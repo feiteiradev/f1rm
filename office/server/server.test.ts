@@ -1,5 +1,8 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -19,8 +22,12 @@ afterEach(() => {
   server?.stop(true);
 });
 
+// Stand-in for the built client.
+const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
+writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
+
 function start(repos?: Record<string, string>) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos) });
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -68,4 +75,32 @@ test("a new session appears as an idle employee in its repo's room", async () =>
   const state = await seen;
   expect(state.employees.s1).toMatchObject({ status: "idle", room: "/code/shop/.git", cwd: "/code/shop" });
   expect(state.rooms["/code/shop/.git"]).toEqual({ id: "/code/shop/.git", name: "shop" });
+});
+
+test("hook events without the right ingest secret are rejected and change nothing", async () => {
+  start();
+  expect((await hook(sessionStart("fake", "/x"), { "x-f1rm-secret": "wrong" })).status).toBe(401);
+  const res = await fetch(`${base()}/ingest`, { method: "POST", body: JSON.stringify(sessionStart("fake", "/x")) });
+  expect(res.status).toBe(401);
+
+  await hook(sessionStart("real", "/y"));
+  const state = await office((s) => "real" in s.employees);
+  expect(Object.keys(state.employees)).toEqual(["real"]);
+});
+
+test("the page and the WebSocket need the per-launch UI token", async () => {
+  start();
+  expect((await fetch(`${base()}/${TOKEN}/`)).status).toBe(200);
+  expect(await (await fetch(`${base()}/${TOKEN}/`)).text()).toContain("<title>f1rm</title>");
+  for (const path of ["/", "/wrong/", "/wrong/ws", `/${TOKEN}x/`]) {
+    expect((await fetch(base() + path)).status).toBe(401);
+  }
+
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/wrong/ws`, { headers: { origin: base() } } as any);
+  sockets.push(ws);
+  const outcome = await new Promise((r) => {
+    ws.onmessage = () => r("message");
+    ws.onerror = () => r("rejected");
+  });
+  expect(outcome).toBe("rejected");
 });

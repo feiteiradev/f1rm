@@ -1,5 +1,6 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
-import { basename, dirname } from "node:path";
+import { timingSafeEqual } from "node:crypto";
+import { basename, dirname, resolve, sep } from "node:path";
 import { emptyOffice, normalize, reduce, type Room } from "./office.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -7,10 +8,19 @@ type Options = {
   port: number;
   secret: string;
   token: string;
-  machine: Pick<typeof realMachine, "gitCommonDir">;
+  machine: typeof realMachine;
+  /** The built browser client. */
+  clientDir: string;
 };
 
-export function startServer({ port, secret, token, machine }: Options) {
+/** Constant-time credential check. */
+function same(given: string | null | undefined, expected: string) {
+  const a = Buffer.from(given ?? ""), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function startServer({ port, secret, token, machine, clientDir }: Options) {
+  clientDir = resolve(clientDir);
   let state = emptyOffice();
 
   const rooms = new Map<string, Room>();
@@ -33,6 +43,7 @@ export function startServer({ port, secret, token, machine }: Options) {
     async fetch(req, server) {
       const url = new URL(req.url);
       if (url.pathname === "/ingest" && req.method === "POST") {
+        if (!same(req.headers.get("x-f1rm-secret"), secret)) return new Response("unauthorized", { status: 401 });
         const payload = await req.json().catch(() => null);
         const event = normalize(payload, roomOf(String(payload?.cwd ?? "")));
         if (event) {
@@ -41,8 +52,16 @@ export function startServer({ port, secret, token, machine }: Options) {
         }
         return new Response(null, { status: 200 });
       }
-      if (url.pathname === `/${token}/ws` && server.upgrade(req)) return;
-      return new Response("not found", { status: 404 });
+      // Everything for the browser lives under /<ui token>/, so every request carries the token.
+      const [, given, ...rest] = url.pathname.split("/");
+      if (!same(given, token)) return new Response("unauthorized", { status: 401 });
+      const path = rest.join("/");
+      if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
+      const file = resolve(clientDir, path || "index.html");
+      if (!file.startsWith(clientDir + sep) || !(await Bun.file(file).exists())) {
+        return new Response("not found", { status: 404 });
+      }
+      return new Response(Bun.file(file));
     },
     websocket: {
       open(ws) {
