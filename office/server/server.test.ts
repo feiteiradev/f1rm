@@ -142,6 +142,24 @@ test("activity is a short description of the tool, file or command", async () =>
   }
 });
 
+test("an employee carries its terminal locator from the hook headers", async () => {
+  start();
+  await hook(sessionStart("iterm", "/a"), {
+    "x-f1rm-iterm-session": "w0t1p0:6C2B4D3E-1A2B-4C5D-8E9F-0123456789AB",
+    "x-f1rm-term-program": "iTerm.app",
+  });
+  await hook(sessionStart("vscode", "/b"), { "x-f1rm-iterm-session": "", "x-f1rm-term-program": "vscode" });
+  await hook(sessionStart("bg", "/c"), { "x-f1rm-iterm-session": "", "x-f1rm-term-program": "" });
+
+  const { employees } = await office((s) => Object.keys(s.employees).length === 3);
+  expect(employees.iterm.terminal).toEqual({
+    itermSessionId: "w0t1p0:6C2B4D3E-1A2B-4C5D-8E9F-0123456789AB",
+    termProgram: "iTerm.app",
+  });
+  expect(employees.vscode.terminal).toEqual({ termProgram: "vscode" });
+  expect(employees.bg.terminal).toEqual({});
+});
+
 test("a session in a worktree sits in its main repo's room; a non-git folder is its own room", async () => {
   start({
     "/code/shop": "/code/shop/.git",

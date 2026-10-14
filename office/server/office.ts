@@ -3,12 +3,15 @@ import { basename } from "node:path";
 
 export type Status = "working" | "waiting" | "idle";
 export type Room = { id: string; name: string };
+/** Where the session's terminal is, for Jump. Background sessions have neither. */
+export type TerminalLocator = { itermSessionId?: string; termProgram?: string };
 export type Employee = {
   sessionId: string;
   status: Status;
   activity: string;
   cwd: string;
   room: string;
+  terminal: TerminalLocator;
 };
 export type OfficeState = { rooms: Record<string, Room>; employees: Record<string, Employee> };
 
@@ -18,6 +21,7 @@ export type F1rmEvent = {
   kind: string;
   cwd: string;
   room: Room;
+  terminal: TerminalLocator;
   /** Short "what it's doing now"; undefined keeps the previous one. */
   activity?: string;
 };
@@ -54,7 +58,7 @@ function describeTool(tool: string, input: any): string {
 }
 
 /** One raw hook payload -> one f1rm event, or null if it isn't a hook payload. */
-export function normalize(payload: any, roomOf: (cwd: string) => Room): F1rmEvent | null {
+export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) => Room): F1rmEvent | null {
   const valid = ["session_id", "hook_event_name", "cwd"].every((k) => typeof payload?.[k] === "string" && payload[k]);
   if (!valid) return null;
   const kind: string = payload.hook_event_name;
@@ -70,6 +74,11 @@ export function normalize(payload: any, roomOf: (cwd: string) => Room): F1rmEven
     kind,
     cwd: payload.cwd,
     room: roomOf(payload.cwd),
+    // Unset env vars arrive as empty headers.
+    terminal: {
+      ...(headers.get("x-f1rm-iterm-session") && { itermSessionId: headers.get("x-f1rm-iterm-session")! }),
+      ...(headers.get("x-f1rm-term-program") && { termProgram: headers.get("x-f1rm-term-program")! }),
+    },
     activity: activity[kind],
   };
 }
@@ -98,6 +107,7 @@ export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
         activity: e.activity ?? before?.activity ?? "",
         cwd: e.cwd,
         room: e.room.id,
+        terminal: e.terminal,
       },
     },
   };

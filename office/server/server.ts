@@ -51,7 +51,7 @@ export function startServer({ port, secret, token, machine, clientDir }: Options
       if (url.pathname === "/ingest" && req.method === "POST") {
         if (!same(req.headers.get("x-f1rm-secret"), secret)) return new Response("unauthorized", { status: 401 });
         const payload = await req.json().catch(() => null);
-        const event = normalize(payload, roomOf);
+        const event = normalize(payload, req.headers, roomOf);
         if (event) {
           state = reduce(state, event);
           server.publish("office", JSON.stringify(state));
