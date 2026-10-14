@@ -78,6 +78,70 @@ test("a new session appears as an idle employee in its repo's room", async () =>
   expect(state.rooms["/code/shop/.git"]).toEqual({ id: "/code/shop/.git", name: "shop" });
 });
 
+const common = (session_id: string, hook_event_name: string) => ({
+  session_id,
+  transcript_path: `/Users/me/.claude/projects/x/${session_id}.jsonl`,
+  cwd: "/code/shop",
+  permission_mode: "default",
+  hook_event_name,
+});
+const preToolUse = (id: string, tool_name: string, tool_input: object) => ({
+  ...common(id, "PreToolUse"),
+  tool_name,
+  tool_input,
+  tool_use_id: "toolu_1",
+});
+
+test("tool use flips an employee to working, a permission prompt to waiting, stop to idle", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  await hook(sessionStart("s1", "/code/shop"));
+  const employee = async () => (await office(() => true)).employees.s1;
+
+  await hook({ ...common("s1", "UserPromptSubmit"), prompt: "fix the login bug" });
+  expect(await employee()).toMatchObject({ status: "working", activity: "Thinking" });
+
+  await hook(preToolUse("s1", "Edit", { file_path: "/code/shop/src/login.ts", old_string: "a", new_string: "b" }));
+  expect(await employee()).toMatchObject({ status: "working", activity: "Edit login.ts" });
+
+  await hook({ ...preToolUse("s1", "Bash", { command: "rm -rf build" }), hook_event_name: "PermissionRequest" });
+  expect(await employee()).toMatchObject({ status: "waiting", activity: "Bash: rm -rf build" });
+
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} });
+  expect((await employee()).status).toBe("working");
+
+  await hook({ ...common("s1", "Stop"), stop_hook_active: false });
+  expect(await employee()).toMatchObject({ status: "idle", activity: "" });
+
+  await hook({ ...common("s1", "SessionEnd"), reason: "prompt_input_exit" });
+  expect(await employee()).toBeUndefined();
+});
+
+test("a session already running when the server starts appears on its next event", async () => {
+  start();
+  await hook(preToolUse("old", "Read", { file_path: "/code/shop/README.md" }));
+  expect((await office(() => true)).employees.old).toMatchObject({ status: "working", activity: "Read README.md" });
+});
+
+test("activity is a short description of the tool, file or command", async () => {
+  start();
+  const cases: [string, object, string][] = [
+    ["Write", { file_path: "/a/b/new.ts", content: "x" }, "Write new.ts"],
+    ["Read", { file_path: "/a/b/c.md" }, "Read c.md"],
+    ["Grep", { pattern: "TODO", path: "/a" }, "Grep TODO"],
+    ["Glob", { pattern: "**/*.ts" }, "Glob **/*.ts"],
+    ["Bash", { command: "bun test\n&& echo done", description: "Run tests" }, "Bash: bun test"],
+    ["Bash", { command: "x".repeat(200) }, "Bash: " + "x".repeat(53) + "…"],
+    ["WebFetch", { url: "https://bun.sh/docs/api/http", prompt: "?" }, "WebFetch bun.sh"],
+    ["WebSearch", { query: "bun websockets" }, "WebSearch bun websockets"],
+    ["Agent", { description: "Explore auth", prompt: "..." }, "Agent: Explore auth"],
+    ["mcp__github__create_issue", { title: "t" }, "mcp__github__create_issue"],
+  ];
+  for (const [tool, input, activity] of cases) {
+    await hook(preToolUse("s", tool, input));
+    expect((await office(() => true)).employees.s.activity).toBe(activity);
+  }
+});
+
 test("a session in a worktree sits in its main repo's room; a non-git folder is its own room", async () => {
   start({
     "/code/shop": "/code/shop/.git",
