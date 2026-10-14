@@ -23,6 +23,7 @@ export function startServer({ port, secret, token, machine, clientDir }: Options
   clientDir = resolve(clientDir);
   let state = emptyOffice();
 
+  // ponytail: cached per cwd for the server's lifetime; a folder that later gets `git init` needs a restart.
   const rooms = new Map<string, Room>();
   const roomOf = (cwd: string): Room => {
     let room = rooms.get(cwd);
