@@ -31,10 +31,15 @@ const userSettings = {
 
 const f1rmHandlers = (settings: any) =>
   Object.entries(settings.hooks ?? {}).flatMap(([event, groups]: [string, any]) =>
-    groups.flatMap((g: any) => g.hooks.filter((h: any) => h.type === "http").map((h: any) => ({ event, ...h }))),
+    groups.flatMap((g: any) =>
+      g.hooks
+        .filter((h: any) => JSON.stringify(h).includes("X-F1rm-Secret"))
+        .map((h: any) => ({ event, matcher: g.matcher, ...h })),
+    ),
   );
+const secretOf = (settings: any) => f1rmHandlers(settings).find((h) => h.type === "http").headers["X-F1rm-Secret"];
 
-test("install adds an http hook with the ingest secret for every observed event, keeping everything else", () => {
+test("install adds a hook with the ingest secret for every observed event, keeping everything else", () => {
   const home = tempHome(userSettings);
   const { code } = f1rm(home, "install");
   expect(code).toBe(0);
@@ -47,9 +52,19 @@ test("install adds an http hook with the ingest secret for every observed event,
   expect(settings.hooks.Stop[0]).toEqual(userSettings.hooks.Stop[0]);
 
   const handlers = f1rmHandlers(settings);
-  expect(handlers.map((h) => h.event).sort()).toEqual(
+  const secret = secretOf(settings);
+  expect(secret).toMatch(/^[\w-]{32,}$/);
+
+  // SessionStart only runs command hooks, so it POSTs with curl; everything else is an http hook.
+  const sessionStart = handlers.filter((h) => h.event === "SessionStart");
+  expect(sessionStart).toHaveLength(1);
+  expect(sessionStart[0].type).toBe("command");
+  expect(sessionStart[0].command).toContain("http://127.0.0.1:4170/ingest");
+  expect(sessionStart[0].command).toContain(secret);
+
+  const http = handlers.filter((h) => h.event !== "SessionStart");
+  expect(http.map((h) => h.event).sort()).toEqual(
     [
-      "SessionStart",
       "SessionEnd",
       "UserPromptSubmit",
       "PreToolUse",
@@ -63,11 +78,12 @@ test("install adds an http hook with the ingest secret for every observed event,
       "CwdChanged",
     ].sort(),
   );
-  const secret = handlers[0].headers["X-F1rm-Secret"];
-  expect(secret).toMatch(/^[\w-]{32,}$/);
-  for (const h of handlers) {
+  for (const h of http) {
+    expect(h.type).toBe("http");
+    expect(h.matcher).toBeUndefined(); // every tool, every notification
     expect(h.url).toBe("http://127.0.0.1:4170/ingest");
     expect(h.headers["X-F1rm-Secret"]).toBe(secret);
+    expect(h.timeout).toBeLessThanOrEqual(5); // a stuck office must not stall sessions
   }
 
   expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
@@ -110,7 +126,7 @@ test("start serves the office on loopback and opens its URL with a fresh UI toke
   const port = probe.port;
   probe.stop(true);
   Bun.spawnSync(["bun", CLI, "install"], { env: { ...process.env, HOME: home, F1RM_PORT: String(port) } });
-  const secret = f1rmHandlers(settingsOf(home))[0].headers["X-F1rm-Secret"];
+  const handlers = f1rmHandlers(settingsOf(home));
 
   // a stub `open` first on PATH records the URL instead of opening a browser
   const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
@@ -132,22 +148,55 @@ test("start serves the office on loopback and opens its URL with a fresh UI toke
     for (let i = 0; i < 50 && !existsSync(join(bin, "open.log")); i++) await Bun.sleep(20);
     expect(readFileSync(join(bin, "open.log"), "utf8").trim()).toBe(url);
 
-    // the installed hook URL and secret reach the office the URL shows
+    // Fire the installed hooks the way Claude Code does, from a session in iTerm2,
+    // and watch them reach the office that URL shows.
     const ws = new WebSocket(url.replace("http:", "ws:") + "ws", { headers: { origin: new URL(url).origin } } as any);
-    const appeared = new Promise<any>((resolve) => {
-      ws.onmessage = (m) => {
-        const state = JSON.parse(String(m.data));
-        if (state.employees.s1) resolve(state.employees.s1);
-      };
-    });
+    const states: any[] = [];
+    ws.onmessage = (m) => states.push(JSON.parse(String(m.data)));
     await new Promise((r) => (ws.onopen = r));
-    const res = await fetch(`http://127.0.0.1:${port}/ingest`, {
+    const until = async (pred: (s: any) => boolean) => {
+      for (let i = 0; i < 50 && !states.some(pred); i++) await Bun.sleep(20);
+      return states.find(pred);
+    };
+    const sessionEnv: Record<string, string> = { ITERM_SESSION_ID: "w0t1p0:ABCD", TERM_PROGRAM: "iTerm.app" };
+    const payload = (hook_event_name: string, extra = {}) =>
+      JSON.stringify({ session_id: "s1", transcript_path: "/t.jsonl", cwd: home, hook_event_name, ...extra });
+
+    // SessionStart: a command hook, run by a shell with the payload on stdin
+    const start = handlers.find((h) => h.event === "SessionStart");
+    const ran = Bun.spawnSync(["sh", "-c", start.command], {
+      stdin: Buffer.from(payload("SessionStart", { source: "startup" })),
+      env: { PATH: process.env.PATH!, ...sessionEnv },
+    });
+    expect(ran.exitCode).toBe(0);
+    expect(ran.stdout.toString()).toBe(""); // stdout of a SessionStart hook would land in Claude's context
+    const started = await until((s) => s.employees.s1);
+    expect(started?.employees.s1).toMatchObject({
+      status: "idle",
+      cwd: home,
+      terminal: { itermSessionId: "w0t1p0:ABCD", termProgram: "iTerm.app" },
+    });
+
+    // PreToolUse: an http hook, with allowed env vars interpolated into its headers
+    const pre = handlers.find((h) => h.event === "PreToolUse");
+    const headers = Object.fromEntries(
+      Object.entries<string>(pre.headers).map(([k, v]) => [
+        k,
+        v.replace(/\$\{?(\w+)\}?/g, (_, name) => (pre.allowedEnvVars.includes(name) ? sessionEnv[name] ?? "" : "")),
+      ]),
+    );
+    const res = await fetch(pre.url, {
       method: "POST",
-      headers: { "X-F1rm-Secret": secret },
-      body: JSON.stringify({ session_id: "s1", hook_event_name: "SessionStart", cwd: home, source: "startup" }),
+      headers: { ...headers, "content-type": "application/json" },
+      body: payload("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/x/notes.md" } }),
     });
     expect(res.status).toBe(200);
-    expect(await appeared).toMatchObject({ status: "idle", cwd: home });
+    expect(await res.text()).toBe(""); // empty body: no decision, Claude Code carries on
+    const working = await until((s) => s.employees.s1?.status === "working");
+    expect(working?.employees.s1).toMatchObject({
+      activity: "Read notes.md",
+      terminal: { itermSessionId: "w0t1p0:ABCD", termProgram: "iTerm.app" },
+    });
     ws.close();
   } finally {
     proc.kill();
