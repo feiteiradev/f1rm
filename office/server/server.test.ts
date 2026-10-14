@@ -205,10 +205,10 @@ test("the page and the WebSocket need the per-launch UI token", async () => {
 test("a foreign Origin or an unexpected Host is rejected, even with valid credentials", async () => {
   start();
   const page = `${base()}/${TOKEN}/`;
-  const bad = [
+  const bad: Record<string, string>[] = [
     { origin: "https://evil.example" },
     { origin: "null" },
-    { origin: `http://127.0.0.1:${server.port + 1}` },
+    { origin: `http://127.0.0.1:${server.port! + 1}` },
     { host: `evil.example:${server.port}` }, // DNS rebinding
     { host: "127.0.0.1" },
   ];
@@ -255,6 +255,6 @@ test("the server sends no CORS headers", async () => {
     await hook(sessionStart("s", "/s")),
   ];
   for (const res of responses) {
-    expect([...res.headers.keys()].filter((h) => h.startsWith("access-control-"))).toEqual([]);
+    expect(Array.from(res.headers, ([h]) => h).filter((h) => h.startsWith("access-control-"))).toEqual([]);
   }
 });
