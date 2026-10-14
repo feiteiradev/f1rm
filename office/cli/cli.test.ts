@@ -104,6 +104,62 @@ test("install and uninstall work when there are no settings yet", () => {
   expect(settingsOf(home)).toEqual({});
 });
 
+test("start serves the office on loopback and opens its URL with a fresh UI token", async () => {
+  const home = tempHome();
+  const probe = Bun.serve({ port: 0, fetch: () => new Response() });
+  const port = probe.port;
+  probe.stop(true);
+  Bun.spawnSync(["bun", CLI, "install"], { env: { ...process.env, HOME: home, F1RM_PORT: String(port) } });
+  const secret = f1rmHandlers(settingsOf(home))[0].headers["X-F1rm-Secret"];
+
+  // a stub `open` first on PATH records the URL instead of opening a browser
+  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$@" >> "${bin}/open.log"\n`, { mode: 0o755 });
+  const proc = Bun.spawn(["bun", CLI, "start"], {
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+    stdout: "pipe",
+  });
+  try {
+    const reader = proc.stdout.getReader();
+    let out = "";
+    while (!/http:\/\/\S+/.test(out)) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("start exited: " + out);
+      out += new TextDecoder().decode(value);
+    }
+    const url = out.match(/http:\/\/\S+/)![0];
+    expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/[\\w-]{32,}/$`));
+    for (let i = 0; i < 50 && !existsSync(join(bin, "open.log")); i++) await Bun.sleep(20);
+    expect(readFileSync(join(bin, "open.log"), "utf8").trim()).toBe(url);
+
+    // the installed hook URL and secret reach the office the URL shows
+    const ws = new WebSocket(url.replace("http:", "ws:") + "ws", { headers: { origin: new URL(url).origin } } as any);
+    const appeared = new Promise<any>((resolve) => {
+      ws.onmessage = (m) => {
+        const state = JSON.parse(String(m.data));
+        if (state.employees.s1) resolve(state.employees.s1);
+      };
+    });
+    await new Promise((r) => (ws.onopen = r));
+    const res = await fetch(`http://127.0.0.1:${port}/ingest`, {
+      method: "POST",
+      headers: { "X-F1rm-Secret": secret },
+      body: JSON.stringify({ session_id: "s1", hook_event_name: "SessionStart", cwd: home, source: "startup" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await appeared).toMatchObject({ status: "idle", cwd: home });
+    ws.close();
+  } finally {
+    proc.kill();
+  }
+});
+
+test("start refuses to run before install", () => {
+  const { code, err } = f1rm(tempHome(), "start");
+  expect(code).not.toBe(0);
+  expect(err).toContain("f1rm install");
+});
+
 test("install refuses to touch a settings file it cannot parse", () => {
   const home = tempHome();
   writeFileSync(join(home, ".claude", "settings.json"), "{ not json");

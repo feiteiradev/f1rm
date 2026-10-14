@@ -3,6 +3,8 @@
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { machine } from "../server/machine.ts";
+import { startServer } from "../server/server.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
 const DEFAULT_PORT = 4170;
@@ -85,7 +87,21 @@ function uninstall() {
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
 
-const commands: Record<string, () => void | Promise<void>> = { install, uninstall };
+function start() {
+  const hook = installed(readSettings());
+  if (!hook) throw new Error("hooks not installed: run `f1rm install` first");
+  const port = Number(new URL(hook.url!).port);
+  const token = randomBytes(32).toString("base64url");
+  const clientDir = join(import.meta.dir, "..", "client", "dist");
+  if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
+
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir });
+  const url = `http://127.0.0.1:${port}/${token}/`;
+  console.log(`f1rm office: ${url}`);
+  Bun.spawn(["open", url]);
+}
+
+const commands: Record<string, () => void | Promise<void>> = { install, uninstall, start };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
   console.error("usage: f1rm install | uninstall | start");
