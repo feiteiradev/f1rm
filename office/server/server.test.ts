@@ -116,6 +116,21 @@ test("tool use flips an employee to working, a permission prompt to waiting, sto
   expect(await employee()).toBeUndefined();
 });
 
+test("permission and idle notifications set waiting and idle; other notifications change nothing", async () => {
+  start();
+  const notify = (notification_type: string) =>
+    hook({ ...common("s1", "Notification"), message: "…", notification_type });
+  const status = async () => (await office(() => true)).employees.s1.status;
+
+  await hook(preToolUse("s1", "Bash", { command: "curl example.com" }));
+  await notify("permission_prompt");
+  expect(await status()).toBe("waiting");
+  await notify("auth_success");
+  expect(await status()).toBe("waiting");
+  await notify("idle_prompt");
+  expect(await status()).toBe("idle");
+});
+
 test("a session already running when the server starts appears on its next event", async () => {
   start();
   await hook(preToolUse("old", "Read", { file_path: "/code/shop/README.md" }));

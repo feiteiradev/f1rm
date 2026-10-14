@@ -17,7 +17,7 @@ export type OfficeState = { rooms: Record<string, Room>; employees: Record<strin
 
 export type F1rmEvent = {
   sessionId: string;
-  /** The hook event name, e.g. PreToolUse. */
+  /** The hook event name, e.g. PreToolUse, or Notification/<type>. */
   kind: string;
   cwd: string;
   room: Room;
@@ -61,7 +61,10 @@ function describeTool(tool: string, input: any): string {
 export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) => Room): F1rmEvent | null {
   const valid = ["session_id", "hook_event_name", "cwd"].every((k) => typeof payload?.[k] === "string" && payload[k]);
   if (!valid) return null;
-  const kind: string = payload.hook_event_name;
+  const kind: string =
+    payload.hook_event_name === "Notification"
+      ? `Notification/${payload.notification_type}`
+      : payload.hook_event_name;
   const tool = typeof payload.tool_name === "string" ? clip(describeTool(payload.tool_name, payload.tool_input)) : "";
   const activity: Record<string, string> = {
     UserPromptSubmit: "Thinking",
@@ -91,7 +94,9 @@ const STATUS: Record<string, Status> = {
   SubagentStart: "working",
   SubagentStop: "working",
   PermissionRequest: "waiting",
+  "Notification/permission_prompt": "waiting",
   Stop: "idle",
+  "Notification/idle_prompt": "idle",
 };
 
 export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
