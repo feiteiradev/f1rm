@@ -104,3 +104,52 @@ test("the page and the WebSocket need the per-launch UI token", async () => {
   });
   expect(outcome).toBe("rejected");
 });
+
+test("a foreign Origin or an unexpected Host is rejected, even with valid credentials", async () => {
+  start();
+  const page = `${base()}/${TOKEN}/`;
+  const bad = [
+    { origin: "https://evil.example" },
+    { origin: "null" },
+    { origin: `http://127.0.0.1:${server.port + 1}` },
+    { host: `evil.example:${server.port}` }, // DNS rebinding
+    { host: "127.0.0.1" },
+  ];
+  for (const headers of bad) {
+    expect((await fetch(page, { headers })).status).toBe(403);
+    expect((await hook(sessionStart("x", "/x"), headers)).status).toBe(403);
+  }
+  // The browser's own origins are fine, as are hook requests with no Origin.
+  for (const origin of [base(), `http://localhost:${server.port}`]) {
+    expect((await fetch(page, { headers: { origin } })).status).toBe(200);
+  }
+  expect((await fetch(page, { headers: { host: `localhost:${server.port}` } })).status).toBe(200);
+
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, {
+    headers: { origin: "https://evil.example" },
+  } as any);
+  sockets.push(ws);
+  const outcome = await new Promise((r) => {
+    ws.onmessage = () => r("message");
+    ws.onerror = () => r("rejected");
+  });
+  expect(outcome).toBe("rejected");
+  expect(Object.keys((await office(() => true)).employees)).toEqual([]);
+});
+
+test("the server sends no CORS headers", async () => {
+  start();
+  const origin = "https://evil.example";
+  const responses = [
+    await fetch(`${base()}/${TOKEN}/`, { headers: { origin } }),
+    await fetch(`${base()}/${TOKEN}/`),
+    await fetch(`${base()}/ingest`, {
+      method: "OPTIONS",
+      headers: { origin, "access-control-request-method": "POST" },
+    }),
+    await hook(sessionStart("s", "/s")),
+  ];
+  for (const res of responses) {
+    expect([...res.headers.keys()].filter((h) => h.startsWith("access-control-"))).toEqual([]);
+  }
+});

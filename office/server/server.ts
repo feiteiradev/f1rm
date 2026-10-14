@@ -41,6 +41,12 @@ export function startServer({ port, secret, token, machine, clientDir }: Options
     hostname: "127.0.0.1",
     port,
     async fetch(req, server) {
+      // Host defeats DNS rebinding; Origin defeats other sites (hooks send none).
+      const hosts = [`127.0.0.1:${server.port}`, `localhost:${server.port}`];
+      const origin = req.headers.get("origin");
+      if (!hosts.includes(req.headers.get("host") ?? "") || (origin !== null && !hosts.some((h) => origin === `http://${h}`))) {
+        return new Response("forbidden", { status: 403 });
+      }
       const url = new URL(req.url);
       if (url.pathname === "/ingest" && req.method === "POST") {
         if (!same(req.headers.get("x-f1rm-secret"), secret)) return new Response("unauthorized", { status: 401 });
