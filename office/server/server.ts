@@ -14,6 +14,8 @@ import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
 const MAX_BRIEF = 8000;
+const PM_DECIDES =
+  "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
 
 type Options = {
   port: number;
@@ -93,6 +95,18 @@ export function startServer({
   };
 
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
+  // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
+  // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
+  const folderOf = (room: string) => (basename(room) === ".git" ? dirname(room) : room);
+  const pmOf = (room: string) => Object.values(state.employees).find((e) => e.room === room && e.role === "pm");
+  const tellEmployee = (employee: Employee, message: string) => {
+    // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
+    if (!employee.socket) return Promise.resolve(Response.json({ ok: false, error: "This session has no inbox to tell." }, { status: 409 }));
+    return machine.tell(employee.socket, employee.sessionId, message).then(
+      () => Response.json({ ok: true }),
+      (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
+    );
+  };
 
   let boards: Record<string, BoardRow[]> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
@@ -168,12 +182,7 @@ export function startServer({
         if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) {
           return Response.json({ ok: false, error: `Tell a message of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
         }
-        // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
-        if (!employee.socket) return Response.json({ ok: false, error: "This session has no inbox to tell." }, { status: 409 });
-        return machine.tell(employee.socket, employee.sessionId, message.trim()).then(
-          () => Response.json({ ok: true }),
-          (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
-        );
+        return tellEmployee(employee, message.trim());
       }
       if (rest[0] === "roles" && rest.length === 1) {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
@@ -205,13 +214,10 @@ export function startServer({
         if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (override != null && typeof override !== "boolean")) {
           return Response.json({ error: `Hire needs a role, a task name, a model that is a string, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
-        // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
-        // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
-        const folder = basename(room) === ".git" ? dirname(room) : room;
-        const hasPm = Object.values(state.employees).some((e) => e.room === room && e.role === "pm");
+        const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: hasPm ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
@@ -221,6 +227,25 @@ export function startServer({
           () => Response.json({ ok: true }),
           (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
         );
+      }
+      if ((rest[0] === "decide" || rest[0] === "start-pm") && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        const { room, need } = body ?? {};
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        const pm = pmOf(room);
+        if (rest[0] === "start-pm") {
+          if (pm) return Response.json({ error: "This project already has a PM." }, { status: 409 });
+          return machine.startPmInIterm(folderOf(room)).then(
+            () => Response.json({ ok: true }),
+            (err: Error) => Response.json({ error: `Start PM failed: ${err.message}` }, { status: 502 }),
+          );
+        }
+        if (typeof need !== "string" || !need.trim() || need.length > MAX_BRIEF) {
+          return Response.json({ error: `Describe the need in 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        }
+        if (!pm) return Response.json({ error: "This project has no PM." }, { status: 409 });
+        return tellEmployee(pm, PM_DECIDES + need.trim());
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");

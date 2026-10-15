@@ -28,6 +28,10 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     if (tellFails) throw new Error(tellFails);
   },
   workingHires: async () => working,
+  startPmInIterm: async (folder: string) => {
+    calls.push(`pm ${folder}`);
+    if (pmFails) throw new Error(pmFails);
+  },
   spawnBackground: async (argv: string[], cwd: string) => {
     spawned.push({ argv, cwd });
     if (spawnFails) throw new Error(spawnFails);
@@ -46,6 +50,7 @@ const defaultAnswer = async function* () {
 let tellFails = "";
 let working: number | null = 0;
 let spawnFails = "";
+let pmFails = "";
 let spawned: { argv: string[]; cwd: string }[] = [];
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
@@ -59,6 +64,7 @@ afterEach(() => {
   tellFails = "";
   working = 0;
   spawnFails = "";
+  pmFails = "";
   spawned = [];
   sockets.forEach((s) => s.close());
   sockets = [];
@@ -791,6 +797,98 @@ test("Roles and Hire need the UI token, the right method and the browser's own o
   expect((await ui("roles", { method: "POST" })).status).toBe(405);
   expect((await ui("roles", { headers: { origin: "https://evil.example" } })).status).toBe(403);
   expect(spawned).toEqual([]);
+});
+
+const pmPost = (path: "decide" | "start-pm", body: unknown, init: RequestInit = {}, token = TOKEN) =>
+  ui(path, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const PM_SOCKET = { "x-f1rm-messaging-socket": "/tmp/cc-socks/pm.sock" };
+
+test("Let the PM decide tells the project's PM the need and asks them to hire per the guidelines", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const res = await pmPost("decide", { room: ROOM, need: "  A login page with passkeys.  " });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toStartWith("tell /tmp/cc-socks/pm.sock pm1 ");
+  expect(calls[0]).toContain("per the f1rm guidelines");
+  expect(calls[0]).toContain("f1rm hire");
+  expect(calls[0]).toEndWith("The need:\nA login page with passkeys.");
+});
+
+test("Let the PM decide says so when the project has no PM, the PM has no inbox, or the machine refuses", async () => {
+  start(SHOP);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => ROOM in s.rooms);
+  const none = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([none.status, await none.json()]).toEqual([409, { error: "This project has no PM." }]);
+  await inRoom("pm1", { agent_type: "f1rm:pm" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const quiet = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([quiet.status, await quiet.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
+  await hook({ ...common("pm1", "Stop"), cwd: "/code/shop" }, PM_SOCKET);
+  tellFails = "its inbox socket is gone, so the session has ended";
+  const gone = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([gone.status, await gone.json()]).toEqual([409, { ok: false, error: "Tell failed: its inbox socket is gone, so the session has ended" }]);
+});
+
+test("Let the PM decide refuses an unknown project and a bad need, and tells nobody", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await office((s) => ROOM in s.rooms);
+  const cases: [unknown, number][] = [
+    [{ room: "/code/shop", need: "x" }, 404],
+    [{ room: "constructor", need: "x" }, 404],
+    ["not json", 404],
+    [{ room: ROOM }, 400],
+    [{ room: ROOM, need: "  " }, 400],
+    [{ room: ROOM, need: 7 }, 400],
+    [{ room: ROOM, need: "x".repeat(8001) }, 400],
+  ];
+  for (const [body, status] of cases) expect([JSON.stringify(body), (await pmPost("decide", body)).status]).toEqual([JSON.stringify(body), status]);
+  expect(calls).toEqual([]);
+});
+
+test("Start PM opens a PM tab in the room's repo folder, whatever folder the request names", async () => {
+  start(SHOP);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => ROOM in s.rooms);
+  const res = await pmPost("start-pm", { room: ROOM, folder: "/etc", cwd: "/etc" });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toEqual(["pm /code/shop"]);
+});
+
+test("Start PM opens nothing when the project has a PM, the project is unknown, or the tab fails to open", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  const had = await pmPost("start-pm", { room: ROOM });
+  expect([had.status, await had.json()]).toEqual([409, { error: "This project already has a PM." }]);
+  expect((await pmPost("start-pm", { room: "/code/blog/.git" })).status).toBe(404);
+  expect((await pmPost("start-pm", "not json")).status).toBe(404);
+  expect(calls).toEqual([]);
+  await hook({ ...common("pm1", "SessionEnd"), cwd: "/code/shop" });
+  await office((s) => !Object.values(s.employees).some((e) => e.role === "pm"));
+  pmFails = "iTerm2 isn't installed";
+  const failed = await pmPost("start-pm", { room: ROOM });
+  expect([failed.status, await failed.json()]).toEqual([502, { error: "Start PM failed: iTerm2 isn't installed" }]);
+});
+
+test("Let the PM decide and Start PM need the UI token, a POST and the browser's own origin", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await office((s) => ROOM in s.rooms);
+  const json = { "content-type": "application/json" };
+  for (const path of ["decide", "start-pm"] as const) {
+    const body = { room: ROOM, need: "x" };
+    expect([path, (await pmPost(path, body, {}, "wrong")).status]).toEqual([path, 401]);
+    expect([path, (await fetch(`${base()}/${path}`, { method: "POST", body: JSON.stringify(body) })).status]).toEqual([path, 401]);
+    expect([path, (await ui(path)).status]).toEqual([path, 405]);
+    expect([path, (await pmPost(path, body, { headers: { origin: "https://evil.example", ...json } })).status]).toEqual([path, 403]);
+    expect([path, (await pmPost(path, body, { headers: { host: "evil.example", ...json } })).status]).toEqual([path, 403]);
+  }
+  expect(calls).toEqual([]);
 });
 
 const permissionRequest = (id: string, command: string) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest" });

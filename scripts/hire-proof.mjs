@@ -1,6 +1,7 @@
 // Drives the built office page in a real browser against an in-process server whose machine only records the spawn, and
 // checks the Hire dialog: the Hire button and an empty desk open it, the roles come from the plugin folder, the hire
 // leaves the server as the exact claude argv, the working-hire count shows, a plain hire at the cap spawns nothing, Hire anyway needs a confirm that can be cancelled,
+// the PM section (Let the PM decide tells the PM the need, Start PM opens a PM tab in the repo folder only when there is no PM),
 // and the static demo explains that hiring needs a live office.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/hire-proof.mjs
@@ -16,28 +17,31 @@ const OUT = resolve(process.env.OUT ?? "hire-proof-out");
 mkdirSync(OUT, { recursive: true });
 
 const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
-const spawned = [];
+const spawned = [], told = [], pmTabs = [];
 let working = 1;
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
   machine: {
-    gitCommonDir: (cwd) => (cwd === "/code/shop" ? "/code/shop/.git" : null),
+    gitCommonDir: (cwd) => (["/code/shop", "/code/blog"].includes(cwd) ? `${cwd}/.git` : null),
     liveSessions: async () => new Set(),
     workingHires: async () => working,
+    tell: async (socket, sessionId, message) => void told.push({ socket, sessionId, message }),
+    startPmInIterm: async (folder) => void pmTabs.push(folder),
     spawnBackground: async (argv, cwd) => (spawned.push({ argv, cwd }), "backgrounded"),
   },
 });
 const base = `http://127.0.0.1:${server.port}`;
-const send = async (session_id, hook_event_name, extra = {}) => {
+const send = async (session_id, hook_event_name, extra = {}, headers = {}, cwd = "/code/shop") => {
   const res = await fetch(`${base}/ingest`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-f1rm-secret": SECRET },
-    body: JSON.stringify({ session_id, transcript_path: `/x/${session_id}.jsonl`, cwd: "/code/shop", permission_mode: "default", hook_event_name, ...extra }),
+    headers: { "content-type": "application/json", "x-f1rm-secret": SECRET, ...headers },
+    body: JSON.stringify({ session_id, transcript_path: `/x/${session_id}.jsonl`, cwd, permission_mode: "default", hook_event_name, ...extra }),
   });
   assert.equal(res.status, 200);
 };
-await send("pm1", "UserPromptSubmit", { prompt: "plan", agent_type: "f1rm:pm" });
+await send("pm1", "UserPromptSubmit", { prompt: "plan", agent_type: "f1rm:pm" }, { "x-f1rm-messaging-socket": "/tmp/cc-socks/pm1.sock" });
 await send("des1", "UserPromptSubmit", { prompt: "go", agent_type: "f1rm:designer" });
+await send("des2", "UserPromptSubmit", { prompt: "go", agent_type: "f1rm:designer" }, {}, "/code/blog");
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
 const errors = [];
@@ -143,6 +147,33 @@ try {
   assert.equal(await dialog.locator(".count").innerText(), "4 of 4 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
+
+  const pm = dialog.locator(".pm");
+  await page.getByRole("button", { name: "Hire", exact: true }).click();
+  await dialog.locator(".role").first().waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "Start PM", exact: true }).count(), 0, "a project with a PM offers no Start PM");
+  assert.equal(await pm.getByRole("button", { name: "Jump to terminal", exact: true }).count(), 1, "it offers a Jump to the PM instead");
+  assert.equal(await pm.getByRole("button", { name: "Let the PM decide", exact: true }).isDisabled(), true, "no need, nothing to send");
+  await page.getByLabel("Brief", { exact: true }).fill("Passkey login for the shop.");
+  await page.screenshot({ path: join(OUT, "06-pm.png") });
+  await pm.getByRole("button", { name: "Let the PM decide", exact: true }).click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(told.length, 1, "one Tell");
+  assert.deepEqual([told[0].socket, told[0].sessionId], ["/tmp/cc-socks/pm1.sock", "pm1"], "it went to the PM's inbox");
+  assert.match(told[0].message, /per the f1rm guidelines[\s\S]*\nPasskey login for the shop\.$/, "it names the need and asks for hiring per the guidelines");
+  assert.equal(spawned.length, 2, "the PM decides, so the office hired nobody");
+  assert.deepEqual(pmTabs, [], "a project with a PM opens no PM tab");
+
+  await page.getByRole("button", { name: /Lobby/ }).click();
+  await page.locator(".door", { hasText: "blog" }).click();
+  await page.getByRole("button", { name: "Hire", exact: true }).click();
+  await dialog.locator(".role").first().waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "Let the PM decide", exact: true }).count(), 0, "no PM, no Let the PM decide");
+  await page.screenshot({ path: join(OUT, "07-start-pm.png") });
+  await dialog.getByRole("button", { name: "Start PM", exact: true }).click();
+  await dialog.waitFor({ state: "detached" });
+  assert.deepEqual(pmTabs, ["/code/blog"], "Start PM opens one PM tab in the project's folder");
+  assert.equal(told.length, 1, "Start PM tells nobody");
 
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 780 } })).newPage();
   watch(phone);
