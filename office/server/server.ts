@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
+import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
@@ -23,6 +24,8 @@ type Options = {
   boardsDir?: string;
   /** How often the board files are checked for edits. */
   boardPollMs?: number;
+  /** How long a PermissionRequest hook is held for the browser before the terminal prompt decides. */
+  approvalTimeoutMs?: number;
   /** Time source in ms; tests control it. */
   clock?: () => number;
   /** Quiet this long (no event, no transcript write) and an employee goes offline. */
@@ -51,6 +54,7 @@ export function startServer({
   dbPath = ":memory:",
   boardsDir,
   boardPollMs = 500,
+  approvalTimeoutMs = DEFAULT_TIMEOUT_S * 1000,
   clock = Date.now,
   offlineAfterMs = 5 * 60_000,
   removeAfterMs = 15 * 60_000,
@@ -87,7 +91,8 @@ export function startServer({
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
 
   let boards: Record<string, BoardRow[]> = {};
-  const snapshot = () => JSON.stringify({ ...state, boards });
+  const approvals = createBroker(approvalTimeoutMs, () => push());
+  const snapshot = () => JSON.stringify({ ...state, boards, approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -111,7 +116,15 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
+          // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
+          // The exception is the notification about the very prompt being held.
+          if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
+          if (event.kind === "PermissionRequest") {
+            server.timeout(req, 0); // the hold outlasts the idle timeout
+            const decision = await approvals.hold(event.sessionId, String(payload.tool_name ?? ""), payload.tool_input, event.at, req.signal);
+            if (decision) return Response.json({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision } });
+          }
         }
         return new Response(null, { status: 200 });
       }
@@ -126,6 +139,13 @@ export function startServer({
         if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
+      if ((rest[0] === "approve" || rest[0] === "deny") && rest.length === 2) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const decided = approvals.answer(rest[1], rest[0] === "approve" ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE });
+        return decided
+          ? Response.json({ ok: true })
+          : Response.json({ ok: false, error: "That request is no longer waiting; the terminal has it." }, { status: 404 });
       }
       if (rest[0] === "ask" && rest.length === 2) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
@@ -217,6 +237,7 @@ export function startServer({
   server.stop = async (closeActiveConnections) => {
     clearInterval(timer);
     clearInterval(boardTimer);
+    approvals.releaseAll();
     await stop(closeActiveConnections);
     db.close();
   };

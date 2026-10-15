@@ -6,6 +6,7 @@ import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../serv
 import { CELL, layoutOffice, ROOM, rosterOf } from "./layout.ts";
 import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
+import { argsText } from "./approvals.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
@@ -199,4 +200,14 @@ test("every bundled asset is credited with its source and CC0 license", () => {
     expect(row).toMatch(/https:\/\/kenney\.nl\/\S+/);
     expect(row).toContain("CC0 1.0");
   }
+});
+
+test("the tray shows a Bash command whole and any other tool's arguments as indented JSON", () => {
+  const command = "cd /tmp && " + "echo long-argument ".repeat(100) + "&& rm -rf ./build";
+  expect(argsText("Bash", { command, description: "x" })).toBe(command);
+  expect(argsText("Write", { file_path: "/a.ts", content: "<img src=x onerror=alert(1)>" })).toBe(
+    '{\n  "file_path": "/a.ts",\n  "content": "<img src=x onerror=alert(1)>"\n}',
+  );
+  expect(argsText("Bash", { command: 7 })).toBe('{\n  "command": 7\n}');
+  expect(argsText("Bash", undefined)).toBe("");
 });

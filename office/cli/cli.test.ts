@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -87,7 +88,9 @@ test("install adds a hook with the ingest secret for every observed event, keepi
     expect(h.matcher).toBeUndefined(); // every tool, every notification
     expect(h.url).toBe("http://127.0.0.1:4170/ingest");
     expect(h.headers["X-F1rm-Secret"]).toBe(secret);
-    expect(h.timeout).toBeLessThanOrEqual(5); // a stuck office must not stall sessions
+    // a stuck office must not stall sessions, except that the permission hook is held for the browser
+    if (h.event === "PermissionRequest") expect(h.timeout).toBeGreaterThan(DEFAULT_TIMEOUT_S);
+    else expect(h.timeout).toBeLessThanOrEqual(5);
   }
 
   expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
@@ -101,6 +104,29 @@ test("install is idempotent and keeps the same secret", () => {
   expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe(first);
   // the backup still holds the pre-f1rm original
   expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
+});
+
+test("install gives a hook installed with the old 5 s timeout the longer permission timeout, once", () => {
+  const home = tempHome(userSettings);
+  f1rm(home, "install");
+  const old = settingsOf(home);
+  old.hooks.PermissionRequest[0].hooks[0].timeout = 5;
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
+
+  f1rm(home, "install");
+  const upgraded = readFileSync(join(home, ".claude", "settings.json"), "utf8");
+  const permission = f1rmHandlers(JSON.parse(upgraded)).filter((h) => h.event === "PermissionRequest");
+  expect(permission.map((h) => h.timeout)).toEqual([2 * DEFAULT_TIMEOUT_S]);
+  f1rm(home, "install");
+  expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe(upgraded);
+});
+
+test("start refuses an approval timeout the installed permission hook would not outlast", () => {
+  const home = tempHome();
+  f1rm(home, "install");
+  const refused = Bun.spawnSync(["bun", CLI, "start"], { env: { ...process.env, HOME: home, F1RM_APPROVAL_TIMEOUT: String(2 * DEFAULT_TIMEOUT_S) }, timeout: 5000 });
+  expect(refused.exitCode).toBe(1);
+  expect(refused.stderr.toString()).toContain("F1RM_APPROVAL_TIMEOUT must be shorter");
 });
 
 test("uninstall removes exactly what install added", () => {

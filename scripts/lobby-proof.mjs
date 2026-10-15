@@ -45,7 +45,8 @@ const send = (id, cwd, hook_event_name = "SessionStart", extra = {}) =>
     body: JSON.stringify({ session_id: id, cwd, hook_event_name, ...extra }),
   });
 const edit = (id, cwd) => send(id, cwd, "PreToolUse", { tool_name: "Edit", tool_input: { file_path: `${cwd}/a.ts` } });
-const ask = (id, cwd) => send(id, cwd, "PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf build" } });
+// The server holds a PermissionRequest until it is decided, so this does not wait for the answer.
+const ask = (id, cwd) => void send(id, cwd, "PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf build" } }).catch(() => {});
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
 const errors = [];
