@@ -3,18 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import type { OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
 import { argsText } from "./approvals.ts";
+import { post } from "./post.ts";
 import "./approvals.css";
-
-/** Null when the office took the decision, otherwise why it didn't. */
-async function decide(verb: "approve" | "deny", id: string): Promise<string | null> {
-  try {
-    // The page lives under /<ui token>/, so a relative URL carries the token.
-    const res = await fetch(new URL(`${verb}/${encodeURIComponent(id)}`, location.href), { method: "POST" });
-    return res.ok ? null : ((await res.json().catch(() => null))?.error ?? `Failed (${res.status}).`);
-  } catch {
-    return "The office isn't reachable.";
-  }
-}
 
 function Hand({ state, approval: a }: { state: OfficeState; approval: Approval }) {
   const who = state.employees[a.sessionId];
@@ -22,7 +12,7 @@ function Hand({ state, approval: a }: { state: OfficeState; approval: Approval }
   const [error, setError] = useState<string | null>(null);
   async function answer(verb: "approve" | "deny") {
     setBusy(true);
-    setError(await decide(verb, a.id));
+    setError(await post(`${verb}/${encodeURIComponent(a.id)}`));
     setBusy(false);
   }
   return (

@@ -1,6 +1,7 @@
 // Ask: the panel's side-question box, and the shift's history of Asks and Tells. Answers stream in from a read-only copy of the session.
 import { useEffect, useRef, useState } from "react";
 import { addEntry, patchEntry, readAnswer, type History, type HistoryEntry } from "./history.ts";
+import { post } from "./post.ts";
 import "./ask.css";
 
 /** Keeps the shift's history above the panel, so closing it or selecting someone else loses nothing. */
@@ -34,16 +35,7 @@ export function useHistory() {
     const finish = (error: string | null) =>
       setHistory((h) => patchEntry(h, sessionId, "tell", id, (e) => ({ ...e, state: error ? "failed" : "sent", ...(error && { error }) })));
     if (import.meta.env.MODE === "demo") return finish("Tell needs a live office; this is a recording.");
-    try {
-      const res = await fetch(new URL(`tell/${encodeURIComponent(sessionId)}`, location.href), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      finish(res.ok ? null : ((await res.json().catch(() => null))?.error ?? `Tell failed (${res.status}).`));
-    } catch {
-      finish("The office isn't reachable.");
-    }
+    finish(await post(`tell/${encodeURIComponent(sessionId)}`, { message }));
   }
   return { history, ask, tell };
 }

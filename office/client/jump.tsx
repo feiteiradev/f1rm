@@ -3,20 +3,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { OfficeState } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
 import { roleTitle } from "../people.ts";
+import { post } from "./post.ts";
 import { search, type Entry } from "./search.ts";
 import "./jump.css";
 
 /** Null when the terminal came forward, otherwise why it didn't. */
 async function jumpTo(id: string): Promise<string | null> {
   if (import.meta.env.MODE === "demo") return "Jump needs a live office; this is a recording.";
-  try {
-    // The page lives under /<ui token>/, so a relative URL carries the token.
-    const res = await fetch(new URL(`jump/${encodeURIComponent(id)}`, location.href), { method: "POST" });
-    if (res.ok) return null;
-    return (await res.json().catch(() => null))?.error ?? `Jump failed (${res.status}).`;
-  } catch {
-    return "The office isn't reachable.";
-  }
+  return post(`jump/${encodeURIComponent(id)}`);
 }
 
 /** Runs a jump and tracks its outcome, for a button or the palette. */
