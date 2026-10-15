@@ -1,6 +1,6 @@
 // The machine module's OS calls against stub `claude`, `osascript`, `code` and `open` commands on PATH.
 import { afterAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,8 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 // Each stub logs "name<TAB>args...<TAB>[env:<count of CLAUDE_CODE_ vars>]", prints $STUB_OUT and exits $STUB_EXIT.
 const STUB = `#!/bin/sh
 { printf '%s' "$(basename "$0")"; for a in "$@"; do printf '\\t%s' "$(printf %s "$a" | tr '\\n' ' ')"; done; printf '\\t[env:%s]\\n' "$(env | grep -c '^CLAUDE_CODE_')"; } >> "$STUB_LOG"
+pwd -P >> "$STUB_LOG.cwd"
+[ "$(basename "$0")" = claude ] && cat > "$STUB_LOG.stdin"
 printf %s "$STUB_OUT"
 exit "\${STUB_EXIT:-0}"
 `;
@@ -20,7 +22,7 @@ for (const name of ["claude", "osascript", "code", "open"]) {
 
 // Bun resolves a spawned command against the PATH it started with, so each call runs in a child that starts with the stubs first.
 async function run(expr: string, out = "", exit: Record<string, number> = {}) {
-  rmSync(log, { force: true });
+  for (const f of [log, log + ".cwd", log + ".stdin"]) rmSync(f, { force: true });
   writeFileSync(log, "");
   const child = Bun.spawn(
     ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify((await Promise.resolve(${expr}).catch((e) => ({ threw: e.message }))) ?? null))`],
@@ -30,7 +32,8 @@ async function run(expr: string, out = "", exit: Record<string, number> = {}) {
     },
   );
   const value = JSON.parse(await new Response(child.stdout).text());
-  return { value, calls: readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => l.split("\t")) };
+  const read = (f: string) => (existsSync(f) ? readFileSync(f, "utf8") : "");
+  return { value, cwds: read(log + ".cwd").trim().split("\n").filter(Boolean), stdin: read(log + ".stdin"), calls: readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => l.split("\t")) };
 }
 
 const claudeAgents = async (out: string, exit = 0) => {
@@ -95,4 +98,32 @@ test("openVsCode runs `code <folder>`, and falls back to `open -a` when that fai
   const fallback = await run(`machine.openVsCode("/code/shop")`, "", { all: 1 });
   expect(fallback.calls.map((c) => c.slice(0, -1))).toEqual([["code", "/code/shop"], ["open", "-a", "Visual Studio Code", "/code/shop"]]);
   expect(fallback.value).toEqual({ threw: "couldn't open VS Code" });
+});
+
+const delta = (text: string) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
+const textBlock = JSON.stringify({ type: "stream_event", event: { type: "content_block_start", content_block: { type: "text" } } });
+const result = (r: object) => JSON.stringify({ type: "result", subtype: "success", is_error: false, ...r });
+const ask = (question: string, out: string, exit = 0) =>
+  run(`(async () => { const parts = []; for await (const t of machine.askFork("sid-1", ${JSON.stringify(askDir)}, ${JSON.stringify(question)})) parts.push(t); return parts; })()`, out, { all: exit });
+const askDir = realpathSync(mkdtempSync(join(dir, "session-cwd-")));
+
+test("askFork forks the session on Haiku with read-only tools, hooks off and no transcript, in the session's folder", async () => {
+  const { calls, cwds, stdin, value } = await ask("--What is the codeword?", [delta("The codeword "), delta("is MANGO."), result({ result: "The codeword is MANGO." })].join("\n"));
+  expect(value).toEqual(["The codeword ", "is MANGO."]);
+  expect(calls[0].slice(0, -1)).toEqual([
+    "claude", "-p", "--resume", "sid-1", "--fork-session", "--no-session-persistence",
+    "--model", "haiku", "--tools", "Read,Grep,Glob", "--disallowedTools", "mcp__*", "--permission-mode", "dontAsk",
+    "--settings", '{"disableAllHooks":true}',
+    "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+  ]);
+  expect(calls[0].at(-1)).toBe("[env:0]");
+  expect(cwds).toEqual([askDir]);
+  expect(stdin.endsWith("\n\n--What is the codeword?")).toBe(true);
+});
+
+test("askFork separates text blocks, falls back to the final result without deltas, and throws what went wrong", async () => {
+  expect((await ask("q", [textBlock, delta("Let me look."), textBlock, delta("It is MANGO."), result({})].join("\n"))).value).toEqual(["Let me look.", "\n\n", "It is MANGO."]);
+  expect((await ask("q", result({ result: "MANGO" }))).value).toEqual(["MANGO"]);
+  expect((await ask("q", result({ is_error: true, result: "No conversation found with session ID: sid-1" }))).value).toEqual({ threw: "No conversation found with session ID: sid-1" });
+  expect((await ask("q", "", 1)).value).toEqual({ threw: "claude exited with 1" });
 });

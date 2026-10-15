@@ -5,7 +5,19 @@ export function claudeEnv(env: Record<string, string | undefined> = process.env)
   return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(CLAUDECODE$|CLAUDE_CODE_|CLAUDE_PID$|CLAUDE_EFFORT$)/.test(k)));
 }
 
-const ITERM = 'application id "com.googlecode.iterm2"';
+async function* lines(stream: ReadableStream<Uint8Array>) {
+  const dec = new TextDecoder();
+  let buf = "";
+  for await (const chunk of stream) {
+    buf += dec.decode(chunk, { stream: true });
+    const parts = buf.split("\n");
+    buf = parts.pop()!;
+    yield* parts.filter(Boolean);
+  }
+  if (buf) yield buf;
+}
+
+const ITERM ='application id "com.googlecode.iterm2"';
 const SAFE_ID = /^[\w-]+$/;
 
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
@@ -69,7 +81,55 @@ const RUN_IN_NEW_TAB = `on run argv
   end tell
 end run`;
 
+const ASK_PREAMBLE =
+  "This is a side question from the user, not a new task. Answer it from this conversation so far. Do not continue or redo the work, and do not change anything. Be brief.\n\n";
+
 export const machine = {
+  /**
+   * Streams the answer to a side question from a read-only Haiku fork of the session. The fork runs in the
+   * session's cwd with every hook off (so it never reaches the office), no transcript of its own, and only
+   * Read, Grep and Glob. It sees what is in the transcript, not a turn still being written. Throws if it can't answer; aborting `signal` kills it.
+   */
+  async *askFork(sessionId: string, cwd: string, question: string, signal?: AbortSignal): AsyncGenerator<string> {
+    const proc = Bun.spawn(
+      [
+        "claude", "-p", "--resume", sessionId, "--fork-session", "--no-session-persistence",
+        "--model", "haiku", "--tools", "Read,Grep,Glob", "--disallowedTools", "mcp__*", "--permission-mode", "dontAsk",
+        "--settings", '{"disableAllHooks":true}',
+        "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+      ],
+      // The question goes in on stdin, where a leading "-" can't be read as a flag.
+      { cwd, env: claudeEnv(), stdin: new Blob([ASK_PREAMBLE + question]), stdout: "pipe", stderr: "pipe", timeout: 180_000, signal },
+    );
+    const stderr = new Response(proc.stderr).text();
+    try {
+      let streamed = false, final: any;
+      for await (const line of lines(proc.stdout)) {
+        let msg: any;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const ev = msg?.type === "stream_event" && !msg.parent_tool_use_id ? msg.event : null;
+        if (ev?.type === "content_block_start" && ev.content_block?.type === "text" && streamed) yield "\n\n";
+        if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+          streamed = true;
+          yield ev.delta.text;
+        }
+        if (msg?.type === "result") final = msg;
+      }
+      const code = await proc.exited;
+      if (final?.is_error || (!final && code !== 0)) {
+        throw new Error(String(final?.result || (await stderr).trim().slice(-300) || `claude exited with ${code}`));
+      }
+      // Without token deltas the whole answer still arrives, in the result.
+      if (!streamed && typeof final?.result === "string") yield final.result;
+    } finally {
+      proc.kill();
+    }
+  },
+
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */
   gitCommonDir(cwd: string): string | null {
     const r = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], {

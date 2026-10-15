@@ -1,6 +1,7 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "./server.ts";
@@ -22,7 +23,17 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
+  askFork: (sessionId: string, cwd: string, question: string, signal?: AbortSignal) => {
+    calls.push(`ask ${sessionId} ${cwd} ${question}`);
+    return askAnswer(signal);
+  },
 });
+// What the faked fork says; a test swaps it to gate or fail the answer.
+const defaultAnswer = async function* () {
+  yield "The codeword is ";
+  yield "MANGO.";
+};
+let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
 let server: ReturnType<typeof startServer>;
 let sockets: WebSocket[] = [];
@@ -30,6 +41,7 @@ afterEach(() => {
   calls.length = 0;
   openTabs = new Set();
   backgroundIds = {};
+  askAnswer = defaultAnswer;
   sockets.forEach((s) => s.close());
   sockets = [];
   server?.stop(true);
@@ -491,4 +503,86 @@ test("a parent's interns leave with it", async () => {
   await office((s) => "agent-1" in s.interns);
   await hook({ ...common("parent", "SessionEnd"), reason: "other" });
   expect(await office(() => true)).toMatchObject({ employees: {}, interns: {} });
+});
+
+const askOf = (id: string, body: unknown = { question: "What is the codeword?" }, init: RequestInit = {}, token = TOKEN) =>
+  fetch(`${base()}/${token}/ask/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+    ...init,
+  });
+const ndjson = async (res: Response) => (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+
+test("Ask forks the asked employee's session in its own folder and streams the answer back", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  await hook(sessionStart("s2", "/code/blog"));
+  const res = await askOf("s1");
+  expect([res.status, res.headers.get("content-type")]).toEqual([200, "application/x-ndjson"]);
+  expect(await ndjson(res)).toEqual([{ text: "The codeword is " }, { text: "MANGO." }]);
+  expect(calls).toEqual(["ask s1 /code/shop What is the codeword?"]);
+});
+
+test("Ask delivers the first words before the answer is finished", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"));
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  askAnswer = async function* () {
+    yield "first ";
+    await gate;
+    yield "second";
+  };
+  const reader = (await askOf("s1")).body!.getReader();
+  const first = await reader.read();
+  expect(new TextDecoder().decode(first.value)).toBe('{"text":"first "}\n');
+  release();
+  const rest = await reader.read();
+  expect(new TextDecoder().decode(rest.value)).toBe('{"text":"second"}\n');
+  expect((await reader.read()).done).toBe(true);
+});
+
+test("Ask reports a fork that fails, and stops the fork when the browser goes away", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"));
+  askAnswer = async function* () {
+    yield "partial ";
+    throw new Error("No conversation found with session ID: s1");
+  };
+  expect(await ndjson(await askOf("s1"))).toEqual([{ text: "partial " }, { error: "Ask failed: No conversation found with session ID: s1" }]);
+
+  let stopped = false;
+  askAnswer = async function* (signal) {
+    while (!signal!.aborted) {
+      yield "more ";
+      await Bun.sleep(10);
+    }
+    stopped = true;
+  };
+  // A raw socket, because a fetch cancelled in-process leaves its connection open.
+  const body = JSON.stringify({ question: "q" });
+  const socket = connect(server.port!, "127.0.0.1", () =>
+    socket.write(`POST /${TOKEN}/ask/s1 HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`),
+  );
+  await new Promise((r) => socket.once("data", r));
+  socket.destroy();
+  await Bun.sleep(100);
+  expect(stopped).toBe(true);
+});
+
+test("Ask needs the UI token, a POST, a known employee and a sane question", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"));
+  expect((await askOf("s1", undefined, {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/ask/s1`, { method: "POST", body: "{}" })).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/ask/s1`)).status).toBe(405);
+  expect((await askOf("s1", undefined, { headers: { origin: "https://evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await askOf("s1", undefined, { headers: { host: "evil.example" } })).status).toBe(403);
+  expect((await askOf("nobody")).status).toBe(404);
+  expect((await askOf("constructor")).status).toBe(404);
+  for (const bad of [{}, { question: "  " }, { question: 7 }, { question: "x".repeat(4001) }, "not json"]) {
+    expect((await askOf("s1", bad)).status).toBe(400);
+  }
+  expect(calls).toEqual([]);
 });
