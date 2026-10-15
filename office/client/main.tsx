@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
+import { AskBox, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
 import { roleTitle } from "../people.ts";
+import type { HistoryEntry } from "./history.ts";
 import { poseOf, statusCounts } from "./pose.ts";
 import { createScene, type Scene } from "./scene.ts";
 import "./office.css";
@@ -29,7 +31,7 @@ function Counter({ state }: { state: OfficeState }) {
   );
 }
 
-function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose: () => void }) {
+function Panel({ state, id, entries, onAsk, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onClose: () => void }) {
   const e = state.employees[id];
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), [id]);
@@ -72,6 +74,7 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
         )}
       </dl>
       <JumpButton key={id} id={id} />
+      <AskBox key={id} entries={entries} onAsk={onAsk} />
     </aside>
   );
 }
@@ -81,6 +84,7 @@ function Office() {
   const [connected, setConnected] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [board, setBoard] = useState<string | null>(null);
+  const { history, ask } = useHistory();
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<Scene | null>(null);
   const latest = useRef({ state, selected });
@@ -141,7 +145,7 @@ function Office() {
         <div className="scene" ref={host} />
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
-        {state && selected && <Panel state={state} id={selected} onClose={() => select(null)} />}
+        {state && selected && <Panel state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onClose={() => select(null)} />}
         {state && board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
         {state && <BoardList state={state} onOpen={setBoard} />}
         {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}

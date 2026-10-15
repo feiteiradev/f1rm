@@ -5,6 +5,7 @@ import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -82,6 +83,8 @@ export function startServer({
     return room;
   };
 
+  const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
+
   let boards: Record<string, BoardRow[]> = {};
   const snapshot = () => JSON.stringify({ ...state, boards });
   const push = () => server.publish("office", snapshot());
@@ -89,6 +92,8 @@ export function startServer({
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port,
+    // The fork can be silent for a while (starting up, reading files) before its first words.
+    idleTimeout: 120,
     async fetch(req, server) {
       await ready;
       // Host defeats DNS rebinding; Origin defeats other sites (hooks send none).
@@ -116,10 +121,20 @@ export function startServer({
       const path = rest.join("/");
       if (rest[0] === "jump" && rest.length === 2) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
-        const employee = Object.hasOwn(state.employees, rest[1]) ? state.employees[rest[1]] : undefined;
+        const employee = employeeOf(rest[1]);
         if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
+      if (rest[0] === "ask" && rest.length === 2) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ error: "No such employee." }, { status: 404 });
+        const question = ((await req.json().catch(() => null)) as { question?: unknown } | null)?.question;
+        if (typeof question !== "string" || !question.trim() || question.length > MAX_QUESTION) {
+          return Response.json({ error: `Ask a question of 1 to ${MAX_QUESTION} characters.` }, { status: 400 });
+        }
+        return new Response(askStream(machine, employee, question.trim()), { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
