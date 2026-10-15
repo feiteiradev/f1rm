@@ -235,6 +235,14 @@ test("the page and the WebSocket need the per-launch UI token", async () => {
   expect(outcome).toBe("rejected");
 });
 
+test("the page without its trailing slash redirects, so its assets resolve under the token", async () => {
+  start();
+  const res = await fetch(`${base()}/${TOKEN}`, { redirect: "manual" });
+  expect(res.status).toBe(307);
+  expect(res.headers.get("location")).toBe(`/${TOKEN}/`);
+  expect((await fetch(`${base()}/wrong`, { redirect: "manual" })).status).toBe(401);
+});
+
 test("a foreign Origin or an unexpected Host is rejected, even with valid credentials", async () => {
   start();
   const page = `${base()}/${TOKEN}/`;

@@ -1,12 +1,18 @@
 #!/usr/bin/env bun
 // The f1rm CLI: install | uninstall | start
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
+const F1RM_DIR = join(process.env.HOME!, ".f1rm");
+// curl reads the secret from here, so it never appears on a command line.
+const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
+// What install created, so uninstall removes those containers and no others.
+const CREATED_FILE = join(F1RM_DIR, "created.json");
 const DEFAULT_PORT = 4170;
 const SECRET_HEADER = "X-F1rm-Secret";
 
@@ -39,19 +45,18 @@ const EVENTS = [
 type Handler = { type: string; url?: string; headers?: Record<string, string>; [k: string]: unknown };
 type Settings = { hooks?: Record<string, { matcher?: string; hooks: Handler[] }[]>; [k: string]: unknown };
 
-const isF1rmHttp = (h: Handler) => h.type === "http" && !!h.headers?.[SECRET_HEADER];
-const isF1rm = (h: Handler) => isF1rmHttp(h) || (h.type === "command" && String(h.command).includes(SECRET_HEADER));
+type Created = { hooks: boolean; events: string[] };
 
-function handlerFor(event: string, url: string, secret: string): Handler {
-  // SessionStart only runs command hooks, so that one event POSTs with curl instead.
-  if (event === "SessionStart") {
-    const env = Object.entries(ENV_HEADERS).map(([h, v]) => ` -H "${h}: $${v}"`).join("");
-    return {
-      type: "command",
-      command: `curl -s -m ${HOOK_TIMEOUT} -o /dev/null -H 'Content-Type: application/json' -H '${SECRET_HEADER}: ${secret}'${env} --data-binary @- ${url} || true`,
-      timeout: HOOK_TIMEOUT,
-    };
-  }
+function curlHook(url: string): Handler {
+  const env = Object.entries(ENV_HEADERS).map(([h, v]) => ` -H "${h}: $${v}"`).join("");
+  return {
+    type: "command",
+    command: `curl -s -m ${HOOK_TIMEOUT} -o /dev/null -H 'Content-Type: application/json' -H @'${HEADERS_FILE}'${env} --data-binary @- ${url} || true`,
+    timeout: HOOK_TIMEOUT,
+  };
+}
+
+function httpHook(url: string, secret: string): Handler {
   return {
     type: "http",
     url,
@@ -60,6 +65,18 @@ function handlerFor(event: string, url: string, secret: string): Handler {
     timeout: HOOK_TIMEOUT,
   };
 }
+
+// SessionStart only runs command hooks, so that one event POSTs with curl instead.
+const handlerFor = (event: string, url: string, secret: string) => (event === "SessionStart" ? curlHook(url) : httpHook(url, secret));
+
+// A handler is f1rm's only if it is exactly what install writes.
+const isF1rmHttp = (h: Handler) =>
+  h.type === "http" && !!h.headers?.[SECRET_HEADER] && isDeepStrictEqual(h, httpHook(String(h.url), h.headers[SECRET_HEADER]));
+const isF1rmCurl = (h: Handler) => {
+  const url = /--data-binary @- (\S+) \|\| true$/.exec(String(h.command))?.[1];
+  return h.type === "command" && !!url && isDeepStrictEqual(h, curlHook(url));
+};
+const isF1rm = (h: Handler) => isF1rmHttp(h) || isF1rmCurl(h);
 
 function readSettings(): Settings {
   if (!existsSync(SETTINGS)) return {};
@@ -78,27 +95,41 @@ function writeSettings(settings: Settings) {
 /** An installed f1rm http hook handler (holding the URL and secret), if any. */
 const installed = (s: Settings) => Object.values(s.hooks ?? {}).flat().flatMap((g) => g.hooks).find(isF1rmHttp);
 
-/** Removes f1rm's handlers, and any group, event or hooks object that only held them. */
+/** Removes f1rm's handlers, and the groups that held only them. */
 function withoutF1rm(s: Settings): Settings {
   if (!s.hooks) return { ...s };
   const hooks: NonNullable<Settings["hooks"]> = {};
   for (const [event, groups] of Object.entries(s.hooks)) {
-    const kept = groups
+    hooks[event] = groups
       .map((g) => ({ ...g, hooks: g.hooks.filter((h) => !isF1rm(h)) }))
       .filter((g, i) => g.hooks.length > 0 || groups[i].hooks.length === 0);
-    if (kept.length > 0 || groups.length === 0) hooks[event] = kept;
   }
-  const { hooks: _, ...rest } = s;
-  return Object.keys(hooks).length > 0 || Object.keys(s.hooks).length === 0 ? { ...rest, hooks } : rest;
+  return { ...s, hooks };
 }
+
+const readCreated = (): Created => {
+  try {
+    return JSON.parse(readFileSync(CREATED_FILE, "utf8"));
+  } catch {
+    return { hooks: false, events: [] };
+  }
+};
 
 function install() {
   const before = readSettings();
   const secret = installed(before)?.headers?.[SECRET_HEADER] ?? randomBytes(32).toString("base64url");
   const url = `http://127.0.0.1:${Number(process.env.F1RM_PORT ?? DEFAULT_PORT)}/ingest`;
   const after = withoutF1rm(before);
+  const created: Created = installed(before)
+    ? readCreated()
+    : { hooks: !before.hooks, events: EVENTS.filter((e) => !before.hooks?.[e]) };
   after.hooks ??= {};
   for (const event of EVENTS) (after.hooks[event] ??= []).push({ hooks: [handlerFor(event, url, secret)] });
+
+  mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
+  writeFileSync(HEADERS_FILE, `${SECRET_HEADER}: ${secret}\n`, { mode: 0o600 });
+  chmodSync(HEADERS_FILE, 0o600); // mode only applies to a file being created
+  writeFileSync(CREATED_FILE, JSON.stringify(created));
 
   if (JSON.stringify(after) === JSON.stringify(before)) return console.log("f1rm hooks already installed.");
   if (existsSync(SETTINGS) && !installed(before)) copyFileSync(SETTINGS, SETTINGS + ".f1rm-backup");
@@ -109,7 +140,12 @@ function install() {
 function uninstall() {
   const before = readSettings();
   if (!installed(before)) return console.log("f1rm hooks are not installed.");
-  writeSettings(withoutF1rm(before));
+  const after = withoutF1rm(before);
+  const created = readCreated();
+  for (const event of created.events) if (after.hooks![event]?.length === 0) delete after.hooks![event];
+  if (created.hooks && Object.keys(after.hooks!).length === 0) delete after.hooks;
+  writeSettings(after);
+  rmSync(F1RM_DIR, { recursive: true, force: true });
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
 

@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,7 +33,7 @@ const f1rmHandlers = (settings: any) =>
   Object.entries(settings.hooks ?? {}).flatMap(([event, groups]: [string, any]) =>
     groups.flatMap((g: any) =>
       g.hooks
-        .filter((h: any) => JSON.stringify(h).includes("X-F1rm-Secret"))
+        .filter((h: any) => /X-F1rm-Secret|\.f1rm\/ingest-headers/.test(JSON.stringify(h)))
         .map((h: any) => ({ event, matcher: g.matcher, ...h })),
     ),
   );
@@ -60,7 +60,11 @@ test("install adds a hook with the ingest secret for every observed event, keepi
   expect(sessionStart).toHaveLength(1);
   expect(sessionStart[0].type).toBe("command");
   expect(sessionStart[0].command).toContain("http://127.0.0.1:4170/ingest");
-  expect(sessionStart[0].command).toContain(secret);
+  const headersFile = join(home, ".f1rm", "ingest-headers");
+  expect(sessionStart[0].command).toContain(`-H @'${headersFile}'`);
+  expect(sessionStart[0].command).not.toContain(secret); // argv is world-readable via ps
+  expect(readFileSync(headersFile, "utf8")).toBe(`X-F1rm-Secret: ${secret}\n`);
+  expect(statSync(headersFile).mode & 0o777).toBe(0o600);
 
   const http = handlers.filter((h) => h.event !== "SessionStart");
   expect(http.map((h) => h.event).sort()).toEqual(
@@ -109,6 +113,28 @@ test("uninstall removes exactly what install added", () => {
 
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(settingsOf(home)).toEqual({ ...userSettings, theme: "dark" });
+});
+
+test("uninstall removes the ingest header file", () => {
+  const home = tempHome(userSettings);
+  f1rm(home, "install");
+  expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(true);
+  f1rm(home, "uninstall");
+  expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(false);
+});
+
+const lookalike = { type: "command", command: "echo X-F1rm-Secret >> /tmp/log" };
+test.each([
+  ["an empty hooks object", { hooks: {} }],
+  ["an empty event list", { hooks: { Stop: [] } }],
+  ["an empty group", { hooks: { Stop: [{ hooks: [] }] } }],
+  ["a command hook that merely mentions the header", { hooks: { Stop: [{ hooks: [lookalike] }] } }],
+  ["an http hook of its own carrying the header", { hooks: { Stop: [{ hooks: [{ type: "http", url: "https://example.com/x", headers: { "X-F1rm-Secret": "mine" } }] }] } }],
+])("install then uninstall leaves %s as it was", (_, settings) => {
+  const home = tempHome(settings);
+  f1rm(home, "install");
+  expect(f1rm(home, "uninstall").code).toBe(0);
+  expect(settingsOf(home)).toEqual(settings);
 });
 
 test("install and uninstall work when there are no settings yet", () => {
