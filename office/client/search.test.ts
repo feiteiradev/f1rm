@@ -24,6 +24,11 @@ test("a query finds employees by name, role, room or task, ignoring case", () =>
   expect(ids("zzz")).toEqual([]);
 });
 
+test("a query finds an employee by its session title", () => {
+  const titled = [e("1", "Maya", "Designer", "shop"), { ...e("2", "Felix", "Frontend dev", "shop"), title: "checkout redesign" }];
+  expect(search(titled, "checkout").map((x) => x.id)).toEqual(["2"]);
+});
+
 test("a fuzzy query matches letters in order, and several words must all match", () => {
   expect(ids("tms")).toEqual(["2"]);
   expect(ids("backend blog")).toEqual(["4"]);

@@ -123,6 +123,17 @@ await page.keyboard.type("pst");
 assert.equal(await page.getByRole("option").count(), 1, "scattered letters match (post.md)");
 await key("Escape");
 await dialog.waitFor({ state: "hidden" });
+// A session's own title (`--name`) finds it too.
+await fetch(`${base}/ingest`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-f1rm-secret": SECRET, "x-f1rm-iterm-session": tab(3) },
+  body: JSON.stringify({ session_id: "c", cwd: "/code/blog", hook_event_name: "UserPromptSubmit", session_title: "spring launch" }),
+});
+await key("Meta+k");
+await page.keyboard.type("spring launch");
+assert.equal(await page.getByRole("option").count(), 1, "a session title finds its employee");
+await key("Escape");
+await dialog.waitFor({ state: "hidden" });
 await key("Meta+k");
 await page.keyboard.type("zzzz");
 assert.equal(await page.getByText("No one matches.").count(), 1);

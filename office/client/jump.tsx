@@ -47,7 +47,7 @@ export function Palette({ state, onOpen }: { state: OfficeState; onOpen: (roomId
   const listId = useId();
 
   const entries = useMemo<Entry[]>(
-    () => rosterOf(state).map((e) => ({ id: e.sessionId, name: e.name, role: roleTitle(e.role), room: state.rooms[e.room]?.name ?? "", task: e.activity })),
+    () => rosterOf(state).map((e) => ({ id: e.sessionId, name: e.name, role: roleTitle(e.role), room: state.rooms[e.room]?.name ?? "", task: e.activity, title: e.title })),
     [state],
   );
   const results = useMemo(() => search(entries, query), [entries, query]);

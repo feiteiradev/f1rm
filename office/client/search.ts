@@ -1,5 +1,6 @@
 // ⌘K's fuzzy search over employees.
-export type Entry = { id: string; name: string; role: string; room: string; task: string };
+/** `title` is the session's own title (`--name`), when it has one. */
+export type Entry = { id: string; name: string; role: string; room: string; task: string; title?: string };
 
 // ponytail: letters-in-order matching with a gap penalty; no typo tolerance or per-field weights.
 /** A substring beats a scattered match; earlier and tighter is better. Null if `token` isn't in `field`. */
@@ -17,14 +18,14 @@ function score(field: string, token: string): number | null {
 }
 
 /**
- * Entries matching every space-separated token of `query` in at least one of name, role, room or task,
+ * Entries matching every space-separated token of `query` in at least one of name, role, room, task or title,
  * best first; ties keep their input order. An empty query keeps everyone.
  */
 export function search(entries: Entry[], query: string): Entry[] {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const ranked: { entry: Entry; total: number }[] = [];
   for (const entry of entries) {
-    const fields = [entry.name, entry.role, entry.room, entry.task].map((f) => f.toLowerCase());
+    const fields = [entry.name, entry.role, entry.room, entry.task, entry.title ?? ""].map((f) => f.toLowerCase());
     let total = 0;
     for (const token of tokens) {
       const best = Math.max(...fields.map((f) => score(f, token) ?? -Infinity));
