@@ -99,6 +99,7 @@ export function startServer({
       // Everything for the browser lives under /<ui token>/, so every request carries the token.
       const [, given, ...rest] = url.pathname.split("/");
       if (!same(given, token)) return new Response("unauthorized", { status: 401 });
+      if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
