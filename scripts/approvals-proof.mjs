@@ -1,7 +1,7 @@
 // Live proof of raised-hand approvals: a real Haiku interactive session (in a PTY, default permission mode) asks to run
 // `touch`; the real `f1rm start` (temp HOME, short approval timeout) holds its PermissionRequest hook; headless Chrome
 // approves it, denies it, or leaves it to time out from the top-bar tray. Checks that the file was created only when it
-// should be, and that after the timeout the terminal's own prompt still works.
+// should be, that after the timeout the terminal's own prompt still works, and that with the office stopped the session never waits on it.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/approvals-proof.mjs
 // PROJ defaults to a throwaway folder; Claude Code then shows its trust dialog, which this script answers (Claude Code records that in ~/.claude.json).
@@ -219,9 +219,25 @@ try {
   assert.equal(readdirSync(proj).filter((f) => f.startsWith("f1rm-timeout-")).length, 1, "answering in the terminal after the timeout ran the command");
 
   assert.deepEqual(errors, [], "no page errors");
+
+  // With the office closed the hooks fail to connect; the session must go on to its own prompt without waiting.
+  server.kill();
+  await server.exited;
+  const downFile = join(proj, `f1rm-down-${nonce()}`), downMark = raw.length, downStops = count("Stop"), downPerms = count("PermissionRequest");
+  await type(`Run exactly this bash command and then reply done: /usr/bin/touch ${downFile}`);
+  await until(() => count("PermissionRequest") > downPerms, 90_000, "the permission hook to fire with the office down");
+  const firedAt = Date.now();
+  await until(() => dialog.test(strip(raw.slice(downMark))), 20_000, "the terminal dialog with the office down");
+  const shownIn = (Date.now() - firedAt) / 1000;
+  assert.ok(shownIn < 5, `the terminal prompt showed straight away with the office down (${shownIn.toFixed(1)} s after the hook fired)`);
+  target.terminal.write("\r");
+  await until(() => existsSync(downFile), 30_000, "the command to run with the office down");
+  await until(() => count("Stop") > downStops, 90_000, "the turn to end with the office down");
+
   console.log(
     `PASS approvals: approve from the tray ran touch (${approved[0]}); deny from the tray did not run touch; a ${TIMEOUT_S} s timeout returned no decision, ` +
-      `left the terminal prompt up, and answering it there ran touch; the tray showed employee ${employee.name}, project ${roomName}, tool Bash, the whole command as text; screenshots in ${OUT}`,
+      `left the terminal prompt up, and answering it there ran touch; with the office stopped the terminal prompt showed ${shownIn.toFixed(1)} s after the hook fired and the turn finished; ` +
+      `the tray showed employee ${employee.name}, project ${roomName}, tool Bash, the whole command as text; screenshots in ${OUT}`,
   );
   await browser.close();
 } finally {
