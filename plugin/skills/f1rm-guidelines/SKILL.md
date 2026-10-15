@@ -44,7 +44,7 @@ Playbook:
    - Run it in the repo's main working directory. Background sessions run only in folders the user has trusted.
    - It prints `backgrounded · <id>` and exits 0 on success, and exits non-zero with a message when it refuses.
 6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`. The task slug is lowercase words joined by hyphens, unique on the board.
-7. **Slash commands.** The brief of a hire starts with its role's slash commands, for example `/research` and `/security-review`. They are commands, not Skill-tool skills, so a role cannot invoke them itself and its file does not list them under `skills:`. `f1rm hire` prepends them and the `Report to` line, so do not write them in the brief yourself.
+7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline` or `/research`. Only the first slash command in a prompt expands, so `f1rm hire` names the role's other skills in the brief and the hire loads them with the Skill tool before starting. `/research` is a command, not a Skill-tool skill, so it is always a role's first entry. `/security-review` is built in, and the Reviewer loads it with the Skill tool. `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
 
 ## Brief format

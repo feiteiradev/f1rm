@@ -68,9 +68,11 @@ export async function hire(args: string[]): Promise<number> {
       );
   }
 
-  // ponytail: live on Claude Code 2.1.300, only the first slash command of a chain expands (the rest arrive as its text), and code-review forks into a subagent. Per-command briefs or a Skill-tool step are the upgrade if a role needs two.
-  const commands = slashCommands(role).map((c) => `/${c}`).join(" ");
-  const prompt = `${commands} Report to: ${reportTo ?? pmName(process.cwd())}\n\n${brief}`;
+  // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
+  // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
+  const [first, ...rest] = slashCommands(role);
+  const more = rest.length ? ` Before you start, load these with the Skill tool: ${rest.join(", ")}.` : "";
+  const prompt = `/${first}${more} Report to: ${reportTo ?? pmName(process.cwd())}\n\n${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, "--worktree", task, prompt, ...extra];
   if (role === "reviewer") argv.push(...REVIEWER_DISALLOWED);

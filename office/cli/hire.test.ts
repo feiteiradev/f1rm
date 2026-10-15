@@ -68,7 +68,7 @@ test.each([
   ["frontend-dev", "/mattpocock-skills:tdd"],
   ["backend-dev", "/mattpocock-skills:tdd"],
   ["researcher", "/research"],
-  ["reviewer", "/code-review /f1rm:f1rm-guidelines /security-review"],
+  ["reviewer", "/code-review Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, security-review."],
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
