@@ -124,15 +124,6 @@ test("the roster follows the office: rooms by name, then employees by session id
   expect(rosterOf(office(["b", "a"], staff)).map((e) => e.sessionId)).toEqual(["s9", "s1", "s2"]);
 });
 
-test("rooms wrap to a new row when the width runs out", () => {
-  const roomWidth = ROOM.pad * 2 + ROOM.cols * CELL.w;
-  const state = office(["a", "b", "c"], []);
-  const wide = layoutOffice(state, 3 * roomWidth + 40).rooms;
-  expect(new Set(wide.map((r) => r.y)).size).toBe(1);
-  const narrow = layoutOffice(state, roomWidth * 2 + 40).rooms;
-  expect(narrow.map((r) => r.y > narrow[0].y)).toEqual([false, false, true]);
-});
-
 test("a door counts the employees inside, flags a raised hand, and a project nobody is in is empty", () => {
   const state = office(["shop", "blog", "docs"], [
     employee("a", "shop"), employee("b", "shop", { status: "waiting" }), employee("c", "blog", { status: "offline" }),

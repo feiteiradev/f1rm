@@ -24,8 +24,9 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
   const roomW = solo ? Math.max(ROOM.pad * 2 + cols * CELL.w, width - MARGIN * 2) : ROOM.pad * 2 + cols * CELL.w;
   const inset = Math.floor((roomW - cols * CELL.w) / 2);
 
+  // The page opens one project at a time, so rooms just stack; only the roster lays out several, and only for their order.
   const out: RoomLayout[] = [];
-  let x = MARGIN, y = MARGIN, rowH = 0;
+  let y = MARGIN;
   for (const room of rooms) {
     // Company staff take the front desks in role order (shifts of a role by counter), freelancers the hot desks behind
     // them, by session id. Both orders are stable while nobody joins or leaves, with no arrival order in the state.
@@ -38,24 +39,18 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
     const seats = Math.max(cols, crewSeats + Math.ceil(freelancers.length / cols) * cols);
     const people = [...crew, ...Array(crewSeats - crew.length).fill(undefined), ...freelancers];
     const h = Math.max(ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h, solo ? fill - MARGIN * 2 : 0);
-    if (x > MARGIN && x + roomW > width - MARGIN) {
-      x = MARGIN;
-      y += rowH + GAP;
-      rowH = 0;
-    }
     // Whole plank rows (8), so the floor lines meet the desks the same way in every room.
     const slack = Math.floor((h - (ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h)) / 16) * 8;
     const desks = Array.from({ length: seats }, (_, i) => ({
-      x: x + inset + (i % cols) * CELL.w,
+      x: MARGIN + inset + (i % cols) * CELL.w,
       y: y + ROOM.wall + ROOM.pad + slack + Math.floor(i / cols) * CELL.h,
       hot: i >= crewSeats && freelancers.length > 0,
       employee: people[i],
     }));
-    out.push({ room, x, y, w: roomW, h, empty: here.length === 0, desks });
-    x += roomW + GAP;
-    rowH = Math.max(rowH, h);
+    out.push({ room, x: MARGIN, y, w: roomW, h, empty: here.length === 0, desks });
+    y += h + GAP;
   }
-  return { rooms: out, height: y + rowH + MARGIN };
+  return { rooms: out, height: y - GAP + MARGIN };
 }
 
 /** Employees in the order the office lays them out, so keyboard order does not change as events arrive. */
