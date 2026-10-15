@@ -2,13 +2,14 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
+import { rosterOf } from "./layout.ts";
 import { identityOf } from "./people.ts";
 import { poseOf, statusCounts } from "./pose.ts";
 import { createScene, type Scene } from "./scene.ts";
 import "./office.css";
 
 const COUNTERS: [Status, string][] = [["working", "Active"], ["waiting", "Waiting"], ["idle", "Idle"]];
-const STATUS_TEXT: Record<Status, string> = { working: "Working", waiting: "Waiting for permission", idle: "Idle" };
+const STATUS_TEXT: Record<Status, string> = { working: "Working", waiting: "Waiting for permission", idle: "Idle", offline: "Offline" };
 const IDLE_TEXT = "On a coffee break";
 
 function Counter({ state }: { state: OfficeState }) {
@@ -32,7 +33,7 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
   useEffect(() => closeRef.current?.focus(), [id]);
   if (!e) return null;
   const { name, role } = identityOf(id);
-  const activity = e.activity || (e.status === "idle" ? IDLE_TEXT : "None");
+  const activity = e.status === "offline" ? "None" : e.activity || (e.status === "idle" ? IDLE_TEXT : "None");
   return (
     <aside className="panel" aria-label={`${name}, ${role}`}>
       <header>
@@ -67,6 +68,14 @@ function Office() {
   const scene = useRef<Scene | null>(null);
   const latest = useRef({ state, selected });
   latest.current = { state, selected };
+  const opener = useRef<Element | null>(null);
+  // The scene keeps the first render's callback, so this reads only refs and the stable setter.
+  const select = (id: string | null) => {
+    const open = latest.current.selected;
+    if (id && !open) opener.current = document.activeElement;
+    setSelected(id);
+    if (!id && open) (opener.current as HTMLElement | null)?.focus?.();
+  };
 
   useEffect(() => {
     // The page lives under /<ui token>/, so the socket path inherits the token.
@@ -80,7 +89,7 @@ function Office() {
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, setSelected).then((s) => {
+    createScene(host.current!, select).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       if (latest.current.state) s.update(latest.current.state, latest.current.selected);
@@ -97,13 +106,12 @@ function Office() {
   }, [state, selected]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelected(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && select(null);
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, []);
 
   const empty = state && Object.keys(state.rooms).length === 0;
-  const staff = state ? Object.values(state.employees) : [];
   return (
     <>
       <header className="bar">
@@ -115,15 +123,15 @@ function Office() {
         <div className="scene" ref={host} />
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
-        {state && selected && <Panel state={state} id={selected} onClose={() => setSelected(null)} />}
+        {state && selected && <Panel state={state} id={selected} onClose={() => select(null)} />}
         {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
         <ul className="roster">
           {state &&
-            staff.map((e) => {
+            rosterOf(state).map((e) => {
               const { name, role } = identityOf(e.sessionId);
               return (
                 <li key={e.sessionId}>
-                  <button data-pose={poseOf(e)} onClick={() => setSelected(e.sessionId)}>
+                  <button data-pose={poseOf(e)} onClick={() => select(e.sessionId)}>
                     {name}, {role}, {state.rooms[e.room]?.name}, {STATUS_TEXT[e.status]}
                   </button>
                 </li>

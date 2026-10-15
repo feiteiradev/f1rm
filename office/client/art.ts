@@ -88,7 +88,7 @@ const KEYS = { x: 15, y: 31 };
 const CODE_COLORS = [0x7fd6a2, 0xe8b45c, 0x8ab4f8, 0xd98cb3];
 const INK = 0x2a1a05;
 
-function screen(g: Graphics, pose: Pose | "off", f: number) {
+function screen(g: Graphics, pose: Pose, f: number) {
   const { x, y, w, h } = SCREEN;
   box(g, x - 1, y - 1, w + 2, h + 2, COLORS.bezel);
   box(g, x + 4, y + h + 1, 3, 1, COLORS.bezel);
@@ -117,7 +117,7 @@ function bubble(g: Graphics, x: number, y: number, color: number) {
   box(g, x + 5, y + 8, 2, 2, color);
 }
 
-export function drawDesk(g: Graphics, pose: Pose | "off", f: number, skin: number, selected: boolean) {
+export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean) {
   g.clear();
   screen(g, pose, f);
   if (pose === "reading") {

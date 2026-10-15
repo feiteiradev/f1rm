@@ -37,3 +37,7 @@ export function layoutOffice(state: OfficeState, width: number): { rooms: RoomLa
   }
   return { rooms: out, height: y + rowH + MARGIN };
 }
+
+/** Employees in the order the office lays them out, so keyboard order does not change as events arrive. */
+export const rosterOf = (state: OfficeState): Employee[] =>
+  layoutOffice(state, 0).rooms.flatMap((r) => r.desks.flatMap((d) => d.employee ?? []));

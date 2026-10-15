@@ -2,13 +2,13 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Employee, OfficeState } from "../server/office.ts";
-import { CELL, layoutOffice, ROOM } from "./layout.ts";
+import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
+import { CELL, layoutOffice, ROOM, rosterOf } from "./layout.ts";
 import { identityOf } from "./people.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
-  sessionId, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, ...over,
+  sessionId, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
 });
 const office = (rooms: string[], staff: Employee[]): OfficeState => ({
   rooms: Object.fromEntries(rooms.map((r) => [r, { id: r, name: r }])),
@@ -26,6 +26,7 @@ test("each status and tool maps to its pose", () => {
     [{ status: "working", tool: "" }, "typing"],
     [{ status: "waiting", tool: "Bash" }, "hand"],
     [{ status: "idle", tool: "Edit" }, "coffee"],
+    [{ status: "offline", tool: "Edit" }, "off"],
   ];
   for (const [e, pose] of cases) expect(poseOf(employee("s", "r", e))).toBe(pose);
 });
@@ -36,14 +37,19 @@ test("the counter tallies working, waiting and idle employees", () => {
     employee("b", "r", { status: "working" }),
     employee("c", "r", { status: "waiting" }),
     employee("d", "r"),
+    employee("e", "r", { status: "offline" }),
   ]);
-  expect(statusCounts(state)).toEqual({ working: 2, waiting: 1, idle: 1 });
-  expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0 });
+  expect(statusCounts(state)).toEqual({ working: 2, waiting: 1, idle: 1, offline: 1 });
+  expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0, offline: 0 });
 });
 
-test("an employee keeps one name and look for the same session id", () => {
+test("an employee keeps one name and look for the same session id, and different ids look different", () => {
   expect(identityOf("abc")).toEqual(identityOf("abc"));
   expect(identityOf("abc").role).toBe("Freelancer");
+  const ids = Array.from({ length: 60 }, (_, i) => `session-${i}`);
+  const people = ids.map(identityOf);
+  expect(new Set(people.map((p) => p.name)).size).toBeGreaterThan(15);
+  expect(new Set(people.map((p) => p.seed)).size).toBe(ids.length);
 });
 
 test("rooms sort by name, and a room with nobody in it is empty", () => {
@@ -56,6 +62,23 @@ test("employees take desks in session id order, filling rows of three", () => {
   const [room] = layoutOffice(office(["r"], staff), 400).rooms;
   expect(room.desks.map((d) => d.employee?.sessionId)).toEqual(["s1", "s2", "s3", "s4", undefined, undefined]);
   expect(room.desks[3].y - room.desks[0].y).toBe(CELL.h);
+});
+
+test("the roster keeps its order when a session's event moves it to the end of the state", () => {
+  const room = { id: "r", name: "r" };
+  const event = (sessionId: string, at: number): F1rmEvent => ({ sessionId, kind: "PreToolUse", cwd: "/x", room, terminal: {}, at });
+  let state = office([], []);
+  for (const [i, id] of ["s2", "s3", "s1"].entries()) state = reduce(state, event(id, i));
+  const before = rosterOf(state).map((e) => e.sessionId);
+  state = reduce(state, event("s1", 9));
+  expect(Object.keys(state.employees)).toEqual(["s2", "s3", "s1"]);
+  expect(rosterOf(state).map((e) => e.sessionId)).toEqual(before);
+  expect(before).toEqual(["s1", "s2", "s3"]);
+});
+
+test("the roster follows the office: rooms by name, then employees by session id", () => {
+  const staff = [employee("s2", "b"), employee("s9", "a"), employee("s1", "b")];
+  expect(rosterOf(office(["b", "a"], staff)).map((e) => e.sessionId)).toEqual(["s9", "s1", "s2"]);
 });
 
 test("rooms wrap to a new row when the width runs out", () => {

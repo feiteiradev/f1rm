@@ -1,5 +1,5 @@
 // The PixiJS scene: draws the office from the latest server state, animates each employee from its pose.
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
 import { bob, buildDesk, buildRoom, COLORS, drawDesk, loadArt, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM } from "./layout.ts";
@@ -34,6 +34,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
   const desks = new Container();
   const roomLabels = new Container();
   const names = new Container();
+  names.eventMode = roomLabels.eventMode = "none";
   world.addChild(rooms, desks);
   app.stage.addChild(world, roomLabels, names);
   app.stage.eventMode = "static";
@@ -81,6 +82,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         if (!p) {
           const art = buildDesk(identityOf(e.sessionId).seed);
           art.root.eventMode = "static";
+          art.root.hitArea = new Rectangle(0, 0, CELL.w, CELL.h);
           art.root.cursor = "pointer";
           art.root.on("pointertap", () => onSelect(e.sessionId));
           desks.addChild(art.root);
@@ -111,6 +113,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       if (key === p.drawn) continue;
       p.drawn = key;
       p.art.person.y = bob(pose, f);
+      p.art.person.alpha = p.name.alpha = pose === "off" ? 0.4 : 1;
       drawDesk(p.art.fx, pose, f, p.art.skin, id === selected);
     }
     for (const d of dimmers.values()) {

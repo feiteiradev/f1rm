@@ -18,11 +18,12 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--mono); }
 
 .bar {
   flex: none;
-  height: 52px;
-  padding: 0 16px;
+  min-height: 52px;
+  padding: 6px 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 4px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
