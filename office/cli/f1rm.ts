@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
@@ -26,6 +27,8 @@ const ENV_HEADERS: Record<string, string> = {
 };
 // Seconds; keeps a stuck office from stalling sessions. A dead office is a connection error, which Claude Code ignores.
 const HOOK_TIMEOUT = 5;
+// PermissionRequest is held for the browser, so its hook must outlast the broker or Claude Code cancels the hook before the broker answers.
+const APPROVAL_HOOK_TIMEOUT = 2 * DEFAULT_TIMEOUT_S;
 
 // Not WorktreeCreate: a hook there replaces git's worktree creation, so observing it would break --worktree.
 const EVENTS = [
@@ -57,22 +60,22 @@ function curlHook(url: string): Handler {
   };
 }
 
-function httpHook(url: string, secret: string): Handler {
+function httpHook(url: string, secret: string, event = ""): Handler {
   return {
     type: "http",
     url,
     headers: { [SECRET_HEADER]: secret, ...Object.fromEntries(Object.entries(ENV_HEADERS).map(([h, v]) => [h, `$${v}`])) },
     allowedEnvVars: Object.values(ENV_HEADERS),
-    timeout: HOOK_TIMEOUT,
+    timeout: event === "PermissionRequest" ? APPROVAL_HOOK_TIMEOUT : HOOK_TIMEOUT,
   };
 }
 
 // SessionStart only runs command hooks, so that one event POSTs with curl instead.
-const handlerFor = (event: string, url: string, secret: string) => (event === "SessionStart" ? curlHook(url) : httpHook(url, secret));
+const handlerFor = (event: string, url: string, secret: string) => (event === "SessionStart" ? curlHook(url) : httpHook(url, secret, event));
 
-// A handler is f1rm's only if it is exactly what install writes.
+// A handler is f1rm's only if it is exactly what install writes. The timeout is left out so an install from before it varied per event is still recognised, and replaced.
 const isF1rmHttp = (h: Handler) =>
-  h.type === "http" && !!h.headers?.[SECRET_HEADER] && isDeepStrictEqual(h, httpHook(String(h.url), h.headers[SECRET_HEADER]));
+  h.type === "http" && !!h.headers?.[SECRET_HEADER] && isDeepStrictEqual({ ...h, timeout: 0 }, { ...httpHook(String(h.url), h.headers[SECRET_HEADER]), timeout: 0 });
 const isF1rmCurl = (h: Handler) => {
   const url = /--data-binary @- (\S+) \|\| true$/.exec(String(h.command))?.[1];
   return h.type === "command" && !!url && isDeepStrictEqual(h, curlHook(url));
@@ -170,7 +173,11 @@ function start() {
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath, boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs });
+  const approvalTimeout = seconds("F1RM_APPROVAL_TIMEOUT", DEFAULT_TIMEOUT_S);
+  const approvalHook = (readSettings().hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
+  if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
+
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath, boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   console.log(`f1rm office: ${url}`);
   Bun.spawn(["open", url]);

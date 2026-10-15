@@ -1,0 +1,69 @@
+.tray { position: relative; }
+.tray-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.tray-button:hover { border-color: var(--muted); }
+.tray-button .badge {
+  min-width: 2ch;
+  padding: 0 4px;
+  text-align: center;
+  color: var(--text);
+  background: var(--line);
+  font-weight: 700;
+}
+.tray-button[data-waiting] { color: var(--text); border-color: var(--amber); }
+.tray-button[data-waiting] .badge { color: var(--bg); background: var(--amber); }
+
+.tray-panel {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+}
+.tray-panel ul { margin: 0; padding: 0; list-style: none; }
+.tray-panel .none { margin: 0; padding: 16px; color: var(--muted); }
+.hand { padding: 12px 16px; border-bottom: 1px solid var(--line); border-left: 4px solid var(--amber); }
+.hand:last-child { border-bottom: 0; }
+.hand p { margin: 0; }
+.hand .who { display: flex; gap: 12px; align-items: baseline; }
+.hand .where { color: var(--muted); }
+.hand .tool { margin-top: 4px; color: var(--amber); font-weight: 700; }
+.hand .args {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.hand .answer { display: flex; gap: 8px; margin-top: 8px; }
+.hand button {
+  flex: 1;
+  font: inherit;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+.hand button:disabled { opacity: 0.5; cursor: default; }
+.hand .approve { color: var(--bg); background: var(--green); border-color: var(--green); }
+.hand .deny { color: var(--text); background: transparent; }
+.hand .deny:hover { border-color: var(--muted); }
+.hand .problem { margin-top: 6px; color: var(--amber); }

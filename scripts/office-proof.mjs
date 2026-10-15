@@ -90,7 +90,8 @@ await send("s1", "/code/shop", "SessionStart");
 await tool("s1", "/code/shop", "Edit", { file_path: "/code/shop/src/login.ts" });
 await tool("s2", "/code/shop", "Read", { file_path: "/code/shop/README.md" });
 await tool("s3", "/code/shop", "Bash", { command: "bun test" });
-await tool("s4", "/code/shop", "Bash", { command: "rm -rf build" }, "PermissionRequest");
+// The server holds a PermissionRequest until it is decided, so this does not wait for the answer.
+void tool("s4", "/code/shop", "Bash", { command: "rm -rf build" }, "PermissionRequest").catch(() => {});
 await send("s5", "/code/shop", "SessionStart");
 await tool("b1", "/code/blog", "Write", { file_path: "/code/blog/post.md" });
 await send("b2", "/code/blog", "SessionStart");

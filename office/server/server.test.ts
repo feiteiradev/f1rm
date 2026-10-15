@@ -57,8 +57,8 @@ afterEach(() => {
 const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
-function start(repos?: Record<string, string>) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir });
+function start(repos?: Record<string, string>, approvalTimeoutMs?: number) {
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -133,7 +133,8 @@ test("tool use flips an employee to working, a permission prompt to waiting, sto
   await hook(preToolUse("s1", "Edit", { file_path: "/code/shop/src/login.ts", old_string: "a", new_string: "b" }));
   expect(await employee()).toMatchObject({ status: "working", activity: "Edit login.ts", tool: "Edit" });
 
-  await hook({ ...preToolUse("s1", "Bash", { command: "rm -rf build" }), hook_event_name: "PermissionRequest" });
+  void hook({ ...preToolUse("s1", "Bash", { command: "rm -rf build" }), hook_event_name: "PermissionRequest" }); // held until decided
+  await office((s) => s.employees.s1?.status === "waiting");
   expect(await employee()).toMatchObject({ status: "waiting", activity: "Bash: rm -rf build", tool: "Bash" });
 
   await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} });
@@ -643,4 +644,112 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
     expect((await tellOf("s1", bad)).status).toBe(400);
   }
   expect(calls).toEqual([]);
+});
+
+const permissionRequest = (id: string, command: string) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest" });
+const decide = (verb: "approve" | "deny", id: string, token = TOKEN, init: RequestInit = {}) =>
+  fetch(`${base()}/${token}/${verb}/${id}`, { method: "POST", ...init });
+/** Sends a PermissionRequest and returns its still-held response with the approval the office lists for it. */
+async function raiseHand(session = "s1", command = "rm -rf build") {
+  const held = hook(permissionRequest(session, command));
+  const [approval] = (await office((s) => (s.approvals ?? []).some((a) => a.sessionId === session))).approvals!.filter((a) => a.sessionId === session);
+  return { held, approval };
+}
+const settled = (p: Promise<unknown>) => Promise.race([p.then(() => true), Bun.sleep(150).then(() => false)]);
+
+test("a permission request is held while the office lists it with its tool and arguments", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  expect(approval).toMatchObject({ sessionId: "s1", tool: "Bash", input: { command: "rm -rf build" } });
+  expect(await settled(held)).toBe(false);
+});
+
+test("approving answers the held hook with an allow decision and clears the tray", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  const res = await decide("approve", approval.id);
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  const answer = await held;
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
+  expect((await office(() => true)).approvals).toEqual([]);
+  expect((await decide("approve", approval.id)).status).toBe(404); // answered once
+});
+
+test("denying answers the held hook with a deny decision that tells Claude why", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  expect((await decide("deny", approval.id)).status).toBe(200);
+  expect(await (await held).json()).toEqual({
+    hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "Denied from the f1rm office." } },
+  });
+});
+
+test("when the timeout passes the hook gets no decision and the tray empties", async () => {
+  start(undefined, 100);
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held } = await raiseHand();
+  const answer = await held;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+  const state = await office(() => true);
+  expect(state.approvals).toEqual([]);
+  expect(state.employees.s1.status).toBe("waiting"); // the terminal prompt is still up
+});
+
+test("a later event for the session drops its pending hand and answers the hook with no decision", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  const other = await raiseHand("s2");
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} }); // answered in the terminal
+  const answer = await held;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+  expect((await office((s) => s.approvals!.length === 1)).approvals!.map((a) => a.sessionId)).toEqual(["s2"]); // only s1's hand dropped
+  expect((await decide("approve", approval.id)).status).toBe(404);
+  expect(await settled(other.held)).toBe(false);
+});
+
+test("a permission_prompt notification for the held prompt does not drop it", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  await hook({ ...common("s1", "Notification"), message: "Claude needs your permission", notification_type: "permission_prompt" });
+  expect(await settled(held)).toBe(false);
+  expect((await decide("approve", approval.id)).status).toBe(200);
+});
+
+test("a second request from the same session replaces the first", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const first = await raiseHand("s1", "ls");
+  const second = hook(permissionRequest("s1", "pwd"));
+  await office((s) => s.approvals!.length === 1 && (s.approvals![0].input as any).command === "pwd");
+  expect((await first.held).status).toBe(200);
+  expect(await settled(second)).toBe(false);
+});
+
+test("a hook cancelled by Claude Code drops its hand", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const abort = new AbortController();
+  fetch(`${base()}/ingest`, { method: "POST", signal: abort.signal, headers: { "x-f1rm-secret": SECRET }, body: JSON.stringify(permissionRequest("s1", "ls")) }).catch(() => {});
+  await office((s) => s.approvals!.length === 1);
+  abort.abort();
+  expect((await office((s) => s.approvals!.length === 0)).approvals).toEqual([]);
+});
+
+test("Approve and Deny need the UI token, a POST and the browser's own origin", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held, approval } = await raiseHand();
+  expect((await decide("approve", approval.id, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/approve/${approval.id}`, { method: "POST" })).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/approve/${approval.id}`)).status).toBe(405);
+  expect((await decide("approve", approval.id, TOKEN, { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect((await decide("deny", approval.id, TOKEN, { headers: { host: "evil.example" } })).status).toBe(403);
+  expect((await decide("approve", "no-such-id")).status).toBe(404);
+  expect(await settled(held)).toBe(false); // none of that answered it
 });

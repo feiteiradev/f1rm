@@ -5,6 +5,7 @@ import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf, scaleFor } from "./layout.ts";
 import { DOOR, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
+import { Tray } from "./approvals.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
@@ -269,6 +270,7 @@ function Office() {
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
         {state && <Palette state={state} onOpen={go} />}
+        {state && <Tray state={state} />}
         {view && <Counter state={view} />}
       </header>
       <main>
