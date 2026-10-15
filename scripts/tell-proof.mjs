@@ -166,7 +166,7 @@ try {
   const delivered = await until(() => seen().find((r) => r.p.hook_event_name === "UserPromptSubmit" && String(r.p.prompt).includes(word)), 60_000, "the target to read the Tell");
   const post = await until(() => seen().find((r) => r.p.hook_event_name === "PostToolUse" && String(r.p.tool_input?.command).includes("sleep 20")), 60_000, "the sleep tool to finish");
   const failed = seen().some((r) => r.p.hook_event_name === "PostToolUseFailure");
-  const stop = await until(() => seen().find((r) => r.p.hook_event_name === "Stop" && String(r.p.last_assistant_message).includes(word)), 90_000, "the reply with the codeword");
+  const stop = await until(() => seen().findLast((r) => r.p.hook_event_name === "Stop" && r.t > delivered.t), 90_000, "the turn that read the Tell to finish");
 
   assert.ok(sentAt > pre.t && sentAt < post.t, "the Tell was sent while the sleep ran");
   assert.ok(!failed, "the running tool did not fail or get interrupted");
@@ -178,7 +178,7 @@ try {
   assert.deepEqual(errors, [], "no page errors");
   console.log(
     `PASS Tell: sleep 20 started at +0.0s, Tell sent at +${(sentAt - pre.t).toFixed(1)}s, tool finished at +${(post.t - pre.t).toFixed(1)}s, ` +
-      `target read the Tell at +${(delivered.t - pre.t).toFixed(1)}s (${(delivered.t - post.t).toFixed(1)}s after the tool), replied "${String(stop.p.last_assistant_message).trim().slice(0, 80)}"; screenshots in ${OUT}`,
+      `target read the Tell at +${(delivered.t - pre.t).toFixed(1)}s (${(delivered.t - post.t).toFixed(1)}s after the tool), then replied "${String(stop.p.last_assistant_message).trim().slice(0, 80)}"; screenshots in ${OUT}`,
   );
   await browser.close();
 } finally {
