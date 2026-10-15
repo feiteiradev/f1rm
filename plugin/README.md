@@ -46,7 +46,7 @@ Every role has `memory: user`, so it keeps what it learns across projects. The s
 Claude Code does not apply a role's `skills:` list when the role is the session agent (`--agent`). The files keep the list for use as subagents, and the launcher loads the skills as a slash command at the start of the first prompt:
 
 - `f1rm pm` runs `claude --agent f1rm:pm --name pm-<repo basename> "/mattpocock-skills:grilling Your session name is pm-<repo basename>. ..."`, so the PM interviews you before it plans and its hires know where to report. Extra arguments go to `claude`, for example `f1rm pm --model sonnet`.
-- `f1rm hire` (a separate ticket) does the same for each hired role. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
+- `f1rm hire <role> <name> <task> "<brief>"` does the same for each hired role: it starts the brief with the role's `skills:` and slash-only commands, adds the PM session to report to, and refuses at 4 working hires unless `--override` is given. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
 - By hand, put the slash command first: `claude --agent f1rm:designer "/design-pipeline <brief>"`.
 
 ## Files

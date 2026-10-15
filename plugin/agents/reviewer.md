@@ -6,7 +6,7 @@ memory: user
 skills:
   - code-review
   - f1rm:f1rm-guidelines
-# ponytail: the no-push rule is prompt-only. `disallowedTools: Bash(git push *)` removes the whole Bash tool. #12 adds --disallowedTools at hire time, a speed bump that `git -C . push` gets past.
+# ponytail: the no-push rule is prompt-only. `disallowedTools: Bash(git push *)` removes the whole Bash tool. `f1rm hire` passes --disallowedTools for this role, a speed bump that `git -C . push` gets past.
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage
 ---
 

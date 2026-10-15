@@ -84,7 +84,7 @@ test("the roster table names each hireable role with the commands `f1rm hire` lo
   expect(rows.map((r) => r[1])).toEqual(Object.keys(ROLES));
   for (const [, name, cell] of rows) {
     const listed = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    expect(listed.sort()).toEqual([...ROLES[name].filter((s) => s !== GUIDELINES), ...(slash[name] ?? [])].sort());
+    expect(listed.sort()).toEqual([...ROLES[name], ...(slash[name] ?? [])].sort());
   }
 });
 
@@ -160,4 +160,12 @@ test.skipIf(!hasClaude)("the Reviewer's session has Bash, so it can diff, merge 
 
 test.skipIf(!hasClaude)("the PM's session can list its hires", () => {
   expect(initTools("pm")).toContain("ListAgents");
+});
+
+test("the playbook gives the real `f1rm hire` syntax, and the override only after user approval", () => {
+  const playbook = section("Roster and hiring playbook");
+  expect(playbook).toContain('f1rm hire <role> <name> <task> "<brief>"');
+  expect(playbook).not.toContain("--help");
+  expect(section("Cap rule")).toContain("f1rm hire --override");
+  expect(section("Brief format")).not.toMatch(/^Report to:/m);
 });
