@@ -4,15 +4,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
 import { CELL, layoutOffice, ROOM, rosterOf } from "./layout.ts";
-import { identityOf } from "./people.ts";
+import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
-  sessionId, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
+  sessionId, name: sessionId, role: null, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
 });
 const office = (rooms: string[], staff: Employee[]): OfficeState => ({
   rooms: Object.fromEntries(rooms.map((r) => [r, { id: r, name: r }])),
   employees: Object.fromEntries(staff.map((e) => [e.sessionId, e])),
+  interns: {},
 });
 
 test("each status and tool maps to its pose", () => {
@@ -43,18 +44,56 @@ test("the counter tallies working, waiting and idle employees", () => {
   expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0, offline: 0 });
 });
 
-test("an employee keeps one name and look for the same session id, and different ids look different", () => {
-  expect(identityOf("abc")).toEqual(identityOf("abc"));
-  expect(identityOf("abc").role).toBe("Freelancer");
-  const ids = Array.from({ length: 60 }, (_, i) => `session-${i}`);
-  const people = ids.map(identityOf);
-  expect(new Set(people.map((p) => p.name)).size).toBeGreaterThan(15);
-  expect(new Set(people.map((p) => p.seed)).size).toBe(ids.length);
+test("a role keeps its fixed name and look; its counter takes the lowest free number", () => {
+  expect(ROLE_IDS.map((r) => ROLES[r].name)).toEqual(["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"]);
+  expect(new Set(ROLE_IDS.map((r) => ROLES[r].seed)).size).toBe(6);
+  expect(new Set(ROLE_IDS.map((r) => decodeLook(ROLES[r].seed).shirt)).size).toBe(6);
+  expect(seedFor({ sessionId: "a", role: "designer" })).toBe(seedFor({ sessionId: "b", role: "designer" }));
+  expect(nameFor("a", "designer", new Set())).toBe("Maya");
+  expect(nameFor("a", "designer", new Set(["Maya"]))).toBe("Maya (2)");
+  expect(nameFor("a", "designer", new Set(["Maya", "Maya (3)"]))).toBe("Maya (2)");
+});
+
+test("only f1rm's own agent types are roles", () => {
+  const cases: [unknown, RoleId | undefined][] = [
+    ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"],
+    ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],
+    ["Explore", undefined], ["", undefined], [undefined, undefined], [7, undefined],
+  ];
+  for (const [agentType, role] of cases) expect(roleOfAgentType(agentType)).toBe(role);
+});
+
+test("a freelancer keeps one name and look for the same session id, and 100 of them never share a name", () => {
+  const name = (id: string, taken = new Set<string>()) => nameFor(id, null, taken);
+  expect(name("abc")).toBe(name("abc"));
+  const taken = new Set<string>();
+  for (let i = 0; i < 100; i++) taken.add(name(`session-${i}`, taken));
+  expect(taken.size).toBe(100);
+  for (const role of ROLE_IDS) expect(taken.has(ROLES[role].name)).toBe(false);
+  expect(new Set(Array.from({ length: 60 }, (_, i) => seedFor({ sessionId: `session-${i}`, role: null }))).size).toBe(60);
 });
 
 test("rooms sort by name, and a room with nobody in it is empty", () => {
   const { rooms } = layoutOffice(office(["b", "a"], [employee("s1", "b")]), 400);
   expect(rooms.map((r) => [r.room.name, r.empty])).toEqual([["a", true], ["b", false]]);
+});
+
+test("staff take the front desks in role order, freelancers the hot desks behind them", () => {
+  const staff = [
+    employee("f2", "r"), employee("f1", "r"),
+    employee("d", "r", { role: "designer", name: "Maya" }),
+    employee("p", "r", { role: "pm", name: "Priya" }),
+    employee("d2", "r", { role: "designer", name: "Maya (2)" }),
+    employee("d10", "r", { role: "designer", name: "Maya (10)" }),
+  ];
+  const [room] = layoutOffice(office(["r"], staff), 400).rooms;
+  expect(room.desks.map((d) => [d.employee?.sessionId, d.hot])).toEqual([
+    ["p", false], ["d", false], ["d2", false],
+    ["d10", false], [undefined, false], [undefined, false],
+    ["f1", true], ["f2", true], [undefined, true],
+  ]);
+  const quiet = layoutOffice(office(["r"], [employee("p", "r", { role: "pm" })]), 400).rooms[0];
+  expect(quiet.desks.some((d) => d.hot)).toBe(false);
 });
 
 test("employees take desks in session id order, filling rows of three", () => {

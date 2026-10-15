@@ -201,6 +201,23 @@ test("an event for an offline employee brings it back idle", async () => {
   expect(state.employees.away.status).toBe("idle");
 });
 
+test("interns and names survive a restart, and interns leave when their parent goes quiet", async () => {
+  now = 1_000_000;
+  const first = start();
+  await hook(first.server, "boss", "SessionStart", { agent_type: "f1rm:designer", session_title: "login" });
+  await hook(first.server, "boss", "SubagentStart", { agent_id: "agent-1", agent_type: "Explore" });
+  first.server.stop(true);
+
+  const second = start(first.dbPath);
+  const restored = await office(second.server, (s) => "agent-1" in s.interns);
+  expect(restored.employees.boss).toMatchObject({ role: "designer", name: "Maya", title: "login" });
+  expect(restored.interns["agent-1"].parent).toBe("boss");
+
+  now += 1500;
+  const quiet = await office(second.server, (s) => s.employees.boss?.status === "offline");
+  expect(quiet.interns).toEqual({});
+});
+
 test("a restarted server answers nothing until its first sweep has dropped the ghosts", async () => {
   now = 1_000_000;
   const first = start();

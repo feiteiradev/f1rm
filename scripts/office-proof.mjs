@@ -7,7 +7,6 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
 import { layoutOffice } from "../office/client/layout.ts";
-import { identityOf } from "../office/client/people.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "office-proof-out");
@@ -90,14 +89,14 @@ const counts = async () =>
 assert.deepEqual(await counts(), { working: 4, waiting: 1, idle: 3 });
 assert.ok(await page.locator(".counter").isVisible());
 
-const { room, deskOf, clipOf } = await rects();
+const { s: office, room, deskOf, clipOf } = await rects();
 const poses = { typing: "s1", reading: "s2", running: "s3", hand: "s4", coffee: "s5" };
 const roster = await page.locator(".roster button").evaluateAll((bs) => bs.map((b) => [b.textContent, b.dataset.pose]));
 const crops = {};
 for (const [pose, id] of Object.entries(poses)) {
   const d = deskOf(id);
   const clip = clipOf(d.x, d.y, 36, 64);
-  const who = identityOf(id).name;
+  const who = `${office.employees[id].name},`;
   assert.equal(roster.find(([t]) => t.startsWith(who))?.[1], pose, `${who} should be ${pose}`);
   crops[pose] = await pixels(clip);
   await shot(`02-${pose}`, clip);
@@ -125,7 +124,7 @@ await page.mouse.click((d4.x + 18) * SCALE, box.y + (d4.y + 24) * SCALE);
 const panel = page.locator(".panel");
 await panel.waitFor();
 const text = await panel.innerText();
-for (const want of [identityOf("s4").name, "Freelancer", "shop", "Waiting for permission", "Bash: rm -rf build"]) {
+for (const want of [office.employees.s4.name, "Freelancer", "shop", "Waiting for permission", "Bash: rm -rf build"]) {
   assert.ok(text.includes(want), `panel shows ${want}: ${text}`);
 }
 await shot("06-panel");
