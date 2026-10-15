@@ -1,7 +1,7 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
 import { lstatSync } from "node:fs";
 import { connect } from "node:net";
-import { isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 
 /** The environment for a spawned `claude`, without the session variables of a Claude Code session that launched f1rm: they would make the child look like that session's own child. */
 export function claudeEnv(env: Record<string, string | undefined> = process.env) {
@@ -140,6 +140,8 @@ export const machine = {
    * Throws unless `socketPath` is an absolute path to a socket file (a symlink is refused: the path came from a hook header).
    */
   async tell(socketPath: string, sessionId: string, message: string): Promise<void> {
+    // Claude Code keeps every session's inbox in a cc-socks folder; anything else could be another program's socket.
+    if (basename(dirname(socketPath)) !== "cc-socks") throw new Error("that isn't a Claude Code inbox socket");
     if (!isAbsolute(socketPath) || !lstatSync(socketPath, { throwIfNoEntry: false })?.isSocket()) {
       throw new Error("its inbox socket is gone, so the session has ended");
     }
