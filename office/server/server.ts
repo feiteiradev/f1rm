@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
-import { emptyOffice, normalize, reduce, sweep, type Employee, type Room } from "./office.ts";
+import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { jump } from "./jump.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -140,6 +140,12 @@ export function startServer({
       if (!alive) return;
       const next = sweep(state, clock(), timeouts, lastActive, alive);
       if (next !== state) {
+        // Replay must see the same departures, or a dead session keeps its name and the next arrival is renamed.
+        for (const e of Object.values(state.employees)) {
+          if (next.employees[e.sessionId]) continue;
+          const gone: F1rmEvent = { sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() };
+          append.run(gone.at, JSON.stringify(gone));
+        }
         state = next;
         server.publish("office", JSON.stringify(state));
       }

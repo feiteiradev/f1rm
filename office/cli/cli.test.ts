@@ -243,3 +243,83 @@ test("install refuses to touch a settings file it cannot parse", () => {
   expect(err).toContain("settings.json");
   expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe("{ not json");
 });
+
+// A stub `claude` first on PATH records its argv and the session-identifying part of its env.
+function stubClaude(exitCode = 0) {
+  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const log = join(bin, "claude.log");
+  writeFileSync(
+    join(bin, "claude"),
+    `#!/bin/sh\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
+    { mode: 0o755 },
+  );
+  const lines = () => readFileSync(log, "utf8").trim().split("\n");
+  return {
+    bin,
+    args: () => lines().filter((l) => l.startsWith("arg:")).map((l) => l.slice(4)),
+    env: () => lines().filter((l) => l.startsWith("env:")).map((l) => l.slice(4)),
+  };
+}
+
+function pm(extraEnv: Record<string, string>, stub: ReturnType<typeof stubClaude>, ...args: string[]) {
+  return pmIn(process.cwd(), extraEnv, stub, ...args);
+}
+
+function pmIn(cwd: string, extraEnv: Record<string, string>, stub: ReturnType<typeof stubClaude>, ...args: string[]) {
+  const r = Bun.spawnSync(["bun", CLI, "pm", ...args], {
+    cwd,
+    env: { ...process.env, HOME: tempHome(), PATH: `${stub.bin}:${process.env.PATH}`, ...extraEnv },
+  });
+  return { code: r.exitCode, err: r.stderr.toString() };
+}
+
+const repoDir = (name: string) => {
+  const dir = join(mkdtempSync(join(tmpdir(), "f1rm-repo-")), name);
+  mkdirSync(dir);
+  return dir;
+};
+
+test("pm starts the PM role, named for its repo, with the grilling slash command first in its prompt", () => {
+  const stub = stubClaude();
+  expect(pmIn(repoDir("shop"), {}, stub).code).toBe(0);
+  const args = stub.args();
+  expect(args.slice(0, 4)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop"]);
+  expect(args).toHaveLength(5);
+  expect(args[4]).toStartWith("/mattpocock-skills:grilling ");
+});
+
+test("the PM's first prompt gives its session name, after the slash command", () => {
+  const stub = stubClaude();
+  pmIn(repoDir("shop"), {}, stub);
+  const prompt = stub.args()[4];
+  expect(prompt.indexOf("pm-shop")).toBeGreaterThan(prompt.indexOf("/mattpocock-skills:grilling"));
+  expect(prompt).toContain("Your session name is pm-shop.");
+});
+
+test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
+  const repo = repoDir("shop");
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  Bun.spawnSync(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]);
+  mkdirSync(join(repo, "src"));
+  const wt = join(repoDir("elsewhere"), "wt");
+  Bun.spawnSync(["git", "-C", repo, "worktree", "add", "-q", wt]);
+  for (const cwd of [join(repo, "src"), wt]) {
+    const stub = stubClaude();
+    pmIn(cwd, {}, stub);
+    expect(stub.args()[3]).toBe("pm-shop");
+  }
+});
+
+test("pm passes extra claude flags before the prompt and returns claude's exit code", () => {
+  const stub = stubClaude(3);
+  expect(pmIn(repoDir("shop"), {}, stub, "--plugin-dir", "/p", "--model", "haiku").code).toBe(3);
+  const args = stub.args();
+  expect(args.slice(0, 8)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop", "--plugin-dir", "/p", "--model", "haiku"]);
+  expect(args[8]).toStartWith("/mattpocock-skills:grilling ");
+});
+
+test("pm scrubs the Claude Code session variables it inherited", () => {
+  const stub = stubClaude();
+  pm({ CLAUDECODE: "1", CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/s.sock", CLAUDE_CODE_MESSAGING_TOKEN: "t", CLAUDE_PID: "42", CLAUDE_EFFORT: "max", CLAUDE_CONFIG_DIR: "/keep" }, stub);
+  expect(stub.env()).toEqual(["CLAUDE_CONFIG_DIR=/keep"]);
+});

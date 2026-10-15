@@ -2,7 +2,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { OfficeState } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
-import { identityOf } from "./people.ts";
+import { roleTitle } from "../people.ts";
 import { search, type Entry } from "./search.ts";
 import "./jump.css";
 
@@ -52,10 +52,7 @@ export function Palette({ state }: { state: OfficeState }) {
   const listId = useId();
 
   const entries = useMemo<Entry[]>(
-    () => rosterOf(state).map((e) => {
-      const { name, role } = identityOf(e.sessionId);
-      return { id: e.sessionId, name, role, room: state.rooms[e.room]?.name ?? "", task: e.activity };
-    }),
+    () => rosterOf(state).map((e) => ({ id: e.sessionId, name: e.name, role: roleTitle(e.role), room: state.rooms[e.room]?.name ?? "", task: e.activity })),
     [state],
   );
   const results = useMemo(() => search(entries, query), [entries, query]);

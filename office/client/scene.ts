@@ -1,17 +1,24 @@
 // The PixiJS scene: draws the office from the latest server state, animates each employee from its pose.
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
-import { bob, buildDesk, buildRoom, COLORS, drawDesk, loadArt, TICK_MS, type DeskArt } from "./art.ts";
+import { seedFor, seedOf } from "../people.ts";
+import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM } from "./layout.ts";
-import { identityOf } from "./people.ts";
 import { poseOf } from "./pose.ts";
 
 export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
 
-type Person = { art: DeskArt; name: Text; employee: OfficeState["employees"][string]; drawn: string };
+type Person = { art: DeskArt; name: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; drawn: string };
+/** An intern walking out from its parent's seat (`born`), or back to it once stopped (`left`); times are performance.now() ms. */
+type Walker = { sprite: Container; parent: string; slot: number; born: number; left?: number };
 type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
 
 const LABEL = { fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: "700", fill: 0xe9e4d6 } as const;
+// Art pixels in a desk's own frame: where an intern starts (its parent's seat) and the spots it stands in, in front of the desk.
+const SEAT = { x: 17, y: 14 };
+// ponytail: three standing spots; a fourth intern of one parent stands on the first. Add spots if sub-agent fan-out that wide shows up.
+const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
+const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void): Promise<Scene> {
@@ -32,18 +39,20 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
   const world = new Container();
   const rooms = new Container();
   const desks = new Container();
+  const walkersLayer = new Container();
   const roomLabels = new Container();
   const names = new Container();
   names.eventMode = roomLabels.eventMode = "none";
-  world.addChild(rooms, desks);
+  world.addChild(rooms, desks, walkersLayer);
   app.stage.addChild(world, roomLabels, names);
   app.stage.eventMode = "static";
   app.stage.on("pointertap", (e) => e.target === app.stage && onSelect(null));
 
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const people = new Map<string, Person>();
+  const walkers = new Map<string, Walker>();
   const dimmers = new Map<string, Dimmer>();
-  let latest: OfficeState = { rooms: {}, employees: {} };
+  let latest: OfficeState = { rooms: {}, employees: {}, interns: {} };
   let selected: string | null = null;
 
   function render() {
@@ -79,17 +88,24 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         if (!e) continue;
         seen.add(e.sessionId);
         let p = people.get(e.sessionId);
+        // A freelancer whose role turns up later changes look.
+        if (p && p.seed !== seedFor(e)) {
+          removePerson(e.sessionId, p);
+          p = undefined;
+        }
         if (!p) {
-          const art = buildDesk(identityOf(e.sessionId).seed);
+          const art = buildDesk(seedFor(e));
           art.root.eventMode = "static";
           art.root.hitArea = new Rectangle(0, 0, CELL.w, CELL.h);
           art.root.cursor = "pointer";
           art.root.on("pointertap", () => onSelect(e.sessionId));
           desks.addChild(art.root);
-          p = { art, name: new Text({ text: identityOf(e.sessionId).name, style: LABEL }), employee: e, drawn: "" };
+          p = { art, name: new Text({ text: e.name, style: LABEL }), employee: e, seed: seedFor(e), hot: d.hot, drawn: "" };
           people.set(e.sessionId, p);
         }
         p.employee = e;
+        p.hot = d.hot;
+        p.name.text = e.name;
         p.drawn = "";
         p.art.root.position.set(d.x, d.y);
         p.name.anchor.set(0.5, 0);
@@ -97,16 +113,56 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         names.addChild(p.name);
       }
     }
-    for (const [id, p] of people) {
-      if (seen.has(id)) continue;
-      p.art.root.destroy({ children: true });
-      p.name.destroy();
-      people.delete(id);
+    for (const [id, p] of people) if (!seen.has(id)) removePerson(id, p);
+
+    const now = performance.now();
+    for (const [id, i] of Object.entries(latest.interns)) {
+      const w = walkers.get(id);
+      if (w) delete w.left;
+      else if (people.has(i.parent)) {
+        const taken = new Set([...walkers.values()].filter((o) => o.parent === i.parent).map((o) => o.slot));
+        const sprite = buildIntern(seedOf(id));
+        walkersLayer.addChild(sprite);
+        walkers.set(id, {
+          sprite,
+          parent: i.parent,
+          slot: Math.max(0, STANDS.findIndex((_, k) => !taken.has(k))),
+          born: reduceMotion.matches ? now - WALK_MS : now,
+        });
+      }
+    }
+    for (const [id, w] of walkers) {
+      if (id in latest.interns && people.has(w.parent)) continue;
+      // Walk back to the desk, unless the desk is gone or motion is off.
+      if (people.has(w.parent) && !reduceMotion.matches) w.left ??= now;
+      else removeWalker(id, w);
     }
   }
 
+  function removePerson(id: string, p: Person) {
+    p.art.root.destroy({ children: true });
+    p.name.destroy();
+    people.delete(id);
+  }
+  function removeWalker(id: string, w: Walker) {
+    w.sprite.destroy({ children: true });
+    walkers.delete(id);
+  }
+
   app.ticker.add(() => {
-    const f = reduceMotion.matches ? 0 : Math.floor(performance.now() / TICK_MS);
+    const now = performance.now();
+    const f = reduceMotion.matches ? 0 : Math.floor(now / TICK_MS);
+    for (const [id, w] of walkers) {
+      const desk = people.get(w.parent)!.art.root;
+      const t = w.left === undefined ? Math.min(1, (now - w.born) / WALK_MS) : 1 - (now - w.left) / WALK_MS;
+      if (t <= 0) {
+        removeWalker(id, w);
+        continue;
+      }
+      const stand = STANDS[w.slot];
+      w.sprite.position.set(desk.x + SEAT.x + (stand.x - SEAT.x) * t, desk.y + SEAT.y + (stand.y - SEAT.y) * t + (t < 1 ? f % 2 : 0));
+      w.sprite.alpha = Math.min(1, t * 4);
+    }
     for (const [id, p] of people) {
       const pose = poseOf(p.employee);
       const key = `${pose}|${f}|${id === selected}`;
@@ -114,7 +170,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       p.drawn = key;
       p.art.person.y = bob(pose, f);
       p.art.person.alpha = p.name.alpha = pose === "off" ? 0.4 : 1;
-      drawDesk(p.art.fx, pose, f, p.art.skin, id === selected);
+      drawDesk(p.art.fx, pose, f, p.art.skin, id === selected, p.hot);
     }
     for (const d of dimmers.values()) {
       d.now += (d.target - d.now) * 0.12;

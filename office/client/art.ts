@@ -3,6 +3,7 @@ import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js
 import indoorUrl from "./assets/roguelikeIndoor_transparent.png";
 import charUrl from "./assets/roguelikeChar_transparent.png";
 import { CELL, ROOM, type RoomLayout } from "./layout.ts";
+import { decodeLook } from "../people.ts";
 import type { Pose } from "./pose.ts";
 
 let indoor: Texture, chars: Texture;
@@ -35,6 +36,8 @@ export const COLORS = {
   bezel: 0x232a38,
   amber: 0xf2a93b,
   green: 0x3ddc84,
+  mat: 0x3f5f66,
+  matEdge: 0x56808a,
 };
 
 // Character layers in the char sheet: skin, shirt, hair as [col, row]. Skin tones sampled for the raised arm.
@@ -47,26 +50,37 @@ const DESK = { x: 2, y: 24 };
 
 export type DeskArt = { root: Container; person: Container; fx: Graphics; skin: number };
 
+/** The three character layers (skin, shirt, hair) for a look seed, drawn at (x, y); returns the skin color. */
+function dress(parent: Container, seed: number, x: number, y: number): number {
+  const look = decodeLook(seed);
+  const skin = SKINS[look.skin];
+  for (const [c, r] of [skin, SHIRTS[look.shirt], HAIRS[look.hair]]) put(parent, chars, c, r, x, y);
+  return skin[2];
+}
+
 export function buildDesk(seed: number | null): DeskArt {
   const root = new Container();
   const person = new Container();
-  const skinPick = SKINS[(seed ?? 0) % SKINS.length];
-  if (seed === null) {
-    put(root, indoor, 0, 2, CHAR.x, CHAR.y + 1);
-  } else {
-    const [sc, sr] = skinPick, [hc, hr] = SHIRTS[(seed >>> 3) % SHIRTS.length], [pc, pr] = HAIRS[(seed >>> 7) % HAIRS.length];
-    put(person, chars, sc, sr, CHAR.x, CHAR.y);
-    put(person, chars, hc, hr, CHAR.x, CHAR.y);
-    put(person, chars, pc, pr, CHAR.x, CHAR.y);
-  }
+  let skin = SKINS[0][2];
+  if (seed === null) put(root, indoor, 0, 2, CHAR.x, CHAR.y + 1);
+  else skin = dress(person, seed, CHAR.x, CHAR.y);
   root.addChild(person);
   for (const [c, r, dx, dy] of [[0, 0, 0, 0], [2, 0, 16, 0], [0, 1, 0, 16], [2, 1, 16, 16]]) {
     put(root, indoor, c, r, DESK.x + dx, DESK.y + dy);
   }
   const fx = new Graphics();
   root.addChild(fx);
-  return { root, person, fx, skin: skinPick[2] };
+  return { root, person, fx, skin };
 }
+
+/** A sub-agent: the same sprite layers as an employee, a head shorter. */
+export function buildIntern(seed: number): Container {
+  const intern = new Container();
+  dress(intern, seed, 0, 0);
+  intern.scale.set(INTERN_SCALE);
+  return intern;
+}
+const INTERN_SCALE = 0.75;
 
 const box = (g: Graphics, x: number, y: number, w: number, h: number, color: number, alpha = 1) =>
   void g.rect(x, y, w, h).fill({ color, alpha });
@@ -117,9 +131,16 @@ function bubble(g: Graphics, x: number, y: number, color: number) {
   box(g, x + 5, y + 8, 2, 2, color);
 }
 
-export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean) {
+export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean, hot = false) {
   g.clear();
   screen(g, pose, f);
+  if (hot) {
+    // A folded name card, the mark of a shared desk.
+    box(g, 4, 35, 9, 6, 0xf3ecd8);
+    box(g, 4, 35, 9, 1, COLORS.amber);
+    box(g, 5, 37, 6, 1, 0x7a7262);
+    box(g, 5, 39, 4, 1, 0x7a7262);
+  }
   if (pose === "reading") {
     box(g, KEYS.x, 30, 12, 5, 0x8a5a3c);
     box(g, KEYS.x + 1, 30, 5, 4, 0xf3ecd8);
@@ -177,6 +198,11 @@ export function buildRoom(r: RoomLayout) {
   box(g, r.x, r.y + ROOM.wall - 3, r.w, 3, COLORS.baseboard);
   for (const [x, y, w, h] of [[r.x, r.y, r.w, 1], [r.x, r.y + r.h - 1, r.w, 1], [r.x, r.y, 1, r.h], [r.x + r.w - 1, r.y, 1, r.h]]) {
     box(g, x, y, w, h, COLORS.outside);
+  }
+  for (const d of r.desks) {
+    if (!d.hot) continue;
+    box(g, d.x, d.y + 8, CELL.w, CELL.h - 10, COLORS.mat);
+    box(g, d.x + 1, d.y + 9, CELL.w - 2, CELL.h - 12, COLORS.matEdge, 0.5);
   }
   put(root, indoor, 19, 12, r.x + r.w - 44, r.y + 2);
   put(root, indoor, 16, 0, r.x + r.w - 20, r.y + ROOM.wall - 14);

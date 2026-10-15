@@ -1,11 +1,12 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
 
+/** The environment for a spawned `claude`, without the session variables of a Claude Code session that launched f1rm: they would make the child look like that session's own child. */
+export function claudeEnv(env: Record<string, string | undefined> = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(CLAUDECODE$|CLAUDE_CODE_|CLAUDE_PID$|CLAUDE_EFFORT$)/.test(k)));
+}
+
 const ITERM = 'application id "com.googlecode.iterm2"';
 const SAFE_ID = /^[\w-]+$/;
-
-// A claude launched from a Claude Code session would inherit that session's messaging socket and token.
-const claudeEnv = () =>
-  Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/.test(k)));
 
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
 async function agents(all: boolean): Promise<any[] | null> {
