@@ -134,22 +134,22 @@ export function startServer({
       if (!same(given, token)) return new Response("unauthorized", { status: 401 });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
+      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell"].includes(rest[0]) && req.method !== "POST") {
+        return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+      }
       if (rest[0] === "jump" && rest.length === 2) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const employee = employeeOf(rest[1]);
         if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
       }
       if ((rest[0] === "approve" || rest[0] === "deny") && rest.length === 2) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const decided = approvals.answer(rest[1], rest[0] === "approve" ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE });
         return decided
           ? Response.json({ ok: true })
           : Response.json({ ok: false, error: "That request is no longer waiting; the terminal has it." }, { status: 404 });
       }
       if (rest[0] === "ask" && rest.length === 2) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const employee = employeeOf(rest[1]);
         if (!employee) return Response.json({ error: "No such employee." }, { status: 404 });
         const question = ((await req.json().catch(() => null)) as { question?: unknown } | null)?.question;
@@ -159,7 +159,6 @@ export function startServer({
         return new Response(askStream(machine, employee, question.trim()), { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
       }
       if (rest[0] === "tell" && rest.length === 2) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const employee = employeeOf(rest[1]);
         if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
         const message = ((await req.json().catch(() => null)) as { message?: unknown } | null)?.message;
