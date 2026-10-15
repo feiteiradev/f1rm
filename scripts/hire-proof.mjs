@@ -1,6 +1,7 @@
 // Drives the built office page in a real browser against an in-process server whose machine only records the spawn, and
 // checks the Hire dialog: the Hire button and an empty desk open it, the roles come from the plugin folder, the hire
-// leaves the server as the exact claude argv, the cap shows, and the static demo explains that hiring needs a live office.
+// leaves the server as the exact claude argv, the working-hire count shows, a plain hire at the cap spawns nothing, Hire anyway needs a confirm that can be cancelled,
+// and the static demo explains that hiring needs a live office.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/hire-proof.mjs
 import assert from "node:assert/strict";
@@ -58,6 +59,7 @@ try {
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
   const names = await dialog.locator(".role .name").allInnerTexts();
   assert.deepEqual([...names].sort(), ["Bruno", "Felix", "Ines", "Kofi", "Maya"], "five roles, each with its fixed name, and no PM");
+  assert.equal(await dialog.locator(".count").innerText(), "1 of 4 hires working.", "the dialog counts the working hires against the cap");
   const maya = dialog.locator(".role", { hasText: "Maya" });
   assert.match(await maya.innerText(), /1 working/, "Maya's row counts the Designer already working");
   assert.match(await maya.innerText(), /sonnet.*design-pipeline/s, "the row names the model and skills");
@@ -96,20 +98,51 @@ try {
   const { rooms } = layoutOffice(projectState(s, room.id), Math.floor(1440 / SCALE), Math.floor((await page.locator(".scene").evaluate((e) => e.clientHeight)) / SCALE));
   const empty = rooms[0].desks.find((d) => !d.employee);
   const box = await page.locator(".scene canvas").boundingBox();
-  await page.mouse.click((empty.x + 18) * SCALE, box.y + (empty.y + 40) * SCALE);
+  const [x, y] = [(empty.x + 18) * SCALE, box.y + (empty.y + 40) * SCALE];
+  // The scene finds its click target on a frame after the pointer arrives, so a move-and-click in one breath can miss.
+  await page.mouse.move(x, y);
+  await page.waitForTimeout(150);
+  await page.mouse.click(x, y);
   await dialog.locator(".role").first().waitFor();
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
   assert.equal(await page.locator(".panel").count(), 0, "an empty desk opens no employee panel");
 
-  working = 4;
+  working = 3;
   await page.getByRole("button", { name: "Hire", exact: true }).click();
+  await dialog.locator(".role").first().waitFor();
+  assert.equal(await dialog.locator(".count").innerText(), "3 of 4 hires working.");
   await page.getByLabel("Brief", { exact: true }).fill("One more");
+  working = 4;
   await page.getByRole("button", { name: /^Hire / }).click();
   await page.getByText("4 hires are already working (the cap is 4).").waitFor();
-  await page.screenshot({ path: join(OUT, "03-cap.png") });
+  assert.equal(await dialog.locator(".count").innerText(), "4 of 4 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
   assert.equal(spawned.length, 1, "nothing spawned at the cap");
+  assert.equal(await dialog.getByRole("group", { name: "Confirm hiring past the cap" }).count(), 0, "no confirm until Hire anyway is pressed");
+  await page.screenshot({ path: join(OUT, "03-cap.png") });
+
+  await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
+  const confirm = dialog.getByRole("group", { name: "Confirm hiring past the cap" });
+  assert.match(await confirm.innerText(), /Hire Maya past the cap\? That makes 5 hires working/);
+  await page.screenshot({ path: join(OUT, "03b-confirm.png") });
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await confirm.count(), 0, "Cancel closes the confirm");
+  assert.equal(await dialog.evaluate((d) => d.open), true, "Cancel leaves the dialog and the brief alone");
+  assert.equal(await page.getByLabel("Brief", { exact: true }).inputValue(), "One more");
+  assert.equal(spawned.length, 1, "a cancelled confirm spawns nothing");
+
+  await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
+  await dialog.getByRole("button", { name: "Yes, hire anyway", exact: true }).click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(spawned.length, 2, "a confirmed Hire anyway spawns past the cap");
+  assert.equal(spawned[1].argv[spawned[1].argv.indexOf("--agent") + 1], "f1rm:designer");
+  assert.match(spawned[1].argv.at(-1), /\n\nOne more$/);
+
+  await page.getByRole("button", { name: "Hire", exact: true }).click();
+  await dialog.locator(".role").first().waitFor();
+  assert.equal(await dialog.locator(".count").innerText(), "4 of 4 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
   await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
 
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 780 } })).newPage();
   watch(phone);
@@ -143,7 +176,7 @@ try {
   }
 
   assert.deepEqual(errors, ["Failed to load resource: the server responded with a status of 409 (Conflict)"], "no page errors but the browser's own note of the cap's 409");
-  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the cap, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
+  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the count and the cap, refuses a plain hire there, hires anyway only after a confirm, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
 } finally {
   await browser.close();
   server.stop(true);

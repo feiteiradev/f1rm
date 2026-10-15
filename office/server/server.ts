@@ -8,7 +8,7 @@ import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
-import { HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
+import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
 import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -184,23 +184,26 @@ export function startServer({
           const known = roleOfAgentType(`f1rm:${id}`);
           return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
         };
-        return Response.json(
-          readRoles()
+        // The cap counts every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
+        const hires = await machine.workingHires();
+        return Response.json({
+          roles: readRoles()
             .sort((a, b) => order(a.id) - order(b.id))
             .map((r) => {
               const known = roleOfAgentType(`f1rm:${r.id}`);
               const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
               return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
             }),
-        );
+          hires: { working: hires, cap: CAP },
+        });
       }
       if (rest[0] === "hire" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-        const { room, role, task, brief, model } = body ?? {};
+        const { room, role, task, brief, model, override } = body ?? {};
         if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string")) {
-          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (override != null && typeof override !== "boolean")) {
+          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
         // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
         // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
@@ -208,7 +211,7 @@ export function startServer({
         const hasPm = Object.values(state.employees).some((e) => e.room === room && e.role === "pm");
         let argv: string[];
         try {
-          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: hasPm ? pmName(folder, machine) : null, model }, machine);
+          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: hasPm ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
