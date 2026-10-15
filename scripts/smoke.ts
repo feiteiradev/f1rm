@@ -285,6 +285,9 @@ async function c5(): Promise<R> {
   const tokCmd = events.find((x) => x.path === "/session-start" && x.b.session_id === sid)?.h["x-f1rm-msg-token"] ?? "";
   note(`http headers via allowlist: iterm ${iterm ? "ok" : "MISSING"}, term "${e.h["x-f1rm-term"]}", messaging socket ${sockOk ? "ok " + sock : "MISSING"}`);
   note(`messaging token via http header: ${tokHttp ? "present" : "EMPTY (credential vars are never interpolated)"}; via SessionStart command hook: ${tokCmd ? `present (${tokCmd.length} chars)` : "absent"}`);
+  const httpStart = JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "http", url: `http://127.0.0.1:${listener.port}/ss-http`, timeout: 5 }] }] } });
+  await claudeJson(["say ok", "--model", "haiku", "--settings", httpStart]);
+  note(`SessionStart as an http hook: ${events.some((e) => e.path === "/ss-http") ? "fired" : "never fires (needs a command hook)"}`);
   return { ok: iterm && term && sockOk && !!tokHttp, notes };
 }
 
