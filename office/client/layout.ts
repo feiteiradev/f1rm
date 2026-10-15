@@ -14,6 +14,7 @@ export type RoomLayout = { room: Room; x: number; y: number; w: number; h: numbe
 /** Integer art scale keeps pixels square; narrow windows drop to 2x and wide ones step up. */
 export const scaleFor = (px: number) => (px < 760 ? 2 : px < 1100 ? 3 : 4);
 
+// ponytail: an open room seats at most six per row, one per role; a wider screen leaves margin instead of a longer row.
 /** With `solo`, the one room open fills the screen: it widens to seat a whole company in a row and sits in the middle. */
 export function layoutOffice(state: OfficeState, width: number, solo = false): { rooms: RoomLayout[]; height: number } {
   const staff = Object.values(state.employees);

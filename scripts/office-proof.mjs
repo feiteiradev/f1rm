@@ -6,13 +6,14 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
-import { layoutOffice } from "../office/client/layout.ts";
+import { layoutOffice, scaleFor } from "../office/client/layout.ts";
+import { projectState } from "../office/client/lobby.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "office-proof-out");
 mkdirSync(OUT, { recursive: true });
 
-const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = 3, BAR = 52;
+const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
 const repos = { "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git", "/code/docs": "/code/docs/.git" };
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
@@ -59,14 +60,27 @@ async function state() {
   ws.close();
   return s;
 }
-async function rects() {
+// Where things are on screen inside the open project, from the layout of the slice the page itself draws.
+async function rects(roomName) {
   const s = await state(), box = await canvasBox();
-  const { rooms } = layoutOffice(s, Math.floor(1440 / SCALE));
-  const room = (name) => rooms.find((r) => r.room.name === name);
-  const deskOf = (id) => rooms.flatMap((r) => r.desks).find((d) => d.employee?.sessionId === id);
+  const id = Object.values(s.rooms).find((r) => r.name === roomName).id;
+  const slice = projectState(s, id);
+  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), true);
+  const room = rooms[0];
+  const deskOf = (sid) => room.desks.find((d) => d.employee?.sessionId === sid);
   const clipOf = (x, y, w, h) => ({ x: x * SCALE, y: box.y + y * SCALE, width: w * SCALE, height: h * SCALE });
   return { s, room, deskOf, clipOf };
 }
+const enter = async (name) => {
+  await page.locator(".door", { hasText: name }).click();
+  await page.locator(".back").waitFor();
+  await page.locator(".scene canvas").waitFor();
+  await settle();
+};
+const toLobby = async () => {
+  await page.getByRole("button", { name: "Lobby" }).click();
+  await page.locator(".door").first().waitFor();
+};
 
 await page.waitForSelector(".counter");
 assert.match(await page.locator("main").innerText(), /office is empty/);
@@ -82,14 +96,17 @@ await tool("b1", "/code/blog", "Write", { file_path: "/code/blog/post.md" });
 await send("b2", "/code/blog", "SessionStart");
 await send("d1", "/code/docs", "SessionStart");
 await settle();
-await shot("01-office");
+await shot("01-lobby");
 
 const counts = async () =>
   Object.fromEntries(await page.locator(".counter li").evaluateAll((lis) => lis.map((l) => [l.dataset.status, +l.querySelector(".count").textContent])));
-assert.deepEqual(await counts(), { working: 4, waiting: 1, idle: 3 });
+assert.deepEqual(await counts(), { working: 4, waiting: 1, idle: 3 }, "the lobby counts everyone");
 assert.ok(await page.locator(".counter").isVisible());
 
-const { s: office, room, deskOf, clipOf } = await rects();
+await enter("shop");
+assert.deepEqual(await counts(), { working: 3, waiting: 1, idle: 1 }, "a project counts its own");
+await shot("01-office");
+const { s: office, deskOf, clipOf } = await rects("shop");
 const poses = { typing: "s1", reading: "s2", running: "s3", hand: "s4", coffee: "s5" };
 const roster = await page.locator(".roster button").evaluateAll((bs) => bs.map((b) => [b.textContent, b.dataset.pose]));
 const crops = {};
@@ -108,8 +125,10 @@ for (const [pose, id] of Object.entries(poses)) {
 }
 assert.ok(new Set(Object.values(crops)).size === 5, "five poses look different");
 
-const docs = room("docs");
-const docsClip = clipOf(docs.x, docs.y, docs.w, docs.h);
+await toLobby();
+await enter("docs");
+const docs = (await rects("docs")).room;
+const docsClip = (await rects("docs")).clipOf(docs.x, docs.y, docs.w, docs.h);
 const lit = await meanLuma(await pixels(docsClip));
 await shot("03-room-lit", docsClip);
 await send("d1", "/code/docs", "SessionEnd");
@@ -118,6 +137,9 @@ const dim = await meanLuma(await pixels(docsClip));
 await shot("04-room-dimmed", docsClip);
 assert.ok(dim < lit * 0.7, `empty room dims (lit ${lit.toFixed(1)}, dim ${dim.toFixed(1)})`);
 await shot("05-office-with-dimmed-room");
+await toLobby();
+assert.equal(await page.locator(".door[data-empty]").count(), 1, "the empty project's door is dimmed in the lobby");
+await enter("shop");
 
 const d4 = deskOf("s4"), box = await canvasBox();
 await page.mouse.click((d4.x + 18) * SCALE, box.y + (d4.y + 24) * SCALE);
@@ -134,7 +156,7 @@ assert.equal(await panel.count(), 0, "Escape closes the panel");
 const before = await pixels(clipOf(deskOf("s2").x, deskOf("s2").y, 36, 64));
 await send("s2", "/code/shop", "Stop");
 await settle();
-assert.deepEqual(await counts(), { working: 3, waiting: 1, idle: 3 });
+assert.deepEqual(await counts(), { working: 2, waiting: 1, idle: 2 }, "shop after s2 stops");
 assert.ok((await pixels(clipOf(deskOf("s2").x, deskOf("s2").y, 36, 64))) !== before, "s2's desk changed");
 await shot("07-after-stop");
 

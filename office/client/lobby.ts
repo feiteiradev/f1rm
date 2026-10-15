@@ -19,6 +19,7 @@ export function doorsOf(state: OfficeState): Door[] {
     });
 }
 
+// ponytail: every project gets a door and long lists just scroll; add grouping or a filter if people keep dozens of projects.
 /** Doors fill a row of the hallway and wrap, each row centered; the rows sit a third of the way down a view `viewH` tall. */
 export function layoutLobby(state: OfficeState, width: number, viewH = 0): { doors: DoorSlot[]; height: number } {
   const doors = doorsOf(state);
@@ -45,6 +46,7 @@ export function projectState(state: OfficeState, roomId: string): OfficeState {
   };
 }
 
+// ponytail: the URL fragment is the whole router; a second view with its own state would want a real one.
 const PREFIX = "#/project/";
 /** The URL fragment that opens a project; empty for the lobby. */
 export const hashFor = (roomId: string | null) => (roomId === null ? "" : PREFIX + encodeURIComponent(roomId));
