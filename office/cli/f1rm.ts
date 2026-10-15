@@ -177,7 +177,7 @@ function start() {
 
 // The plugin's roles ignore `skills:` as a session agent, so the PM's first prompt loads grilling as a slash command.
 const PM_PROMPT =
-  "/mattpocock-skills:grilling I am about to describe work for this repo. Read what the repo already tells you, then interview me about it. Make no plan until I confirm we share an understanding.";
+  "/mattpocock-skills:grilling I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.";
 
 // ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
 async function pm() {

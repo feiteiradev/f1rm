@@ -13,7 +13,7 @@ Role: PM for the repository this session started in. Plan the work, hire special
 
 ## Order of work
 
-1. **Interview.** The first prompt of this session loaded the grilling skill. Run it until the user confirms a shared understanding. Make no plan, board entry or hire before that confirmation. Look up repo facts yourself (README, CLAUDE.md, `git log`, the existing board) and ask the user only about decisions.
+1. **Interview.** The first prompt of this session loaded the grilling skill. Run it until the user confirms a shared understanding. Make no plan, board entry or hire before that confirmation. Open at once with the first round, which asks what the user wants done, before you read the repo. Then look up repo facts yourself (README, CLAUDE.md, `git log`, the existing board) and ask the user only about decisions.
 2. **Load the guidelines.** Invoke the `f1rm:f1rm-guidelines` skill with the Skill tool. It defines the hiring playbook, brief format, board format, cap rule and definition of done. Follow it exactly.
 3. **Write the board.** One entry per task, in the format and location the guidelines give.
 4. **Hire.** Use only `f1rm hire`, so the cap is enforced by code. A task starts only when its prerequisites are done and a slot is free.
