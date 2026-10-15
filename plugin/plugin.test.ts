@@ -3,19 +3,22 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { claudeEnv } from "../office/server/machine.ts";
 
 const PLUGIN = import.meta.dir;
 const REPO = join(PLUGIN, "..");
 
 const GUIDELINES = "f1rm:f1rm-guidelines";
+// research and security-review are slash commands, not Skill-tool skills, so no role lists them.
 const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
   designer: ["design-pipeline"],
   "frontend-dev": ["mattpocock-skills:tdd"],
   "backend-dev": ["mattpocock-skills:tdd"],
-  reviewer: ["code-review", "security-review", GUIDELINES],
-  researcher: ["research"],
+  reviewer: ["code-review", GUIDELINES],
+  researcher: [],
 };
+const SLASH_ONLY = ["research", "security-review"];
 
 function parts(file: string) {
   const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(readFileSync(file, "utf8"));
@@ -33,7 +36,7 @@ test("the plugin ships exactly the six roles", () => {
 test.each(Object.entries(ROLES))("%s declares its skills, user memory, tools and model", (name, skills) => {
   const { fm } = role(name);
   expect(fm.name).toBe(name);
-  expect(fm.skills).toEqual(skills);
+  expect(fm.skills ?? []).toEqual(skills);
   expect(fm.memory).toBe("user");
   expect(fm.model).toMatch(/^(opus|sonnet|haiku)$/);
   expect(String(fm.tools).split(/,\s*/)).toContain("SendMessage");
@@ -51,7 +54,7 @@ test("the PM interviews before it plans, and only the Reviewer merges and never 
   expect(pm.body).toMatch(/Make no plan, board entry or hire before that confirmation/);
   expect(pm.body).toContain("f1rm hire");
   const reviewer = role("reviewer");
-  expect(reviewer.fm.disallowedTools).toBe("Bash(git push *)");
+  expect(reviewer.fm.disallowedTools).toBeUndefined(); // a Bash(...) deny removes the whole Bash tool
   expect(reviewer.body).toContain("Never push");
 });
 
@@ -75,13 +78,34 @@ test("the guidelines cover every item the spec lists", () => {
   expect(section("Definition of done")).toContain("Reviewer has signed off");
 });
 
-test("the roster table names each hireable role with the skills its file lists", () => {
+test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
+  const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
   expect(rows.map((r) => r[1])).toEqual(Object.keys(ROLES));
   for (const [, name, cell] of rows) {
     const listed = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    expect(listed).toEqual(ROLES[name].filter((s) => s !== GUIDELINES));
+    expect(listed.sort()).toEqual([...ROLES[name].filter((s) => s !== GUIDELINES), ...(slash[name] ?? [])].sort());
   }
+});
+
+test("research and security-review are slash commands: briefs start with them, no role invokes them as skills", () => {
+  const playbook = section("Roster and hiring playbook");
+  for (const c of SLASH_ONLY) {
+    expect(playbook).toContain(`\`/${c}\``);
+    for (const r of Object.keys(ROLES)) {
+      expect(role(r).fm.skills ?? []).not.toContain(c);
+      expect(role(r).body).not.toMatch(new RegExp(`${c} skill`, "i"));
+    }
+  }
+  expect(playbook).toMatch(/brief of a hire starts with/i);
+});
+
+test("a hire reports to the PM's name, which f1rm pm sets and the PM passes on", () => {
+  const brief = section("Brief format");
+  expect(brief).toContain("--name pm-<repo basename>");
+  expect(brief).toContain("ListAgents");
+  expect(role("pm").body).toContain("ListAgents");
+  expect(String(role("pm").fm.tools).split(/,\s*/)).toContain("ListAgents");
 });
 
 test("the board example follows the board format the guidelines state", () => {
@@ -97,9 +121,9 @@ test("the board example follows the board format the guidelines state", () => {
 // Throwaway HOME and CLAUDE_CONFIG_DIR: nothing here can reach the real Claude Code config.
 function sandboxedClaude() {
   const home = mkdtempSync(join(tmpdir(), "f1rm-plugin-"));
-  const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
+  const env = { ...claudeEnv(), HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
   return (...args: string[]) => {
-    const r = Bun.spawnSync(["claude", ...args], { env });
+    const r = Bun.spawnSync(["claude", ...args], { env, cwd: REPO });
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
 }
@@ -120,4 +144,20 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   expect(details.out).toContain("Skills (1)  f1rm-guidelines");
   expect(details.out).toMatch(/Agents \(6\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
+});
+
+/** The tools a role's session starts with, from the init event. A bad model id stops the session before any API call, so this costs nothing. */
+function initTools(name: string): string[] {
+  const out = sandboxedClaude()("-p", "--plugin-dir", PLUGIN, "--agent", `f1rm:${name}`, "--model", "claude-nonexistent-x", "--output-format", "stream-json", "--verbose", "x").out;
+  const init = out.split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l)).find((e) => e.type === "system" && e.subtype === "init");
+  return init.tools;
+}
+
+// A deny rule such as Bash(...) in `disallowedTools` removes the whole Bash tool, so only the init event shows what a role really has.
+test.skipIf(!hasClaude)("the Reviewer's session has Bash, so it can diff, merge and run checks", () => {
+  expect(initTools("reviewer")).toContain("Bash");
+});
+
+test.skipIf(!hasClaude)("the PM's session can list its hires", () => {
+  expect(initTools("pm")).toContain("ListAgents");
 });

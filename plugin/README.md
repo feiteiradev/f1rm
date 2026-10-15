@@ -36,8 +36,8 @@ The plugin name is fixed as `f1rm`. Role memory lives in `~/.claude/agent-memory
 | Designer | `f1rm:designer` | `design-pipeline` | sonnet |
 | Frontend dev | `f1rm:frontend-dev` | `mattpocock-skills:tdd` | sonnet |
 | Backend dev | `f1rm:backend-dev` | `mattpocock-skills:tdd` | sonnet |
-| Reviewer | `f1rm:reviewer` | `code-review`, `security-review`, `f1rm:f1rm-guidelines` | opus |
-| Researcher | `f1rm:researcher` | `research` | sonnet |
+| Reviewer | `f1rm:reviewer` | `code-review`, `f1rm:f1rm-guidelines` | opus |
+| Researcher | `f1rm:researcher` | none | sonnet |
 
 Every role has `memory: user`, so it keeps what it learns across projects. The skill names are the ones installed on the author's machine. Edit the `skills:` lists in `agents/` to match yours.
 
@@ -45,8 +45,8 @@ Every role has `memory: user`, so it keeps what it learns across projects. The s
 
 Claude Code does not apply a role's `skills:` list when the role is the session agent (`--agent`). The files keep the list for use as subagents, and the launcher loads the skills as a slash command at the start of the first prompt:
 
-- `f1rm pm` runs `claude --agent f1rm:pm "/mattpocock-skills:grilling ..."`, so the PM interviews you before it plans. Extra arguments go to `claude`, for example `f1rm pm --model sonnet`.
-- `f1rm hire` (a separate ticket) does the same for each hired role.
+- `f1rm pm` runs `claude --agent f1rm:pm --name pm-<repo basename> "/mattpocock-skills:grilling Your session name is pm-<repo basename>. ..."`, so the PM interviews you before it plans and its hires know where to report. Extra arguments go to `claude`, for example `f1rm pm --model sonnet`.
+- `f1rm hire` (a separate ticket) does the same for each hired role. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
 - By hand, put the slash command first: `claude --agent f1rm:designer "/design-pipeline <brief>"`.
 
 ## Files

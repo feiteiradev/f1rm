@@ -11,7 +11,7 @@ Hierarchy: the user, then one PM per repo, then specialists hired per task. The 
 
 ## Roster and hiring playbook
 
-| Role | Hire for | Skills loaded by `f1rm hire` |
+| Role | Hire for | Slash commands `f1rm hire` starts the brief with |
 | :- | :- | :- |
 | `pm` | Started by the user with `f1rm pm`. Never hired. | `mattpocock-skills:grilling` |
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
@@ -32,7 +32,7 @@ Playbook:
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
 5. **Hire only with `f1rm hire`** (role, name, task slug, brief). Run `f1rm hire --help` for the exact syntax. Never start a hire by calling `claude` yourself, because the cap lives in `f1rm hire`.
 6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`. The task slug is lowercase words joined by hyphens, unique on the board.
-7. **Skills.** `f1rm hire` puts the role's skills at the start of the brief as slash commands. The role files also list them. Do not write slash commands in the brief yourself.
+7. **Slash commands.** The brief of a hire starts with its role's slash commands, for example `/research` and `/security-review`. They are commands, not Skill-tool skills, so a role cannot invoke them itself and its file does not list them under `skills:`. `f1rm hire` prepends them, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
 
 ## Brief format
@@ -51,7 +51,7 @@ Out of scope: <what to leave alone>
 Report: when done or blocked, SendMessage to "<PM session name>" as described in the handoff rules
 ```
 
-Find your own session name with the ListAgents tool before writing the first brief, and use that exact name in `Report to`. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review.
+Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. Use that exact name in `Report to`. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review.
 
 ## Handoff via SendMessage
 
