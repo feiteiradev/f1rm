@@ -1,0 +1,77 @@
+.board-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: min(640px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+}
+.board-panel header { flex: none; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.board-panel h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.board-panel .summary { margin: 2px 0 0; color: var(--muted); }
+.board-panel button {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.board-panel button:hover { border-color: var(--muted); }
+.board-panel .rows { margin-top: 12px; min-height: 0; overflow: auto; }
+.board-panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.board-panel th { text-align: left; color: var(--muted); font-weight: 400; }
+.board-panel th, .board-panel td { padding: 4px 8px 4px 0; vertical-align: top; overflow-wrap: anywhere; }
+.board-panel td { border-top: 1px solid var(--line); }
+.board-panel th:nth-child(-n+2), .board-panel td:nth-child(-n+2) { white-space: nowrap; }
+.board-panel .chip { display: inline-block; width: 8px; height: 8px; margin-right: 6px; background: var(--muted); }
+.board-panel [data-board-status="doing"] .chip { background: var(--green); }
+.board-panel [data-board-status="review"] .chip { background: var(--amber); }
+.board-panel [data-board-status="done"] .chip { background: #5b8def; }
+.board-panel [data-board-status="blocked"] .chip { background: #e05a5a; }
+.board-panel [data-board-status="todo"] .chip { background: transparent; border: 1px solid var(--muted); }
+
+/* Out of sight until focused, like the roster. */
+.boards {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  list-style: none;
+}
+.boards:focus-within {
+  left: 16px;
+  bottom: 16px;
+  width: auto;
+  height: auto;
+  max-height: 50%;
+  padding: 8px;
+  overflow: auto;
+  clip-path: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.boards button {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .board-panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-height: 60%; }
+}

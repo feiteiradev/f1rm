@@ -1,0 +1,4 @@
+node_modules/
+office/client/dist/
+office/demo/dist/
+.claude/worktrees/

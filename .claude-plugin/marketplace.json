@@ -1,0 +1,12 @@
+{
+  "name": "f1rm",
+  "description": "The f1rm company plugin for Claude Code.",
+  "owner": { "name": "Pedro Feiteira" },
+  "plugins": [
+    {
+      "name": "f1rm",
+      "source": "./plugin",
+      "description": "The f1rm company: roles, guidelines and hiring for Claude Code sessions."
+    }
+  ]
+}
