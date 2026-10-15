@@ -68,6 +68,7 @@ export async function hire(args: string[]): Promise<number> {
       );
   }
 
+  // ponytail: live on Claude Code 2.1.300, only the first slash command of a chain expands (the rest arrive as its text), and code-review forks into a subagent. Per-command briefs or a Skill-tool step are the upgrade if a role needs two.
   const commands = slashCommands(role).map((c) => `/${c}`).join(" ");
   const prompt = `${commands} Report to: ${reportTo ?? pmName(process.cwd())}\n\n${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
