@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { jump } from "./jump.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 type Options = {
@@ -102,6 +103,13 @@ export function startServer({
       if (!same(given, token)) return new Response("unauthorized", { status: 401 });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
+      if (rest[0] === "jump" && rest.length === 2) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const employee = Object.hasOwn(state.employees, rest[1]) ? state.employees[rest[1]] : undefined;
+        if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
+        const result = await jump(machine, employee);
+        return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
       if (!file.startsWith(clientDir + sep) || !(await Bun.file(file).exists())) {

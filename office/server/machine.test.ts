@@ -1,23 +1,42 @@
-// The machine module's liveSessions against a stub `claude` on PATH.
+// The machine module's OS calls against stub `claude`, `osascript`, `code` and `open` commands on PATH.
 import { afterAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-machine-"));
+const log = join(dir, "calls.log");
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-writeFileSync(join(dir, "claude"), '#!/bin/sh\nprintf %s "$STUB_OUT"\nexit "${STUB_EXIT:-0}"\n');
-chmodSync(join(dir, "claude"), 0o755);
-
-// Bun resolves a spawned command against the PATH it started with, so liveSessions runs in a child that starts with the stub first.
-async function claudeAgents(out: string, exit = 0) {
-  const child = Bun.spawn(
-    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; const s = await machine.liveSessions(); console.log(JSON.stringify(s && [...s]))`],
-    { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_OUT: out, STUB_EXIT: String(exit) }, stdout: "pipe" },
-  );
-  const ids: string[] | null = JSON.parse(await new Response(child.stdout).text());
-  return ids && new Set(ids);
+// Each stub logs "name<TAB>args...<TAB>[env:<count of CLAUDE_CODE_ vars>]", prints $STUB_OUT and exits $STUB_EXIT.
+const STUB = `#!/bin/sh
+{ printf '%s' "$(basename "$0")"; for a in "$@"; do printf '\\t%s' "$(printf %s "$a" | tr '\\n' ' ')"; done; printf '\\t[env:%s]\\n' "$(env | grep -c '^CLAUDE_CODE_')"; } >> "$STUB_LOG"
+printf %s "$STUB_OUT"
+exit "\${STUB_EXIT:-0}"
+`;
+for (const name of ["claude", "osascript", "code", "open"]) {
+  writeFileSync(join(dir, name), STUB);
+  chmodSync(join(dir, name), 0o755);
 }
+
+// Bun resolves a spawned command against the PATH it started with, so each call runs in a child that starts with the stubs first.
+async function run(expr: string, out = "", exit: Record<string, number> = {}) {
+  rmSync(log, { force: true });
+  writeFileSync(log, "");
+  const child = Bun.spawn(
+    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify((await Promise.resolve(${expr}).catch((e) => ({ threw: e.message }))) ?? null))`],
+    {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, STUB_OUT: out, STUB_EXIT: String(exit.all ?? 0), CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/not-for-children" },
+      stdout: "pipe",
+    },
+  );
+  const value = JSON.parse(await new Response(child.stdout).text());
+  return { value, calls: readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => l.split("\t")) };
+}
+
+const claudeAgents = async (out: string, exit = 0) => {
+  const { value } = await run("machine.liveSessions().then((s) => s && [...s])", out, { all: exit });
+  return value && new Set<string>(value);
+};
 
 test("liveSessions lists the session ids of `claude agents --json`", async () => {
   const out = JSON.stringify([
@@ -32,4 +51,48 @@ test("liveSessions is null when claude agents fails, so nobody is mistaken for g
   expect(await claudeAgents("[]", 1)).toBeNull();
   expect(await claudeAgents("not json")).toBeNull();
   expect(await claudeAgents('{"error":"x"}')).toBeNull();
+});
+
+test("backgroundId finds the attach handle of a background session, among finished ones too", async () => {
+  const out = JSON.stringify([
+    { pid: 1, cwd: "/a", kind: "interactive", sessionId: "same" },
+    { id: "7c5dcf5d", cwd: "/a", kind: "background", sessionId: "same", state: "done" },
+    { id: "0badf00d", cwd: "/a", kind: "background", sessionId: "other" },
+  ]);
+  const { value, calls } = await run(`machine.backgroundId("same")`, out);
+  expect(value).toBe("7c5dcf5d");
+  expect(calls[0].slice(0, 4)).toEqual(["claude", "agents", "--json", "--all"]);
+  expect((await run(`machine.backgroundId("nobody")`, out)).value).toBeNull();
+  expect((await run(`machine.backgroundId("same")`, JSON.stringify([{ id: "$(rm -rf)", kind: "background", sessionId: "same" }]))).value).toBeNull();
+});
+
+test("claude is never started with the parent session's CLAUDE_CODE_ variables", async () => {
+  const { calls } = await run("machine.liveSessions()", "[]");
+  expect(calls[0].at(-1)).toBe("[env:0]");
+});
+
+test("focusIterm passes the session guid to AppleScript as an argument and reports whether the tab was found", async () => {
+  const found = await run(`machine.focusIterm("w2t5p0:6C2B4D3E-1A2B-4C5D-8E9F-0123456789AB")`, "ok");
+  expect(found.value).toBe(true);
+  expect(found.calls[0][0]).toBe("osascript");
+  expect(found.calls[0][1]).toBe("-e");
+  expect(found.calls[0].at(-2)).toBe("6C2B4D3E-1A2B-4C5D-8E9F-0123456789AB");
+  expect((await run(`machine.focusIterm("w2t5p0:6C2B4D3E-1A2B-4C5D-8E9F-0123456789AB")`, "missing")).value).toBe(false);
+  const hostile = await run(`machine.focusIterm('w0t0p0:x" & (do shell script "id") & "')`, "ok");
+  expect([hostile.value, hostile.calls]).toEqual([false, []]);
+});
+
+test("attachInIterm types `claude attach <id>` into a new tab, and refuses an id with shell syntax", async () => {
+  const { calls } = await run(`machine.attachInIterm("7c5dcf5d")`);
+  expect(calls[0].at(-2)).toBe("claude attach 7c5dcf5d");
+  const bad = await run(`machine.attachInIterm("7c5; rm -rf ~")`);
+  expect([bad.value, bad.calls]).toEqual([{ threw: "bad background session id" }, []]);
+});
+
+test("openVsCode runs `code <folder>`, and falls back to `open -a` when that fails", async () => {
+  const ok = await run(`machine.openVsCode("/code/shop")`);
+  expect(ok.calls.map((c) => c.slice(0, 2))).toEqual([["code", "/code/shop"]]);
+  const fallback = await run(`machine.openVsCode("/code/shop")`, "", { all: 1 });
+  expect(fallback.calls.map((c) => c.slice(0, -1))).toEqual([["code", "/code/shop"], ["open", "-a", "Visual Studio Code", "/code/shop"]]);
+  expect(fallback.value).toEqual({ threw: "couldn't open VS Code" });
 });

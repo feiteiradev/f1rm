@@ -92,7 +92,8 @@ function describeTool(tool: string, input: any): string {
 /** One raw hook payload -> one f1rm event, or null if it isn't a hook payload. */
 export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) => Room, at: number): F1rmEvent | null {
   const valid = ["session_id", "hook_event_name", "cwd"].every((k) => typeof payload?.[k] === "string" && payload[k]);
-  if (!valid) return null;
+  // The cwd reaches `code` and `open` as an argument, where a leading "-" would be read as a flag.
+  if (!valid || !payload.cwd.startsWith("/")) return null;
   const kind: string =
     payload.hook_event_name === "Notification"
       ? `Notification/${payload.notification_type}`
