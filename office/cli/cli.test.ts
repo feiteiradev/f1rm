@@ -383,3 +383,74 @@ test("pm scrubs the Claude Code session variables it inherited", () => {
   pm({ CLAUDECODE: "1", CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/s.sock", CLAUDE_CODE_MESSAGING_TOKEN: "t", CLAUDE_PID: "42", CLAUDE_EFFORT: "max", CLAUDE_CONFIG_DIR: "/keep" }, stub);
   expect(stub.env()).toEqual(["CLAUDE_CONFIG_DIR=/keep"]);
 });
+
+function stubBin() {
+  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  for (const tool of ["launchctl", "open"]) writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $@" >> "${bin}/calls.log"\n`, { mode: 0o755 });
+  const calls = () => (existsSync(join(bin, "calls.log")) ? readFileSync(join(bin, "calls.log"), "utf8").trim().split("\n") : []);
+  const run = (home: string, ...args: string[]) => {
+    const r = Bun.spawnSync(["bun", CLI, ...args], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` } });
+    return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+  };
+  return { bin, calls, run };
+}
+
+test("service writes a login agent that runs `f1rm serve` with this PATH, and reloads it", () => {
+  const home = tempHome();
+  const stub = stubBin();
+  expect(stub.run(home, "service").code).toBe(1);
+  stub.run(home, "install");
+  const { code } = stub.run(home, "service");
+  expect(code).toBe(0);
+  const plist = readFileSync(join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist"), "utf8");
+  expect(plist).toContain(`<string>${process.execPath}</string><string>${CLI}</string><string>serve</string>`);
+  expect(plist).toContain("<key>RunAtLoad</key><true/>");
+  expect(plist).toContain("<key>KeepAlive</key><true/>");
+  expect(plist).toContain(`<key>PATH</key><string>${stub.bin}:`);
+  const uid = process.getuid!();
+  expect(stub.calls()).toEqual([
+    `launchctl bootout gui/${uid}/dev.f1rm.office`,
+    `launchctl bootstrap gui/${uid} ${join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist")}`,
+  ]);
+});
+
+test("service off, and uninstall, unload the login agent and remove it", () => {
+  for (const off of [["service", "off"], ["uninstall"]]) {
+    const home = tempHome();
+    const stub = stubBin();
+    stub.run(home, "install");
+    stub.run(home, "service");
+    expect(stub.run(home, ...off).code).toBe(0);
+    expect(existsSync(join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist"))).toBe(false);
+    expect(stub.calls().at(-1)).toBe(`launchctl bootout gui/${process.getuid!()}/dev.f1rm.office`);
+  }
+});
+
+test("start opens the office that is already running instead of starting another", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  const url = `http://127.0.0.1:${office.port}/tok/`;
+  mkdirSync(join(home, ".f1rm"));
+  writeFileSync(join(home, ".f1rm", "office-url"), url);
+  // async spawn: a sync one would block this process, and with it the office that has to answer
+  const proc = Bun.spawn(["bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe" });
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  office.stop(true);
+  expect(code).toBe(0);
+  expect(out.trim()).toBe(`f1rm office: ${url}`);
+  expect(stub.calls()).toEqual([`open ${url}`]);
+});
+
+test("uninstall keeps the event log and the PM's boards", () => {
+  const home = tempHome();
+  const stub = stubBin();
+  stub.run(home, "install");
+  mkdirSync(join(home, ".f1rm", "boards"));
+  writeFileSync(join(home, ".f1rm", "boards", "shop.md"), "| T1 | pm | todo | - | x |\n");
+  writeFileSync(join(home, ".f1rm", "events.db"), "");
+  stub.run(home, "uninstall");
+  expect(existsSync(join(home, ".f1rm", "boards", "shop.md"))).toBe(true);
+  expect(existsSync(join(home, ".f1rm", "events.db"))).toBe(true);
+  expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(false);
+});
