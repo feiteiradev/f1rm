@@ -179,11 +179,7 @@ async function checkBackground() {
     const body = await res.json();
     if (res.status !== 200) throw new Error(`jump answered ${res.status} ${JSON.stringify(body)}`);
     await until(async () => Number(await osa(TAB_COUNT, win.id)) === before + 1, 10_000, "the new tab");
-    const screen = await until(async () => {
-      const t = await osa(LAST_TAB_TEXT, win.id);
-      return /claude attach/.test(t) && t;
-    }, 10_000, "`claude attach` in the new tab");
-    console.log(`  jump opened tab ${before + 1} in the window: ${screen.split("\n").filter((l) => l.trim()).slice(0, 2).join(" | ").slice(0, 120)}`);
+    // `claude attach` shows for only ~125-300 ms before it clears the screen, so the attached session is the check.
     await until(async () => /f1rm-jump-smoke|jump-smoke-ok/.test(await osa(LAST_TAB_TEXT, win.id)), 20_000, "the attached session on screen");
     console.log("  the new tab shows the attached session");
   } finally {

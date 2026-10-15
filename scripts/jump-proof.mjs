@@ -77,6 +77,30 @@ await jumped(2);
 assert.deepEqual(calls.slice(1), [tab(2)], "ArrowDown then Enter jumped to the second match in the room");
 await dialog.waitFor({ state: "hidden" });
 
+// The highlight follows the employee, not the row: someone above it leaves while the palette is open.
+await send("d", "/code/shop", 4, { file_path: "/code/shop/race.ts" });
+await key("Meta+k");
+await page.keyboard.type("shop");
+const optionIds = () => page.getByRole("option").evaluateAll((els) => els.map((e) => e.id.split("-").at(-1)));
+const highlighted = async () => (await page.locator("[role=option][aria-selected=true]").getAttribute("id")).split("-").at(-1);
+await page.waitForFunction(() => document.querySelectorAll("[role=option]").length === 3);
+const order = await optionIds();
+await key("ArrowDown");
+const picked = await highlighted();
+assert.equal(picked, order[1]);
+await fetch(`${base}/ingest`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-f1rm-secret": SECRET },
+  body: JSON.stringify({ session_id: order[0], cwd: "/code/shop", hook_event_name: "SessionEnd", reason: "other" }),
+});
+await page.waitForFunction(() => document.querySelectorAll("[role=option]").length === 2);
+assert.equal(await highlighted(), picked, "the highlight stayed on the same employee when the list changed");
+await key("Enter");
+await jumped(3);
+assert.equal(calls.at(-1), tab(picked === "a" ? 1 : picked === "b" ? 2 : 4), "Enter jumped to the highlighted employee");
+await dialog.waitFor({ state: "hidden" });
+const raced = calls.length;
+
 // Fuzzy letters, and a query that matches no one keeps the palette open and does nothing.
 await key("Meta+k");
 await page.keyboard.type("pst");
@@ -88,7 +112,7 @@ await page.keyboard.type("zzzz");
 assert.equal(await page.getByText("No one matches.").count(), 1);
 await key("Enter");
 await page.waitForTimeout(200);
-assert.equal(calls.length, 2, "Enter with no match jumps nowhere");
+assert.equal(calls.length, raced, "Enter with no match jumps nowhere");
 await key("Escape");
 
 // Escape closes only the palette; the panel behind it stays. The panel's button jumps by keyboard.
@@ -104,8 +128,8 @@ assert.equal(await page.evaluate(() => document.activeElement?.className), "", "
 await key("Tab");
 assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Jump to terminal");
 await key("Enter");
-await jumped(3);
-assert.equal(calls.length, 3, "the panel's Jump button jumped");
+await jumped(raced + 1);
+assert.equal(calls.length, raced + 1, "the panel's Jump button jumped");
 await page.screenshot({ path: join(OUT, "panel-jump.png") });
 
 assert.deepEqual(errors, [], "no page errors");

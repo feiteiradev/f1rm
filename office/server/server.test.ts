@@ -376,6 +376,17 @@ test("Jump needs the UI token and a POST", async () => {
   expect((await jumpTo("s1")).status).toBe(200);
 });
 
+test("a hook whose cwd is not an absolute path is dropped, so it can never reach a command line as a flag", async () => {
+  start();
+  const vscode = { "x-f1rm-term-program": "vscode" };
+  for (const cwd of ["--opt=value", "-n", "relative/dir"]) await hook(sessionStart("flag", cwd), vscode);
+  await hook(sessionStart("ok", "/code/shop"), vscode);
+  const state = await office((s) => "ok" in s.employees);
+  expect(Object.keys(state.employees)).toEqual(["ok"]);
+  expect((await jumpTo("flag")).status).toBe(404);
+  expect(calls).toEqual([]);
+});
+
 const ROLE_NAMES = ["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"];
 
 test("a session started with --agent is that role's employee, titled by --name; any other session is a freelancer", async () => {

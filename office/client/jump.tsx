@@ -46,7 +46,7 @@ export function JumpButton({ id }: { id: string }) {
 export function Palette({ state }: { state: OfficeState }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const { error, busy, jump, clear } = useJump();
   const opener = useRef<Element | null>(null);
   const listId = useId();
@@ -56,13 +56,14 @@ export function Palette({ state }: { state: OfficeState }) {
     [state],
   );
   const results = useMemo(() => search(entries, query), [entries, query]);
-  const current = results[Math.min(active, results.length - 1)];
+  // By id, not position: the list changes as the office does, and Enter must go to who was highlighted.
+  const current = results.find((r) => r.id === activeId) ?? results[0];
   const optionId = (id: string) => `${listId}-${id}`;
 
   function show() {
     opener.current = document.activeElement;
     setQuery("");
-    setActive(0);
+    setActiveId(null);
     clear();
     setOpen(true);
   }
@@ -96,7 +97,7 @@ export function Palette({ state }: { state: OfficeState }) {
     const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
     if (step && results.length) {
       e.preventDefault();
-      setActive((Math.min(active, results.length - 1) + step + results.length) % results.length);
+      setActiveId(results[(results.indexOf(current) + step + results.length) % results.length].id);
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (current) go(current.id);
@@ -128,7 +129,7 @@ export function Palette({ state }: { state: OfficeState }) {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setActive(0);
+                setActiveId(null);
                 clear();
               }}
               onKeyDown={onKeyDown}
@@ -143,7 +144,7 @@ export function Palette({ state }: { state: OfficeState }) {
                     role="option"
                     aria-selected={r === current}
                     data-status={e.status}
-                    onMouseMove={() => setActive(results.indexOf(r))}
+                    onMouseMove={() => setActiveId(r.id)}
                     onClick={() => go(r.id)}
                   >
                     <span className="swatch" aria-hidden />
