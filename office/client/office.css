@@ -1,0 +1,101 @@
+:root {
+  color-scheme: dark;
+  --bg: #151822;
+  --surface: #1d2230;
+  --line: #2c3447;
+  --text: #e9e4d6;
+  --muted: #9aa3b5;
+  --amber: #f2a93b;
+  --green: #3ddc84;
+  --idle: #7e9cc8;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--mono); }
+#root { display: flex; flex-direction: column; }
+
+.bar {
+  flex: none;
+  height: 52px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.bar h1 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+.offline { margin: 0; color: var(--amber); }
+
+.counter { margin: 0 0 0 auto; padding: 0; display: flex; gap: 20px; list-style: none; }
+.counter li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.counter .count { color: var(--text); font-size: 18px; font-weight: 700; min-width: 1ch; }
+
+.swatch { width: 10px; height: 10px; background: var(--muted); }
+[data-status="working"] .swatch { background: var(--green); }
+[data-status="waiting"] .swatch { background: var(--amber); }
+[data-status="idle"] .swatch { background: var(--idle); }
+
+main { position: relative; flex: 1; min-height: 0; }
+.scene { height: 100%; overflow: auto; }
+.scene canvas { display: block; }
+
+.note {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(34ch, calc(100% - 32px));
+  height: fit-content;
+  text-align: center;
+  color: var(--muted);
+}
+
+.panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 300px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+}
+.panel header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.panel h2 { margin: 0; font-size: 20px; }
+.panel .role { margin: 2px 0 0; color: var(--muted); }
+.panel button {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.panel button:hover { border-color: var(--muted); }
+.panel button:active { transform: translateY(1px); }
+.panel dl { margin: 16px 0 0; display: grid; grid-template-columns: 5.5rem 1fr; gap: 10px 12px; }
+.panel dt { color: var(--muted); }
+.panel dd { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.panel .activity { color: var(--amber); }
+
+code { font: inherit; color: var(--text); }
+
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.roster {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  list-style: none;
+}
+
+@media (max-width: 640px) {
+  .panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; }
+  .counter { gap: 12px; }
+}

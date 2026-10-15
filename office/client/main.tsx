@@ -1,11 +1,72 @@
-// Tracer page: rooms and their employees, live from the server's WebSocket.
-import { useEffect, useState } from "react";
+// The office page: the PixiJS scene plus React panels, both rendered from the server's state alone.
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { OfficeState } from "../server/office.ts";
+import type { OfficeState, Status } from "../server/office.ts";
+import { identityOf } from "./people.ts";
+import { poseOf, statusCounts } from "./pose.ts";
+import { createScene, type Scene } from "./scene.ts";
+import "./office.css";
+
+const COUNTERS: [Status, string][] = [["working", "Active"], ["waiting", "Waiting"], ["idle", "Idle"]];
+const STATUS_TEXT: Record<Status, string> = { working: "Working", waiting: "Waiting for permission", idle: "Idle" };
+const IDLE_TEXT = "On a coffee break";
+
+function Counter({ state }: { state: OfficeState }) {
+  const counts = statusCounts(state);
+  return (
+    <ul className="counter" aria-label="Employees by status">
+      {COUNTERS.map(([status, label]) => (
+        <li key={status} data-status={status}>
+          <span className="swatch" aria-hidden />
+          <span className="count">{counts[status]}</span>
+          {label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose: () => void }) {
+  const e = state.employees[id];
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => closeRef.current?.focus(), [id]);
+  if (!e) return null;
+  const { name, role } = identityOf(id);
+  const activity = e.activity || (e.status === "idle" ? IDLE_TEXT : "None");
+  return (
+    <aside className="panel" aria-label={`${name}, ${role}`}>
+      <header>
+        <div>
+          <h2>{name}</h2>
+          <p className="role">{role}</p>
+        </div>
+        <button ref={closeRef} onClick={onClose} aria-label="Close panel">
+          Close
+        </button>
+      </header>
+      <dl>
+        <dt>Room</dt>
+        <dd title={e.cwd}>{state.rooms[e.room]?.name}</dd>
+        <dt>Status</dt>
+        <dd data-status={e.status}>
+          <span className="swatch" aria-hidden />
+          {STATUS_TEXT[e.status]}
+        </dd>
+        <dt>Activity</dt>
+        <dd className="activity">{activity}</dd>
+      </dl>
+    </aside>
+  );
+}
 
 function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
   const [connected, setConnected] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+  const host = useRef<HTMLDivElement>(null);
+  const scene = useRef<Scene | null>(null);
+  const latest = useRef({ state, selected });
+  latest.current = { state, selected };
 
   useEffect(() => {
     // The page lives under /<ui token>/, so the socket path inherits the token.
@@ -17,31 +78,60 @@ function Office() {
     return () => ws.close();
   }, []);
 
-  if (!connected) return <p>Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>;
-  if (!state) return <p>Connecting…</p>;
+  useEffect(() => {
+    let dead = false;
+    createScene(host.current!, setSelected).then((s) => {
+      if (dead) return s.destroy();
+      scene.current = s;
+      if (latest.current.state) s.update(latest.current.state, latest.current.selected);
+    });
+    return () => {
+      dead = true;
+      scene.current?.destroy();
+      scene.current = null;
+    };
+  }, []);
 
-  const employees = Object.values(state.employees);
-  const rooms = Object.values(state.rooms).sort((a, b) => a.name.localeCompare(b.name));
+  useEffect(() => {
+    if (state) scene.current?.update(state, selected);
+  }, [state, selected]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelected(null);
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
+  const empty = state && Object.keys(state.rooms).length === 0;
+  const staff = state ? Object.values(state.employees) : [];
   return (
-    <main>
-      <h1>f1rm</h1>
-      {rooms.length === 0 && <p>No sessions yet. Start <code>claude</code> anywhere.</p>}
-      {rooms.map((room) => (
-        <section key={room.id}>
-          <h2 title={room.id}>{room.name}</h2>
-          <ul>
-            {employees
-              .filter((e) => e.room === room.id)
-              .map((e) => (
-                <li key={e.sessionId} className={e.status} title={e.cwd}>
-                  {e.sessionId.slice(0, 8)} · {e.status}
-                  {e.activity && ` · ${e.activity}`}
+    <>
+      <header className="bar">
+        <h1>f1rm</h1>
+        {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
+        {state && <Counter state={state} />}
+      </header>
+      <main>
+        <div className="scene" ref={host} />
+        {!state && <p className="note">Connecting…</p>}
+        {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
+        {state && selected && <Panel state={state} id={selected} onClose={() => setSelected(null)} />}
+        {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
+        <ul className="roster">
+          {state &&
+            staff.map((e) => {
+              const { name, role } = identityOf(e.sessionId);
+              return (
+                <li key={e.sessionId}>
+                  <button data-pose={poseOf(e)} onClick={() => setSelected(e.sessionId)}>
+                    {name}, {role}, {state.rooms[e.room]?.name}, {STATUS_TEXT[e.status]}
+                  </button>
                 </li>
-              ))}
-          </ul>
-        </section>
-      ))}
-    </main>
+              );
+            })}
+        </ul>
+      </main>
+    </>
   );
 }
 
