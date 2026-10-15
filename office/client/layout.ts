@@ -14,16 +14,18 @@ export type RoomLayout = { room: Room; x: number; y: number; w: number; h: numbe
 /** Integer art scale keeps pixels square; narrow windows drop to 2x and wide ones step up. */
 export const scaleFor = (px: number) => (px < 760 ? 2 : px < 1100 ? 3 : 4);
 
-// ponytail: an open room seats at most six per row, one per role; a wider screen leaves margin instead of a longer row.
-/** With `solo`, the one room open fills the screen: it widens to seat a whole company in a row and sits in the middle. */
-export function layoutOffice(state: OfficeState, width: number, solo = false): { rooms: RoomLayout[]; height: number } {
+// ponytail: an open room seats at most six per row, one per role; a wider screen gets more floor around the desks, not a longer row.
+/** With `fill` (the view's height), the one room open fills the whole view: its walls and floor reach every edge and the desks sit in the middle. */
+export function layoutOffice(state: OfficeState, width: number, fill: number | null = null): { rooms: RoomLayout[]; height: number } {
+  const solo = fill !== null;
   const staff = Object.values(state.employees);
   const rooms = Object.values(state.rooms).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   const cols = solo ? Math.min(ROOM.maxCols, Math.max(ROOM.cols, Math.floor((width - MARGIN * 2 - ROOM.pad * 2) / CELL.w))) : ROOM.cols;
-  const roomW = ROOM.pad * 2 + cols * CELL.w;
+  const roomW = solo ? Math.max(ROOM.pad * 2 + cols * CELL.w, width - MARGIN * 2) : ROOM.pad * 2 + cols * CELL.w;
+  const inset = Math.floor((roomW - cols * CELL.w) / 2);
 
   const out: RoomLayout[] = [];
-  let x = solo ? Math.max(MARGIN, Math.floor((width - roomW) / 2)) : MARGIN, y = MARGIN, rowH = 0;
+  let x = MARGIN, y = MARGIN, rowH = 0;
   for (const room of rooms) {
     // Company staff take the front desks in role order (shifts of a role by counter), freelancers the hot desks behind
     // them, by session id. Both orders are stable while nobody joins or leaves, with no arrival order in the state.
@@ -35,15 +37,17 @@ export function layoutOffice(state: OfficeState, width: number, solo = false): {
     const crewSeats = Math.ceil(crew.length / cols) * cols;
     const seats = Math.max(cols, crewSeats + Math.ceil(freelancers.length / cols) * cols);
     const people = [...crew, ...Array(crewSeats - crew.length).fill(undefined), ...freelancers];
-    const h = ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h;
+    const h = Math.max(ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h, solo ? fill - MARGIN * 2 : 0);
     if (x > MARGIN && x + roomW > width - MARGIN) {
       x = MARGIN;
       y += rowH + GAP;
       rowH = 0;
     }
+    // Whole plank rows (8), so the floor lines meet the desks the same way in every room.
+    const slack = Math.floor((h - (ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h)) / 16) * 8;
     const desks = Array.from({ length: seats }, (_, i) => ({
-      x: x + ROOM.pad + (i % cols) * CELL.w,
-      y: y + ROOM.wall + ROOM.pad + Math.floor(i / cols) * CELL.h,
+      x: x + inset + (i % cols) * CELL.w,
+      y: y + ROOM.wall + ROOM.pad + slack + Math.floor(i / cols) * CELL.h,
       hot: i >= crewSeats && freelancers.length > 0,
       employee: people[i],
     }));

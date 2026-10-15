@@ -65,7 +65,7 @@ async function rects(roomName) {
   const s = await state(), box = await canvasBox();
   const id = Object.values(s.rooms).find((r) => r.name === roomName).id;
   const slice = projectState(s, id);
-  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), true);
+  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), Math.floor((await page.locator(".scene").evaluate((e) => e.clientHeight)) / SCALE));
   const room = rooms[0];
   const deskOf = (sid) => room.desks.find((d) => d.employee?.sessionId === sid);
   const clipOf = (x, y, w, h) => ({ x: x * SCALE, y: box.y + y * SCALE, width: w * SCALE, height: h * SCALE });

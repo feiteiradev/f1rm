@@ -172,13 +172,22 @@ test("the URL fragment names the open project, paths and all", () => {
   expect(roomFromHash("#other")).toBeNull();
 });
 
-test("one open project widens its room to seat the company in a row and centers it", () => {
+test("one open project fills the view: its room spans the width and height, with the company in a row in the middle", () => {
   const six = ["a", "b", "c", "d", "e", "f"].map((id, i) => employee(id, "r", { role: ROLE_IDS[i] }));
-  const solo = layoutOffice(office(["r"], six), 480, true).rooms[0];
+  const { rooms, height } = layoutOffice(office(["r"], six), 480, 225);
+  const solo = rooms[0];
   expect(new Set(solo.desks.slice(0, 6).map((d) => d.y)).size).toBe(1);
-  expect(solo.x).toBe(Math.floor((480 - solo.w) / 2));
-  const narrow = layoutOffice(office(["r"], six), 120, true).rooms[0];
-  expect(narrow.w).toBe(ROOM.pad * 2 + ROOM.cols * CELL.w);
+  expect(solo.w).toBeGreaterThanOrEqual(480 - 16);
+  expect(solo.h).toBeGreaterThanOrEqual(225 - 16);
+  expect(height).toBeLessThanOrEqual(225);
+  const above = solo.desks[0].y - (solo.y + ROOM.wall), below = solo.y + solo.h - (solo.desks[0].y + CELL.h);
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(16);
+  const left = solo.desks[0].x - solo.x, right = solo.x + solo.w - (solo.desks[5].x + CELL.w);
+  expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  const narrow = layoutOffice(office(["r"], six), 120, 400).rooms[0];
+  expect(narrow.desks.length).toBe(ROOM.cols * 2);
+  const crowd = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => employee(id, "r"));
+  expect(layoutOffice(office(["r"], crowd), 480, 100).height).toBeGreaterThan(100);
 });
 
 test("every bundled asset is credited with its source and CC0 license", () => {

@@ -74,7 +74,7 @@ async function geometry(p, roomName) {
   const s = await state();
   const box = await p.locator(".scene canvas").boundingBox();
   const slice = projectState(s, Object.values(s.rooms).find((r) => r.name === roomName).id);
-  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), true);
+  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), Math.floor((await p.locator(".scene").evaluate((e) => e.clientHeight)) / SCALE));
   const deskOf = (id) => rooms.flatMap((r) => r.desks).find((d) => d.employee?.sessionId === id);
   const clipOf = (x, y, w, h) => ({ x: x * SCALE, y: box.y + y * SCALE, width: w * SCALE, height: h * SCALE });
   return { s, rooms, deskOf, clipOf };

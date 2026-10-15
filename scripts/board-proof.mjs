@@ -95,7 +95,7 @@ async function whiteboardAt(room) {
   ws.close();
   const id = Object.values(state.rooms).find((r) => r.name === room).id;
   const scale = scaleFor(1440);
-  const r = layoutOffice(projectState(state, id), Math.floor(1440 / scale), true).rooms[0];
+  const r = layoutOffice(projectState(state, id), Math.floor(1440 / scale), Math.floor((await page.locator(".scene").evaluate((e) => e.clientHeight)) / scale)).rooms[0];
   const box = await page.locator(".scene canvas").boundingBox();
   return { x: (r.x + r.w - 62 + 20) * scale, y: box.y + (r.y + 2 + 8) * scale };
 }

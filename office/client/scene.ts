@@ -48,7 +48,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
   function render() {
     const scale = scaleFor(host.clientWidth);
     world.scale.set(scale);
-    const { rooms: laidOut, height } = layoutOffice(latest, Math.floor(host.clientWidth / scale), true);
+    const { rooms: laidOut, height } = layoutOffice(latest, Math.floor(host.clientWidth / scale), Math.floor(host.clientHeight / scale));
     app.renderer.resize(host.clientWidth, Math.max(host.clientHeight, height * scale));
     app.stage.hitArea = app.screen;
 

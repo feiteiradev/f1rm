@@ -81,6 +81,27 @@ const pixelStats = (p, clip) =>
     }, buf.toString("base64")),
   );
 
+// The drawn room's bounds, as the share of the scene area that is not the office's outer background.
+const coverage = async (p) => {
+  const buf = await p.locator(".scene").screenshot();
+  return p.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height });
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] === 21 && d[i + 1] === 24 && d[i + 2] === 34) continue;
+      const px = (i / 4) % c.width, py = Math.floor(i / 4 / c.width);
+      x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+    }
+    return { w: (x1 - x0 + 1) / c.width, h: (y1 - y0 + 1) / c.height };
+  }, buf.toString("base64"));
+};
+
 // The office is empty: a hallway with no doors, and the way to fill it.
 await page.goto(url);
 await page.locator(".hall").waitFor();
@@ -161,8 +182,8 @@ assert.equal(await page.locator(".crumb").innerText(), "my shop");
 assert.deepEqual(await counter(), { working: 1, waiting: 1, idle: 0 }, "the project's own counts");
 await settle();
 await shot("03-project-shop");
-const canvas = await page.locator(".scene canvas").boundingBox();
-assert.ok(canvas.width >= 1400, "the office fills the screen");
+const full = await coverage(page);
+assert.ok(full.w >= 0.85 && full.h >= 0.85, `the open project fills the 1440x900 screen (${(full.w * 100).toFixed(0)}% wide, ${(full.h * 100).toFixed(0)}% tall)`);
 
 // Live updates in the project, the panel with Ask and Jump, and an intern.
 await send("s3", shop, "SessionStart");
@@ -247,6 +268,8 @@ await phone.locator(".back").waitFor();
 await phone.locator(".roster button").first().waitFor({ state: "attached" });
 await phone.waitForTimeout(500);
 assert.ok(await fits(), "no horizontal scroll in a project at 390px");
+const phoneFull = await coverage(phone);
+assert.ok(phoneFull.w >= 0.85 && phoneFull.h >= 0.85, `the project fills the 390px screen (${(phoneFull.w * 100).toFixed(0)}% wide, ${(phoneFull.h * 100).toFixed(0)}% tall)`);
 await shot("09-phone-project", phone);
 await phone.locator(".roster button").first().focus();
 await phone.keyboard.press("Enter");
