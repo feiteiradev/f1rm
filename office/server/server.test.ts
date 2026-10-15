@@ -13,6 +13,7 @@ const TOKEN = "ui-token";
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
+  liveSessions: async () => new Set<string>(),
 });
 
 let server: ReturnType<typeof startServer>;
