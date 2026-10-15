@@ -114,18 +114,13 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
       : payload.hook_event_name;
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
   const tool = toolName ? clip(describeTool(toolName, payload.tool_input)) : "";
-  const activity: Record<string, string> = {
-    UserPromptSubmit: "Thinking",
-    PreToolUse: tool,
-    PermissionRequest: tool,
-    Stop: "",
-  };
-  const toolByKind: Record<string, string> = {
-    UserPromptSubmit: "",
-    PreToolUse: toolName,
-    PermissionRequest: toolName,
-    Stop: "",
-  };
+  // [activity, raw tool name] for the kinds that change them; any other kind keeps the previous ones.
+  const [activity, rawTool] = ({
+    UserPromptSubmit: ["Thinking", ""],
+    PreToolUse: [tool, toolName],
+    PermissionRequest: [tool, toolName],
+    Stop: ["", ""],
+  } as Record<string, [string, string]>)[kind] ?? [];
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
   // Inside a sub-agent, agent_type is the sub-agent's type, so only an event from the main session names its role.
   const agentId = str(payload.agent_id);
@@ -145,8 +140,8 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
     at,
     ...(typeof payload.transcript_path === "string" && { transcript: payload.transcript_path }),
     ...(headers.get("x-f1rm-messaging-socket") && { socket: headers.get("x-f1rm-messaging-socket")! }),
-    activity: activity[kind],
-    tool: toolByKind[kind],
+    activity,
+    tool: rawTool,
     ...(role && { role }),
     ...(title && { title }),
     ...(subagent && agentId && { intern: { id: agentId, type: str(payload.agent_type) ?? "" } }),
