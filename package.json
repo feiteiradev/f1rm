@@ -6,7 +6,8 @@
     "f1rm": "office/cli/f1rm.ts"
   },
   "scripts": {
-    "build": "vite build office/client --base ./",
+    "build": "vite build office/client --base ./ && vite build office/demo --base ./ --mode demo",
+    "record-demo": "bun scripts/record-demo.ts",
     "start": "bun office/cli/f1rm.ts start",
     "smoke": "bun scripts/smoke.ts",
     "typecheck": "tsc --noEmit",

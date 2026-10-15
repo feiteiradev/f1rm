@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start | pm | hire
+// The f1rm CLI: install | uninstall | start | demo | pm | hire
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
@@ -176,6 +176,24 @@ function start() {
   Bun.spawn(["open", url]);
 }
 
+// The recorded office on its own static build: no hooks, no database, no session of yours involved.
+function demo() {
+  const dir = join(import.meta.dir, "..", "demo", "dist");
+  if (!existsSync(dir)) throw new Error("demo not built, run `bun run build`");
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: Number(process.env.F1RM_DEMO_PORT ?? 4171),
+    async fetch(req) {
+      const file = resolve(dir, "." + decodeURIComponent(new URL(req.url).pathname).replace(/\/$/, "/index.html"));
+      if (!file.startsWith(dir + sep) || !(await Bun.file(file).exists())) return new Response("not found", { status: 404 });
+      return new Response(Bun.file(file));
+    },
+  });
+  const url = `http://127.0.0.1:${server.port}/`;
+  console.log(`f1rm demo: ${url}`);
+  Bun.spawn(["open", url]);
+}
+
 // The plugin's roles ignore `skills:` as a session agent, so the PM's first prompt loads grilling as a slash command.
 // The name comes after it so hires can address their reports to it.
 const pmPrompt = (name: string) =>
@@ -195,12 +213,13 @@ const commands: Record<string, () => void | Promise<void>> = {
   install,
   uninstall,
   start,
+  demo,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
 };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start | pm [claude flags] | hire <role> <name> <task> <brief>");
+  console.error("usage: f1rm install | uninstall | start | demo | pm [claude flags] | hire <role> <name> <task> <brief>");
   process.exit(1);
 }
 try {

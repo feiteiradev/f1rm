@@ -10,15 +10,26 @@ import type { OfficeState } from "./office.ts";
 const SECRET = "ingest-secret";
 const TOKEN = "ui-token";
 
+// Canned answers, and a log of the OS calls Jump makes.
+const calls: string[] = [];
+let openTabs = new Set<string>();
+let backgroundIds: Record<string, string> = {};
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
   liveSessions: async () => new Set<string>(),
+  backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
+  focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
+  attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
+  openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
 });
 
 let server: ReturnType<typeof startServer>;
 let sockets: WebSocket[] = [];
 afterEach(() => {
+  calls.length = 0;
+  openTabs = new Set();
+  backgroundIds = {};
   sockets.forEach((s) => s.close());
   sockets = [];
   server?.stop(true);
@@ -299,6 +310,81 @@ test("the server sends no CORS headers", async () => {
   for (const res of responses) {
     expect(Array.from(res.headers, ([h]) => h).filter((h) => h.startsWith("access-control-"))).toEqual([]);
   }
+});
+
+const ITERM_ID = (n: number) => `w${n % 5}t${n}p0:6C2B4D3E-1A2B-4C5D-8E9F-${String(n).padStart(12, "0")}`;
+const jumpTo = (id: string, init: RequestInit = { method: "POST" }, token = TOKEN) =>
+  fetch(`${base()}/${token}/jump/${encodeURIComponent(id)}`, init);
+
+test("Jump focuses the iTerm2 tab of exactly the employee asked for, among 40 tabs", async () => {
+  start();
+  for (let n = 0; n < 40; n++) {
+    await hook(sessionStart(`s${n}`, `/code/p${n}`), { "x-f1rm-iterm-session": ITERM_ID(n), "x-f1rm-term-program": "iTerm.app" });
+    openTabs.add(ITERM_ID(n));
+  }
+  await office((s) => Object.keys(s.employees).length === 40);
+
+  for (const n of [0, 27, 39]) {
+    const res = await jumpTo(`s${n}`);
+    expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  }
+  expect(calls).toEqual([0, 27, 39].map((n) => `iterm ${ITERM_ID(n)}`));
+});
+
+test("Jump says so when the employee's tab is closed, and does not guess another", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"), { "x-f1rm-iterm-session": ITERM_ID(1) });
+  const res = await jumpTo("s1");
+  expect([res.status, await res.json()]).toEqual([409, { ok: false, error: "Its terminal tab is closed." }]);
+  expect(calls).toEqual([`iterm ${ITERM_ID(1)}`]);
+});
+
+test("a background employee with no tab gets a new tab running claude attach", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"), { "x-f1rm-iterm-session": "", "x-f1rm-term-program": "" });
+  expect((await jumpTo("bg1")).status).toBe(200);
+  expect(calls).toEqual(["attach 7c5dcf5d"]);
+});
+
+test("a VS Code session focuses the VS Code window for its folder, even if iTerm2 launched VS Code", async () => {
+  start();
+  await hook(sessionStart("vs", "/code/shop"), { "x-f1rm-iterm-session": ITERM_ID(3), "x-f1rm-term-program": "vscode" });
+  expect((await jumpTo("vs")).status).toBe(200);
+  expect(calls).toEqual(["code /code/shop"]);
+});
+
+test("Jump to a session with nowhere to go, or an unknown or inherited name, does nothing", async () => {
+  start();
+  await hook(sessionStart("plain", "/a"), { "x-f1rm-term-program": "Apple_Terminal" });
+  const res = await jumpTo("plain");
+  expect([res.status, (await res.json()).ok]).toEqual([409, false]);
+  expect((await jumpTo("nobody")).status).toBe(404);
+  expect((await jumpTo("constructor")).status).toBe(404);
+  expect(calls).toEqual([]);
+});
+
+test("Jump needs the UI token and a POST", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"), { "x-f1rm-iterm-session": ITERM_ID(1) });
+  openTabs.add(ITERM_ID(1));
+  expect((await jumpTo("s1", { method: "POST" }, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/jump/s1`, { method: "POST" })).status).toBe(401);
+  expect((await jumpTo("s1", { method: "GET" })).status).toBe(405);
+  expect((await jumpTo("s1", { method: "POST", headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect(calls).toEqual([]);
+  expect((await jumpTo("s1")).status).toBe(200);
+});
+
+test("a hook whose cwd is not an absolute path is dropped, so it can never reach a command line as a flag", async () => {
+  start();
+  const vscode = { "x-f1rm-term-program": "vscode" };
+  for (const cwd of ["--opt=value", "-n", "relative/dir"]) await hook(sessionStart("flag", cwd), vscode);
+  await hook(sessionStart("ok", "/code/shop"), vscode);
+  const state = await office((s) => "ok" in s.employees);
+  expect(Object.keys(state.employees)).toEqual(["ok"]);
+  expect((await jumpTo("flag")).status).toBe(404);
+  expect(calls).toEqual([]);
 });
 
 const ROLE_NAMES = ["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"];

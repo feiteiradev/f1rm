@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
+import { JumpButton, Palette } from "./jump.tsx";
 import { roleTitle } from "../people.ts";
 import { poseOf, statusCounts } from "./pose.ts";
 import { createScene, type Scene } from "./scene.ts";
@@ -69,6 +70,7 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
           </>
         )}
       </dl>
+      <JumpButton key={id} id={id} />
     </aside>
   );
 }
@@ -130,6 +132,7 @@ function Office() {
       <header className="bar">
         <h1>f1rm</h1>
         {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
+        {state && <Palette state={state} />}
         {state && <Counter state={state} />}
       </header>
       <main>
