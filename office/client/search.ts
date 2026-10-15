@@ -1,6 +1,7 @@
 // ⌘K's fuzzy search over employees.
 export type Entry = { id: string; name: string; role: string; room: string; task: string };
 
+// ponytail: letters-in-order matching with a gap penalty; no typo tolerance or per-field weights.
 /** A substring beats a scattered match; earlier and tighter is better. Null if `token` isn't in `field`. */
 function score(field: string, token: string): number | null {
   const at = field.indexOf(token);

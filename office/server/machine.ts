@@ -30,6 +30,7 @@ async function osascript(script: string, ...args: string[]): Promise<string> {
   return out.trim();
 }
 
+// ponytail: scans every tab with one Apple event per property (40 tabs measured under a second); cache window and tab positions if that is felt.
 const FOCUS_ITERM = `on run argv
   if not (${ITERM} is running) then return "missing"
   tell ${ITERM}
@@ -54,6 +55,7 @@ const FOCUS_ITERM = `on run argv
 end run`;
 
 // A new tab in the current window, or a window if there is none; the shell stays open after the command exits.
+// ponytail: always iTerm2's current window; pick the window of the employee's room if people mind.
 const RUN_IN_NEW_TAB = `on run argv
   tell ${ITERM}
     if (count of windows) = 0 then
@@ -104,6 +106,7 @@ export const machine = {
   /** Focuses the VS Code window open on `folder` (VS Code opens one if there is none). */
   async openVsCode(folder: string): Promise<void> {
     const run = async (cmd: string[]) => (await Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }).exited) === 0;
+    // ponytail: the folder is the session's cwd, so a session in a subfolder of an open workspace gets a new window; match by workspace if that bites.
     // `code` is only on PATH if the user installed the shell command; `open -a` always works.
     if (!(await run(["code", folder]).catch(() => false))) {
       if (!(await run(["open", "-a", "Visual Studio Code", folder]))) throw new Error("couldn't open VS Code");

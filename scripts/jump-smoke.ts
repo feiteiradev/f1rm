@@ -120,6 +120,7 @@ async function checkIterm() {
 
   // Interleaved across windows, then neighbours, then the same tab twice.
   const order = [0, 39, 13, 14, 27, 1, 38, 25, 26, 12, 12, 9, 10];
+  const started = Date.now();
   for (const n of order) {
     const { win, guid } = tabs[n];
     const found = await machine.focusIterm(`w${wins.findIndex((w) => w.id === win)}t${n % 10}p0:${guid}`);
@@ -131,7 +132,7 @@ async function checkIterm() {
     }
     if (!found || curWin !== win || curGuid !== guid) throw new Error(`jump to tab ${n} landed on window ${curWin} session ${curGuid}`);
   }
-  console.log(`  ${order.length} jumps each landed on exactly its tab`);
+  console.log(`  ${order.length} jumps each landed on exactly its tab (${Math.round((Date.now() - started) / order.length)} ms per jump including the check)`);
   if (await machine.focusIterm("w0t0p0:00000000-0000-0000-0000-000000000000")) throw new Error("jump to a tab that doesn't exist reported success");
   console.log("  a tab that doesn't exist reports missing");
 }

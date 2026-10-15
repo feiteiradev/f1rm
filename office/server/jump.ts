@@ -17,6 +17,7 @@ export async function jump(machine: typeof realMachine, e: Employee): Promise<Ju
         : { ok: false, error: "Its terminal tab is closed." };
     }
     // Background sessions have no tab; attaching gives them one.
+    // ponytail: runs `claude agents` on each such jump; fine until a jump is felt to lag.
     const id = await machine.backgroundId(e.sessionId);
     if (id) {
       await machine.attachInIterm(id);
