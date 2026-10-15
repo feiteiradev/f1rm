@@ -8,6 +8,7 @@ import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type Ro
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { argsText } from "./approvals.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
+import { TASK_NAME, taskFrom } from "./hire.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
   sessionId, name: sessionId, role: null, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
@@ -201,4 +202,13 @@ test("the tray shows a Bash command whole and any other tool's arguments as inde
   );
   expect(argsText("Bash", { command: 7 })).toBe('{\n  "command": 7\n}');
   expect(argsText("Bash", undefined)).toBe("");
+});
+
+test("the Hire dialog's task name comes from the brief's first words and always passes the server's check", () => {
+  expect(taskFrom("Design the login page. Reply OK and stop.")).toBe("design-the-login-page");
+  expect(taskFrom("  Fix: `f1rm hire` (v2)!! ")).toBe("fix-f1rm-hire-v2");
+  expect(taskFrom("Add a very-long-hyphenated-compound-wordthatgoesonandonandon here")).toBe("add-a-very-long");
+  expect(taskFrom("x".repeat(60))).toBe("x".repeat(40));
+  expect(taskFrom("日本語 ...")).toBe("");
+  for (const brief of ["Design the login page", "a b c d e f", "A".repeat(50) + "-b"]) expect(taskFrom(brief)).toMatch(TASK_NAME);
 });

@@ -8,6 +8,7 @@ import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
+import { HireDialog } from "./hire.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
 import { TellBox } from "./tell.tsx";
 import { roleTitle } from "../people.ts";
@@ -88,7 +89,7 @@ function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeSt
 }
 
 /** One project's office, full screen: its scene, employee panel, whiteboard panel and keyboard roster. `state` is already that project's slice. */
-function Project({ state }: { state: OfficeState }) {
+function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [board, setBoard] = useState<string | null>(null);
   const { history, ask, tell } = useHistory();
@@ -107,7 +108,7 @@ function Project({ state }: { state: OfficeState }) {
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select, setBoard).then((s) => {
+    createScene(host.current!, select, setBoard, onHire).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       s.update(latest.current.state, latest.current.selected);
@@ -235,6 +236,7 @@ function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
   const [connected, setConnected] = useState(true);
   const [open, go] = useRoute();
+  const [hiring, setHiring] = useState(false);
   const left = useRef<string | null>(null);
 
   useEffect(() => {
@@ -268,17 +270,19 @@ function Office() {
           </button>
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
+        {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}
       </header>
       <main>
-        {inside && view ? <Project key={inside} state={view} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
+        {inside && view ? <Project key={inside} state={view} onHire={() => setHiring(true)} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
+      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setHiring(false)} />}
     </>
   );
 }

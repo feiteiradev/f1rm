@@ -170,6 +170,21 @@ export const machine = {
     return list && new Set(list.map((a) => a?.sessionId).filter((id): id is string => typeof id === "string"));
   },
 
+  /** How many background hires hold a slot, or null if `claude agents --json` can't say. A blocked hire waits on a person and still holds its slot; interactive sessions are the user's, not hires. */
+  async workingHires(): Promise<number | null> {
+    const list = await agents(false);
+    return list && list.filter((a) => a?.kind === "background" && (a.state === "working" || a.state === "blocked")).length;
+  },
+
+  /** Runs `argv` (a `claude --bg` start) in `cwd` with no stdin and no shell. Resolves with what it printed; throws with its error output if it fails. */
+  async spawnBackground(argv: string[], cwd: string): Promise<string> {
+    const proc = Bun.spawn(argv, { cwd, env: claudeEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+    const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    const code = await proc.exited;
+    if (code !== 0) throw new Error((err || out).trim().slice(-300) || `claude exited with ${code}`);
+    return out.trim();
+  },
+
   /** The short id `claude attach` takes for a background session, or null if Claude Code lists none. */
   async backgroundId(sessionId: string): Promise<string | null> {
     const found = (await agents(true))?.find((a) => a?.kind === "background" && a.sessionId === sessionId);
