@@ -25,6 +25,7 @@ const fakeMachine = () => ({
     return alive;
   },
   backgroundId: async () => null,
+  letGo: async () => {},
   focusIterm: async () => false,
   attachInIterm: async () => {},
   openVsCode: async () => {},

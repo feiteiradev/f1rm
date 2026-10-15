@@ -1,0 +1,8 @@
+.panel .letgo { margin-top: 16px; }
+.panel .letgo > button { width: 100%; color: var(--amber); border-color: var(--amber); }
+.letgo .confirm { padding: 8px; border: 1px solid var(--amber); }
+.letgo .confirm p { margin: 0 0 8px; }
+.panel .letgo .confirm button + button { margin-left: 8px; }
+.panel .letgo button:disabled { opacity: 0.6; cursor: default; }
+.letgo .problem { margin: 8px 0 0; color: var(--amber); overflow-wrap: anywhere; }
+.letgo .problem:empty { display: none; }

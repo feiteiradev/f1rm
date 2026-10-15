@@ -228,3 +228,50 @@ test("tell refuses a path that isn't an absolute, existing socket file", async (
   box.stop();
   expect(box.received).toEqual([]);
 });
+
+// A `claude` that keeps listing session 7c5dcf5d until `rm` has run $GONE_AFTER times, as a real one did right after `stop`.
+const lgDir = mkdtempSync(join(dir, "letgo-"));
+writeFileSync(
+  join(lgDir, "claude"),
+  `#!/bin/sh
+echo "$*" >> "$LG/calls"
+n=$(cat "$LG/rms" 2>/dev/null || echo 0)
+case "$1" in
+  stop) exit 1 ;;
+  rm) echo $((n + 1)) > "$LG/rms"; [ -n "$RM_FAIL" ] && { echo "$RM_FAIL" >&2; exit 1; } ;;
+  agents) if [ "$n" -ge "$GONE_AFTER" ]; then echo '[{"id":"0badf00d","kind":"background"}]'; else echo '[{"id":"7c5dcf5d","kind":"background"},{"id":"0badf00d","kind":"background"}]'; fi ;;
+esac
+exit 0
+`,
+);
+chmodSync(join(lgDir, "claude"), 0o755);
+async function letGo(id: string, goneAfter: number, rmFail = "") {
+  for (const f of ["calls", "rms"]) rmSync(join(lgDir, f), { force: true });
+  const child = Bun.spawn(
+    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify(await machine.letGo(${JSON.stringify(id)}, { tries: 4, waitMs: 10 }).then(() => "gone", (e) => ({ threw: e.message }))))`],
+    { env: { ...process.env, PATH: `${lgDir}:${process.env.PATH}`, LG: lgDir, GONE_AFTER: String(goneAfter), RM_FAIL: rmFail }, stdout: "pipe" },
+  );
+  const value = JSON.parse(await new Response(child.stdout).text());
+  const calls = existsSync(join(lgDir, "calls")) ? readFileSync(join(lgDir, "calls"), "utf8").trim().split("\n").filter((l) => !l.startsWith("agents")) : [];
+  return { value, calls };
+}
+
+test("letGo stops the session, then repeats rm until claude agents --all no longer lists it", async () => {
+  const quick = await letGo("7c5dcf5d", 1);
+  expect([quick.value, quick.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
+  const raced = await letGo("7c5dcf5d", 3);
+  expect([raced.value, raced.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+test("letGo gives up when the session never leaves the list, and says what claude said when rm refuses", async () => {
+  expect((await letGo("7c5dcf5d", 99)).value).toEqual({ threw: "7c5dcf5d is still listed after 4 tries" });
+  const refused = await letGo("7c5dcf5d", 99, "worktree has unpushed commits");
+  expect([refused.value, refused.calls]).toEqual([{ threw: "worktree has unpushed commits" }, ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+test("letGo refuses an id that could be read as a flag or a shell word, and runs nothing", async () => {
+  for (const bad of ["--force", "7c5; rm -rf ~", ""]) {
+    const r = await letGo(bad, 1);
+    expect([bad, r.value, r.calls]).toEqual([bad, { threw: "bad background session id" }, []]);
+  }
+});

@@ -10,7 +10,8 @@ import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { HireDialog } from "./hire.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
-import { TellBox } from "./tell.tsx";
+import { LetGo } from "./letgo.tsx";
+import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
 import { poseOf, statusCounts } from "./pose.ts";
@@ -38,7 +39,7 @@ function Counter({ state }: { state: OfficeState }) {
   );
 }
 
-function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onTell: (message: string) => void; onClose: () => void }) {
+function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onTell: (message: string) => void; onIntern: (subtask: string) => void; onClose: () => void }) {
   const e = state.employees[id];
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), [id]);
@@ -81,8 +82,10 @@ function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeSt
         )}
       </dl>
       <JumpButton id={id} />
+      <LetGo id={id} name={name} />
       <AskBox onAsk={onAsk} />
       <TellBox name={name} onTell={onTell} />
+      <InternBox name={name} onIntern={onIntern} />
       <History entries={entries} />
     </aside>
   );
@@ -133,7 +136,7 @@ function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) 
   return (
     <>
       <div className="scene" ref={host} />
-      {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onClose={() => select(null)} />}
+      {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
       {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
       <BoardList state={state} onOpen={setBoard} />
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}

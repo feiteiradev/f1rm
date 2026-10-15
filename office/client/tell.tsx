@@ -35,3 +35,27 @@ export function TellBox({ name, onTell }: { name: string; onTell: (message: stri
     </section>
   );
 }
+
+/** Give them an intern: the subtask is typed here, and the office asks the employee to hand it to a sub-agent. */
+export function InternBox({ name, onIntern }: { name: string; onIntern: (subtask: string) => void }) {
+  const [subtask, setSubtask] = useState("");
+  return (
+    <section className="intern" aria-label="Give them an intern">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!subtask.trim()) return;
+          onIntern(subtask.trim());
+          setSubtask("");
+        }}
+      >
+        <label htmlFor="intern-subtask">Give {name} an intern</label>
+        <div className="row">
+          <input id="intern-subtask" value={subtask} onChange={(e) => setSubtask(e.target.value)} placeholder="Check the staging logs." maxLength={4000} autoComplete="off" />
+          <button type="submit" disabled={!subtask.trim()}>Send</button>
+        </div>
+      </form>
+      <p className="warn">A Tell asking {name} to hand this subtask to a sub-agent. It is read at its next step.</p>
+    </section>
+  );
+}

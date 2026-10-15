@@ -42,6 +42,13 @@ export async function agents(all: boolean): Promise<any[] | null> {
   }
 }
 
+/** Runs `claude` with `args` and no stdin; the exit code and what it printed. */
+async function claude(...args: string[]) {
+  const proc = Bun.spawn(["claude", ...args], { env: claudeEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+  const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  return { code: await proc.exited, text: (err || out).trim() };
+}
+
 /** Runs AppleScript; the arguments reach `on run argv`, so nothing is spliced into the script text. */
 async function osascript(script: string, ...args: string[]): Promise<string> {
   const proc = Bun.spawn(["osascript", "-e", script, ...args], { stdout: "pipe", stderr: "pipe", timeout: 15_000 });
@@ -192,6 +199,25 @@ export const machine = {
   async backgroundId(sessionId: string): Promise<string | null> {
     const found = (await agents(true))?.find((a) => a?.kind === "background" && a.sessionId === sessionId);
     return typeof found?.id === "string" && SAFE_ID.test(found.id) ? found.id : null;
+  },
+
+  /**
+   * Stops a background session and removes it with its worktree. `rm` right after `stop` can exit 0 and leave the session, so it
+   * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
+   */
+  async letGo(id: string, { tries = 10, waitMs = 1000 } = {}): Promise<void> {
+    if (!SAFE_ID.test(id)) throw new Error("bad background session id");
+    // A session that already ended makes `stop` fail, and `rm` works on it all the same.
+    await claude("stop", id);
+    // ponytail: a refused `rm` is final and unpushed work is never discarded; offer `--discard-unpushed` behind its own confirm if refusals are felt.
+    for (let i = 0; i < tries; i++) {
+      const rm = await claude("rm", id);
+      if (rm.code !== 0) throw new Error(rm.text.slice(-300) || `claude rm exited with ${rm.code}`);
+      const list = await agents(true);
+      if (list && !list.some((a) => a?.id === id)) return;
+      await Bun.sleep(waitMs);
+    }
+    throw new Error(`${id} is still listed after ${tries} tries`);
   },
 
   /** Brings the iTerm2 tab with this `$ITERM_SESSION_ID` to the front. False if no such tab is open. */

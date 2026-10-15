@@ -29,13 +29,14 @@ export function useHistory() {
     }
   }
 
-  async function tell(sessionId: string, message: string) {
+  /** Sends a Tell, or with `intern` the Give them an intern shortcut, which the office wraps as a subtask for a sub-agent. */
+  async function tell(sessionId: string, message: string, intern = false) {
     const id = nextId.current++;
-    setHistory((h) => addEntry(h, sessionId, { kind: "tell", id, message, state: "sending" }));
+    setHistory((h) => addEntry(h, sessionId, { kind: "tell", id, message: intern ? `Hand to an intern: ${message}` : message, state: "sending" }));
     const finish = (error: string | null) =>
       setHistory((h) => patchEntry(h, sessionId, "tell", id, (e) => ({ ...e, state: error ? "failed" : "sent", ...(error && { error }) })));
     if (import.meta.env.MODE === "demo") return finish("Tell needs a live office; this is a recording.");
-    finish(await post(`tell/${encodeURIComponent(sessionId)}`, { message }));
+    finish(await post(`${intern ? "intern" : "tell"}/${encodeURIComponent(sessionId)}`, intern ? { subtask: message } : { message }));
   }
   return { history, ask, tell };
 }

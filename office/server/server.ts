@@ -16,6 +16,8 @@ const MAX_MESSAGE = 4000;
 const MAX_BRIEF = 8000;
 const PM_DECIDES =
   "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
+const INTERN =
+  "The user asked, from the f1rm office, that you hand a subtask to an intern: spawn a sub-agent for it, give it everything it needs to work alone, and use its result in your own work. Keep going on your own task meanwhile.\n\nThe subtask:\n";
 
 type Options = {
   port: number;
@@ -108,6 +110,9 @@ export function startServer({
     );
   };
 
+  // What the office records when a session is gone, so a replay shows the same departure.
+  const departure = (e: Employee): F1rmEvent => ({ sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() });
+
   let boards: Record<string, BoardRow[]> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
   const snapshot = () => JSON.stringify({ ...state, boards, approvals: approvals.list() });
@@ -151,7 +156,7 @@ export function startServer({
       if (!same(given, token)) return new Response("unauthorized", { status: 401 });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       }
       if (rest[0] === "jump" && rest.length === 2) {
@@ -183,6 +188,40 @@ export function startServer({
           return Response.json({ ok: false, error: `Tell a message of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
         }
         return tellEmployee(employee, message.trim());
+      }
+      if (rest[0] === "intern" && rest.length === 2) {
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
+        const subtask = ((await req.json().catch(() => null)) as { subtask?: unknown } | null)?.subtask;
+        if (typeof subtask !== "string" || !subtask.trim() || subtask.length > MAX_MESSAGE) {
+          return Response.json({ ok: false, error: `Name a subtask of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
+        }
+        return tellEmployee(employee, INTERN + subtask.trim());
+      }
+      if (rest[0] === "background" && rest.length === 2) {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
+        const employee = employeeOf(rest[1]);
+        return Response.json({ background: !!employee && (await machine.backgroundId(employee.sessionId)) !== null });
+      }
+      if (rest[0] === "letgo" && rest.length === 2) {
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ error: "No such employee." }, { status: 404 });
+        if (((await req.json().catch(() => null)) as { confirm?: unknown } | null)?.confirm !== true) {
+          return Response.json({ error: "Letting someone go needs an explicit confirm." }, { status: 400 });
+        }
+        const id = await machine.backgroundId(employee.sessionId);
+        if (!id) return Response.json({ error: "Only a background hire can be let go." }, { status: 409 });
+        try {
+          await machine.letGo(id);
+        } catch (err) {
+          return Response.json({ error: `Let go failed: ${(err as Error).message}` }, { status: 502 });
+        }
+        // The session may never send its own SessionEnd, so the office records the departure itself.
+        const gone = departure(employee);
+        append.run(gone.at, JSON.stringify(gone));
+        state = reduce(state, gone);
+        push();
+        return Response.json({ ok: true });
       }
       if (rest[0] === "roles" && rest.length === 1) {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
@@ -280,7 +319,7 @@ export function startServer({
         // Replay must see the same departures, or a dead session keeps its name and the next arrival is renamed.
         for (const e of Object.values(state.employees)) {
           if (next.employees[e.sessionId]) continue;
-          const gone: F1rmEvent = { sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() };
+          const gone = departure(e);
           append.run(gone.at, JSON.stringify(gone));
         }
         state = next;
