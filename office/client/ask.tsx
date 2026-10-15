@@ -1,5 +1,5 @@
 // Ask: the panel's side-question box, and the shift's history of Asks and Tells. Answers stream in from a read-only copy of the session.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { addEntry, patchEntry, readAnswer, type History, type HistoryEntry } from "./history.ts";
 import "./ask.css";
 
@@ -66,7 +66,7 @@ function Entry({ entry }: { entry: HistoryEntry }) {
           <p className="tag">Told</p>
           <p className="msg">{entry.message}</p>
           <p className="state" role="status">
-            {entry.state === "sending" ? "Sending…" : entry.state === "sent" ? "Sent. It reads this at its next step." : entry.error}
+            {entry.state === "sending" ? "Sending…" : entry.state === "sent" ? "Sent to its inbox." : entry.error}
           </p>
         </li>
       );
@@ -98,9 +98,16 @@ export function AskBox({ onAsk }: { onAsk: (question: string) => void }) {
 
 /** Everything asked and told this shift, oldest first. */
 export function History({ entries }: { entries: HistoryEntry[] }) {
+  const list = useRef<HTMLOListElement>(null);
+  const seen = useRef(entries.length);
+  // The panel scrolls, and the history sits below the boxes: a new entry brings itself into view.
+  useEffect(() => {
+    if (entries.length > seen.current) list.current?.lastElementChild?.scrollIntoView({ block: "nearest" });
+    seen.current = entries.length;
+  }, [entries.length]);
   if (!entries.length) return null;
   return (
-    <ol className="history" aria-label="History this shift">
+    <ol className="history" aria-label="History this shift" ref={list}>
       {entries.map((e) => (
         <Entry key={`${e.kind}-${e.id}`} entry={e} />
       ))}

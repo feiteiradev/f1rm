@@ -136,15 +136,15 @@ export const machine = {
   },
 
   /**
-   * Writes a message into a session's inbox socket; Claude Code reads it at the session's next step, never mid-tool. Resolves once
-   * the frame is written: the socket gives no answer, so a session that holds the message for approval looks the same as one that took it.
+   * Writes a message into a session's inbox socket; Claude Code reads it at the session's next step, never mid-tool. Resolves once the frame is written.
    * Throws unless `socketPath` is an absolute path to a socket file (a symlink is refused: the path came from a hook header).
    */
   async tell(socketPath: string, sessionId: string, message: string): Promise<void> {
     if (!isAbsolute(socketPath) || !lstatSync(socketPath, { throwIfNoEntry: false })?.isSocket()) {
       throw new Error("its inbox socket is gone, so the session has ended");
     }
-    // No auth line: it matters only to a receiver in bypassPermissions, which holds the message either way.
+    // ponytail: Claude Code answers nothing on this socket, so a message a bypassPermissions receiver holds for approval reads as "sent"; the panel says to approve it in the terminal. Watch the receiver's hooks or `claude agents --json` (waitingFor) if a real "pending" state is wanted.
+    // No auth line: the token can't come from a hook header, and without it a bypassPermissions receiver holds the message.
     const frame = JSON.stringify({ type: "user", session_id: sessionId, from: "f1rm", message: { role: "user", content: message } });
     await new Promise<void>((resolve, reject) => {
       const c = connect(socketPath, () => c.end(frame + "\n"));

@@ -30,7 +30,7 @@ export function TellBox({ name, onTell }: { name: string; onTell: (message: stri
         <button type="submit" disabled={!message.trim()}>Tell {name}</button>
       </form>
       <p className="warn">
-        {name} reads this at its next step and may act on it. A working session isn't interrupted mid-tool; an idle one starts a new turn. If it holds messages for approval, approve this one in its terminal.
+        {name} reads this at its next step and may act on it. A running tool isn't interrupted; an idle session starts a new turn. If it holds the message for approval, approve it in its terminal.
       </p>
     </section>
   );

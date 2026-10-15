@@ -136,9 +136,9 @@ test("askFork separates text blocks, falls back to the final result without delt
   expect((await ask("q", "", 1)).value).toEqual({ threw: "claude exited with 1" });
 });
 
-// A stand-in for a session's inbox: a unix socket that records what is written to it. Short path: sockets cap near 104 bytes.
+// A stand-in for a session's inbox: a unix socket that records what is written to it. Sockets cap paths near 104 bytes, so the folders are short.
 async function inbox() {
-  const path = join(mkdtempSync(join("/tmp", "f1rm-ib-")), "s.sock");
+  const path = join(mkdtempSync(join(dir, "ib-")), "s.sock");
   const received: string[] = [];
   const server = createServer((c) => {
     let buf = "";
@@ -161,7 +161,7 @@ test("tell writes one newline-ended user frame, with the session id, into the in
 
 test("tell refuses a path that isn't an absolute, existing socket file", async () => {
   const box = await inbox();
-  const link = join(mkdtempSync(join("/tmp", "f1rm-ib-")), "link.sock");
+  const link = join(mkdtempSync(join(dir, "ib-")), "link.sock");
   symlinkSync(box.path, link);
   const file = join(dir, "plain.sock");
   writeFileSync(file, "");
