@@ -8,8 +8,9 @@ import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
-import { MAX_MESSAGE, tell } from "./tell.ts";
 import type { machine as realMachine } from "./machine.ts";
+
+const MAX_MESSAGE = 4000;
 
 type Options = {
   port: number;
@@ -165,8 +166,12 @@ export function startServer({
         if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) {
           return Response.json({ ok: false, error: `Tell a message of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
         }
-        const result = await tell(machine, employee, message.trim());
-        return Response.json(result, { status: result.ok ? 200 : 409 });
+        // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
+        if (!employee.socket) return Response.json({ ok: false, error: "This session has no inbox to tell." }, { status: 409 });
+        return machine.tell(employee.socket, employee.sessionId, message.trim()).then(
+          () => Response.json({ ok: true }),
+          (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
+        );
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
