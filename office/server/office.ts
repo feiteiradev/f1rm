@@ -1,6 +1,7 @@
 // The office: hook payload normalizer and the pure state reducer.
 import { basename } from "node:path";
 import { nameFor, roleOfAgentType, type RoleId } from "../people.ts";
+import type { BoardRow } from "./board.ts";
 
 export type Status = "working" | "waiting" | "idle" | "offline";
 export type Room = { id: string; name: string };
@@ -34,7 +35,13 @@ export type Intern = {
   /** The sub-agent's type, e.g. Explore. */
   type: string;
 };
-export type OfficeState = { rooms: Record<string, Room>; employees: Record<string, Employee>; interns: Record<string, Intern> };
+export type OfficeState = {
+  rooms: Record<string, Room>;
+  employees: Record<string, Employee>;
+  interns: Record<string, Intern>;
+  /** Each room's board rows, only for rooms that have a board. The server adds this to what it pushes; the reducer never sees it. */
+  boards?: Record<string, BoardRow[]>;
+};
 
 export type F1rmEvent = {
   sessionId: string;

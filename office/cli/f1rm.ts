@@ -170,7 +170,7 @@ function start() {
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath, offlineAfterMs, removeAfterMs });
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath, boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs });
   const url = `http://127.0.0.1:${port}/${token}/`;
   console.log(`f1rm office: ${url}`);
   Bun.spawn(["open", url]);

@@ -80,7 +80,7 @@ Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--
 
 Each repo has one board file, written only by the PM. It lives outside the repo, so project repos stay clean.
 
-- **Path.** `~/.f1rm/boards/<repo>.md`, where `<repo>` is the absolute path of the repo's main working directory with every character that is not a letter or digit replaced by `-`. A repo's worktrees use the main repo's board. Create the directory if it is missing.
+- **Path.** `~/.f1rm/boards/<repo>.md`, where `<repo>` is the absolute path of the repo's main working directory with every character that is not an ASCII letter or digit (`A-Z`, `a-z`, `0-9`) replaced by `-`. A git repo's main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`. A repo's worktrees use the main repo's board. Create the directory if it is missing.
 - **Contents.** A title line, then one Markdown table with exactly these columns.
 
 ```

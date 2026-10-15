@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
+import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { jump } from "./jump.ts";
 import type { machine as realMachine } from "./machine.ts";
@@ -16,6 +17,10 @@ type Options = {
   clientDir: string;
   /** SQLite file for the append-only event log; the office is rebuilt from it on start. */
   dbPath?: string;
+  /** Where the PM's board files live; without it no room has a board. */
+  boardsDir?: string;
+  /** How often the board files are checked for edits. */
+  boardPollMs?: number;
   /** Time source in ms; tests control it. */
   clock?: () => number;
   /** Quiet this long (no event, no transcript write) and an employee goes offline. */
@@ -42,6 +47,8 @@ function same(given: string | null | undefined, expected: string) {
 export function startServer({
   port, secret, token, machine, clientDir,
   dbPath = ":memory:",
+  boardsDir,
+  boardPollMs = 500,
   clock = Date.now,
   offlineAfterMs = 5 * 60_000,
   removeAfterMs = 15 * 60_000,
@@ -75,6 +82,10 @@ export function startServer({
     return room;
   };
 
+  let boards: Record<string, BoardRow[]> = {};
+  const snapshot = () => JSON.stringify({ ...state, boards });
+  const push = () => server.publish("office", snapshot());
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port,
@@ -94,7 +105,7 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
-          server.publish("office", JSON.stringify(state));
+          push();
         }
         return new Response(null, { status: 200 });
       }
@@ -120,7 +131,7 @@ export function startServer({
     websocket: {
       open(ws) {
         ws.subscribe("office");
-        ws.send(JSON.stringify(state));
+        ws.send(snapshot());
       },
       message() {},
     },
@@ -147,17 +158,38 @@ export function startServer({
           append.run(gone.at, JSON.stringify(gone));
         }
         state = next;
-        server.publish("office", JSON.stringify(state));
+        push();
       }
     } finally {
       sweeping = false;
     }
   }
-  const ready = sweepOnce();
+  // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
+  let reading = false;
+  async function readBoards() {
+    if (!boardsDir || reading) return;
+    reading = true;
+    try {
+      const next: Record<string, BoardRow[]> = {};
+      for (const id of Object.keys(state.rooms)) {
+        const rows = await readBoard(boardFile(boardsDir, id));
+        if (rows.length) next[id] = rows;
+      }
+      if (JSON.stringify(next) !== JSON.stringify(boards)) {
+        boards = next;
+        push();
+      }
+    } finally {
+      reading = false;
+    }
+  }
+  const ready = Promise.all([sweepOnce(), readBoards()]);
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
+  const boardTimer = setInterval(readBoards, boardPollMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     clearInterval(timer);
+    clearInterval(boardTimer);
     await stop(closeActiveConnections);
     db.close();
   };
