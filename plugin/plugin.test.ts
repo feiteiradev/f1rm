@@ -143,7 +143,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   expect(claude("plugin", "install", "f1rm@f1rm").code).toBe(0);
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
-  expect(details.out).toContain("Skills (1)  f1rm-guidelines");
+  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
   expect(details.out).toMatch(/Agents \(6\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });

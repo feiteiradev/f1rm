@@ -1,6 +1,6 @@
 # f1rm plugin
 
-The f1rm company for Claude Code: six roles and the `f1rm-guidelines` skill. It works from a plain terminal. The office app is only a view of it.
+The f1rm company for Claude Code: six roles, the `f1rm-guidelines` skill and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
 
 ## Install
 

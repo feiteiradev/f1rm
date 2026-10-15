@@ -30,7 +30,7 @@ Playbook:
    - Backend dev and Frontend dev in parallel only when the brief fixes the API contract between them.
    - Reviewer after every finished branch, and for every branch.
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
-5. **Hire only with `f1rm hire`**. Never start a hire by calling `claude` yourself, because the cap lives in `f1rm hire`.
+5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the cap lives in `f1rm hire`.
 
    ```
    f1rm hire <role> <name> <task> "<brief>"
