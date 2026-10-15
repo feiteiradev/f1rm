@@ -45,8 +45,6 @@
 .hand .args {
   margin: 6px 0 0;
   padding: 8px;
-  max-height: 220px;
-  overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;

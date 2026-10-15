@@ -116,7 +116,8 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
-          // Any later event means the session moved on, except the notification about the very prompt being held.
+          // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
+          // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
           if (event.kind === "PermissionRequest") {

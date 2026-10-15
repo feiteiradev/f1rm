@@ -33,7 +33,7 @@ function Hand({ state, approval: a }: { state: OfficeState; approval: Approval }
       </p>
       <p className="tool">{a.tool || "Tool"}</p>
       {/* Text, never HTML: the arguments are whatever the session asked to run. */}
-      <pre className="args" tabIndex={0} aria-label={`${a.tool} arguments`}>{argsText(a.tool, a.input)}</pre>
+      <pre className="args" aria-label={`${a.tool} arguments`}>{argsText(a.tool, a.input)}</pre>
       <div className="answer">
         <button className="approve" disabled={busy} onClick={() => answer("approve")}>Approve</button>
         <button className="deny" disabled={busy} onClick={() => answer("deny")}>Deny</button>
