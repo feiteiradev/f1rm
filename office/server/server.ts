@@ -9,7 +9,7 @@ import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, t
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
-import { ROLES, roleOfAgentType } from "../people.ts";
+import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
@@ -179,12 +179,19 @@ export function startServer({
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
         const room = url.searchParams.get("room");
         const staff = Object.values(state.employees);
+        // Company order, like the desks; a role file the office doesn't know goes last.
+        const order = (id: string) => {
+          const known = roleOfAgentType(`f1rm:${id}`);
+          return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
+        };
         return Response.json(
-          readRoles().map((r) => {
-            const known = roleOfAgentType(`f1rm:${r.id}`);
-            const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
-            return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
-          }),
+          readRoles()
+            .sort((a, b) => order(a.id) - order(b.id))
+            .map((r) => {
+              const known = roleOfAgentType(`f1rm:${r.id}`);
+              const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
+              return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
+            }),
         );
       }
       if (rest[0] === "hire" && rest.length === 1) {

@@ -675,7 +675,8 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   await office((s) => Object.keys(s.employees).length === 4);
   const roles = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any[];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
-  expect(roles.map((r) => r.id).sort()).toEqual(files);
+  expect([...roles.map((r) => r.id)].sort()).toEqual(files);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });

@@ -36,8 +36,11 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const briefBox = useRef<HTMLTextAreaElement>(null);
   const id = useId();
 
+  // Without scrolling: on a phone the dialog scrolls, and focusing the brief must not hide the roles above it.
+  useEffect(() => briefBox.current?.focus({ preventScroll: true }), [roles]);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     dialog.current!.showModal();
@@ -97,7 +100,7 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
             <label htmlFor={`${id}-brief`}>Brief</label>
             <textarea
               id={`${id}-brief`}
-              autoFocus
+              ref={briefBox}
               rows={7}
               maxLength={8000}
               value={brief}
