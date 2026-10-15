@@ -57,6 +57,8 @@ test("a role keeps its fixed name and look; its counter takes the lowest free nu
 test("only f1rm's own agent types are roles", () => {
   const cases: [unknown, RoleId | undefined][] = [
     ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"],
+    ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"],
+    ["f1rm:pm-dev", undefined], ["f1rm:designer-dev", undefined], ["f1rm:frontend", undefined], ["f1rm:backend", undefined],
     ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],
     ["Explore", undefined], ["", undefined], [undefined, undefined], [7, undefined],
   ];

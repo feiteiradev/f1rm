@@ -218,6 +218,22 @@ test("interns and names survive a restart, and interns leave when their parent g
   expect(quiet.interns).toEqual({});
 });
 
+test("a swept session frees its name for good: the Designer who replaced it is still Maya after a restart", async () => {
+  now = 1_000_000;
+  const first = start();
+  await hook(first.server, "old", "SessionStart", { agent_type: "f1rm:designer" });
+  now += 3500;
+  await office(first.server, (s) => ids(s).length === 0);
+  await hook(first.server, "new", "SessionStart", { agent_type: "f1rm:designer" });
+  const before = await office(first.server, (s) => ids(s).join() === "new");
+  expect(before.employees.new.name).toBe("Maya");
+  first.server.stop(true);
+
+  const second = start(first.dbPath);
+  const after = await office(second.server, (s) => ids(s).join() === "new");
+  expect(after.employees.new.name).toBe("Maya");
+});
+
 test("a restarted server answers nothing until its first sweep has dropped the ghosts", async () => {
   now = 1_000_000;
   const first = start();
