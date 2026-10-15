@@ -1,4 +1,7 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
+import { lstatSync } from "node:fs";
+import { connect } from "node:net";
+import { isAbsolute } from "node:path";
 
 /** The environment for a spawned `claude`, without the session variables of a Claude Code session that launched f1rm: they would make the child look like that session's own child. */
 export function claudeEnv(env: Record<string, string | undefined> = process.env) {
@@ -130,6 +133,25 @@ export const machine = {
     } finally {
       proc.kill();
     }
+  },
+
+  /**
+   * Writes a message into a session's inbox socket; Claude Code reads it at the session's next step, never mid-tool. Resolves once
+   * the frame is written: the socket gives no answer, so a session that holds the message for approval looks the same as one that took it.
+   * Throws unless `socketPath` is an absolute path to a socket file (a symlink is refused: the path came from a hook header).
+   */
+  async tell(socketPath: string, sessionId: string, message: string): Promise<void> {
+    if (!isAbsolute(socketPath) || !lstatSync(socketPath, { throwIfNoEntry: false })?.isSocket()) {
+      throw new Error("its inbox socket is gone, so the session has ended");
+    }
+    // No auth line: it matters only to a receiver in bypassPermissions, which holds the message either way.
+    const frame = JSON.stringify({ type: "user", session_id: sessionId, from: "f1rm", message: { role: "user", content: message } });
+    await new Promise<void>((resolve, reject) => {
+      const c = connect(socketPath, () => c.end(frame + "\n"));
+      c.setTimeout(5000, () => c.destroy(new Error("its inbox didn't answer")));
+      c.on("close", () => resolve());
+      c.on("error", (err: NodeJS.ErrnoException) => reject(new Error(err.code === "ECONNREFUSED" ? "its inbox socket is gone, so the session has ended" : err.message)));
+    });
   },
 
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */

@@ -23,6 +23,10 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
+  tell: async (socket: string, sessionId: string, message: string) => {
+    calls.push(`tell ${socket} ${sessionId} ${message}`);
+    if (tellFails) throw new Error(tellFails);
+  },
   askFork: (sessionId: string, cwd: string, question: string, signal?: AbortSignal) => {
     calls.push(`ask ${sessionId} ${cwd} ${question}`);
     return askAnswer(signal);
@@ -33,6 +37,7 @@ const defaultAnswer = async function* () {
   yield "The codeword is ";
   yield "MANGO.";
 };
+let tellFails = "";
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
 let server: ReturnType<typeof startServer>;
@@ -42,6 +47,7 @@ afterEach(() => {
   openTabs = new Set();
   backgroundIds = {};
   askAnswer = defaultAnswer;
+  tellFails = "";
   sockets.forEach((s) => s.close());
   sockets = [];
   server?.stop(true);
@@ -583,6 +589,58 @@ test("Ask needs the UI token, a POST, a known employee and a sane question", asy
   expect((await askOf("constructor")).status).toBe(404);
   for (const bad of [{}, { question: "  " }, { question: 7 }, { question: "x".repeat(4001) }, "not json"]) {
     expect((await askOf("s1", bad)).status).toBe(400);
+  }
+  expect(calls).toEqual([]);
+});
+
+const tellOf = (id: string, body: unknown = { message: "Use the staging database." }, init: RequestInit = {}, token = TOKEN) =>
+  fetch(`${base()}/${token}/tell/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+    ...init,
+  });
+
+test("Tell writes the message to the socket its hooks reported, for the employee asked for", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  await hook(sessionStart("s2", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/202.sock" });
+  const res = await tellOf("s2", { message: "  Use the staging database.  " });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toEqual(["tell /tmp/cc-socks/202.sock s2 Use the staging database."]);
+});
+
+test("a later event without a socket header keeps the socket the employee reported", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  await hook(preToolUse("s1", "Bash", { command: "ls" }), { "x-f1rm-messaging-socket": "" });
+  expect((await tellOf("s1")).status).toBe(200);
+  expect(calls).toEqual(["tell /tmp/cc-socks/101.sock s1 Use the staging database."]);
+});
+
+test("Tell says why it failed: no socket reported, or the machine refused it", async () => {
+  start();
+  await hook(sessionStart("quiet", "/code/shop"));
+  await hook(sessionStart("gone", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/9.sock" });
+  const none = await tellOf("quiet");
+  expect([none.status, await none.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
+  tellFails = "its inbox socket is gone, so the session has ended";
+  const refused = await tellOf("gone");
+  expect([refused.status, await refused.json()]).toEqual([409, { ok: false, error: "Tell failed: its inbox socket is gone, so the session has ended" }]);
+});
+
+test("Tell needs the UI token, a POST, a known employee and a sane message", async () => {
+  start();
+  await hook(sessionStart("s1", "/a"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/1.sock" });
+  expect((await tellOf("s1", undefined, {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/tell/s1`, { method: "POST", body: "{}" })).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/tell/s1`)).status).toBe(405);
+  expect((await tellOf("s1", undefined, { headers: { origin: "https://evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await tellOf("s1", undefined, { headers: { host: "evil.example" } })).status).toBe(403);
+  expect((await tellOf("nobody")).status).toBe(404);
+  expect((await tellOf("constructor")).status).toBe(404);
+  for (const bad of [{}, { message: "  " }, { message: 7 }, { message: "x".repeat(4001) }, "not json"]) {
+    expect((await tellOf("s1", bad)).status).toBe(400);
   }
   expect(calls).toEqual([]);
 });

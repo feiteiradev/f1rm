@@ -26,6 +26,8 @@ export type Employee = {
   lastEventAt: number;
   /** The session's transcript file, whose mtime counts as liveness. */
   transcript?: string;
+  /** The session's inbox socket, where Tell delivers. Unchecked: whoever holds the ingest secret chose it. */
+  socket?: string;
 };
 /** A sub-agent, shown walking out from its parent's desk until it stops. */
 export type Intern = {
@@ -53,6 +55,8 @@ export type F1rmEvent = {
   /** Clock time (ms) the server received the event. */
   at: number;
   transcript?: string;
+  /** The session's inbox socket path from the hook headers; undefined keeps the previous one. */
+  socket?: string;
   /** Short "what it's doing now"; undefined keeps the previous one. */
   activity?: string;
   /** Raw tool name; undefined keeps the previous one. */
@@ -137,6 +141,7 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
     },
     at,
     ...(typeof payload.transcript_path === "string" && { transcript: payload.transcript_path }),
+    ...(headers.get("x-f1rm-messaging-socket") && { socket: headers.get("x-f1rm-messaging-socket")! }),
     activity: activity[kind],
     tool: toolByKind[kind],
     ...(role && { role }),
@@ -192,6 +197,7 @@ export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
         terminal: e.terminal,
         lastEventAt: e.at,
         transcript: e.transcript ?? before?.transcript,
+        socket: e.socket ?? before?.socket,
       },
     },
   };

@@ -12,9 +12,9 @@
 }
 .panel .ask button:disabled { opacity: 0.6; cursor: default; }
 .ask .hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
-.ask .history { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
-.ask .history p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.ask .q { color: var(--amber); }
-.ask .a { margin-top: 2px; }
-.ask [data-state="streaming"] .a { color: var(--muted); }
-.ask .problem { margin-top: 2px; color: var(--amber); }
+.panel .history { margin: 16px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); list-style: none; display: grid; gap: 12px; }
+.history p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.history .q { color: var(--amber); }
+.history .a { margin-top: 2px; }
+.history [data-state="streaming"] .a { color: var(--muted); }
+.history .problem { margin-top: 2px; color: var(--amber); }

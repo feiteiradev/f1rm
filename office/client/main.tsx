@@ -5,9 +5,10 @@ import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf, scaleFor } from "./layout.ts";
 import { DOOR, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
-import { AskBox, useHistory } from "./ask.tsx";
+import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
+import { TellBox } from "./tell.tsx";
 import { roleTitle } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
 import { poseOf, statusCounts } from "./pose.ts";
@@ -35,7 +36,7 @@ function Counter({ state }: { state: OfficeState }) {
   );
 }
 
-function Panel({ state, id, entries, onAsk, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onClose: () => void }) {
+function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onTell: (message: string) => void; onClose: () => void }) {
   const e = state.employees[id];
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), [id]);
@@ -78,7 +79,9 @@ function Panel({ state, id, entries, onAsk, onClose }: { state: OfficeState; id:
         )}
       </dl>
       <JumpButton key={id} id={id} />
-      <AskBox key={id} entries={entries} onAsk={onAsk} />
+      <AskBox key={id} onAsk={onAsk} />
+      <TellBox key={id} name={name} onTell={onTell} />
+      <History entries={entries} />
     </aside>
   );
 }
@@ -87,7 +90,7 @@ function Panel({ state, id, entries, onAsk, onClose }: { state: OfficeState; id:
 function Project({ state }: { state: OfficeState }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [board, setBoard] = useState<string | null>(null);
-  const { history, ask } = useHistory();
+  const { history, ask, tell } = useHistory();
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<Scene | null>(null);
   const latest = useRef({ state, selected });
@@ -128,7 +131,7 @@ function Project({ state }: { state: OfficeState }) {
   return (
     <>
       <div className="scene" ref={host} />
-      {selected && <Panel state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onClose={() => select(null)} />}
+      {selected && <Panel state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onClose={() => select(null)} />}
       {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
       <BoardList state={state} onOpen={setBoard} />
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
