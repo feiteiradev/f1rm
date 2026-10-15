@@ -673,7 +673,10 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   await hook({ ...common("d3", "Stop"), cwd: "/code/shop" });
   await inRoom("p", { agent_type: "f1rm:pm" });
   await office((s) => Object.keys(s.employees).length === 4);
-  const roles = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any[];
+  working = 3;
+  const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
+  const roles = reply.roles;
+  expect(reply.hires).toEqual({ working: 3, cap: 4 });
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files);
   expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
@@ -682,8 +685,10 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
   expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
-  const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as any[];
-  expect(elsewhere.find((r) => r.id === "designer").working).toBe(0);
+  const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
+  expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
+  working = null;
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 4 });
 });
 
 test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
@@ -746,6 +751,21 @@ test("at the cap Hire answers 409 with the working count and spawns nothing; whe
   const blind = await hireOf(ASSIGN);
   expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
   expect(spawned).toEqual([]);
+});
+
+test("Hire anyway: override spends a slot past the cap, a plain hire after it is still refused, and override must be a boolean", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  working = 4;
+  expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
+  expect(spawned).toEqual([]);
+  expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
+  expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
+  expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
+  working = 5;
+  expect((await hireOf(ASSIGN)).status).toBe(409);
+  expect(spawned.length).toBe(1);
 });
 
 test("Hire says so when claude fails to start the session", async () => {

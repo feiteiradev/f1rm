@@ -2,40 +2,46 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MODELS } from "../people.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
-import { post } from "./post.ts";
+import { send } from "./post.ts";
 import "./hire.css";
 
+/** The working hires against the cap; `working` is null when the office couldn't count them. */
+type Hires = { working: number | null; cap: number };
 type Role = { id: string; name: string; title: string; description: string; skills: string[]; model: string; working: number };
 
 const DEMO = import.meta.env.MODE === "demo";
 
-/** The plugin's roles for this project, or why they couldn't be read. */
+/** The plugin's roles for this project and the working-hire count, or why they couldn't be read. */
 function useRoles(room: string) {
   const [roles, setRoles] = useState<Role[] | null>(null);
+  const [hires, setHires] = useState<Hires | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (DEMO) return;
     let dead = false;
     fetch(new URL(`roles?room=${encodeURIComponent(room)}`, location.href))
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed (${res.status}).`))))
-      .then((list) => !dead && setRoles(list))
+      .then((reply: { roles: Role[]; hires: Hires }) => !dead && (setRoles(reply.roles), setHires(reply.hires)))
       .catch((err: Error) => !dead && setError(`Couldn't read the roles. ${err.message}`));
     return () => {
       dead = true;
     };
   }, [room]);
-  return { roles, error };
+  return { roles, hires, setHires, error };
 }
 
 export function HireDialog({ room, name, onClose }: { room: string; name: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const { roles, error: loadError } = useRoles(room);
+  const { roles, hires, setHires, error: loadError } = useRoles(room);
   const [roleId, setRoleId] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
   const [task, setTask] = useState<string | null>(null);
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // The office refused for the cap, so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
+  const [capped, setCapped] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const briefBox = useRef<HTMLTextAreaElement>(null);
   const id = useId();
 
@@ -47,19 +53,26 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
     return () => opener?.focus?.();
   }, []);
 
+  const full = hires?.working != null && hires.working >= hires.cap;
   const role = roles?.find((r) => r.id === (roleId ?? roles[0]?.id));
   // The task name follows the brief until it is edited by hand.
   const taskName = task ?? taskFrom(brief);
   const ready = !!role && !!brief.trim() && TASK_NAME.test(taskName) && !busy;
 
-  async function hire() {
+  async function hire(override = false) {
     if (!ready) return;
     setBusy(true);
     setProblem(null);
-    const failure = await post("hire", { room, role: role.id, task: taskName, brief: brief.trim(), model: model || null });
-    if (failure === null) return onClose();
+    setCapped(false);
+    setConfirming(false);
+    const { error, reply } = await send("hire", { room, role: role.id, task: taskName, brief: brief.trim(), model: model || null, override });
+    if (error === null) return onClose();
     setBusy(false);
-    setProblem(failure);
+    setProblem(error);
+    if (typeof reply?.working === "number") {
+      setCapped(true);
+      setHires((h) => h && { ...h, working: reply.working as number });
+    }
   }
 
   return (
@@ -82,6 +95,11 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
         <p className="loading" role="status">Reading the roles…</p>
       ) : (
         <form onSubmit={(e) => (e.preventDefault(), hire())}>
+          <p className="count" role="status" data-full={full || undefined}>
+            {hires?.working == null
+              ? "The working hires couldn't be counted."
+              : `${hires.working} of ${hires.cap} hires working.${full ? " That is the cap, so a plain hire is refused." : ""}`}
+          </p>
           <fieldset className="roles">
             <legend>Role</legend>
             {roles.map((r) => (
@@ -128,6 +146,18 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
             </select>
             <button type="submit" disabled={!ready}>{busy ? "Hiring…" : role ? `Hire ${role.name}` : "Hire"}</button>
             <p className="problem" role="alert">{problem}</p>
+            {capped && !confirming && (
+              <button type="button" className="anyway" onClick={() => setConfirming(true)}>Hire anyway</button>
+            )}
+            {capped && confirming && (
+              <div className="confirm" role="group" aria-label="Confirm hiring past the cap">
+                <p>
+                  Hire {role!.name} past the cap? That makes {(hires?.working ?? 0) + 1} hires working, each using your Claude usage. Your yes is the approval to exceed the cap.
+                </p>
+                <button type="button" onClick={() => hire(true)}>Yes, hire anyway</button>
+                <button type="button" onClick={() => setConfirming(false)}>Cancel</button>
+              </div>
+            )}
           </div>
         </form>
       )}

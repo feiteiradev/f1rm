@@ -8,7 +8,7 @@ export const USAGE =
   "usage: f1rm hire [--override] [--report-to <pm session>] <role> <name> <task> <brief> [claude flags...]";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
-const CAP = 4;
+export const CAP = 4;
 // /research and /security-review are slash commands, not Skill-tool skills, so no role lists them under `skills:`.
 const SLASH_ONLY: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
 // ponytail: a deny rule only slows an honest model down; `git -C . push` gets past it. A real block needs a hook.
