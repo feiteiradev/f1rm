@@ -16,6 +16,7 @@ type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
 const LABEL = { fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: "700", fill: 0xe9e4d6 } as const;
 // Art pixels in a desk's own frame: where an intern starts (its parent's seat) and the spots it stands in, in front of the desk.
 const SEAT = { x: 17, y: 14 };
+// ponytail: three standing spots; a fourth intern of one parent stands on the first. Add spots if sub-agent fan-out that wide shows up.
 const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);

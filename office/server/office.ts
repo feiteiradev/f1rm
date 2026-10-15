@@ -27,7 +27,13 @@ export type Employee = {
   transcript?: string;
 };
 /** A sub-agent, shown walking out from its parent's desk until it stops. */
-export type Intern = { agentId: string; /** The parent session id. */ parent: string; type: string };
+export type Intern = {
+  agentId: string;
+  /** The session id of the employee it works for. */
+  parent: string;
+  /** The sub-agent's type, e.g. Explore. */
+  type: string;
+};
 export type OfficeState = { rooms: Record<string, Room>; employees: Record<string, Employee>; interns: Record<string, Intern> };
 
 export type F1rmEvent = {

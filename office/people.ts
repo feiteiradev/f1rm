@@ -22,7 +22,10 @@ export const ROLES = {
 export type RoleId = keyof typeof ROLES;
 export const ROLE_IDS = Object.keys(ROLES) as RoleId[];
 
-/** `f1rm:designer` and `f1rm:frontend-dev` are roles; any other agent type (another plugin's, a built-in) is not. */
+/**
+ * `f1rm:designer` and `f1rm:frontend-dev` are roles; any other agent type (another plugin's, a built-in) is not.
+ * ponytail: the `-dev` spelling is a guess at the role file names; the plugin's role files (#10) must match or this follows them.
+ */
 export function roleOfAgentType(agentType: unknown): RoleId | undefined {
   if (typeof agentType !== "string" || !agentType.startsWith("f1rm:")) return undefined;
   const id = agentType.slice("f1rm:".length).replace(/-dev$/, "");
@@ -30,6 +33,7 @@ export function roleOfAgentType(agentType: unknown): RoleId | undefined {
 }
 
 // None of the six role names, so a freelancer is never mistaken for staff.
+// ponytail: 48 names, then the pool repeats with counters ("Tomas (2)"); widen the pool if offices that big get common.
 const FREELANCER_NAMES = [
   "Tomas", "Livia", "Anders", "Zainab", "Mateo", "Hana", "Oskar", "Elif", "Dario", "Nadia", "Jonas", "Amara",
   "Soraya", "Ivo", "Greta", "Idris", "Noor", "Caio", "Aiko", "Bianca", "Cyrus", "Dalia", "Emeka", "Freya",
