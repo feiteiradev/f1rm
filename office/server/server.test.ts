@@ -20,6 +20,10 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
   liveSessions: async () => new Set<string>(),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
+  letGo: async (id: string) => {
+    calls.push(`letgo ${id}`);
+    if (letGoFails) throw new Error(letGoFails);
+  },
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
@@ -48,6 +52,7 @@ const defaultAnswer = async function* () {
   yield "MANGO.";
 };
 let tellFails = "";
+let letGoFails = "";
 let working: number | null = 0;
 let spawnFails = "";
 let pmFails = "";
@@ -62,6 +67,7 @@ afterEach(() => {
   backgroundIds = {};
   askAnswer = defaultAnswer;
   tellFails = "";
+  letGoFails = "";
   working = 0;
   spawnFails = "";
   pmFails = "";
@@ -888,6 +894,104 @@ test("Let the PM decide and Start PM need the UI token, a POST and the browser's
     expect([path, (await pmPost(path, body, { headers: { origin: "https://evil.example", ...json } })).status]).toEqual([path, 403]);
     expect([path, (await pmPost(path, body, { headers: { host: "evil.example", ...json } })).status]).toEqual([path, 403]);
   }
+  expect(calls).toEqual([]);
+});
+
+const letGoOf = (id: string, body: unknown = { confirm: true }, init: RequestInit = {}, token = TOKEN) =>
+  ui(`letgo/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const internOf = (id: string, body: unknown = { subtask: "Check the staging logs." }, init: RequestInit = {}, token = TOKEN) =>
+  ui(`intern/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+
+test("background says whether claude agents lists the employee's session as a background one", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("fg1", "/code/shop"));
+  const is = async (id: string) => {
+    const res = await ui(`background/${id}`);
+    return [res.status, await res.json()];
+  };
+  expect(await is("bg1")).toEqual([200, { background: true }]);
+  expect(await is("fg1")).toEqual([200, { background: false }]);
+  expect(await is("nobody")).toEqual([200, { background: false }]);
+});
+
+test("Let go stops and removes the background hire's session by its short id, and the employee leaves the office", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("other", "/code/shop"));
+  await office((s) => Object.keys(s.employees).length === 2);
+  const res = await letGoOf("bg1");
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toEqual(["letgo 7c5dcf5d"]);
+  const after = await office((s) => !s.employees.bg1);
+  expect(Object.keys(after.employees)).toEqual(["other"]);
+});
+
+test("Let go does nothing without an explicit confirm, for a session that isn't a background hire, or for an unknown employee", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("fg1", "/code/shop"));
+  for (const body of [{}, { confirm: false }, { confirm: "yes" }, "not json"]) expect([JSON.stringify(body), (await letGoOf("bg1", body)).status]).toEqual([JSON.stringify(body), 400]);
+  const fg = await letGoOf("fg1");
+  expect([fg.status, await fg.json()]).toEqual([409, { error: "Only a background hire can be let go." }]);
+  expect((await letGoOf("nobody")).status).toBe(404);
+  expect((await letGoOf("constructor")).status).toBe(404);
+  expect(calls).toEqual([]);
+  expect(Object.keys((await office((s) => Object.keys(s.employees).length === 2)).employees).sort()).toEqual(["bg1", "fg1"]);
+});
+
+test("Let go says why claude refused or couldn't finish, and the employee stays", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  letGoFails = "worktree has unpushed commits";
+  const res = await letGoOf("bg1");
+  expect([res.status, await res.json()]).toEqual([502, { error: "Let go failed: worktree has unpushed commits" }]);
+  expect(Object.keys((await office((s) => Object.keys(s.employees).length === 1)).employees)).toEqual(["bg1"]);
+});
+
+test("Give them an intern tells the employee to hand the named subtask to a sub-agent", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  const res = await internOf("s1", { subtask: "  Check the staging logs.  " });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toStartWith("tell /tmp/cc-socks/101.sock s1 ");
+  expect(calls[0]).toContain("sub-agent");
+  expect(calls[0]).toEndWith("\nCheck the staging logs.");
+});
+
+test("Give them an intern says why it failed, and refuses a bad subtask or an unknown employee", async () => {
+  start();
+  await hook(sessionStart("quiet", "/code/shop"));
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  const none = await internOf("quiet");
+  expect([none.status, await none.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
+  expect((await internOf("nobody")).status).toBe(404);
+  for (const bad of [{}, { subtask: "  " }, { subtask: 7 }, { subtask: "x".repeat(4001) }, "not json"]) expect((await internOf("s1", bad)).status).toBe(400);
+  expect(calls).toEqual([]);
+});
+
+test("Let go, Give them an intern and background need the UI token, the right method and the browser's own origin", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/1.sock" });
+  const json = { "content-type": "application/json" };
+  const posts = { letgo: { confirm: true }, intern: { subtask: "x" } };
+  for (const [path, body] of Object.entries(posts)) {
+    const of = (init: RequestInit = {}, token = TOKEN) => ui(`${path}/bg1`, { method: "POST", headers: json, body: JSON.stringify(body), ...init }, token);
+    expect([path, (await of({}, "wrong")).status]).toEqual([path, 401]);
+    expect([path, (await fetch(`${base()}/${path}/bg1`, { method: "POST", body: JSON.stringify(body) })).status]).toEqual([path, 401]);
+    expect([path, (await ui(`${path}/bg1`)).status]).toEqual([path, 405]);
+    expect([path, (await of({ headers: { origin: "https://evil.example", ...json } })).status]).toEqual([path, 403]);
+    expect([path, (await of({ headers: { host: "evil.example", ...json } })).status]).toEqual([path, 403]);
+  }
+  expect((await ui("background/bg1", {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/background/bg1`, { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect((await ui("background/bg1", { method: "POST" })).status).toBe(405);
   expect(calls).toEqual([]);
 });
 

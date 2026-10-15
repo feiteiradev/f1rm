@@ -2,6 +2,7 @@
 // checks the Hire dialog: the Hire button and an empty desk open it, the roles come from the plugin folder, the hire
 // leaves the server as the exact claude argv, the working-hire count shows, a plain hire at the cap spawns nothing, Hire anyway needs a confirm that can be cancelled,
 // the PM section (Let the PM decide tells the PM the need, Start PM opens a PM tab in the repo folder only when there is no PM),
+// the panel's Give them an intern (a Tell with the subtask) and Let go (only for a background hire, behind a confirm that can be cancelled),
 // and the static demo explains that hiring needs a live office.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/hire-proof.mjs
@@ -17,7 +18,8 @@ const OUT = resolve(process.env.OUT ?? "hire-proof-out");
 mkdirSync(OUT, { recursive: true });
 
 const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
-const spawned = [], told = [], pmTabs = [];
+const spawned = [], told = [], pmTabs = [], letGone = [];
+const backgroundIds = { des1: "7c5dcf5d" };
 let working = 1;
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
@@ -26,6 +28,8 @@ const server = startServer({
     liveSessions: async () => new Set(),
     workingHires: async () => working,
     tell: async (socket, sessionId, message) => void told.push({ socket, sessionId, message }),
+    backgroundId: async (sessionId) => backgroundIds[sessionId] ?? null,
+    letGo: async (id) => void letGone.push(id),
     startPmInIterm: async (folder) => void pmTabs.push(folder),
     spawnBackground: async (argv, cwd) => (spawned.push({ argv, cwd }), "backgrounded"),
   },
@@ -175,6 +179,42 @@ try {
   assert.deepEqual(pmTabs, ["/code/blog"], "Start PM opens one PM tab in the project's folder");
   assert.equal(told.length, 1, "Start PM tells nobody");
 
+  await page.getByRole("button", { name: /Lobby/ }).click();
+  await page.locator(".door", { hasText: "shop" }).click();
+  const panel = page.locator(".panel");
+  const told0 = told.length;
+  const fromPm = page.waitForResponse((r) => r.url().includes("/background/pm1"));
+  await page.locator(".roster button", { hasText: "PM," }).dispatchEvent("click");
+  await fromPm;
+  assert.equal(await panel.getByRole("button", { name: "Let go", exact: true }).count(), 0, "a session that is not a background hire has no Let go");
+  await panel.getByLabel("Give Priya an intern", { exact: true }).fill("Check the staging logs.");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await panel.getByText("Sent to its inbox.").waitFor();
+  assert.equal(told.length, told0 + 1, "Give them an intern sends one Tell");
+  assert.deepEqual([told.at(-1).socket, told.at(-1).sessionId], ["/tmp/cc-socks/pm1.sock", "pm1"], "it went to that employee's inbox");
+  assert.match(told.at(-1).message, /sub-agent[\s\S]*\nCheck the staging logs\.$/, "it asks for a sub-agent and carries the subtask");
+  assert.match(await panel.locator(".history").innerText(), /Hand to an intern: Check the staging logs\./, "the history shows the shortcut");
+  await page.screenshot({ path: join(OUT, "08-intern.png") });
+
+  const fromBg = page.waitForResponse((r) => r.url().includes("/background/des1"));
+  await page.locator(".roster button", { hasText: "Designer," }).dispatchEvent("click");
+  await fromBg;
+  const letGo = panel.getByRole("button", { name: "Let go", exact: true });
+  await letGo.waitFor();
+  await page.screenshot({ path: join(OUT, "09-let-go.png") });
+  await letGo.click();
+  const sure = panel.getByRole("group", { name: "Confirm letting Maya go" });
+  assert.match(await sure.innerText(), /Let Maya go\? This stops the session and removes it from Claude Code/);
+  await page.screenshot({ path: join(OUT, "10-let-go-confirm.png") });
+  await sure.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await sure.count(), 0, "Cancel closes the confirm");
+  assert.deepEqual(letGone, [], "a cancelled confirm lets nobody go");
+  await letGo.click();
+  await sure.getByRole("button", { name: "Yes, let go", exact: true }).click();
+  await panel.waitFor({ state: "detached" });
+  assert.deepEqual(letGone, ["7c5dcf5d"], "a confirmed Let go stops and removes the session by its short id");
+  assert.equal(await page.locator(".roster button", { hasText: "Designer," }).count(), 0, "Maya has left the office");
+
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 780 } })).newPage();
   watch(phone);
   await phone.goto(`${base}/${TOKEN}/`);
@@ -207,7 +247,7 @@ try {
   }
 
   assert.deepEqual(errors, ["Failed to load resource: the server responded with a status of 409 (Conflict)"], "no page errors but the browser's own note of the cap's 409");
-  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the count and the cap, refuses a plain hire there, hires anyway only after a confirm, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
+  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the count and the cap, refuses a plain hire there, hires anyway only after a confirm, tells an intern's subtask, lets a background hire go only after a confirm, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
 } finally {
   await browser.close();
   server.stop(true);
