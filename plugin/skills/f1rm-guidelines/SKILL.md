@@ -17,7 +17,7 @@ Hierarchy: the user, then one PM per repo, then specialists hired per task. The 
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
 | `frontend-dev` | UI implementation | `mattpocock-skills:tdd` |
 | `backend-dev` | Server, data, API implementation | `mattpocock-skills:tdd` |
-| `reviewer` | Review and local merge of every finished branch | `code-review`, `security-review` |
+| `reviewer` | Review and local merge of every finished branch | `code-review`, `f1rm:f1rm-guidelines`, `security-review` |
 | `researcher` | A question that needs current, cited facts | `research` |
 
 Playbook:
@@ -30,28 +30,39 @@ Playbook:
    - Backend dev and Frontend dev in parallel only when the brief fixes the API contract between them.
    - Reviewer after every finished branch, and for every branch.
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
-5. **Hire only with `f1rm hire`** (role, name, task slug, brief). Run `f1rm hire --help` for the exact syntax. Never start a hire by calling `claude` yourself, because the cap lives in `f1rm hire`.
+5. **Hire only with `f1rm hire`**. Never start a hire by calling `claude` yourself, because the cap lives in `f1rm hire`.
+
+   ```
+   f1rm hire <role> <name> <task> "<brief>"
+   ```
+
+   - `<role>` is `designer`, `frontend-dev`, `backend-dev`, `reviewer` or `researcher`.
+   - `<name>` and `<task>` follow rule 6. The task slug becomes the worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`.
+   - `<brief>` is one quoted argument in the brief format below, without the `Report to` line. `f1rm hire` adds it.
+   - Flags after the brief go to `claude`, for example `--model haiku`.
+   - `--report-to <session>` before the role overrides the PM session name. It defaults to `pm-<repo basename>`.
+   - Run it in the repo's main working directory. Background sessions run only in folders the user has trusted.
+   - It prints `backgrounded · <id>` and exits 0 on success, and exits non-zero with a message when it refuses.
 6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`. The task slug is lowercase words joined by hyphens, unique on the board.
-7. **Slash commands.** The brief of a hire starts with its role's slash commands, for example `/research` and `/security-review`. They are commands, not Skill-tool skills, so a role cannot invoke them itself and its file does not list them under `skills:`. `f1rm hire` prepends them, so do not write them in the brief yourself.
+7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline` or `/research`. Only the first slash command in a prompt expands, so `f1rm hire` names the role's other skills in the brief and the hire loads them with the Skill tool before starting. `/research` is a command, not a Skill-tool skill, so it is always a role's first entry. `/security-review` is built in, and the Reviewer loads it with the Skill tool. `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
 
 ## Brief format
 
-A hire sees only its brief and the repo. Write the brief so it can work without asking. Use exactly these sections, in this order.
+A hire sees only its brief and the repo. Write the brief so it can work without asking. `f1rm hire` puts `Report to: <PM session name>` right after the slash commands. Write exactly these sections, in this order.
 
 ```
 Task: <slug>: <one-line goal>
-Report to: <PM session name>
 Context: <what exists, which files matter, decisions the user made in the interview>
 Inputs: <paths or links to specs, designs, research from earlier tasks, or "none">
 Deliverable: <what must exist when done>, as commits on this worktree branch
 Acceptance criteria:
 - <criterion> (proved by: <the check>)
 Out of scope: <what to leave alone>
-Report: when done or blocked, SendMessage to "<PM session name>" as described in the handoff rules
+Report: when done or blocked, SendMessage to the session named in `Report to`, as described in the handoff rules
 ```
 
-Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. Use that exact name in `Report to`. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review.
+Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. `f1rm hire` fills in `Report to` with it, so pass `--report-to` only if you were started another way. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review.
 
 ## Handoff via SendMessage
 
@@ -110,7 +121,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 - At most **4 hired employees working at once**, counted across the whole firm, not per repo. The Reviewer and the Researcher count.
 - `f1rm hire` refuses at 4 working hires, with a non-zero exit and a message.
 - When it refuses, leave the task `todo`, tell the user why, and ask whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
-- Use the override flag of `f1rm hire` only after the user has approved exceeding the cap in this conversation, for this hire. An earlier approval or your own judgment is not approval. Ask again for each later hire.
+- Use the override flag of `f1rm hire` (`f1rm hire --override <role> <name> <task> "<brief>"`) only after the user has approved exceeding the cap in this conversation, for this hire. An earlier approval or your own judgment is not approval. Ask again for each later hire.
 
 ## Definition of done
 
