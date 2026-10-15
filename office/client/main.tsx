@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
-import { identityOf } from "./people.ts";
+import { roleTitle } from "../people.ts";
 import { poseOf, statusCounts } from "./pose.ts";
 import { createScene, type Scene } from "./scene.ts";
 import "./office.css";
@@ -32,7 +32,8 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), [id]);
   if (!e) return null;
-  const { name, role } = identityOf(id);
+  const { name } = e, role = roleTitle(e.role);
+  const interns = Object.values(state.interns).filter((i) => i.parent === id);
   const activity = e.status === "offline" ? "None" : e.activity || (e.status === "idle" ? IDLE_TEXT : "None");
   return (
     <aside className="panel" aria-label={`${name}, ${role}`}>
@@ -46,6 +47,12 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
         </button>
       </header>
       <dl>
+        {e.title && (
+          <>
+            <dt>Session</dt>
+            <dd>{e.title}</dd>
+          </>
+        )}
         <dt>Room</dt>
         <dd title={e.cwd}>{state.rooms[e.room]?.name}</dd>
         <dt>Status</dt>
@@ -55,6 +62,12 @@ function Panel({ state, id, onClose }: { state: OfficeState; id: string; onClose
         </dd>
         <dt>Activity</dt>
         <dd className="activity">{activity}</dd>
+        {interns.length > 0 && (
+          <>
+            <dt>Interns</dt>
+            <dd>{interns.map((i) => i.type || "Sub-agent").join(", ")}</dd>
+          </>
+        )}
       </dl>
     </aside>
   );
@@ -128,11 +141,12 @@ function Office() {
         <ul className="roster">
           {state &&
             rosterOf(state).map((e) => {
-              const { name, role } = identityOf(e.sessionId);
+              const interns = Object.values(state.interns).filter((i) => i.parent === e.sessionId).length;
               return (
                 <li key={e.sessionId}>
                   <button data-pose={poseOf(e)} onClick={() => select(e.sessionId)}>
-                    {name}, {role}, {state.rooms[e.room]?.name}, {STATUS_TEXT[e.status]}
+                    {e.name}, {roleTitle(e.role)}, {state.rooms[e.room]?.name}, {STATUS_TEXT[e.status]}
+                    {interns > 0 && `, ${interns} ${interns === 1 ? "intern" : "interns"}`}
                   </button>
                 </li>
               );

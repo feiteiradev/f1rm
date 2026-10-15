@@ -300,3 +300,109 @@ test("the server sends no CORS headers", async () => {
     expect(Array.from(res.headers, ([h]) => h).filter((h) => h.startsWith("access-control-"))).toEqual([]);
   }
 });
+
+const ROLE_NAMES = ["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"];
+
+test("a session started with --agent is that role's employee, titled by --name; any other session is a freelancer", async () => {
+  start();
+  const prompt = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...extra });
+  await prompt("d", { agent_type: "f1rm:designer", session_title: "login-redesign" });
+  await prompt("f", { agent_type: "f1rm:frontend-dev" });
+  await prompt("b", { agent_type: "f1rm:backend-dev" });
+  await prompt("p", { agent_type: "f1rm:pm" });
+  await prompt("v", { agent_type: "f1rm:reviewer" });
+  await prompt("r", { agent_type: "f1rm:researcher" });
+  await prompt("x", { agent_type: "other:designer" });
+  await prompt("e", { agent_type: "Explore" });
+  await prompt("n", {});
+
+  const { employees: e } = await office((s) => Object.keys(s.employees).length === 9);
+  const seen = (id: string) => [e[id].role, e[id].name];
+  expect(seen("d")).toEqual(["designer", "Maya"]);
+  expect(seen("f")).toEqual(["frontend", "Felix"]);
+  expect(seen("b")).toEqual(["backend", "Bruno"]);
+  expect(seen("p")).toEqual(["pm", "Priya"]);
+  expect(seen("v")).toEqual(["reviewer", "Ines"]);
+  expect(seen("r")).toEqual(["researcher", "Kofi"]);
+  expect(e.d.title).toBe("login-redesign");
+  for (const id of ["x", "e", "n"]) {
+    expect(e[id].role).toBeNull();
+    expect(ROLE_NAMES).not.toContain(e[id].name);
+  }
+
+  // Later events without the fields keep them.
+  await hook(preToolUse("d", "Bash", { command: "ls" }));
+  expect((await office(() => true)).employees.d).toMatchObject({ role: "designer", name: "Maya", title: "login-redesign" });
+});
+
+test("tool events from inside a sub-agent do not give the session the sub-agent's role", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  await hook({ ...preToolUse("s1", "Read", { file_path: "/a" }), agent_id: "a1", agent_type: "f1rm:reviewer" });
+  const { employees } = await office((s) => s.employees.s1?.tool === "Read");
+  expect(employees.s1.role).toBeNull();
+
+  // The main session's own event names the role, and the employee takes the role's name.
+  await hook({ ...preToolUse("s1", "Read", { file_path: "/a" }), agent_type: "f1rm:designer" });
+  expect((await office(() => true)).employees.s1).toMatchObject({ role: "designer", name: "Maya" });
+});
+
+test("concurrent shifts of a role count up, and a freed counter is reused", async () => {
+  start();
+  const shift = (id: string) => hook({ ...common(id, "SessionStart"), source: "startup", agent_type: "f1rm:designer" });
+  await shift("a");
+  await shift("b");
+  await shift("c");
+  const names = async () => Object.fromEntries(Object.entries((await office(() => true)).employees).map(([id, e]) => [id, e.name]));
+  expect(await names()).toEqual({ a: "Maya", b: "Maya (2)", c: "Maya (3)" });
+
+  await hook({ ...common("a", "SessionEnd"), reason: "other" });
+  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)" });
+  await shift("d");
+  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)", d: "Maya" });
+});
+
+test("freelancer names are unique among the employees present and never a role's name, even with 120 sessions", async () => {
+  start();
+  const ids = Array.from({ length: 120 }, (_, i) => `session-${i}`);
+  for (const id of ids) await hook(sessionStart(id, "/code/shop"));
+  const { employees } = await office((s) => Object.keys(s.employees).length === ids.length);
+  const names = Object.values(employees).map((e) => e.name);
+  expect(new Set(names).size).toBe(ids.length);
+  for (const name of names) expect(ROLE_NAMES).not.toContain(name.replace(/ \(\d+\)$/, ""));
+});
+
+test("a sub-agent is an intern of its parent from its start to its stop, and never an employee", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  await hook(sessionStart("parent", "/code/shop"));
+  await hook({ ...common("parent", "Stop"), stop_hook_active: false });
+  const sub = (event: string, agent_id: string, extra: object = {}) =>
+    hook({ ...common("parent", event), agent_id, agent_type: "Explore", ...extra });
+
+  await sub("SubagentStart", "agent-1");
+  await sub("SubagentStart", "agent-2");
+  const busy = await office((s) => Object.keys(s.interns).length === 2);
+  expect(busy.interns["agent-1"]).toEqual({ agentId: "agent-1", parent: "parent", type: "Explore" });
+  expect(Object.keys(busy.employees)).toEqual(["parent"]);
+  expect(busy.employees.parent.status).toBe("working");
+
+  await sub("SubagentStop", "agent-1", { agent_transcript_path: "/t", last_assistant_message: "done" });
+  const left = await office((s) => Object.keys(s.interns).length === 1);
+  expect(Object.keys(left.interns)).toEqual(["agent-2"]);
+
+  // Claude Code's own helper agents stop without ever starting; that says nothing about the parent.
+  await hook({ ...common("parent", "Stop"), stop_hook_active: false });
+  await sub("SubagentStop", "never-started");
+  const after = await office(() => true);
+  expect(after.employees.parent.status).toBe("idle");
+  expect(Object.keys(after.interns)).toEqual(["agent-2"]);
+});
+
+test("a parent's interns leave with it", async () => {
+  start();
+  await hook(sessionStart("parent", "/code/shop"));
+  await hook({ ...common("parent", "SubagentStart"), agent_id: "agent-1", agent_type: "Explore" });
+  await office((s) => "agent-1" in s.interns);
+  await hook({ ...common("parent", "SessionEnd"), reason: "other" });
+  expect(await office(() => true)).toMatchObject({ employees: {}, interns: {} });
+});
