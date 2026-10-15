@@ -8,6 +8,7 @@
   "scripts": {
     "build": "vite build office/client --base ./",
     "start": "bun office/cli/f1rm.ts start",
+    "smoke": "bun scripts/smoke.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun test && bun run typecheck && bun run build"
   },
