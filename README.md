@@ -27,7 +27,9 @@ bun office/cli/f1rm.ts install   # adds f1rm's hooks to ~/.claude/settings.json,
 bun office/cli/f1rm.ts start     # opens the office in your browser
 ```
 
-Sessions you start after `install` appear in the office. `bun office/cli/f1rm.ts uninstall` removes exactly what `install` added.
+Sessions you start after `install` appear in the office. `bun office/cli/f1rm.ts uninstall` removes exactly what `install` added, and keeps your event log and boards.
+
+To keep the office running in the background and at login, so the hooks always reach it, run `f1rm service` once. Run it again after a `git pull` to restart the office on the new code. `f1rm start` then just opens the page, and `f1rm service off` removes the background office. Its log is `~/.f1rm/office.log`.
 
 ## The company
 

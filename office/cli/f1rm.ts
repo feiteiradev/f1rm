@@ -15,6 +15,10 @@ const F1RM_DIR = join(process.env.HOME!, ".f1rm");
 const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 // What install created, so uninstall removes those containers and no others.
 const CREATED_FILE = join(F1RM_DIR, "created.json");
+// The running office's tokenized URL, so `f1rm start` can open an office that is already up.
+const URL_FILE = join(F1RM_DIR, "office-url");
+const SERVICE = "dev.f1rm.office";
+const PLIST = join(process.env.HOME!, "Library", "LaunchAgents", `${SERVICE}.plist`);
 const DEFAULT_PORT = 4170;
 const SECRET_HEADER = "X-F1rm-Secret";
 
@@ -153,7 +157,9 @@ function uninstall() {
   for (const event of created.events) if (after.hooks![event]?.length === 0) delete after.hooks![event];
   if (created.hooks && Object.keys(after.hooks!).length === 0) delete after.hooks;
   writeSettings(after);
-  rmSync(F1RM_DIR, { recursive: true, force: true });
+  if (existsSync(PLIST)) serviceOff();
+  // The event log and the PM's boards stay: they are the user's history, not install state.
+  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE]) rmSync(f, { force: true });
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
 
@@ -163,7 +169,7 @@ function seconds(name: string, fallback: number): number {
   return n;
 }
 
-function start() {
+function serve() {
   const settings = readSettings();
   const hook = installed(settings);
   if (!hook) throw new Error("hooks not installed: run `f1rm install` first");
@@ -183,8 +189,61 @@ function start() {
 
   startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
+  writeFileSync(URL_FILE, url, { mode: 0o600 });
+  chmodSync(URL_FILE, 0o600);
   console.log(`f1rm office: ${url}`);
-  Bun.spawn(["open", url]);
+  return url;
+}
+
+async function runningOffice(): Promise<string | null> {
+  const url = existsSync(URL_FILE) ? readFileSync(URL_FILE, "utf8").trim() : "";
+  if (!url) return null;
+  const up = await fetch(url, { signal: AbortSignal.timeout(1000) }).then((r) => r.ok, () => false);
+  return up ? url : null;
+}
+
+/** Opens the office that is already running (the background service), or runs one here. */
+async function start() {
+  const running = await runningOffice();
+  if (running) console.log(`f1rm office: ${running}`);
+  Bun.spawn(["open", running ?? serve()]);
+}
+
+const launchctl = (...args: string[]) => Bun.spawnSync(["launchctl", ...args], { stdout: "ignore", stderr: "ignore" }).exitCode;
+const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Runs the office at login and keeps it running, so the hooks always reach it. Running it again restarts it. */
+function service() {
+  if (process.argv[3] === "off") return serviceOff();
+  if (!installed(readSettings())) throw new Error("hooks not installed: run `f1rm install` first");
+  const log = join(F1RM_DIR, "office.log");
+  const args = [process.execPath, join(import.meta.dir, "f1rm.ts"), "serve"].map((a) => `<string>${xml(a)}</string>`).join("");
+  // launchd starts with a bare PATH; the office needs this one to find claude, git and osascript.
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${SERVICE}</string>
+<key>ProgramArguments</key><array>${args}</array>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(process.env.PATH ?? "")}</string></dict>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>${xml(log)}</string>
+<key>StandardErrorPath</key><string>${xml(log)}</string>
+</dict></plist>
+`;
+  mkdirSync(dirname(PLIST), { recursive: true });
+  writeFileSync(PLIST, plist);
+  const domain = `gui/${process.getuid!()}`;
+  launchctl("bootout", `${domain}/${SERVICE}`);
+  if (launchctl("bootstrap", domain, PLIST) !== 0) throw new Error(`launchctl could not load ${PLIST}; see ${log}`);
+  console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
+}
+
+function serviceOff() {
+  launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
+  rmSync(PLIST, { force: true });
+  rmSync(URL_FILE, { force: true });
+  console.log("f1rm background office stopped and removed.");
 }
 
 // The recorded office on its own static build: no hooks, no database, no session of yours involved.
@@ -224,13 +283,15 @@ const commands: Record<string, () => void | Promise<void>> = {
   install,
   uninstall,
   start,
+  serve: () => void serve(),
+  service,
   demo,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
 };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start | demo | pm [claude flags] | hire <role> <name> <task> <brief>");
+  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | pm [claude flags] | hire <role> <name> <task> <brief>");
   process.exit(1);
 }
 try {
