@@ -121,6 +121,40 @@ test("install gives a hook installed with the old 5 s timeout the longer permiss
   expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe(upgraded);
 });
 
+test("install collects no messaging token, so no hook puts it on curl's command line", () => {
+  const home = tempHome();
+  f1rm(home, "install");
+  expect(JSON.stringify(settingsOf(home))).not.toContain("MESSAGING_TOKEN");
+});
+
+test("an install that still forwards the messaging token is upgraded in place, then uninstalls exactly", () => {
+  const home = tempHome(userSettings);
+  f1rm(home, "install");
+  const old = settingsOf(home);
+  const header = "X-F1rm-Messaging-Token";
+  for (const groups of Object.values(old.hooks) as any[]) {
+    for (const h of groups.flatMap((g: any) => g.hooks)) {
+      if (h.type === "http" && h.headers?.["X-F1rm-Secret"]) {
+        h.headers[header] = "$CLAUDE_CODE_MESSAGING_TOKEN";
+        h.allowedEnvVars.push("CLAUDE_CODE_MESSAGING_TOKEN");
+      }
+      if (h.type === "command" && h.command.includes(".f1rm/ingest-headers")) {
+        h.command = h.command.replace(" --data-binary", ` -H "${header}: $CLAUDE_CODE_MESSAGING_TOKEN" --data-binary`);
+      }
+    }
+  }
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
+
+  expect(f1rm(home, "install").code).toBe(0);
+  const upgraded = settingsOf(home);
+  expect(JSON.stringify(upgraded)).not.toContain("MESSAGING_TOKEN");
+  expect(f1rmHandlers(upgraded)).toHaveLength(f1rmHandlers(old).length);
+  expect(secretOf(upgraded)).toBe(secretOf(old));
+  expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
+  expect(f1rm(home, "uninstall").code).toBe(0);
+  expect(settingsOf(home)).toEqual(userSettings);
+});
+
 test("start refuses an approval timeout the installed permission hook would not outlast", () => {
   const home = tempHome();
   f1rm(home, "install");

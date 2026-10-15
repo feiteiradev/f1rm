@@ -18,13 +18,15 @@ const CREATED_FILE = join(F1RM_DIR, "created.json");
 const DEFAULT_PORT = 4170;
 const SECRET_HEADER = "X-F1rm-Secret";
 
-// Session env values each hook carries to the server, as header -> env var.
+// Session env values each hook carries to the server, as header -> env var. Not the messaging token: Tell works
+// without it (spec amendment 2), and curl would carry it on its command line.
 const ENV_HEADERS: Record<string, string> = {
   "X-F1rm-Iterm-Session": "ITERM_SESSION_ID",
   "X-F1rm-Term-Program": "TERM_PROGRAM",
   "X-F1rm-Messaging-Socket": "CLAUDE_CODE_MESSAGING_SOCKET",
-  "X-F1rm-Messaging-Token": "CLAUDE_CODE_MESSAGING_TOKEN",
 };
+// Installs from before amendment 2 also forwarded the token. They are still f1rm's: install upgrades them, uninstall removes them.
+const SHAPES = [ENV_HEADERS, { ...ENV_HEADERS, "X-F1rm-Messaging-Token": "CLAUDE_CODE_MESSAGING_TOKEN" }];
 // Seconds; keeps a stuck office from stalling sessions. A dead office is a connection error, which Claude Code ignores.
 const HOOK_TIMEOUT = 5;
 // PermissionRequest is held for the browser, so its hook must outlast the broker or Claude Code cancels the hook before the broker answers.
@@ -51,8 +53,8 @@ type Settings = { hooks?: Record<string, { matcher?: string; hooks: Handler[] }[
 
 type Created = { hooks: boolean; events: string[] };
 
-function curlHook(url: string): Handler {
-  const env = Object.entries(ENV_HEADERS).map(([h, v]) => ` -H "${h}: $${v}"`).join("");
+function curlHook(url: string, envHeaders = ENV_HEADERS): Handler {
+  const env = Object.entries(envHeaders).map(([h, v]) => ` -H "${h}: $${v}"`).join("");
   return {
     type: "command",
     command: `curl -s -m ${HOOK_TIMEOUT} -o /dev/null -H 'Content-Type: application/json' -H @'${HEADERS_FILE}'${env} --data-binary @- ${url} || true`,
@@ -60,12 +62,12 @@ function curlHook(url: string): Handler {
   };
 }
 
-function httpHook(url: string, secret: string, event = ""): Handler {
+function httpHook(url: string, secret: string, event = "", envHeaders = ENV_HEADERS): Handler {
   return {
     type: "http",
     url,
-    headers: { [SECRET_HEADER]: secret, ...Object.fromEntries(Object.entries(ENV_HEADERS).map(([h, v]) => [h, `$${v}`])) },
-    allowedEnvVars: Object.values(ENV_HEADERS),
+    headers: { [SECRET_HEADER]: secret, ...Object.fromEntries(Object.entries(envHeaders).map(([h, v]) => [h, `$${v}`])) },
+    allowedEnvVars: Object.values(envHeaders),
     timeout: event === "PermissionRequest" ? APPROVAL_HOOK_TIMEOUT : HOOK_TIMEOUT,
   };
 }
@@ -75,10 +77,12 @@ const handlerFor = (event: string, url: string, secret: string) => (event === "S
 
 // A handler is f1rm's only if it is exactly what install writes. The timeout is left out so an install from before it varied per event is still recognised, and replaced.
 const isF1rmHttp = (h: Handler) =>
-  h.type === "http" && !!h.headers?.[SECRET_HEADER] && isDeepStrictEqual({ ...h, timeout: 0 }, { ...httpHook(String(h.url), h.headers[SECRET_HEADER]), timeout: 0 });
+  h.type === "http" &&
+  !!h.headers?.[SECRET_HEADER] &&
+  SHAPES.some((env) => isDeepStrictEqual({ ...h, timeout: 0 }, { ...httpHook(String(h.url), h.headers![SECRET_HEADER], "", env), timeout: 0 }));
 const isF1rmCurl = (h: Handler) => {
   const url = /--data-binary @- (\S+) \|\| true$/.exec(String(h.command))?.[1];
-  return h.type === "command" && !!url && isDeepStrictEqual(h, curlHook(url));
+  return h.type === "command" && !!url && SHAPES.some((env) => isDeepStrictEqual(h, curlHook(url, env)));
 };
 const isF1rm = (h: Handler) => isF1rmHttp(h) || isF1rmCurl(h);
 
