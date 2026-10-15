@@ -1,5 +1,5 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
-import { lstatSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { connect } from "node:net";
 import { basename, dirname, isAbsolute } from "node:path";
 
@@ -23,6 +23,9 @@ async function* lines(stream: ReadableStream<Uint8Array>) {
 const ITERM ='application id "com.googlecode.iterm2"';
 // A leading "-" would let an id be read as a flag.
 const SAFE_ID = /^\w[\w-]*$/;
+
+/** One shell word that holds `s` literally, in sh, bash, zsh and fish alike. */
+export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
 export async function agents(all: boolean): Promise<any[] | null> {
@@ -203,6 +206,13 @@ export const machine = {
   async attachInIterm(backgroundId: string): Promise<void> {
     if (!SAFE_ID.test(backgroundId)) throw new Error("bad background session id");
     await osascript(RUN_IN_NEW_TAB, `claude attach ${backgroundId}`);
+  },
+
+  /** Opens a new iTerm2 tab in `folder` running `f1rm pm`. The folder reaches a shell line, so it is single-quoted and anything that could act as a keystroke is refused. */
+  async startPmInIterm(folder: string): Promise<void> {
+    if (!isAbsolute(folder) || /[\x00-\x1f\x7f]/.test(folder)) throw new Error("bad project folder");
+    if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) throw new Error("the project folder is gone");
+    await osascript(RUN_IN_NEW_TAB, `cd ${shellQuote(folder)} && f1rm pm`);
   },
 
   /** Focuses the VS Code window open on `folder` (VS Code opens one if there is none). */

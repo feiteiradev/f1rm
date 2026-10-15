@@ -32,6 +32,7 @@ const fakeMachine = () => ({
   tell: async () => {},
   workingHires: async () => 0,
   spawnBackground: async () => "",
+  startPmInIterm: async () => {},
 });
 
 let servers: ReturnType<typeof startServer>[] = [];

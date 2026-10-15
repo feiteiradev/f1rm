@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { machine as realMachine } from "./machine.ts";
+import { machine as realMachine, shellQuote } from "./machine.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-machine-"));
 const log = join(dir, "calls.log");
@@ -113,6 +113,28 @@ test("attachInIterm types `claude attach <id>` into a new tab, and refuses an id
   expect(calls[0].at(-2)).toBe("claude attach 7c5dcf5d");
   const bad = await run(`machine.attachInIterm("7c5; rm -rf ~")`);
   expect([bad.value, bad.calls]).toEqual([{ threw: "bad background session id" }, []]);
+});
+
+test("startPmInIterm types `cd <folder> && f1rm pm` into a new tab, quoting the folder so it stays one word", async () => {
+  const plain = realpathSync(mkdtempSync(join(dir, "pm-")));
+  const { calls } = await run(`machine.startPmInIterm(${JSON.stringify(plain)})`);
+  expect(calls[0].slice(0, 2)).toEqual(["osascript", "-e"]);
+  expect(calls[0].at(-2)).toBe(`cd '${plain}' && f1rm pm`);
+
+  const hostile = join(plain, `it's $(id) "x" ; rm -rf ~`);
+  mkdirSync(hostile);
+  const quoted = await run(`machine.startPmInIterm(${JSON.stringify(hostile)})`);
+  expect(quoted.calls[0].at(-2)).toBe(`cd '${plain}/it'\\''s $(id) "x" ; rm -rf ~' && f1rm pm`);
+  const word = Bun.spawnSync(["sh", "-c", `printf %s ${shellQuote(hostile)}`]).stdout.toString();
+  expect(word).toBe(hostile);
+});
+
+test("startPmInIterm refuses a folder that is relative, holds a control character, or is gone, and opens no tab", async () => {
+  const plain = realpathSync(mkdtempSync(join(dir, "pm-")));
+  for (const [folder, why] of [["code/shop", "bad project folder"], [`${plain}\nrm -rf ~`, "bad project folder"], [`${plain}\u001b[2J`, "bad project folder"], [join(plain, "gone"), "the project folder is gone"]]) {
+    const r = await run(`machine.startPmInIterm(${JSON.stringify(folder)})`);
+    expect([r.value, r.calls]).toEqual([{ threw: why }, []]);
+  }
 });
 
 test("openVsCode runs `code <folder>`, and falls back to `open -a` when that fails", async () => {

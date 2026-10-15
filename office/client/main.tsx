@@ -282,7 +282,7 @@ function Office() {
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
-      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setHiring(false)} />}
+      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} onClose={() => setHiring(false)} />}
     </>
   );
 }

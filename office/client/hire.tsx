@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MODELS } from "../people.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
+import { JumpButton } from "./jump.tsx";
 import { send } from "./post.ts";
 import "./hire.css";
 
@@ -30,7 +31,7 @@ function useRoles(room: string) {
   return { roles, hires, setHires, error };
 }
 
-export function HireDialog({ room, name, onClose }: { room: string; name: string; onClose: () => void }) {
+export function HireDialog({ room, name, pm, onClose }: { room: string; name: string; pm: { sessionId: string; name: string } | null; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { roles, hires, setHires, error: loadError } = useRoles(room);
   const [roleId, setRoleId] = useState<string | null>(null);
@@ -73,6 +74,16 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
       setCapped(true);
       setHires((h) => h && { ...h, working: reply.working as number });
     }
+  }
+
+  // The brief doubles as the need the PM is asked to act on.
+  async function askPm(path: "decide" | "start-pm", body: object) {
+    setBusy(true);
+    setProblem(null);
+    const { error } = await send(path, { room, ...body });
+    if (error === null) return onClose();
+    setBusy(false);
+    setProblem(error);
   }
 
   return (
@@ -157,6 +168,20 @@ export function HireDialog({ room, name, onClose }: { room: string; name: string
                 <button type="button" onClick={() => hire(true)}>Yes, hire anyway</button>
                 <button type="button" onClick={() => setConfirming(false)}>Cancel</button>
               </div>
+            )}
+          </div>
+          <div className="pm">
+            {pm ? (
+              <>
+                <p>{pm.name} is the PM here. Send the brief as a need and the PM decides whom to hire, or go to their terminal.</p>
+                <button type="button" onClick={() => askPm("decide", { need: brief.trim() })} disabled={!brief.trim() || busy}>Let the PM decide</button>
+                <JumpButton id={pm.sessionId} />
+              </>
+            ) : (
+              <>
+                <p>This project has no PM. Start one in a new iTerm tab in the project folder.</p>
+                <button type="button" onClick={() => askPm("start-pm", {})} disabled={busy}>Start PM</button>
+              </>
             )}
           </div>
         </form>
