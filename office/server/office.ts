@@ -9,6 +9,8 @@ export type Employee = {
   sessionId: string;
   status: Status;
   activity: string;
+  /** The last tool the session used (e.g. Edit, Bash), or "" before any; the office animates from it. */
+  tool: string;
   cwd: string;
   room: string;
   terminal: TerminalLocator;
@@ -31,6 +33,8 @@ export type F1rmEvent = {
   transcript?: string;
   /** Short "what it's doing now"; undefined keeps the previous one. */
   activity?: string;
+  /** Raw tool name; undefined keeps the previous one. */
+  tool?: string;
 };
 
 export const emptyOffice = (): OfficeState => ({ rooms: {}, employees: {} });
@@ -72,11 +76,18 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
     payload.hook_event_name === "Notification"
       ? `Notification/${payload.notification_type}`
       : payload.hook_event_name;
-  const tool = typeof payload.tool_name === "string" ? clip(describeTool(payload.tool_name, payload.tool_input)) : "";
+  const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+  const tool = toolName ? clip(describeTool(toolName, payload.tool_input)) : "";
   const activity: Record<string, string> = {
     UserPromptSubmit: "Thinking",
     PreToolUse: tool,
     PermissionRequest: tool,
+    Stop: "",
+  };
+  const toolByKind: Record<string, string> = {
+    UserPromptSubmit: "",
+    PreToolUse: toolName,
+    PermissionRequest: toolName,
     Stop: "",
   };
   return {
@@ -92,6 +103,7 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
     at,
     ...(typeof payload.transcript_path === "string" && { transcript: payload.transcript_path }),
     activity: activity[kind],
+    tool: toolByKind[kind],
   };
 }
 
@@ -119,6 +131,7 @@ export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
         sessionId: e.sessionId,
         status: STATUS[e.kind] ?? (before && before.status !== "offline" ? before.status : "idle"),
         activity: e.activity ?? before?.activity ?? "",
+        tool: e.tool ?? before?.tool ?? "",
         cwd: e.cwd,
         room: e.room.id,
         terminal: e.terminal,

@@ -102,16 +102,16 @@ test("tool use flips an employee to working, a permission prompt to waiting, sto
   expect(await employee()).toMatchObject({ status: "working", activity: "Thinking" });
 
   await hook(preToolUse("s1", "Edit", { file_path: "/code/shop/src/login.ts", old_string: "a", new_string: "b" }));
-  expect(await employee()).toMatchObject({ status: "working", activity: "Edit login.ts" });
+  expect(await employee()).toMatchObject({ status: "working", activity: "Edit login.ts", tool: "Edit" });
 
   await hook({ ...preToolUse("s1", "Bash", { command: "rm -rf build" }), hook_event_name: "PermissionRequest" });
-  expect(await employee()).toMatchObject({ status: "waiting", activity: "Bash: rm -rf build" });
+  expect(await employee()).toMatchObject({ status: "waiting", activity: "Bash: rm -rf build", tool: "Bash" });
 
   await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} });
-  expect((await employee()).status).toBe("working");
+  expect(await employee()).toMatchObject({ status: "working", tool: "Bash" });
 
   await hook({ ...common("s1", "Stop"), stop_hook_active: false });
-  expect(await employee()).toMatchObject({ status: "idle", activity: "" });
+  expect(await employee()).toMatchObject({ status: "idle", activity: "", tool: "" });
 
   await hook({ ...common("s1", "SessionEnd"), reason: "prompt_input_exit" });
   expect(await employee()).toBeUndefined();
