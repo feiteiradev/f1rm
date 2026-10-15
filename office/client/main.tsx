@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
+import { BoardList, BoardPanel } from "./board.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
 import { roleTitle } from "../people.ts";
 import { poseOf, statusCounts } from "./pose.ts";
@@ -79,6 +80,7 @@ function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
   const [connected, setConnected] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
+  const [board, setBoard] = useState<string | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<Scene | null>(null);
   const latest = useRef({ state, selected });
@@ -104,7 +106,7 @@ function Office() {
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select).then((s) => {
+    createScene(host.current!, select, setBoard).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       if (latest.current.state) s.update(latest.current.state, latest.current.selected);
@@ -140,6 +142,8 @@ function Office() {
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && selected && <Panel state={state} id={selected} onClose={() => select(null)} />}
+        {state && board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
+        {state && <BoardList state={state} onOpen={setBoard} />}
         {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
         <ul className="roster">
           {state &&
