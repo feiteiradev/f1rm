@@ -160,24 +160,24 @@ function seconds(name: string, fallback: number): number {
 }
 
 function start() {
-  const hook = installed(readSettings());
+  const settings = readSettings();
+  const hook = installed(settings);
   if (!hook) throw new Error("hooks not installed: run `f1rm install` first");
   const port = Number(new URL(hook.url!).port);
   const token = randomBytes(32).toString("base64url");
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
 
-  const dbPath = join(process.env.HOME!, ".f1rm", "events.db");
-  mkdirSync(dirname(dbPath), { recursive: true });
+  mkdirSync(F1RM_DIR, { recursive: true });
   const offlineAfterMs = seconds("F1RM_OFFLINE_AFTER", 5 * 60) * 1000;
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
 
   const approvalTimeout = seconds("F1RM_APPROVAL_TIMEOUT", DEFAULT_TIMEOUT_S);
-  const approvalHook = (readSettings().hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
+  const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath, boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   console.log(`f1rm office: ${url}`);
   Bun.spawn(["open", url]);
