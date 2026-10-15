@@ -5,7 +5,7 @@
 // It never reads or writes ~/.claude/settings.json beyond a before/after checksum.
 // Side effects owned by claude itself: the first run in a new F1RM_SMOKE_DIR accepts the folder-trust dialog
 // (recorded in ~/.claude.json), and check 3 creates ~/.claude/agent-memory/f1rmspike-memrole/.
-// Exit code is 1 when any check fails or settings.json changed.
+// Exit code is 1 when any check fails, settings.json changed, or a bg session could not be removed.
 import { $ } from "bun";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -394,9 +394,11 @@ async function cleanup() {
   for (const p of ptys) await p.close().catch(() => {});
   for (const id of bgIds) {
     await claude(["stop", id]).catch(() => {});
-    await sleep(3000);
-    const r = await claude(["rm", id]).catch(() => undefined);
-    if (r?.code) console.error(`claude rm ${id} exited ${r.code}: ${(r.out + r.err).trim()}`);
+    for (let i = 0; i < 10; i++) {
+      await sleep(2000);
+      await claude(["rm", id]).catch(() => {});
+      if (!(await agentsJson().catch(() => [])).some((a) => a.id === id)) break;
+    }
   }
   listener.stop(true);
 }
@@ -420,12 +422,12 @@ for (const [n, title, run] of CHECKS) {
   }
 }
 await cleanup();
-const leftover = (await agentsJson().catch(() => [])).filter((a) => bgIds.has(a.id) && a.state !== "stopped");
+const leftover = (await agentsJson().catch(() => [])).filter((a) => bgIds.has(a.id));
 const settingsAfter = existsSync(USER_SETTINGS) ? sha(USER_SETTINGS) : "absent";
 console.log("");
 for (const r of results) {
   console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.n}. ${r.title}`);
   for (const l of r.notes) console.log(`        ${l}`);
 }
-console.log(`\nuser settings.json ${settingsBefore === settingsAfter ? "unchanged" : "CHANGED"} (${settingsBefore.slice(0, 12)} -> ${settingsAfter.slice(0, 12)}); bg sessions left running: ${leftover.length}`);
-process.exit(results.every((r) => r.ok) && settingsBefore === settingsAfter ? 0 : 1);
+console.log(`\nuser settings.json ${settingsBefore === settingsAfter ? "unchanged" : "CHANGED"} (${settingsBefore.slice(0, 12)} -> ${settingsAfter.slice(0, 12)}); bg sessions left behind: ${leftover.length}`);
+process.exit(results.every((r) => r.ok) && settingsBefore === settingsAfter && !leftover.length ? 0 : 1);
