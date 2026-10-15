@@ -1,5 +1,10 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
 
+/** The environment for a spawned `claude`, without the session variables of a Claude Code session that launched f1rm: they would make the child look like that session's own child. */
+export function claudeEnv(env: Record<string, string | undefined> = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(CLAUDECODE$|CLAUDE_CODE_|CLAUDE_PID$|CLAUDE_EFFORT$)/.test(k)));
+}
+
 export const machine = {
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */
   gitCommonDir(cwd: string): string | null {

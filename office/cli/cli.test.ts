@@ -243,3 +243,50 @@ test("install refuses to touch a settings file it cannot parse", () => {
   expect(err).toContain("settings.json");
   expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe("{ not json");
 });
+
+// A stub `claude` first on PATH records its argv and the session-identifying part of its env.
+function stubClaude(exitCode = 0) {
+  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const log = join(bin, "claude.log");
+  writeFileSync(
+    join(bin, "claude"),
+    `#!/bin/sh\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
+    { mode: 0o755 },
+  );
+  const lines = () => readFileSync(log, "utf8").trim().split("\n");
+  return {
+    bin,
+    args: () => lines().filter((l) => l.startsWith("arg:")).map((l) => l.slice(4)),
+    env: () => lines().filter((l) => l.startsWith("env:")).map((l) => l.slice(4)),
+  };
+}
+
+function pm(extraEnv: Record<string, string>, stub: ReturnType<typeof stubClaude>, ...args: string[]) {
+  const r = Bun.spawnSync(["bun", CLI, "pm", ...args], {
+    env: { ...process.env, HOME: tempHome(), PATH: `${stub.bin}:${process.env.PATH}`, ...extraEnv },
+  });
+  return { code: r.exitCode, err: r.stderr.toString() };
+}
+
+test("pm starts the PM role with the grilling slash command as its first prompt", () => {
+  const stub = stubClaude();
+  expect(pm({}, stub).code).toBe(0);
+  const args = stub.args();
+  expect(args.slice(0, 2)).toEqual(["--agent", "f1rm:pm"]);
+  expect(args).toHaveLength(3);
+  expect(args[2]).toStartWith("/mattpocock-skills:grilling ");
+});
+
+test("pm passes extra claude flags before the prompt and returns claude's exit code", () => {
+  const stub = stubClaude(3);
+  expect(pm({}, stub, "--plugin-dir", "/p", "--model", "haiku").code).toBe(3);
+  const args = stub.args();
+  expect(args.slice(0, 6)).toEqual(["--agent", "f1rm:pm", "--plugin-dir", "/p", "--model", "haiku"]);
+  expect(args[6]).toStartWith("/mattpocock-skills:grilling ");
+});
+
+test("pm scrubs the Claude Code session variables it inherited", () => {
+  const stub = stubClaude();
+  pm({ CLAUDECODE: "1", CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/s.sock", CLAUDE_CODE_MESSAGING_TOKEN: "t", CLAUDE_PID: "42", CLAUDE_EFFORT: "max", CLAUDE_CONFIG_DIR: "/keep" }, stub);
+  expect(stub.env()).toEqual(["CLAUDE_CONFIG_DIR=/keep"]);
+});

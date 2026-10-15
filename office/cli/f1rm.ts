@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start
+// The f1rm CLI: install | uninstall | start | pm
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { machine } from "../server/machine.ts";
+import { claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
@@ -175,10 +175,23 @@ function start() {
   Bun.spawn(["open", url]);
 }
 
-const commands: Record<string, () => void | Promise<void>> = { install, uninstall, start };
+// The plugin's roles ignore `skills:` as a session agent, so the PM's first prompt loads grilling as a slash command.
+const PM_PROMPT =
+  "/mattpocock-skills:grilling I am about to describe work for this repo. Read what the repo already tells you, then interview me about it. Make no plan until I confirm we share an understanding.";
+
+// ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
+async function pm() {
+  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", ...process.argv.slice(3), PM_PROMPT], {
+    env: claudeEnv(),
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+  process.exit(await proc.exited);
+}
+
+const commands: Record<string, () => void | Promise<void>> = { install, uninstall, start, pm };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start");
+  console.error("usage: f1rm install | uninstall | start | pm [claude flags]");
   process.exit(1);
 }
 try {
