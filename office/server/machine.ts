@@ -202,7 +202,7 @@ export const machine = {
   },
 
   /**
-   * Stops a background session and removes it with its worktree. `rm` right after `stop` can exit 0 and leave the session, so it
+   * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
    * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
    */
   async letGo(id: string, { tries = 10, waitMs = 1000 } = {}): Promise<void> {

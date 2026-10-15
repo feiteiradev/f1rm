@@ -41,7 +41,7 @@ export function LetGo({ id, name }: { id: string; name: string }) {
         <button type="button" onClick={() => setConfirming(true)}>Let go</button>
       ) : (
         <div className="confirm" role="group" aria-label={`Confirm letting ${name} go`}>
-          <p>Let {name} go? This stops the session and removes it and its worktree. Claude refuses if the worktree has uncommitted or unpushed work.</p>
+          <p>Let {name} go? This stops the session and removes it from Claude Code. Claude refuses if the worktree has uncommitted or unpushed work, and may leave the worktree behind.</p>
           <button type="button" onClick={letGo} disabled={busy}>{busy ? "Letting go…" : "Yes, let go"}</button>
           <button type="button" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
         </div>

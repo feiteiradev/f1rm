@@ -204,7 +204,7 @@ try {
   await page.screenshot({ path: join(OUT, "09-let-go.png") });
   await letGo.click();
   const sure = panel.getByRole("group", { name: "Confirm letting Maya go" });
-  assert.match(await sure.innerText(), /Let Maya go\? This stops the session and removes it and its worktree/);
+  assert.match(await sure.innerText(), /Let Maya go\? This stops the session and removes it from Claude Code/);
   await page.screenshot({ path: join(OUT, "10-let-go-confirm.png") });
   await sure.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(await sure.count(), 0, "Cancel closes the confirm");
