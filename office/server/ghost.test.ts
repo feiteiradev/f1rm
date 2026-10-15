@@ -29,6 +29,7 @@ const fakeMachine = () => ({
   attachInIterm: async () => {},
   openVsCode: async () => {},
   askFork: async function* () {},
+  tell: async () => {},
 });
 
 let servers: ReturnType<typeof startServer>[] = [];

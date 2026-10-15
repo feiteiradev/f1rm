@@ -1,8 +1,10 @@
 // The machine module's OS calls against stub `claude`, `osascript`, `code` and `open` commands on PATH.
 import { afterAll, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { machine as realMachine } from "./machine.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-machine-"));
 const log = join(dir, "calls.log");
@@ -132,4 +134,54 @@ test("askFork separates text blocks, falls back to the final result without delt
   expect((await ask("q", result({ result: "MANGO" }))).value).toEqual(["MANGO"]);
   expect((await ask("q", result({ is_error: true, result: "No conversation found with session ID: sid-1" }))).value).toEqual({ threw: "No conversation found with session ID: sid-1" });
   expect((await ask("q", "", 1)).value).toEqual({ threw: "claude exited with 1" });
+});
+
+// A stand-in for a session's inbox: a unix socket that records what is written to it. Sockets cap paths near 104 bytes, so the folders are short.
+async function inbox() {
+  const socks = join(mkdtempSync(join(dir, "ib-")), "cc-socks");
+  mkdirSync(socks);
+  const path = join(socks, "s.sock");
+  const received: string[] = [];
+  const server = createServer((c) => {
+    let buf = "";
+    c.on("data", (d) => (buf += d));
+    c.on("end", () => received.push(buf));
+  });
+  await new Promise<void>((r) => server.listen(path, r));
+  return { path, received, stop: () => server.close() };
+}
+
+test("tell writes one newline-ended user frame, with the session id, into the inbox socket", async () => {
+  const box = await inbox();
+  await realMachine.tell(box.path, "sess-1", "Use the staging database.\nThen rerun.");
+  await Bun.sleep(50);
+  box.stop();
+  expect(box.received).toEqual([
+    JSON.stringify({ type: "user", session_id: "sess-1", from: "f1rm", message: { role: "user", content: "Use the staging database.\nThen rerun." } }) + "\n",
+  ]);
+});
+
+test("tell refuses a live socket outside Claude Code's cc-socks folder", async () => {
+  const other = join(mkdtempSync(join(dir, "ib-")), "docker.sock");
+  const got: string[] = [];
+  const server = createServer((c) => c.on("data", (d) => got.push(String(d))));
+  await new Promise<void>((r) => server.listen(other, r));
+  await expect(realMachine.tell(other, "sess-1", "hi")).rejects.toThrow("isn't a Claude Code inbox socket");
+  await Bun.sleep(50);
+  server.close();
+  expect(got).toEqual([]);
+});
+
+test("tell refuses a path that isn't an absolute, existing socket file", async () => {
+  const box = await inbox();
+  const link = join(mkdtempSync(join(dir, "ib-")), "link.sock");
+  symlinkSync(box.path, link);
+  const file = join(dir, "plain.sock");
+  writeFileSync(file, "");
+  for (const bad of ["s.sock", "./s.sock", "/tmp/f1rm-no-such/s.sock", file, link, dir]) {
+    await expect(realMachine.tell(bad, "sess-1", "hi")).rejects.toThrow(/inbox socket/);
+  }
+  await Bun.sleep(50);
+  box.stop();
+  expect(box.received).toEqual([]);
 });

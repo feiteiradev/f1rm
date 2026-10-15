@@ -7,6 +7,7 @@ import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
+import { MAX_MESSAGE, tell } from "./tell.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 type Options = {
@@ -135,6 +136,17 @@ export function startServer({
           return Response.json({ error: `Ask a question of 1 to ${MAX_QUESTION} characters.` }, { status: 400 });
         }
         return new Response(askStream(machine, employee, question.trim()), { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+      }
+      if (rest[0] === "tell" && rest.length === 2) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
+        const message = ((await req.json().catch(() => null)) as { message?: unknown } | null)?.message;
+        if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) {
+          return Response.json({ ok: false, error: `Tell a message of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
+        }
+        const result = await tell(machine, employee, message.trim());
+        return Response.json(result, { status: result.ok ? 200 : 409 });
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");

@@ -206,6 +206,7 @@ for (const i of [1, 2, 0, 1, 2]) {
 }
 assert.equal(await page.getByRole("button", { name: "Jump to terminal" }).count(), 1, "one Jump button after switching employees with the panel open");
 assert.equal(await page.getByLabel("Ask a side question").count(), 1, "one Ask box after switching employees with the panel open");
+assert.equal(await page.getByLabel(/^Tell .* to change course$/).count(), 1, "one Tell box after switching employees with the panel open");
 await page.keyboard.press("Escape");
 
 // The Lobby control and the browser's Back both return to the lobby; Forward goes back in.
