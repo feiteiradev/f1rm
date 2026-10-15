@@ -1,7 +1,7 @@
 // Seam 1: the event log, the ghost sweep and restart recovery, on a controllable clock.
 import { Database } from "bun:sqlite";
-import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "./server.ts";
@@ -13,12 +13,17 @@ const OFFLINE_AFTER = 1000;
 const REMOVE_AFTER = 3000;
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-ghost-"));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 let now = 0;
-let alive = new Set<string>();
+let alive: Set<string> | null = new Set();
+let gate: Promise<unknown> = Promise.resolve();
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
-  liveSessions: async () => alive,
+  liveSessions: async () => {
+    await gate;
+    return alive;
+  },
 });
 
 let servers: ReturnType<typeof startServer>[] = [];
@@ -28,6 +33,8 @@ afterEach(() => {
   sockets = [];
   servers.forEach((s) => s.stop(true));
   servers = [];
+  gate = Promise.resolve();
+  alive = new Set();
 });
 
 let dbN = 0;
@@ -151,4 +158,69 @@ test("a restarted server restores the sessions that are still running", async ()
   const third = start(first.dbPath);
   const later = await office(third.server, (s) => ids(s).join() === "running");
   expect(later.employees.running).toMatchObject({ status: "working", activity: "Bash: make build" });
+});
+
+test("a failing claude agents skips the sweep: quiet sessions stay until it answers", async () => {
+  now = 1_000_000;
+  alive = null;
+  const { server } = start();
+  await hook(server, "quiet", "PreToolUse", bash("sleep 99"));
+
+  now += 5000;
+  await new Promise((r) => setTimeout(r, 700));
+  const kept = await office(server, (s) => ids(s).length > 0);
+  expect(kept.employees.quiet.status).toBe("working");
+
+  alive = new Set();
+  await office(server, (s) => ids(s).length === 0);
+});
+
+test("an offline employee that claude agents lists again is idle, not offline", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  await hook(server, "back", "PreToolUse", bash("sleep 99"));
+
+  now += 1500;
+  await office(server, (s) => s.employees.back?.status === "offline");
+
+  alive = new Set(["back"]);
+  const state = await office(server, (s) => s.employees.back?.status === "idle");
+  expect(state.employees.back.status).toBe("idle");
+});
+
+test("an event for an offline employee brings it back idle", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  await hook(server, "away", "PreToolUse", bash("sleep 99"));
+
+  now += 1500;
+  await office(server, (s) => s.employees.away?.status === "offline");
+
+  await hook(server, "away", "CwdChanged", { cwd: "/code/shop/app" });
+  const state = await office(server, (s) => s.employees.away?.cwd === "/code/shop/app");
+  expect(state.employees.away.status).toBe("idle");
+});
+
+test("a restarted server answers nothing until its first sweep has dropped the ghosts", async () => {
+  now = 1_000_000;
+  const first = start();
+  await hook(first.server, "ghost", "PreToolUse", bash("npm test"));
+  first.server.stop(true);
+
+  now += 1500;
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  const second = start(first.dbPath);
+  const states: OfficeState[] = [];
+  const ws = new WebSocket(`ws://127.0.0.1:${second.server.port}/${TOKEN}/ws`, {
+    headers: { origin: `http://127.0.0.1:${second.server.port}` },
+  } as any);
+  sockets.push(ws);
+  ws.onmessage = (m) => states.push(JSON.parse(String(m.data)));
+  await new Promise((r) => setTimeout(r, 300));
+  expect(states).toEqual([]);
+
+  release();
+  await new Promise((r) => (ws.onmessage = (m) => { states.push(JSON.parse(String(m.data))); r(null); }));
+  expect(states[0].employees.ghost.status).toBe("offline");
 });

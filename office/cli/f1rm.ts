@@ -149,7 +149,6 @@ function uninstall() {
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
 
-/** A tunable timeout in seconds, from the environment. */
 function seconds(name: string, fallback: number): number {
   const n = Number(process.env[name] ?? fallback);
   if (!(n > 0)) throw new Error(`${name} must be a positive number of seconds`);

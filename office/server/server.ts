@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
-import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { emptyOffice, normalize, reduce, sweep, type Employee, type Room } from "./office.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 type Options = {
@@ -78,6 +78,7 @@ export function startServer({
     hostname: "127.0.0.1",
     port,
     async fetch(req, server) {
+      await ready;
       // Host defeats DNS rebinding; Origin defeats other sites (hooks send none).
       const hosts = [`127.0.0.1:${server.port}`, `localhost:${server.port}`];
       const origin = req.headers.get("origin");
@@ -128,6 +129,7 @@ export function startServer({
       // ponytail: asks `claude agents --json` on every tick while anyone is quiet; cache it if that gets heavy.
       const quiet = Object.values(state.employees).some((e) => now - lastActive(e) >= offlineAfterMs);
       const alive = quiet ? await machine.liveSessions() : new Set<string>();
+      if (!alive) return;
       const next = sweep(state, clock(), timeouts, lastActive, alive);
       if (next !== state) {
         state = next;
@@ -137,7 +139,7 @@ export function startServer({
       sweeping = false;
     }
   }
-  void sweepOnce();
+  const ready = sweepOnce();
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {

@@ -146,7 +146,10 @@ export function sweep(
   let changed = false;
   for (const [id, e] of Object.entries(state.employees)) {
     const quiet = now - lastActive(e);
-    if (alive.has(id) || quiet < t.offlineAfter) employees[id] = e;
+    if (alive.has(id) || quiet < t.offlineAfter) {
+      employees[id] = e.status === "offline" ? { ...e, status: "idle" } : e;
+      changed ||= e.status === "offline";
+    }
     else if (quiet >= t.removeAfter) changed = true;
     else if (e.status === "offline") employees[id] = e;
     else {
