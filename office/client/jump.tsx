@@ -8,6 +8,7 @@ import "./jump.css";
 
 /** Null when the terminal came forward, otherwise why it didn't. */
 async function jumpTo(id: string): Promise<string | null> {
+  if (import.meta.env.MODE === "demo") return "Jump needs a live office; this is a recording.";
   try {
     // The page lives under /<ui token>/, so a relative URL carries the token.
     const res = await fetch(new URL(`jump/${encodeURIComponent(id)}`, location.href), { method: "POST" });
