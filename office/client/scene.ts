@@ -22,7 +22,7 @@ const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void): Promise<Scene> {
+export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void, onHire: () => void): Promise<Scene> {
   await loadArt();
   const app = await newApp(host);
 
@@ -56,7 +56,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
     roomLabels.removeChildren().forEach((c) => c.destroy());
     const present = new Set<string>();
     for (const r of laidOut) {
-      const shell = buildRoom(r);
+      const shell = buildRoom(r, onHire);
       const overlay = new Graphics().rect(r.x, r.y, r.w, r.h).fill(COLORS.night);
       overlay.alpha = dimmers.get(r.room.id)?.now ?? 0;
       // Lets taps through to the whiteboard under it.

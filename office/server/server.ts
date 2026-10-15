@@ -8,9 +8,12 @@ import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
+import { HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
+import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
+const MAX_BRIEF = 8000;
 
 type Options = {
   port: number;
@@ -170,6 +173,50 @@ export function startServer({
         return machine.tell(employee.socket, employee.sessionId, message.trim()).then(
           () => Response.json({ ok: true }),
           (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
+        );
+      }
+      if (rest[0] === "roles" && rest.length === 1) {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
+        const room = url.searchParams.get("room");
+        const staff = Object.values(state.employees);
+        // Company order, like the desks; a role file the office doesn't know goes last.
+        const order = (id: string) => {
+          const known = roleOfAgentType(`f1rm:${id}`);
+          return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
+        };
+        return Response.json(
+          readRoles()
+            .sort((a, b) => order(a.id) - order(b.id))
+            .map((r) => {
+              const known = roleOfAgentType(`f1rm:${r.id}`);
+              const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
+              return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
+            }),
+        );
+      }
+      if (rest[0] === "hire" && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        const { room, role, task, brief, model } = body ?? {};
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string")) {
+          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        }
+        // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
+        // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
+        const folder = basename(room) === ".git" ? dirname(room) : room;
+        const hasPm = Object.values(state.employees).some((e) => e.room === room && e.role === "pm");
+        let argv: string[];
+        try {
+          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: hasPm ? pmName(folder, machine) : null, model }, machine);
+        } catch (err) {
+          if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
+          return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
+        // ponytail: two hires posted at the same instant can both pass the count before either shows in `claude agents`; serialize them if that is felt.
+        return machine.spawnBackground(argv, folder).then(
+          () => Response.json({ ok: true }),
+          (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
         );
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });

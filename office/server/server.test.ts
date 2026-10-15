@@ -1,6 +1,6 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,12 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     calls.push(`tell ${socket} ${sessionId} ${message}`);
     if (tellFails) throw new Error(tellFails);
   },
+  workingHires: async () => working,
+  spawnBackground: async (argv: string[], cwd: string) => {
+    spawned.push({ argv, cwd });
+    if (spawnFails) throw new Error(spawnFails);
+    return "backgrounded";
+  },
   askFork: (sessionId: string, cwd: string, question: string, signal?: AbortSignal) => {
     calls.push(`ask ${sessionId} ${cwd} ${question}`);
     return askAnswer(signal);
@@ -38,6 +44,9 @@ const defaultAnswer = async function* () {
   yield "MANGO.";
 };
 let tellFails = "";
+let working: number | null = 0;
+let spawnFails = "";
+let spawned: { argv: string[]; cwd: string }[] = [];
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
 let server: ReturnType<typeof startServer>;
@@ -48,6 +57,9 @@ afterEach(() => {
   backgroundIds = {};
   askAnswer = defaultAnswer;
   tellFails = "";
+  working = 0;
+  spawnFails = "";
+  spawned = [];
   sockets.forEach((s) => s.close());
   sockets = [];
   server?.stop(true);
@@ -644,6 +656,121 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
     expect((await tellOf("s1", bad)).status).toBe(400);
   }
   expect(calls).toEqual([]);
+});
+
+const SHOP = { "/code/shop": "/code/shop/.git" };
+const ROOM = "/code/shop/.git";
+const ui = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`${base()}/${token}/${path}`, init);
+const hireOf = (body: unknown, init: RequestInit = {}, token = TOKEN) =>
+  ui("hire", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const ASSIGN = { room: ROOM, role: "designer", task: "login-page", brief: "Design the login page. Reply OK and stop." };
+const inRoom = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", ...extra });
+
+test("roles lists the plugin's role files, read from the folder, with the PM left out and the working count per project", async () => {
+  start(SHOP);
+  await inRoom("d1", { agent_type: "f1rm:designer" });
+  await inRoom("d2", { agent_type: "f1rm:designer" });
+  await hook({ ...common("d3", "Stop"), cwd: "/code/shop" });
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => Object.keys(s.employees).length === 4);
+  const roles = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any[];
+  const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
+  expect([...roles.map((r) => r.id)].sort()).toEqual(files);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
+  const designer = roles.find((r) => r.id === "designer");
+  const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
+  expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
+  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
+  expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
+  const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as any[];
+  expect(elsewhere.find((r) => r.id === "designer").working).toBe(0);
+});
+
+test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const brief = "Design the login page.\n$(rm -rf /) 'quoted' --flag";
+  const res = await hireOf({ ...ASSIGN, brief, cwd: "/etc", folder: "/etc" });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(spawned).toEqual([
+    {
+      cwd: "/code/shop",
+      argv: ["claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page", `/design-pipeline\n\n${brief}`],
+    },
+  ]);
+});
+
+test("Hire reports to the project's PM when it has one, and takes a lower model", async () => {
+  start(SHOP);
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  expect((await hireOf({ ...ASSIGN, model: "haiku" })).status).toBe(200);
+  expect(spawned[0].argv.slice(8)).toEqual(["/design-pipeline Report to: pm-shop\n\n" + ASSIGN.brief, "--model", "haiku"]);
+  expect((await hireOf({ ...ASSIGN, model: null })).status).toBe(200);
+  expect(spawned[1].argv).not.toContain("--model");
+});
+
+test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const cases: [object | string, number][] = [
+    [{ ...ASSIGN, role: "pm" }, 400],
+    [{ ...ASSIGN, role: "janitor" }, 400],
+    [{ ...ASSIGN, role: "../designer" }, 400],
+    [{ ...ASSIGN, role: 7 }, 400],
+    [{ ...ASSIGN, task: "Login Page" }, 400],
+    [{ ...ASSIGN, task: "--evil" }, 400],
+    [{ ...ASSIGN, task: "" }, 400],
+    [{ ...ASSIGN, model: "gpt-5" }, 400],
+    [{ ...ASSIGN, model: "haiku --dangerously-skip-permissions" }, 400],
+    [{ ...ASSIGN, brief: "  " }, 400],
+    [{ ...ASSIGN, brief: "x".repeat(8001) }, 400],
+    [{ ...ASSIGN, room: "/code/shop" }, 404],
+    [{ ...ASSIGN, room: "constructor" }, 404],
+    ["not json", 404],
+  ];
+  for (const [body, status] of cases) expect([JSON.stringify(body), (await hireOf(body)).status]).toEqual([JSON.stringify(body), status]);
+  expect(spawned).toEqual([]);
+});
+
+test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  working = 4;
+  const capped = await hireOf(ASSIGN);
+  expect([capped.status, await capped.json()]).toEqual([409, { error: "4 hires are already working (the cap is 4).", working: 4 }]);
+  working = null;
+  const blind = await hireOf(ASSIGN);
+  expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
+  expect(spawned).toEqual([]);
+});
+
+test("Hire says so when claude fails to start the session", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  spawnFails = "not a git repository";
+  const res = await hireOf(ASSIGN);
+  expect([res.status, await res.json()]).toEqual([502, { error: "Hire failed: not a git repository" }]);
+});
+
+test("Roles and Hire need the UI token, the right method and the browser's own origin", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  expect((await hireOf(ASSIGN, {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/hire`, { method: "POST", body: JSON.stringify(ASSIGN) })).status).toBe(401);
+  expect((await ui("hire")).status).toBe(405);
+  expect((await hireOf(ASSIGN, { headers: { origin: "https://evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await hireOf(ASSIGN, { headers: { host: "evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await ui("roles", {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/roles`)).status).toBe(401);
+  expect((await ui("roles", { method: "POST" })).status).toBe(405);
+  expect((await ui("roles", { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect(spawned).toEqual([]);
 });
 
 const permissionRequest = (id: string, command: string) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest" });

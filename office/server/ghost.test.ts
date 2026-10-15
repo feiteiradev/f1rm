@@ -30,6 +30,8 @@ const fakeMachine = () => ({
   openVsCode: async () => {},
   askFork: async function* () {},
   tell: async () => {},
+  workingHires: async () => 0,
+  spawnBackground: async () => "",
 });
 
 let servers: ReturnType<typeof startServer>[] = [];

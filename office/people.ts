@@ -10,6 +10,9 @@ export const decodeLook = (seed: number) => ({
   hair: Math.floor(seed / (SKINS * SHIRTS)) % HAIRS,
 });
 
+/** The models a hire can be lowered or raised to, in place of its role's own. */
+export const MODELS = ["haiku", "sonnet", "opus"];
+
 /** In company order, which is also the order staff take desks. */
 export const ROLES = {
   pm: { title: "PM", name: "Priya", seed: look(0, 0, 2) },
