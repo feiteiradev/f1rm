@@ -24,6 +24,10 @@ const fakeMachine = () => ({
     await gate;
     return alive;
   },
+  backgroundId: async () => null,
+  focusIterm: async () => false,
+  attachInIterm: async () => {},
+  openVsCode: async () => {},
 });
 
 let servers: ReturnType<typeof startServer>[] = [];
