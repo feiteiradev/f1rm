@@ -1,7 +1,7 @@
 // The office: hook payload normalizer and the pure state reducer.
 import { basename } from "node:path";
 
-export type Status = "working" | "waiting" | "idle";
+export type Status = "working" | "waiting" | "idle" | "offline";
 export type Room = { id: string; name: string };
 /** Where the session's terminal is, for Jump. Background sessions have neither. */
 export type TerminalLocator = { itermSessionId?: string; termProgram?: string };
@@ -14,6 +14,10 @@ export type Employee = {
   cwd: string;
   room: string;
   terminal: TerminalLocator;
+  /** Clock time (ms) of the employee's latest event. */
+  lastEventAt: number;
+  /** The session's transcript file, whose mtime counts as liveness. */
+  transcript?: string;
 };
 export type OfficeState = { rooms: Record<string, Room>; employees: Record<string, Employee> };
 
@@ -24,6 +28,9 @@ export type F1rmEvent = {
   cwd: string;
   room: Room;
   terminal: TerminalLocator;
+  /** Clock time (ms) the server received the event. */
+  at: number;
+  transcript?: string;
   /** Short "what it's doing now"; undefined keeps the previous one. */
   activity?: string;
   /** Raw tool name; undefined keeps the previous one. */
@@ -62,7 +69,7 @@ function describeTool(tool: string, input: any): string {
 }
 
 /** One raw hook payload -> one f1rm event, or null if it isn't a hook payload. */
-export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) => Room): F1rmEvent | null {
+export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) => Room, at: number): F1rmEvent | null {
   const valid = ["session_id", "hook_event_name", "cwd"].every((k) => typeof payload?.[k] === "string" && payload[k]);
   if (!valid) return null;
   const kind: string =
@@ -93,6 +100,8 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
       ...(headers.get("x-f1rm-iterm-session") && { itermSessionId: headers.get("x-f1rm-iterm-session")! }),
       ...(headers.get("x-f1rm-term-program") && { termProgram: headers.get("x-f1rm-term-program")! }),
     },
+    at,
+    ...(typeof payload.transcript_path === "string" && { transcript: payload.transcript_path }),
     activity: activity[kind],
     tool: toolByKind[kind],
   };
@@ -120,13 +129,46 @@ export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
       ...others,
       [e.sessionId]: {
         sessionId: e.sessionId,
-        status: STATUS[e.kind] ?? before?.status ?? "idle",
+        status: STATUS[e.kind] ?? (before && before.status !== "offline" ? before.status : "idle"),
         activity: e.activity ?? before?.activity ?? "",
         tool: e.tool ?? before?.tool ?? "",
         cwd: e.cwd,
         room: e.room.id,
         terminal: e.terminal,
+        lastEventAt: e.at,
+        transcript: e.transcript ?? before?.transcript,
       },
     },
   };
+}
+
+export type Timeouts = { offlineAfter: number; removeAfter: number };
+
+/**
+ * Employees quiet for `offlineAfter` ms go offline and for `removeAfter` ms leave, unless `alive`
+ * says Claude Code still runs them. `lastActive` is the later of an employee's last event and transcript write.
+ */
+export function sweep(
+  state: OfficeState,
+  now: number,
+  t: Timeouts,
+  lastActive: (e: Employee) => number,
+  alive: ReadonlySet<string>,
+): OfficeState {
+  const employees: Record<string, Employee> = {};
+  let changed = false;
+  for (const [id, e] of Object.entries(state.employees)) {
+    const quiet = now - lastActive(e);
+    if (alive.has(id) || quiet < t.offlineAfter) {
+      employees[id] = e.status === "offline" ? { ...e, status: "idle" } : e;
+      changed ||= e.status === "offline";
+    }
+    else if (quiet >= t.removeAfter) changed = true;
+    else if (e.status === "offline") employees[id] = e;
+    else {
+      employees[id] = { ...e, status: "offline" };
+      changed = true;
+    }
+  }
+  return changed ? { ...state, employees } : state;
 }
