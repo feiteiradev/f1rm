@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start
+// The f1rm CLI: install | uninstall | start | pm
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { machine } from "../server/machine.ts";
+import { claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
@@ -175,10 +175,27 @@ function start() {
   Bun.spawn(["open", url]);
 }
 
-const commands: Record<string, () => void | Promise<void>> = { install, uninstall, start };
+// The plugin's roles ignore `skills:` as a session agent, so the PM's first prompt loads grilling as a slash command.
+// The name comes after it so hires can address their reports to it.
+const pmPrompt = (name: string) =>
+  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
+
+// ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
+async function pm() {
+  const common = machine.gitCommonDir(process.cwd());
+  const repo = basename(common ? dirname(common) : process.cwd()).replace(/[^\w.-]+/g, "-");
+  const name = `pm-${repo}`;
+  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name)], {
+    env: claudeEnv(),
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+  process.exit(await proc.exited);
+}
+
+const commands: Record<string, () => void | Promise<void>> = { install, uninstall, start, pm };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start");
+  console.error("usage: f1rm install | uninstall | start | pm [claude flags]");
   process.exit(1);
 }
 try {
