@@ -1,7 +1,7 @@
 // `f1rm hire`: the only way a PM starts a specialist, so the cap lives in code.
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { claudeEnv, machine } from "../server/machine.ts";
+import { agents, claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
   "usage: f1rm hire [--override] [--report-to <pm session>] <role> <name> <task> <brief> [claude flags...]";
@@ -26,19 +26,9 @@ function slashCommands(role: string): string[] {
   return [...(fm.skills ?? []), ...(SLASH_ONLY[role] ?? [])];
 }
 
-const safeJson = (s: string) => {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-};
-
 async function workingHires(): Promise<number> {
-  const proc = Bun.spawn(["claude", "agents", "--json"], { env: claudeEnv(), stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
-  const list = (await proc.exited) === 0 ? safeJson(out) : null;
-  if (!Array.isArray(list)) throw new Error("can't count the working hires (`claude agents --json` failed), so not hiring");
+  const list = await agents(false);
+  if (!list) throw new Error("can't count the working hires (`claude agents --json` failed), so not hiring");
   // A blocked hire waits on a person and still holds its slot. Interactive sessions are the user's, not hires.
   return list.filter((a) => a?.kind === "background" && (a.state === "working" || a.state === "blocked")).length;
 }

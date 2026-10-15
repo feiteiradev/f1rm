@@ -25,7 +25,7 @@ const ITERM ='application id "com.googlecode.iterm2"';
 const SAFE_ID = /^\w[\w-]*$/;
 
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
-async function agents(all: boolean): Promise<any[] | null> {
+export async function agents(all: boolean): Promise<any[] | null> {
   try {
     const proc = Bun.spawn(["claude", "agents", "--json", ...(all ? ["--all"] : [])], {
       env: claudeEnv(), stdout: "pipe", stderr: "ignore", timeout: 10_000,
