@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { layoutOffice } from "../office/client/layout.ts";
+import { layoutOffice, scaleFor } from "../office/client/layout.ts";
+import { projectState } from "../office/client/lobby.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "board-proof-out");
@@ -74,8 +75,17 @@ const shot = (name) => page.screenshot({ path: join(OUT, `${name}.png`) });
 
 await send("s1", shop);
 await send("b1", blog);
+// A project's whiteboard exists only inside its office, so each check goes through the lobby's door.
+const visit = async (room) => {
+  if (await page.locator(".back").count()) await page.getByRole("button", { name: "Lobby" }).click();
+  await page.locator(".door", { hasText: room }).click();
+  await page.locator(`.boards button`, { hasText: `Board, ${room}:` }).waitFor({ state: "attached" });
+  await page.waitForTimeout(500);
+};
+await page.locator(".door").first().waitFor();
+await page.waitForFunction(() => document.querySelectorAll(".door").length === 2);
+await visit("my shop");
 const boardButton = (room) => page.locator(".boards button", { hasText: `Board, ${room}:` });
-await boardButton("my shop").waitFor({ state: "attached" });
 const summary = async (room) => (await boardButton(room).textContent()).replace(/^Board, [^:]+: /, "");
 
 // Where each room's whiteboard is on screen, from the layout of the state the server pushes.
@@ -83,9 +93,11 @@ async function whiteboardAt(room) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/${new URL(url).pathname.split("/")[1]}/ws`, { headers: { origin: base } });
   const state = await new Promise((r) => (ws.onmessage = (m) => r(JSON.parse(String(m.data)))));
   ws.close();
-  const r = layoutOffice(state, Math.floor(1440 / 3)).rooms.find((l) => l.room.name === room);
+  const id = Object.values(state.rooms).find((r) => r.name === room).id;
+  const scale = scaleFor(1440);
+  const r = layoutOffice(projectState(state, id), Math.floor(1440 / scale), Math.floor((await page.locator(".scene").evaluate((e) => e.clientHeight)) / scale)).rooms[0];
   const box = await page.locator(".scene canvas").boundingBox();
-  return { x: (r.x + r.w - 62 + 20) * 3, y: box.y + (r.y + 2 + 8) * 3 };
+  return { x: (r.x + r.w - 62 + 20) * scale, y: box.y + (r.y + 2 + 8) * scale };
 }
 const clickBoard = async (room) => {
   const { x, y } = await whiteboardAt(room);
@@ -95,7 +107,9 @@ const clickBoard = async (room) => {
 // A missing board: an empty whiteboard, no panel rows, no error.
 await page.waitForTimeout(800);
 assert.equal(await summary("my shop"), "No tasks");
+await visit("blog");
 assert.equal(await summary("blog"), "No tasks");
+await visit("my shop");
 await shot("01-missing-board");
 await clickBoard("my shop");
 const panel = page.locator(".board-panel");
@@ -116,7 +130,9 @@ const rows = [
 const file = writeBoard(shop, table(rows));
 await page.waitForFunction(() => document.querySelector(".boards button")?.textContent?.includes("1 of 3"));
 assert.equal(await summary("my shop"), "1 of 3 tasks done");
+await visit("blog");
 assert.equal(await summary("blog"), "No tasks", "another room's board is its own");
+await visit("my shop");
 await page.waitForTimeout(300);
 await shot("03-board-written");
 await clickBoard("my shop");

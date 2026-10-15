@@ -6,13 +6,14 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
-import { layoutOffice } from "../office/client/layout.ts";
+import { layoutOffice, scaleFor } from "../office/client/layout.ts";
+import { projectState } from "../office/client/lobby.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "roles-proof-out");
 mkdirSync(OUT, { recursive: true });
 
-const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = 3, BAR = 52;
+const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
 const repos = { "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" };
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
@@ -55,16 +56,25 @@ const page = await open();
 const still = await open({ reducedMotion: "reduce" });
 
 const settle = (ms = 500) => page.waitForTimeout(ms);
+const enter = async (p, name) => {
+  if (await p.locator(".back").count()) await p.getByRole("button", { name: "Lobby" }).click();
+  await p.locator(".door", { hasText: name }).click();
+  await p.locator(".back").waitFor();
+  await p.locator(".scene canvas").waitFor();
+  await p.waitForTimeout(500);
+};
 async function state() {
   const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: base } });
   const s = await new Promise((r) => (ws.onmessage = (m) => r(JSON.parse(String(m.data)))));
   ws.close();
   return s;
 }
-async function geometry(p) {
+// Everything inside the project that page `p` has open, laid out the way the page lays it out.
+async function geometry(p, roomName) {
   const s = await state();
   const box = await p.locator(".scene canvas").boundingBox();
-  const { rooms } = layoutOffice(s, Math.floor(1440 / SCALE));
+  const slice = projectState(s, Object.values(s.rooms).find((r) => r.name === roomName).id);
+  const { rooms } = layoutOffice(slice, Math.floor(1440 / SCALE), Math.floor((await p.locator(".scene").evaluate((e) => e.clientHeight)) / SCALE));
   const deskOf = (id) => rooms.flatMap((r) => r.desks).find((d) => d.employee?.sessionId === id);
   const clipOf = (x, y, w, h) => ({ x: x * SCALE, y: box.y + y * SCALE, width: w * SCALE, height: h * SCALE });
   return { s, rooms, deskOf, clipOf };
@@ -101,9 +111,11 @@ await prompt("blogdes", blog, { agent_type: "f1rm:designer" });
 await start("blogfree", blog);
 for (const [id, cwd] of [["pm", shop], ["des1", shop], ["des2", shop], ["fe", shop], ["blogdes", blog], ["free1", shop]]) await stop(id, cwd);
 await Promise.all([page, still].map((p) => p.waitForTimeout(800)));
+await shot(page, "01-lobby");
+await Promise.all([enter(page, "shop"), enter(still, "shop")]);
 await shot(page, "01-company");
 
-const g = await geometry(page);
+const g = await geometry(page, "shop");
 const names = Object.fromEntries(Object.entries(g.s.employees).map(([id, e]) => [id, e.name]));
 assert.deepEqual(
   ["pm", "des1", "des2", "fe", "be", "rev", "res", "blogdes"].map((id) => names[id]),
@@ -117,10 +129,17 @@ for (const id of ["free1", "free2", "free3", "blogfree"]) {
 assert.equal(new Set(Object.values(names)).size, Object.keys(names).length, "every name is unique");
 
 const labels = await roster(page);
-for (const want of ["Priya, PM, shop", "Maya, Designer, shop", "Maya (2), Designer, shop", "Felix, Frontend dev, shop", "Bruno, Backend dev, shop", "Ines, Reviewer, shop", "Kofi, Researcher, shop", "Maya (3), Designer, blog"]) {
+for (const want of ["Priya, PM, shop", "Maya, Designer, shop", "Maya (2), Designer, shop", "Felix, Frontend dev, shop", "Bruno, Backend dev, shop", "Ines, Reviewer, shop", "Kofi, Researcher, shop"]) {
   assert.ok(labels.some((l) => l.startsWith(want)), `roster has "${want}": ${labels.join(" | ")}`);
 }
-for (const id of ["free1", "free2", "free3", "blogfree"]) assert.ok(labels.some((l) => l.startsWith(`${names[id]}, Freelancer`)), `${names[id]} is listed as a Freelancer`);
+for (const id of ["free1", "free2", "free3"]) assert.ok(labels.some((l) => l.startsWith(`${names[id]}, Freelancer`)), `${names[id]} is listed as a Freelancer`);
+await enter(page, "blog");
+const blogLabels = await roster(page);
+assert.ok(blogLabels.some((l) => l.startsWith("Maya (3), Designer, blog")), `blog's roster has Maya (3): ${blogLabels.join(" | ")}`);
+assert.ok(blogLabels.some((l) => l.startsWith(`${names.blogfree}, Freelancer`)), "and its freelancer");
+assert.ok(blogLabels.every((l) => l.includes(", blog,")), "blog lists only blog");
+await shot(page, "01b-blog");
+await enter(page, "shop");
 
 // Freelancers sit at hot desks behind the staff desks; staff do not.
 const shopRoom = g.rooms.find((r) => r.room.name === "shop");
@@ -138,13 +157,20 @@ assert.notDeepEqual(staffPx, mat, "a staff desk does not");
 await shot(page, "02-shop-room", g.clipOf(shopRoom.x, shopRoom.y, shopRoom.w, shopRoom.h));
 
 // Same role, same sprite, everywhere; different roles, different sprites. Compared on a motion-free page.
-const gs = await geometry(still);
-const head = (id) => pixels(still, gs.clipOf(gs.deskOf(id).x + 15, gs.deskOf(id).y + 11, 16, 16));
-const [mayaShop, mayaBlog, priya, felix] = [await head("des1"), await head("blogdes"), await head("pm"), await head("fe")];
+const headIn = async (room, id) => {
+  const gs = await geometry(still, room);
+  return pixels(still, gs.clipOf(gs.deskOf(id).x + 15, gs.deskOf(id).y + 11, 16, 16));
+};
+const [mayaShop, priya, felix] = [await headIn("shop", "des1"), await headIn("shop", "pm"), await headIn("shop", "fe")];
+const head = (id) => headIn("shop", id);
+await enter(still, "blog");
+const mayaBlog = await headIn("blog", "blogdes");
+await shot(still, "03-maya-blog-motion-free");
+await enter(still, "shop");
 assert.equal(mayaShop, mayaBlog, "Maya looks the same in both rooms");
 assert.equal(await head("des2"), mayaShop, "and for the second shift");
 assert.equal(new Set([mayaShop, priya, felix]).size, 3, "roles look different from each other");
-await shot(still, "03-maya-both-rooms-motion-free");
+await shot(still, "03-maya-shop-motion-free");
 
 // The panel carries the session title.
 const des2 = g.deskOf("des2"), box = await page.locator(".scene canvas").boundingBox();
@@ -214,8 +240,10 @@ assert.deepEqual((await state()).interns, {});
 // Forty more freelancers: every roster name stays unique and none is a role's name.
 for (let i = 0; i < 40; i++) await start(`crowd-${i}`, i % 2 ? shop : blog);
 await settle(900);
-const all = (await roster(page)).map((l) => l.split(",")[0]);
+const all = Object.values((await state()).employees).map((e) => e.name);
 assert.equal(new Set(all).size, all.length, `unique names across ${all.length} employees`);
+const shopRoster = (await roster(page)).map((l) => l.split(",")[0]);
+assert.equal(new Set(shopRoster).size, shopRoster.length, "and in the project on screen");
 assert.ok(all.length >= 48);
 await shot(page, "11-crowd");
 

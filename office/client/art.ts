@@ -1,15 +1,33 @@
 // Drawing: CC0 Kenney tiles for furniture and people, a few pixels of code-drawn props on top.
-import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
+import { Application, Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import indoorUrl from "./assets/roguelikeIndoor_transparent.png";
 import charUrl from "./assets/roguelikeChar_transparent.png";
 import { CELL, ROOM, type RoomLayout } from "./layout.ts";
 import { decodeLook } from "../people.ts";
+import { DOOR, type DoorSlot } from "./lobby.ts";
 import type { Pose } from "./pose.ts";
 
 let indoor: Texture, chars: Texture;
 export async function loadArt() {
   [indoor, chars] = await Promise.all([Assets.load<Texture>(indoorUrl), Assets.load<Texture>(charUrl)]);
   for (const t of [indoor, chars]) t.source.scaleMode = "nearest";
+}
+
+/** A pixel-crisp PixiJS canvas filling `host`. */
+export async function newApp(host: HTMLElement) {
+  const app = new Application();
+  await app.init({
+    background: COLORS.outside,
+    antialias: false,
+    roundPixels: true,
+    resolution: window.devicePixelRatio || 1,
+    autoDensity: true,
+    width: host.clientWidth,
+    height: host.clientHeight,
+  });
+  host.appendChild(app.canvas);
+  app.canvas.style.imageRendering = "pixelated";
+  return app;
 }
 
 // The Kenney sheets are 16px tiles with a 1px margin.
@@ -131,6 +149,13 @@ function bubble(g: Graphics, x: number, y: number, color: number) {
   box(g, x + 5, y + 8, 2, 2, color);
 }
 
+/** The amber "!" bubble of someone waiting for permission, with its top-left at (x, y). */
+function raisedHand(g: Graphics, x: number, y: number) {
+  bubble(g, x, y, COLORS.amber);
+  box(g, x + 5, y + 2, 2, 3, INK);
+  box(g, x + 5, y + 6, 2, 1, INK);
+}
+
 export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean, hot = false) {
   g.clear();
   screen(g, pose, f);
@@ -164,9 +189,7 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
     const wave = f % 4 < 2 ? 0 : 1;
     box(g, CHAR.x + 15, 14, 2, 10, skin);
     box(g, CHAR.x + 14 + wave, 11, 4, 3, skin);
-    bubble(g, 3, 1 + wave, COLORS.amber);
-    box(g, 8, 3 + wave, 2, 3, INK);
-    box(g, 8, 7 + wave, 2, 1, INK);
+    raisedHand(g, 3, 1 + wave);
   } else if (pose === "running") {
     bubble(g, head - 6, 1, 0x10261a);
     for (let i = 0; i < 3; i++) box(g, head - 4 + i * 3, f % 3 === i ? 3 : 5, 2, 2, COLORS.green);
@@ -213,4 +236,45 @@ export function buildRoom(r: RoomLayout) {
     root.addChild(empty.root);
   }
   return root;
+}
+
+const DOOR_WOOD = 0x8a5a3c, DOOR_PANEL = 0x6f4630;
+
+/** The hallway behind the lobby: a wall and floor per row of doors, a door and mat for each project, a plant at the row ends. */
+export function buildHallway(doors: DoorSlot[], width: number, height: number) {
+  const root = new Container();
+  const g = new Graphics();
+  root.addChild(g);
+  const ys = [...new Set(doors.map((d) => d.y))];
+  if (!ys.length) ys.push(8);
+  ys.forEach((y, i) => {
+    const wallTop = i === 0 ? 0 : y, floorTop = y + DOOR.wall, floorEnd = ys[i + 1] ?? height;
+    box(g, 0, floorTop, width, floorEnd - floorTop, COLORS.floor);
+    for (let py = floorTop + 8; py < floorEnd; py += 8) box(g, 0, py, width, 1, COLORS.plank);
+    box(g, 0, wallTop, width, floorTop - wallTop, COLORS.wall);
+    box(g, 0, wallTop, width, 2, COLORS.baseboard);
+    box(g, 0, floorTop - 3, width, 3, COLORS.baseboard);
+    const row = doors.filter((d) => d.y === y);
+    if (row.length) {
+      for (const x of [row[0].x - 18, row[row.length - 1].x + DOOR.w + 2]) if (x >= 0 && x + 16 <= width) put(root, indoor, 16, 0, x, floorTop - 14);
+    }
+  });
+  for (const d of doors) {
+    const { x, y } = d, lit = d.count > 0;
+    box(g, x + 8, y + 66, 40, 6, COLORS.mat);
+    box(g, x + 9, y + 67, 38, 1, COLORS.matEdge, 0.7);
+    box(g, x + 16, y + 3, 24, 4, lit ? COLORS.amber : COLORS.bezel);
+    box(g, x + 10, y + 10, 36, 52, COLORS.baseboard);
+    box(g, x + 12, y + 12, 32, 50, DOOR_WOOD);
+    for (const [px, py, pw, ph] of [[15, 15, 12, 20], [29, 15, 12, 20], [15, 39, 12, 20], [29, 39, 12, 20]]) box(g, x + px, y + py, pw, ph, DOOR_PANEL);
+    box(g, x + 38, y + 38, 3, 3, COLORS.amber);
+    if (!lit) box(g, x + 4, y + 2, 48, 62, COLORS.night, 0.62);
+  }
+  return root;
+}
+
+/** Redraws the raised-hand bubble over one door; `wave` is 0 or 1. */
+export function drawDoorHand(g: Graphics, wave: number) {
+  g.clear();
+  raisedHand(g, DOOR.w - 15, 2 + wave);
 }

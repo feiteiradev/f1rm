@@ -45,6 +45,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(`${base}/${TOKEN}/`);
 await page.locator(".counter").waitFor();
+assert.equal(await page.locator(".door").count(), 2, "the page opens on the lobby");
 const key = (k) => page.keyboard.press(k);
 const dialog = page.getByRole("dialog", { name: "Jump to an employee" });
 const jumped = async (n) => {
@@ -65,6 +66,21 @@ await key("Enter");
 await jumped(1);
 assert.deepEqual(calls, [tab(1)], "Enter jumped to the matching employee's tab");
 await dialog.waitFor({ state: "hidden" });
+await page.locator(".crumb", { hasText: "shop" }).waitFor();
+assert.match(await page.evaluate(() => location.hash), /^#\/project\//, "the palette opened the employee's project from the lobby");
+await page.screenshot({ path: join(OUT, "palette-opened-project.png") });
+
+// A pick in another project opens that project; the jump still goes to that employee's tab.
+await key("Meta+k");
+await page.keyboard.type("post");
+await key("Enter");
+await jumped(2);
+assert.equal(calls.at(-1), tab(3), "the blog employee's tab was jumped to");
+await page.locator(".crumb", { hasText: "blog" }).waitFor();
+assert.equal(await page.locator(".roster button").count(), 1, "only the blog's employee is in the open project");
+await page.screenshot({ path: join(OUT, "palette-other-project.png") });
+calls.length = 1;
+await page.getByRole("button", { name: "Lobby" }).click();
 
 // Arrow keys choose among several matches; room names search too.
 await key("Meta+k");

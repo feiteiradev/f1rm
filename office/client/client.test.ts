@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
 import { CELL, layoutOffice, ROOM, rosterOf } from "./layout.ts";
 import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
+import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
@@ -129,6 +130,64 @@ test("rooms wrap to a new row when the width runs out", () => {
   expect(new Set(wide.map((r) => r.y)).size).toBe(1);
   const narrow = layoutOffice(state, roomWidth * 2 + 40).rooms;
   expect(narrow.map((r) => r.y > narrow[0].y)).toEqual([false, false, true]);
+});
+
+test("a door counts the employees inside, flags a raised hand, and a project nobody is in is empty", () => {
+  const state = office(["shop", "blog", "docs"], [
+    employee("a", "shop"), employee("b", "shop", { status: "waiting" }), employee("c", "blog", { status: "offline" }),
+  ]);
+  expect(doorsOf(state).map((d) => [d.room.id, d.count, d.waiting])).toEqual([["blog", 1, false], ["docs", 0, false], ["shop", 2, true]]);
+});
+
+test("doors wrap into centered rows that fit the width", () => {
+  const state = office(["a", "b", "c", "d", "e"], []);
+  const { doors, height } = layoutLobby(state, 3 * DOOR.w + 20);
+  expect(doors.map((d) => d.y === doors[0].y)).toEqual([true, true, true, false, false]);
+  expect(doors.every((d) => d.x >= 0 && d.x + DOOR.w <= 3 * DOOR.w + 20)).toBe(true);
+  expect(doors[3].x).toBe(Math.floor((3 * DOOR.w + 20 - 2 * DOOR.w) / 2));
+  expect(height).toBeGreaterThanOrEqual(doors[4].y + DOOR.h);
+  expect(layoutLobby(office([], []), 100).doors).toEqual([]);
+});
+
+test("a project's slice holds only its employees, their interns and its board", () => {
+  const state: OfficeState = {
+    ...office(["shop", "blog"], [employee("a", "shop"), employee("b", "blog")]),
+    interns: { i1: { agentId: "i1", parent: "a", type: "Explore" }, i2: { agentId: "i2", parent: "b", type: "Explore" } },
+    boards: { shop: [], blog: [] },
+  };
+  const slice = projectState(state, "shop");
+  expect(Object.keys(slice.rooms)).toEqual(["shop"]);
+  expect(Object.keys(slice.employees)).toEqual(["a"]);
+  expect(Object.keys(slice.interns)).toEqual(["i1"]);
+  expect(Object.keys(slice.boards!)).toEqual(["shop"]);
+  expect(projectState(state, "gone").rooms).toEqual({});
+});
+
+test("the URL fragment names the open project, paths and all", () => {
+  expect(hashFor(null)).toBe("");
+  expect(roomFromHash(hashFor("/Users/me/my shop/.git"))).toBe("/Users/me/my shop/.git");
+  expect(roomFromHash("")).toBeNull();
+  expect(roomFromHash("#/project/")).toBeNull();
+  expect(roomFromHash("#/project/%E0%A4%A")).toBeNull();
+  expect(roomFromHash("#other")).toBeNull();
+});
+
+test("one open project fills the view: its room spans the width and height, with the company in a row in the middle", () => {
+  const six = ["a", "b", "c", "d", "e", "f"].map((id, i) => employee(id, "r", { role: ROLE_IDS[i] }));
+  const { rooms, height } = layoutOffice(office(["r"], six), 480, 225);
+  const solo = rooms[0];
+  expect(new Set(solo.desks.slice(0, 6).map((d) => d.y)).size).toBe(1);
+  expect(solo.w).toBeGreaterThanOrEqual(480 - 16);
+  expect(solo.h).toBeGreaterThanOrEqual(225 - 16);
+  expect(height).toBeLessThanOrEqual(225);
+  const above = solo.desks[0].y - (solo.y + ROOM.wall), below = solo.y + solo.h - (solo.desks[0].y + CELL.h);
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(16);
+  const left = solo.desks[0].x - solo.x, right = solo.x + solo.w - (solo.desks[5].x + CELL.w);
+  expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  const narrow = layoutOffice(office(["r"], six), 120, 400).rooms[0];
+  expect(narrow.desks.length).toBe(ROOM.cols * 2);
+  const crowd = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => employee(id, "r"));
+  expect(layoutOffice(office(["r"], crowd), 480, 100).height).toBeGreaterThan(100);
 });
 
 test("every bundled asset is credited with its source and CC0 license", () => {
