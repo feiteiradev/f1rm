@@ -58,6 +58,27 @@ test("liveSessions is null when claude agents fails, so nobody is mistaken for g
   expect(await claudeAgents('{"error":"x"}')).toBeNull();
 });
 
+test("workingHires counts the background sessions that are working or blocked, and is null when claude can't say", async () => {
+  const out = JSON.stringify([
+    { kind: "background", state: "working" },
+    { kind: "background", state: "blocked" },
+    { kind: "background", state: "done" },
+    { kind: "interactive", state: "working" },
+  ]);
+  expect((await run("machine.workingHires()", out)).value).toBe(2);
+  expect((await run("machine.workingHires()", "[]", { all: 1 })).value).toBeNull();
+});
+
+test("spawnBackground runs the argv as given in the folder, without the parent session's variables, and says why it failed", async () => {
+  const folder = realpathSync(mkdtempSync(join(dir, "folder-")));
+  const argv = ["claude", "--bg", "--worktree", "w", "a brief with $(rm -rf /) and\nnewlines"];
+  const ok = await run(`machine.spawnBackground(${JSON.stringify(argv)}, ${JSON.stringify(folder)})`, "backgrounded · 7c5dcf5d");
+  expect(ok.value).toBe("backgrounded · 7c5dcf5d");
+  expect(ok.calls).toEqual([["claude", "--bg", "--worktree", "w", "a brief with $(rm -rf /) and newlines", "[env:0]"]]);
+  expect(ok.cwds).toEqual([folder]);
+  expect((await run(`machine.spawnBackground(["claude", "--bg"], ${JSON.stringify(folder)})`, "not a git repository", { all: 1 })).value).toEqual({ threw: "not a git repository" });
+});
+
 test("backgroundId finds the attach handle of a background session, among finished ones too", async () => {
   const out = JSON.stringify([
     { pid: 1, cwd: "/a", kind: "interactive", sessionId: "same" },

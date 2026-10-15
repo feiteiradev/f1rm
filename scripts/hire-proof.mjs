@@ -53,7 +53,6 @@ try {
   const dialog = page.locator("dialog.hire");
   assert.equal(await dialog.count(), 0, "no dialog until asked");
 
-  // The Hire button.
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
@@ -89,7 +88,6 @@ try {
     },
   ]);
 
-  // An empty desk.
   const s = await new Promise((r) => {
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: base } });
     ws.onmessage = (m) => (ws.close(), r(JSON.parse(String(m.data))));
@@ -104,7 +102,6 @@ try {
   await dialog.waitFor({ state: "detached" });
   assert.equal(await page.locator(".panel").count(), 0, "an empty desk opens no employee panel");
 
-  // At the cap the server refuses with the count, and the dialog says so and stays open.
   working = 4;
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await page.getByLabel("Brief", { exact: true }).fill("One more");
@@ -114,7 +111,6 @@ try {
   assert.equal(spawned.length, 1, "nothing spawned at the cap");
   await page.keyboard.press("Escape");
 
-  // A phone.
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 780 } })).newPage();
   watch(phone);
   await phone.goto(`${base}/${TOKEN}/`);
@@ -128,7 +124,6 @@ try {
   await page.context().close();
   await phone.context().close();
 
-  // The recorded demo.
   const files = Bun.spawn(["python3", "-m", "http.server", "4398", "--bind", "127.0.0.1"], { cwd: resolve(import.meta.dir, "../office/demo/dist"), stdout: "ignore", stderr: "ignore" });
   await Bun.sleep(800);
   try {
