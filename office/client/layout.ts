@@ -3,7 +3,7 @@ import type { Employee, OfficeState, Room } from "../server/office.ts";
 import { ROLE_IDS } from "../people.ts";
 
 export const CELL = { w: 36, h: 64 };
-export const ROOM = { cols: 3, wall: 22, pad: 6 };
+export const ROOM = { cols: 3, wall: 22, pad: 6, maxCols: 6 };
 const MARGIN = 8;
 const GAP = 8;
 
@@ -11,13 +11,18 @@ const GAP = 8;
 export type Desk = { x: number; y: number; hot: boolean; employee?: Employee };
 export type RoomLayout = { room: Room; x: number; y: number; w: number; h: number; empty: boolean; desks: Desk[] };
 
-export function layoutOffice(state: OfficeState, width: number): { rooms: RoomLayout[]; height: number } {
+/** Integer art scale keeps pixels square; narrow windows drop to 2x and wide ones step up. */
+export const scaleFor = (px: number) => (px < 760 ? 2 : px < 1100 ? 3 : 4);
+
+/** With `solo`, the one room open fills the screen: it widens to seat a whole company in a row and sits in the middle. */
+export function layoutOffice(state: OfficeState, width: number, solo = false): { rooms: RoomLayout[]; height: number } {
   const staff = Object.values(state.employees);
   const rooms = Object.values(state.rooms).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-  const roomW = ROOM.pad * 2 + ROOM.cols * CELL.w;
+  const cols = solo ? Math.min(ROOM.maxCols, Math.max(ROOM.cols, Math.floor((width - MARGIN * 2 - ROOM.pad * 2) / CELL.w))) : ROOM.cols;
+  const roomW = ROOM.pad * 2 + cols * CELL.w;
 
   const out: RoomLayout[] = [];
-  let x = MARGIN, y = MARGIN, rowH = 0;
+  let x = solo ? Math.max(MARGIN, Math.floor((width - roomW) / 2)) : MARGIN, y = MARGIN, rowH = 0;
   for (const room of rooms) {
     // Company staff take the front desks in role order (shifts of a role by counter), freelancers the hot desks behind
     // them, by session id. Both orders are stable while nobody joins or leaves, with no arrival order in the state.
@@ -26,18 +31,18 @@ export function layoutOffice(state: OfficeState, width: number): { rooms: RoomLa
       .filter((e) => e.role)
       .sort((a, b) => ROLE_IDS.indexOf(a.role!) - ROLE_IDS.indexOf(b.role!) || a.name.localeCompare(b.name, undefined, { numeric: true }));
     const freelancers = here.filter((e) => !e.role).sort((a, b) => a.sessionId.localeCompare(b.sessionId));
-    const crewSeats = Math.ceil(crew.length / ROOM.cols) * ROOM.cols;
-    const seats = Math.max(ROOM.cols, crewSeats + Math.ceil(freelancers.length / ROOM.cols) * ROOM.cols);
+    const crewSeats = Math.ceil(crew.length / cols) * cols;
+    const seats = Math.max(cols, crewSeats + Math.ceil(freelancers.length / cols) * cols);
     const people = [...crew, ...Array(crewSeats - crew.length).fill(undefined), ...freelancers];
-    const h = ROOM.wall + ROOM.pad * 2 + (seats / ROOM.cols) * CELL.h;
+    const h = ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h;
     if (x > MARGIN && x + roomW > width - MARGIN) {
       x = MARGIN;
       y += rowH + GAP;
       rowH = 0;
     }
     const desks = Array.from({ length: seats }, (_, i) => ({
-      x: x + ROOM.pad + (i % ROOM.cols) * CELL.w,
-      y: y + ROOM.wall + ROOM.pad + Math.floor(i / ROOM.cols) * CELL.h,
+      x: x + ROOM.pad + (i % cols) * CELL.w,
+      y: y + ROOM.wall + ROOM.pad + Math.floor(i / cols) * CELL.h,
       hot: i >= crewSeats && freelancers.length > 0,
       employee: people[i],
     }));

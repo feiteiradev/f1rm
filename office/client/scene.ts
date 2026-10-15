@@ -1,9 +1,9 @@
 // The PixiJS scene: draws the office from the latest server state, animates each employee from its pose.
-import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
+import { Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
 import { seedFor, seedOf } from "../people.ts";
-import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, TICK_MS, type DeskArt } from "./art.ts";
-import { CELL, layoutOffice, ROOM } from "./layout.ts";
+import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TICK_MS, type DeskArt } from "./art.ts";
+import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { poseOf } from "./pose.ts";
 import { buildWhiteboard, whiteboardCount } from "./whiteboard.ts";
 
@@ -24,18 +24,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…"
 
 export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void): Promise<Scene> {
   await loadArt();
-  const app = new Application();
-  await app.init({
-    background: COLORS.outside,
-    antialias: false,
-    roundPixels: true,
-    resolution: window.devicePixelRatio || 1,
-    autoDensity: true,
-    width: host.clientWidth,
-    height: host.clientHeight,
-  });
-  host.appendChild(app.canvas);
-  app.canvas.style.imageRendering = "pixelated";
+  const app = await newApp(host);
 
   const world = new Container();
   const rooms = new Container();
@@ -57,10 +46,9 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
   let selected: string | null = null;
 
   function render() {
-    // Integer art scale keeps pixels square; narrow windows drop to 2x.
-    const scale = host.clientWidth < 760 ? 2 : 3;
+    const scale = scaleFor(host.clientWidth);
     world.scale.set(scale);
-    const { rooms: laidOut, height } = layoutOffice(latest, Math.floor(host.clientWidth / scale));
+    const { rooms: laidOut, height } = layoutOffice(latest, Math.floor(host.clientWidth / scale), true);
     app.renderer.resize(host.clientWidth, Math.max(host.clientHeight, height * scale));
     app.stage.hitArea = app.screen;
 

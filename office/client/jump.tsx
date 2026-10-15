@@ -44,7 +44,7 @@ export function JumpButton({ id }: { id: string }) {
   );
 }
 
-export function Palette({ state }: { state: OfficeState }) {
+export function Palette({ state, onOpen }: { state: OfficeState; onOpen: (roomId: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -91,6 +91,8 @@ export function Palette({ state }: { state: OfficeState }) {
 
   async function go(id: string) {
     if (busy) return;
+    // Someone in another project: that project's office opens first, wherever the jump itself ends up.
+    onOpen(state.employees[id].room);
     if (await jump(id)) hide();
   }
 
