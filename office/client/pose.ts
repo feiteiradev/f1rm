@@ -16,7 +16,6 @@ const TOOL_POSE: Record<string, Pose> = {
   Bash: "running",
 };
 
-/** Waiting raises a hand and idle takes coffee whatever the last tool was; working follows the tool. */
 export function poseOf(e: Pick<Employee, "status" | "tool">): Pose {
   if (e.status === "waiting") return "hand";
   if (e.status === "idle") return "coffee";

@@ -94,6 +94,29 @@ code { font: inherit; color: var(--text); }
   clip-path: inset(50%);
   list-style: none;
 }
+.roster:focus-within {
+  left: 16px;
+  bottom: 16px;
+  width: auto;
+  height: auto;
+  max-height: 50%;
+  padding: 8px;
+  overflow: auto;
+  clip-path: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.roster button {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+}
 
 @media (max-width: 640px) {
   .panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; }

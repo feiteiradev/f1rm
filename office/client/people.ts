@@ -4,8 +4,7 @@ const NAMES = [
   "Elif", "Dario", "Nadia", "Jonas", "Amara", "Felix", "Soraya", "Ivo", "Greta", "Idris", "Noor", "Caio",
 ];
 
-// FNV-1a: stable, no dependencies.
-export function seedOf(sessionId: string): number {
+function seedOf(sessionId: string): number {
   let h = 2166136261;
   for (const c of sessionId) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
   return h;

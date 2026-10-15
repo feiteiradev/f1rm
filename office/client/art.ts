@@ -1,5 +1,4 @@
 // Drawing: CC0 Kenney tiles for furniture and people, a few pixels of code-drawn props on top.
-// Every coordinate here is in art pixels; the scene scales the whole world by an integer.
 import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import indoorUrl from "./assets/roguelikeIndoor_transparent.png";
 import charUrl from "./assets/roguelikeChar_transparent.png";
@@ -48,7 +47,6 @@ const DESK = { x: 2, y: 24 };
 
 export type DeskArt = { root: Container; person: Container; fx: Graphics; skin: number };
 
-/** One desk cell. An occupied one carries a person (the layer they animate in) and an fx layer for props. */
 export function buildDesk(seed: number | null): DeskArt {
   const root = new Container();
   const person = new Container();
@@ -73,10 +71,8 @@ export function buildDesk(seed: number | null): DeskArt {
 const box = (g: Graphics, x: number, y: number, w: number, h: number, color: number, alpha = 1) =>
   void g.rect(x, y, w, h).fill({ color, alpha });
 
-// One animation tick is 120ms; every pose steps in whole ticks so props move in whole art pixels.
 export const TICK_MS = 120;
 
-/** How far a person's body shifts (art pixels) at tick f: typing bobs, reading bows its head, coffee leans back and forth. */
 export function bob(pose: Pose, f: number): number {
   switch (pose) {
     case "typing": return f % 2;
@@ -87,7 +83,6 @@ export function bob(pose: Pose, f: number): number {
   }
 }
 
-// The person sits right of centre; the monitor stands left of them so both stay in view.
 const SCREEN = { x: 4, y: 18, w: 11, h: 7 };
 const KEYS = { x: 15, y: 31 };
 const CODE_COLORS = [0x7fd6a2, 0xe8b45c, 0x8ab4f8, 0xd98cb3];
@@ -117,18 +112,15 @@ function screen(g: Graphics, pose: Pose | "off", f: number) {
   }
 }
 
-/** A speech bubble with its tail pointing down at the person's head. */
 function bubble(g: Graphics, x: number, y: number, color: number) {
   box(g, x, y, 11, 8, color);
   box(g, x + 5, y + 8, 2, 2, color);
 }
 
-/** Props and overlays for one desk at animation tick f. Empty desks pass "off". */
 export function drawDesk(g: Graphics, pose: Pose | "off", f: number, skin: number, selected: boolean) {
   g.clear();
   screen(g, pose, f);
   if (pose === "reading") {
-    // An open book where the keyboard would be; every fourth tick a page lifts.
     box(g, KEYS.x, 30, 12, 5, 0x8a5a3c);
     box(g, KEYS.x + 1, 30, 5, 4, 0xf3ecd8);
     box(g, KEYS.x + 7, f % 4 === 3 ? 29 : 30, 5, f % 4 === 3 ? 5 : 4, 0xf3ecd8);
@@ -175,7 +167,6 @@ export function drawDesk(g: Graphics, pose: Pose | "off", f: number, skin: numbe
   }
 }
 
-/** The static shell of one room: floor, wall, decor, and an empty desk for every free seat. */
 export function buildRoom(r: RoomLayout) {
   const root = new Container();
   const g = new Graphics();
@@ -184,7 +175,6 @@ export function buildRoom(r: RoomLayout) {
   for (let y = r.y + ROOM.wall + 8; y < r.y + r.h; y += 8) box(g, r.x, y, r.w, 1, COLORS.plank);
   box(g, r.x, r.y, r.w, ROOM.wall, COLORS.wall);
   box(g, r.x, r.y + ROOM.wall - 3, r.w, 3, COLORS.baseboard);
-  // Frame: a 1px darker edge so rooms read as cut-away cells of the building.
   for (const [x, y, w, h] of [[r.x, r.y, r.w, 1], [r.x, r.y + r.h - 1, r.w, 1], [r.x, r.y, 1, r.h], [r.x + r.w - 1, r.y, 1, r.h]]) {
     box(g, x, y, w, h, COLORS.outside);
   }

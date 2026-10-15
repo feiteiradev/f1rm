@@ -1,5 +1,7 @@
 // The client's pure parts: what each state looks like (pose, counts) and where it goes (layout).
 import { expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Employee, OfficeState } from "../server/office.ts";
 import { CELL, layoutOffice, ROOM } from "./layout.ts";
 import { identityOf } from "./people.ts";
@@ -63,4 +65,15 @@ test("rooms wrap to a new row when the width runs out", () => {
   expect(new Set(wide.map((r) => r.y)).size).toBe(1);
   const narrow = layoutOffice(state, roomWidth * 2 + 40).rooms;
   expect(narrow.map((r) => r.y > narrow[0].y)).toEqual([false, false, true]);
+});
+
+test("every bundled asset is credited with its source and CC0 license", () => {
+  const credits = readFileSync(join(import.meta.dir, "../../CREDITS.md"), "utf8").split("\n");
+  const assets = readdirSync(join(import.meta.dir, "assets"));
+  expect(assets.length).toBeGreaterThan(0);
+  for (const file of assets) {
+    const row = credits.find((l) => l.includes(`\`office/client/assets/${file}\``));
+    expect(row).toMatch(/https:\/\/kenney\.nl\/\S+/);
+    expect(row).toContain("CC0 1.0");
+  }
 });

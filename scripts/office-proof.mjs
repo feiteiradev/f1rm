@@ -54,7 +54,6 @@ const meanLuma = (b64) =>
 const settle = (ms = 450) => page.waitForTimeout(ms);
 
 const canvasBox = async () => (await page.locator(".scene canvas").boundingBox());
-// Screen rect of a room or desk, from the same layout function the page uses.
 async function state() {
   const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: base } });
   const s = await new Promise((r) => (ws.onmessage = (m) => r(JSON.parse(String(m.data)))));
@@ -70,12 +69,10 @@ async function rects() {
   return { s, room, deskOf, clipOf };
 }
 
-// 1. A new office is empty; the counter is visible from the first paint.
 await page.waitForSelector(".counter");
 assert.match(await page.locator("main").innerText(), /office is empty/);
 await shot("00-empty");
 
-// 2. One employee per pose across two rooms, plus a third room that fills and empties.
 await send("s1", "/code/shop", "SessionStart");
 await tool("s1", "/code/shop", "Edit", { file_path: "/code/shop/src/login.ts" });
 await tool("s2", "/code/shop", "Read", { file_path: "/code/shop/README.md" });
@@ -88,13 +85,11 @@ await send("d1", "/code/docs", "SessionStart");
 await settle();
 await shot("01-office");
 
-// Criterion: the active/waiting/idle counter is always visible and tallies the server state.
 const counts = async () =>
   Object.fromEntries(await page.locator(".counter li").evaluateAll((lis) => lis.map((l) => [l.dataset.status, +l.querySelector(".count").textContent])));
 assert.deepEqual(await counts(), { working: 4, waiting: 1, idle: 3 });
 assert.ok(await page.locator(".counter").isVisible());
 
-// Criterion: each state has its own animation, and every one of them moves.
 const { room, deskOf, clipOf } = await rects();
 const poses = { typing: "s1", reading: "s2", running: "s3", hand: "s4", coffee: "s5" };
 const roster = await page.locator(".roster button").evaluateAll((bs) => bs.map((b) => [b.textContent, b.dataset.pose]));
@@ -114,7 +109,6 @@ for (const [pose, id] of Object.entries(poses)) {
 }
 assert.ok(new Set(Object.values(crops)).size === 5, "five poses look different");
 
-// Criterion: a room appears with its first employee and dims when empty.
 const docs = room("docs");
 const docsClip = clipOf(docs.x, docs.y, docs.w, docs.h);
 const lit = await meanLuma(await pixels(docsClip));
@@ -126,7 +120,6 @@ await shot("04-room-dimmed", docsClip);
 assert.ok(dim < lit * 0.7, `empty room dims (lit ${lit.toFixed(1)}, dim ${dim.toFixed(1)})`);
 await shot("05-office-with-dimmed-room");
 
-// Criterion: clicking an employee opens its panel (name, role, room, status, activity).
 const d4 = deskOf("s4"), box = await canvasBox();
 await page.mouse.click((d4.x + 18) * SCALE, box.y + (d4.y + 24) * SCALE);
 const panel = page.locator(".panel");
@@ -139,7 +132,6 @@ await shot("06-panel");
 await page.keyboard.press("Escape");
 assert.equal(await panel.count(), 0, "Escape closes the panel");
 
-// Criterion: rendering follows the server alone. Stopping s2 flips it to coffee and moves the counter.
 const before = await pixels(clipOf(deskOf("s2").x, deskOf("s2").y, 36, 64));
 await send("s2", "/code/shop", "Stop");
 await settle();
