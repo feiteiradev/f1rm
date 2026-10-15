@@ -27,7 +27,7 @@ const PATHS = [
   /\b[A-Za-z]:\\\S*/,
   /~\/\S*/,
 ];
-const looksPrivate = (s: string) => [...SECRETS, ...PATHS].some((p) => p.test(s));
+export const looksPrivate = (s: string) => [...SECRETS, ...PATHS].some((p) => p.test(s));
 
 /** A short "what it's doing" line with every argument that could carry user text cut away. */
 function activityOf(e: F1rmEvent): string | undefined {
