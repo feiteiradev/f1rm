@@ -77,8 +77,8 @@ function Panel({ state, id, entries, onAsk, onClose }: { state: OfficeState; id:
           </>
         )}
       </dl>
-      <JumpButton key={id} id={id} />
-      <AskBox key={id} entries={entries} onAsk={onAsk} />
+      <JumpButton id={id} />
+      <AskBox entries={entries} onAsk={onAsk} />
     </aside>
   );
 }
@@ -128,7 +128,7 @@ function Project({ state }: { state: OfficeState }) {
   return (
     <>
       <div className="scene" ref={host} />
-      {selected && <Panel state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onClose={() => select(null)} />}
+      {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onClose={() => select(null)} />}
       {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
       <BoardList state={state} onOpen={setBoard} />
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
