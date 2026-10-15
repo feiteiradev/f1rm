@@ -5,6 +5,7 @@ import { seedFor, seedOf } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM } from "./layout.ts";
 import { poseOf } from "./pose.ts";
+import { buildWhiteboard, whiteboardCount } from "./whiteboard.ts";
 
 export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
 
@@ -21,7 +22,7 @@ const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void): Promise<Scene> {
+export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void): Promise<Scene> {
   await loadArt();
   const app = new Application();
   await app.init({
@@ -70,7 +71,15 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       const shell = buildRoom(r);
       const overlay = new Graphics().rect(r.x, r.y, r.w, r.h).fill(COLORS.night);
       overlay.alpha = dimmers.get(r.room.id)?.now ?? 0;
-      rooms.addChild(shell, overlay);
+      // Lets taps through to the whiteboard under it.
+      overlay.eventMode = "none";
+      const rows = latest.boards?.[r.room.id] ?? [];
+      rooms.addChild(shell, buildWhiteboard(r, rows, () => onBoard(r.room.id)), overlay);
+      const count = whiteboardCount(r, rows, scale);
+      if (count) {
+        count.alpha = r.empty ? 0.4 : 1;
+        roomLabels.addChild(count);
+      }
 
       const label = new Text({ text: clip(r.empty ? `${r.room.name} (empty)` : r.room.name, 22), style: LABEL });
       label.position.set((r.x + ROOM.pad) * scale, (r.y + 5) * scale);

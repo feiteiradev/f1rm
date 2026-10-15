@@ -204,7 +204,6 @@ export function buildRoom(r: RoomLayout) {
     box(g, d.x, d.y + 8, CELL.w, CELL.h - 10, COLORS.mat);
     box(g, d.x + 1, d.y + 9, CELL.w - 2, CELL.h - 12, COLORS.matEdge, 0.5);
   }
-  put(root, indoor, 19, 12, r.x + r.w - 44, r.y + 2);
   put(root, indoor, 16, 0, r.x + r.w - 20, r.y + ROOM.wall - 14);
   for (const d of r.desks) {
     if (d.employee) continue;
