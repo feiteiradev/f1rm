@@ -121,6 +121,12 @@ test("askFork forks the session on Haiku with read-only tools, hooks off and no 
   expect(stdin.endsWith("\n\n--What is the codeword?")).toBe(true);
 });
 
+test("askFork refuses a session id that could be read as a flag, and spawns nothing", async () => {
+  const { calls, value } = await run(`(async () => { for await (const _ of machine.askFork("--dangerously-skip-permissions", ${JSON.stringify(askDir)}, "q")); })()`);
+  expect(value).toEqual({ threw: "bad session id" });
+  expect(calls).toEqual([]);
+});
+
 test("askFork separates text blocks, falls back to the final result without deltas, and throws what went wrong", async () => {
   expect((await ask("q", [textBlock, delta("Let me look."), textBlock, delta("It is MANGO."), result({})].join("\n"))).value).toEqual(["Let me look.", "\n\n", "It is MANGO."]);
   expect((await ask("q", result({ result: "MANGO" }))).value).toEqual(["MANGO"]);

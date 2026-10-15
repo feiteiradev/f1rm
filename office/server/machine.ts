@@ -18,7 +18,8 @@ async function* lines(stream: ReadableStream<Uint8Array>) {
 }
 
 const ITERM ='application id "com.googlecode.iterm2"';
-const SAFE_ID = /^[\w-]+$/;
+// A leading "-" would let an id be read as a flag.
+const SAFE_ID = /^\w[\w-]*$/;
 
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
 async function agents(all: boolean): Promise<any[] | null> {
@@ -91,6 +92,7 @@ export const machine = {
    * Read, Grep and Glob. It sees what is in the transcript, not a turn still being written. Throws if it can't answer; aborting `signal` kills it.
    */
   async *askFork(sessionId: string, cwd: string, question: string, signal?: AbortSignal): AsyncGenerator<string> {
+    if (!SAFE_ID.test(sessionId)) throw new Error("bad session id");
     const proc = Bun.spawn(
       [
         "claude", "-p", "--resume", sessionId, "--fork-session", "--no-session-persistence",
