@@ -16,7 +16,8 @@ export type Desk = { x: number; y: number; hot: boolean; table?: boolean; team?:
 export type Box = { x: number; y: number; w: number; h: number };
 /** `desks[0]` is always the PM's table. */
 export type Pod = Box & { team: string };
-export type RoomLayout = Box & { room: Room; empty: boolean; corner: Box; pods: Pod[]; desks: Desk[] };
+/** `founder` rooms are Founder projects, which look different. */
+export type RoomLayout = Box & { room: Room; empty: boolean; founder: boolean; corner: Box; pods: Pod[]; desks: Desk[] };
 
 /** Integer art scale keeps pixels square; narrow windows drop to 2x and wide ones step up. */
 export const scaleFor = (px: number) => (px < 760 ? 2 : px < 1100 ? 3 : 4);
@@ -76,7 +77,7 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
       row.seats.forEach((employee, c) => desks.push({ x: MARGIN + inset + c * CELL.w, y: top, hot: row.hot && freelancers.length > 0, ...(row.team && { team: row.team }), employee }));
       top += CELL.h;
     });
-    out.push({ room, x: MARGIN, y, w: roomW, h, empty: here.length === 0, corner, pods, desks: [table, ...desks] });
+    out.push({ room, x: MARGIN, y, w: roomW, h, empty: here.length === 0, founder: state.editions?.[room.id] === "founder", corner, pods, desks: [table, ...desks] });
     y += h + GAP;
   }
   return { rooms: out, height: y - GAP + MARGIN };

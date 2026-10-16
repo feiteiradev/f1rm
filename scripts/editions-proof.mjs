@@ -1,14 +1,16 @@
 // Drives the built office page in a real browser against an in-process server with a throwaway settings folder, and checks
 // editions: the question on entering a project with none (Not now and Escape bring it back on the next entry, a choice saves
-// it), the badge on each door, and the top-bar select switching a project. Saves a screenshot per state.
+// it), the badge on each door, the top-bar select switching a project, and a Founder room: its brick wall, its publish chips
+// and "N to publish" at the PM's table. Saves a screenshot per state.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/editions-proof.mjs
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
 import { projectFile, readEdition, writeEdition } from "../office/server/editions.ts";
+import { boardFile } from "../office/server/board.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "editions-proof-out");
@@ -18,8 +20,10 @@ const SECRET = "proof-secret", TOKEN = "proof-token";
 const projectsDir = mkdtempSync(join(tmpdir(), "f1rm-projects-"));
 const SHOP = "/code/shop/.git", BLOG = "/code/blog/.git";
 writeEdition(projectFile(projectsDir, BLOG), "founder");
+const boardsDir = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
+writeFileSync(boardFile(boardsDir, BLOG), "# Board: blog\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | marketer-brand | done | worktree-brand | Write growth/brand.md |\n| T2 | marketer-launch | publish | worktree-launch | Launch post |\n| T3 | social-media-week1 | publish | worktree-week1 | Week 1 posts |\n| T4 | - | todo | - | Pricing page copy |\n");
 const server = startServer({
-  port: 0, secret: SECRET, token: TOKEN, projectsDir, boardPollMs: 50, clientDir: resolve(import.meta.dir, "../office/client/dist"),
+  port: 0, secret: SECRET, token: TOKEN, projectsDir, boardsDir, boardPollMs: 50, clientDir: resolve(import.meta.dir, "../office/client/dist"),
   machine: { gitCommonDir: (cwd) => ({ "/code/shop": SHOP, "/code/blog": BLOG })[cwd] ?? null, liveSessions: async () => new Set() },
 });
 const base = `http://127.0.0.1:${server.port}`;
@@ -88,6 +92,25 @@ try {
   await lobby();
   assert.equal(await door("shop").locator(".edition").innerText(), "Work");
   await page.screenshot({ path: join(OUT, "04-switched.png") });
+
+  // A Founder room: brick where a Work room has blue, and its publish list counted.
+  const wall = async () => {
+    const box = await page.locator(".scene canvas").boundingBox();
+    return (await page.screenshot({ clip: { x: box.x + 300, y: box.y + 44, width: 240, height: 40 } })).toString("base64");
+  };
+  await enter("shop");
+  await page.waitForTimeout(300);
+  const blue = await wall();
+  await lobby();
+  await enter("blog");
+  await page.locator(".boards button", { hasText: "2 to publish" }).waitFor({ state: "attached" });
+  await page.waitForTimeout(300);
+  assert.notEqual(await wall(), blue, "a Founder room's wall is not a Work room's");
+  await page.screenshot({ path: join(OUT, "05-founder-room.png") });
+  await page.locator(".boards button", { hasText: "Board, blog:" }).focus();
+  await page.keyboard.press("Enter");
+  assert.match(await page.locator(".board-panel").innerText(), /1 of 4 tasks done, 2 to publish[\s\S]*publish/);
+  await page.screenshot({ path: join(OUT, "06-publish-board.png") });
   assert.deepEqual(errors, [], "no page errors");
   console.log(`editions-proof: all checks passed; screenshots in ${OUT}`);
 } finally {

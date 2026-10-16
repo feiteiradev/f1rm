@@ -62,6 +62,8 @@ export const COLORS = {
   rugEdge: 0x7d5068,
   pod: 0x3b4a6b,
   podEdge: 0x5a6d96,
+  brick: 0x8a4b38,
+  mortar: 0x6a3628,
 };
 
 // Character layers in the char sheet: skin, shirt, hair as [col, row]. Skin tones sampled for the raised arm.
@@ -261,6 +263,14 @@ export function buildRoom(r: RoomLayout, onHire?: () => void, onStartPm?: () => 
   box(g, r.x, r.y, r.w, r.h, COLORS.floor);
   for (let y = r.y + ROOM.wall + 8; y < r.y + r.h; y += 8) box(g, r.x, y, r.w, 1, COLORS.plank);
   box(g, r.x, r.y, r.w, ROOM.wall, COLORS.wall);
+  // A Founder project's room has a warm brick wall: courses 5 high, the joints offset every other course.
+  if (r.founder) {
+    box(g, r.x, r.y, r.w, ROOM.wall - 3, COLORS.brick);
+    for (let course = 0, y = r.y + 4; y < r.y + ROOM.wall - 3; course++, y += 5) {
+      box(g, r.x, y, r.w, 1, COLORS.mortar);
+      for (let x = r.x + (course % 2 ? 5 : 0); x < r.x + r.w; x += 10) box(g, x, y - 4, 1, 4, COLORS.mortar);
+    }
+  }
   box(g, r.x, r.y + ROOM.wall - 3, r.w, 3, COLORS.baseboard);
   for (const [x, y, w, h] of [[r.x, r.y, r.w, 1], [r.x, r.y + r.h - 1, r.w, 1], [r.x, r.y, 1, r.h], [r.x + r.w - 1, r.y, 1, r.h]]) {
     box(g, x, y, w, h, COLORS.outside);

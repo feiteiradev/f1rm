@@ -259,3 +259,13 @@ test("the Hire dialog's task name comes from the brief's first words and always 
   expect(taskFrom("日本語 ...")).toBe("");
   for (const brief of ["Design the login page", "a b c d e f", "A".repeat(50) + "-b"]) expect(taskFrom(brief)).toMatch(TASK_NAME);
 });
+
+test("a Founder project's room is marked founder, and its board counts what waits to be published", async () => {
+  const { boardSummary } = await import("./board.ts");
+  const state = { ...office(["a", "b"], [employee("s1", "a"), employee("s2", "b")]), editions: { a: "founder" as const } };
+  const { rooms } = layoutOffice(state, 400);
+  expect(rooms.map((r) => [r.room.id, r.founder])).toEqual([["a", true], ["b", false]]);
+  const row = (status: string) => ({ id: "T1", owner: "-", status, branch: "-", task: "x" });
+  expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tasks done, 2 to publish");
+  expect(boardSummary([row("done")])).toBe("1 of 1 task done");
+});
