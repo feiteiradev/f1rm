@@ -326,6 +326,11 @@ async function openHere(room: string, name: string): Promise<string> {
     if (!url) return `The f1rm office didn't start; see ${join(F1RM_DIR, "office.log")}.`;
     notes.push("started it in the background");
   }
+  // An office page already open moves to this project; only with none open does a new tab open on it.
+  const shown = await fetch(new URL("show", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) })
+    .then(async (r) => r.ok && ((await r.json()) as { pages: number }).pages > 0)
+    .catch(() => false);
+  if (shown) return `Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
   Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
   return `Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
 }

@@ -1,7 +1,7 @@
 // Drives the built office page in a real browser against an in-process server with a throwaway settings folder, and checks
 // editions: the question on entering a project with none (Not now and Escape bring it back on the next entry, a choice saves
 // it), the badge on each door, the top-bar select switching a project, and a Founder room: its brick wall, its publish chips
-// and "N to publish" at the PM's table. Saves a screenshot per state.
+// and "N to publish" at the PM's table, and an open page moving to the project /f1rm shows. Saves a screenshot per state.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/editions-proof.mjs
 import assert from "node:assert/strict";
@@ -111,6 +111,14 @@ try {
   await page.keyboard.press("Enter");
   assert.match(await page.locator(".board-panel").innerText(), /1 of 4 tasks done, 2 to publish[\s\S]*publish/);
   await page.screenshot({ path: join(OUT, "06-publish-board.png") });
+  // /f1rm in a project's folder: the office page already open moves to that project.
+  await page.keyboard.press("Escape");
+  await lobby();
+  const shown = await fetch(`${base}/${TOKEN}/show`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: SHOP }) });
+  assert.deepEqual(await shown.json(), { pages: 1 }, "the open page is counted");
+  await page.locator(".crumb", { hasText: "shop" }).waitFor();
+  await page.screenshot({ path: join(OUT, "07-shown.png") });
+
   assert.deepEqual(errors, [], "no page errors");
   console.log(`editions-proof: all checks passed; screenshots in ${OUT}`);
 } finally {

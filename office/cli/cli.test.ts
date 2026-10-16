@@ -581,3 +581,20 @@ test("install puts the f1rm command in ~/.local/bin, and uninstall removes it on
   stub.run(home, "uninstall");
   expect(readFileSync(bin, "utf8")).toBe("#!/bin/sh\necho mine\n");
 });
+
+test("here with an office page open moves that page to this folder's project and opens no new tab", async () => {
+  const home = tempHome(), folder = realpathSync(repoDir("blog"));
+  const stub = stubBin();
+  stub.run(home, "install");
+  const asked: unknown[] = [];
+  const office = Bun.serve({
+    port: 0,
+    fetch: async (req) => (req.method === "POST" && new URL(req.url).pathname === "/tok/show" ? (asked.push(await req.json()), Response.json({ pages: 1 })) : new Response("office")),
+  });
+  writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
+  const r = await hereIn(folder, home, stub.bin);
+  office.stop(true);
+  expect(r.out).toBe("Your office tab now shows blog.");
+  expect(asked).toEqual([{ room: folder }]);
+  expect(stub.calls()).toEqual([]);
+});
