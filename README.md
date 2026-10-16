@@ -4,7 +4,7 @@ A pixel-art office for your Claude Code sessions. Every session on your Mac is a
 
 f1rm also ships a company: a Claude Code plugin with six roles (PM, Designer, Frontend dev, Backend dev, Reviewer, Researcher) and the guidelines they work by. You talk to the PM. The PM hires the rest.
 
-![The f1rm lobby, a project office with its PM waiting for you at the table, and the PM's panel](docs/f1rm.gif)
+![The f1rm lobby, a Work project with its PM waiting for you at the table, the PM's panel, and a Founder project's launch team](docs/f1rm.gif)
 
 ## What you get
 

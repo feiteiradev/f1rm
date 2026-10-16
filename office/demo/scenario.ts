@@ -18,12 +18,17 @@ const WHO: Record<string, Who> = {
   free2: { title: "quit job letter draft", room: "garden-site" },
   free3: { room: "notes-cli" },
   free4: { room: "notes-cli" },
+  // A Founder project: its PM, and a launch team mixing go-to-market roles.
+  pm3: { agent: "f1rm:pm", title: "lemonade board", room: "lemonade" },
+  lead: { agent: "f1rm:lead", title: "lead-launch", room: "lemonade" },
+  mkt: { agent: "f1rm:marketer", title: "launch.marketer-brand", room: "lemonade", worktree: "brand" },
+  seo: { agent: "f1rm:seo-specialist", title: "launch.seo-specialist-audit", room: "lemonade", worktree: "audit" },
 };
-export const ROOMS = ["pixel-pet", "atlas-api", "garden-site", "notes-cli"];
+export const ROOMS = ["pixel-pet", "atlas-api", "garden-site", "notes-cli", "lemonade"];
 /** The public names the scrub step may keep. */
-export const KEEP = [...ROOMS, "pixel-pet board", "atlas board", "sprite sheet", "hud", "palette"];
+export const KEEP = [...ROOMS, "pixel-pet board", "atlas board", "sprite sheet", "hud", "palette", "lemonade board", "lead-launch", "launch.marketer-brand", "launch.seo-specialist-audit"];
 /** Strings planted in the payloads above that must not reach the published fixture. */
-export const MARKERS = ["sk-ant", "Bearer", "/Users", "/private", "/var/", ".ssh", "layoffs", "Acme", "password", "salary", "resignation", "w0t", "jsonl", "hunter2"];
+export const MARKERS = ["sk-ant", "Bearer", "/Users", "/private", "/var/", ".ssh", "layoffs", "Acme", "password", "salary", "resignation", "w0t", "jsonl", "hunter2", "4242", "lemonade.example"];
 
 const steps: Step[] = [];
 const at = (t: number, session: string, hook_event_name: string, extra: Record<string, unknown> = {}) =>
@@ -162,6 +167,35 @@ tool(278, "ines", "Bash", { command: "bun test" });
 ask(290, "ines", "Bash", { command: "git merge --no-ff hud" });
 tool(312, "ines", "Bash", { command: "git merge --no-ff hud" });
 at(320, "ines", "Stop");
+
+at(8, "pm3", "SessionStart");
+prompt(12, "pm3", "Launch the lemonade app: a landing page, SEO, and the first posts. My card ends in 4242");
+tool(18, "pm3", "Write", { file_path: "BOARD.md" });
+at(28, "pm3", "Stop");
+at(22, "lead", "SessionStart");
+prompt(24, "lead", "Team: launch: the landing page and its first visitors");
+tool(30, "lead", "Write", { file_path: "BOARD.launch.md" });
+tool(36, "lead", "Bash", { command: "f1rm hire --team launch marketer launch.marketer-brand brand 'Task: brand'" });
+at(44, "lead", "Stop");
+at(40, "mkt", "SessionStart");
+prompt(42, "mkt", "/cro Write growth/brand.md first");
+tool(48, "mkt", "Skill", { skill: "brandkit" });
+tool(56, "mkt", "Write", { file_path: "growth/brand.md" });
+tool(70, "mkt", "Write", { file_path: "growth/marketing/landing.md" });
+tool(86, "mkt", "Edit", { file_path: "growth/marketing/landing.md" });
+at(104, "mkt", "Stop");
+prompt(220, "mkt", "Draft the launch post");
+tool(226, "mkt", "Write", { file_path: "growth/marketing/launch-post.md" });
+at(250, "mkt", "Stop");
+at(46, "seo", "SessionStart");
+prompt(48, "seo", "/seo-audit the landing page");
+tool(54, "seo", "WebFetch", { url: "https://lemonade.example/" });
+tool(66, "seo", "Read", { file_path: "growth/brand.md" });
+tool(80, "seo", "Write", { file_path: "growth/seo/audit.md" });
+spawn(92, "seo", "agent-3", "Explore");
+done(118, "seo", "agent-3", "Explore");
+tool(124, "seo", "Edit", { file_path: "growth/seo/audit.md" });
+at(140, "seo", "Stop");
 
 export const SCENARIO: Step[] = steps.sort((a, b) => a.t - b.t);
 
