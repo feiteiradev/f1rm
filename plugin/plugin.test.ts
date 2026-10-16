@@ -111,6 +111,29 @@ test("specialists never hire and answer only their Report to; the PM hires only 
   for (const s of ["`PLAN <team>`", "`GO <team>`", "`DONE <team>`", "f1rm hire --team <team>", "Only the PM talks to the user"]) expect(lead).toContain(s);
 });
 
+test("the guidelines run editions: Work and Founder, the founder playbook, drafts only, the content checklist and publish", () => {
+  for (const h of ["Editions", "Founder playbook", "Drafts only"]) expect(section(h).trim().length).toBeGreaterThan(100);
+  expect(section("Editions")).toContain("~/.f1rm/projects/<repo>.json");
+  expect(section("Editions")).toContain("refuses a Founder-only role in a Work project");
+  const playbook = section("Founder playbook");
+  for (const s of ["the customer, the problem they have, the offer, and the channel", "**Strategist first**", "`growth/brand.md`", "`growth/marketing/`", "`launch` team"]) expect(playbook).toContain(s);
+  const drafts = section("Drafts only");
+  for (const s of ["never post, publish, send, schedule or spend", "paid credits", "`publish`"]) expect(drafts).toContain(s);
+  expect(section("Review and merge flow")).toContain("**content checklist**");
+  expect(section("Board format")).toContain("`publish` means approved founder work waiting for the user to put it out");
+  for (const r of ["marketer", "seo-specialist", "social-media", "sales", "strategist"]) {
+    const { body } = role(r);
+    expect(body).toContain("Drafts only: never post, publish, send, schedule or spend");
+    expect(body).toContain("Read `growth/brand.md` before drafting anything");
+    expect(body).toMatch(/Deliver files under `growth\/(marketing|seo|social|sales|strategy)\/`/);
+    expect(body).toContain("Report only to the session in your `Report to`");
+  }
+  expect(role("marketer").body).toContain("your first task is to write it");
+  expect(role("pm").body).toContain("In a Founder project, follow the founder playbook as well");
+  expect(role("pm").body).toContain("keep the `publish` list");
+  expect(role("reviewer").body).toContain("content checklist");
+});
+
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
   const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
