@@ -227,10 +227,10 @@ export function startServer({
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
         const room = url.searchParams.get("room");
         const staff = Object.values(state.employees);
-        // Company order, like the desks; a role file the office doesn't know goes last.
+        // Company order, like the desks, but the specialists first: they are the usual hire, so the first one is preselected. Then the lead, then a role file the office doesn't know.
         const order = (id: string) => {
           const known = roleOfAgentType(`f1rm:${id}`);
-          return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
+          return known === "lead" ? ROLE_IDS.length : known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length + 1;
         };
         // The cap counts every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
         const hires = await machine.workingHires();
@@ -256,7 +256,7 @@ export function startServer({
         const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, task, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

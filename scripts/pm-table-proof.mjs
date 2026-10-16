@@ -25,6 +25,7 @@ const server = startServer({
     startPmInIterm: async (folder) => void pmTabs.push(folder),
     backgroundId: async () => null,
     workingHires: async () => 0,
+    backgroundSessions: async () => [],
   },
 });
 const base = `http://127.0.0.1:${server.port}`;

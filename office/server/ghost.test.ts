@@ -32,6 +32,7 @@ const fakeMachine = () => ({
   askFork: async function* () {},
   tell: async () => {},
   workingHires: async () => 0,
+  backgroundSessions: async () => [],
   spawnBackground: async () => "",
   startPmInIterm: async () => {},
 });

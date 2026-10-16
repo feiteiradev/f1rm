@@ -12,6 +12,7 @@ const GUIDELINES = "f1rm:f1rm-guidelines";
 // research and security-review are slash commands, not Skill-tool skills, so no role lists them.
 const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
+  lead: [GUIDELINES, "f1rm:hire"],
   designer: ["design-pipeline"],
   "frontend-dev": ["mattpocock-skills:tdd"],
   "backend-dev": ["mattpocock-skills:tdd"],
@@ -29,7 +30,7 @@ const role = (name: string) => parts(join(PLUGIN, "agents", `${name}.md`));
 const guidelines = readFileSync(join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), "utf8");
 const section = (heading: string) => guidelines.split(/^## /m).find((s) => s.startsWith(heading + "\n")) ?? "";
 
-test("the plugin ships exactly the six roles", () => {
+test("the plugin ships exactly the seven roles", () => {
   expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual(Object.keys(ROLES).map((r) => `${r}.md`).sort());
 });
 
@@ -73,7 +74,7 @@ test("the guidelines cover every item the spec lists", () => {
   expect(section("Handoff via SendMessage")).toContain("commits on the hire's worktree branch");
   expect(section("Review and merge flow")).toContain("Never run `git push`");
   expect(section("Review and merge flow")).toContain("--ff-only");
-  expect(section("Cap rule")).toContain("**4 hired employees working at once**");
+  expect(section("Cap rule")).toContain("**6 background sessions working at once**");
   expect(section("Cap rule")).toMatch(/override flag.*only after the user has approved/s);
   expect(section("Definition of done")).toContain("Reviewer has signed off");
 });
@@ -144,7 +145,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
-  expect(details.out).toMatch(/Agents \(6\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(7\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 

@@ -32,6 +32,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     if (tellFails) throw new Error(tellFails);
   },
   workingHires: async () => working,
+  backgroundSessions: async () => (working === null ? null : Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" }))),
   startPmInIterm: async (folder: string) => {
     calls.push(`pm ${folder}`);
     if (pmFails) throw new Error(pmFails);
@@ -681,10 +682,10 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   working = 3;
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
-  expect(reply.hires).toEqual({ working: 3, cap: 4 });
+  expect(reply.hires).toEqual({ working: 3, cap: 6 });
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files);
-  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
@@ -693,7 +694,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
   working = null;
-  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 4 });
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 6 });
 });
 
 test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
@@ -749,9 +750,9 @@ test("at the cap Hire answers 409 with the working count and spawns nothing; whe
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 4;
+  working = 6;
   const capped = await hireOf(ASSIGN);
-  expect([capped.status, await capped.json()]).toEqual([409, { error: "4 hires are already working (the cap is 4).", working: 4 }]);
+  expect([capped.status, await capped.json()]).toEqual([409, { error: "6 hires are already working (the cap is 6).", working: 6 }]);
   working = null;
   const blind = await hireOf(ASSIGN);
   expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
@@ -762,13 +763,13 @@ test("Hire anyway: override spends a slot past the cap, a plain hire after it is
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 4;
+  working = 6;
   expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
   expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
   expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
-  working = 5;
+  working = 7;
   expect((await hireOf(ASSIGN)).status).toBe(409);
   expect(spawned.length).toBe(1);
 });

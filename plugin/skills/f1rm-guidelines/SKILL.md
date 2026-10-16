@@ -1,6 +1,6 @@
 ---
 name: f1rm-guidelines
-description: How the f1rm company works. The roster and hiring playbook, brief format, handoff via SendMessage, task board format, Reviewer merge flow, 4-hire cap and definition of done. Load before planning, hiring, reviewing or merging.
+description: How the f1rm company works. The roster and hiring playbook, brief format, handoff via SendMessage, task board format, Reviewer merge flow, the caps and definition of done. Load before planning, hiring, reviewing or merging.
 ---
 
 # f1rm guidelines
@@ -14,6 +14,7 @@ Hierarchy: the user, then one PM per repo, then specialists hired per task. The 
 | Role | Hire for | Slash commands `f1rm hire` starts the brief with |
 | :- | :- | :- |
 | `pm` | Started by the user with `f1rm pm`. Never hired. | `mattpocock-skills:grilling` |
+| `lead` | One slice of a milestone that runs in parallel with others. Hired only by the PM | `f1rm:f1rm-guidelines`, `f1rm:hire` |
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
 | `frontend-dev` | UI implementation | `mattpocock-skills:tdd` |
 | `backend-dev` | Server, data, API implementation | `mattpocock-skills:tdd` |
@@ -118,8 +119,8 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 ## Cap rule
 
-- At most **4 hired employees working at once**, counted across the whole firm, not per repo. The Reviewer and the Researcher count.
-- `f1rm hire` refuses at 4 working hires, with a non-zero exit and a message.
+- At most **6 background sessions working at once**, counted across the whole machine, not per repo. Leads, the Reviewer, the Researcher and the user's own background sessions all count.
+- `f1rm hire` refuses at 6, with a non-zero exit and a message.
 - When it refuses, leave the task `todo`, tell the user why, and ask whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
 - Use the override flag of `f1rm hire` (`f1rm hire --override <role> <name> <task> "<brief>"`) only after the user has approved exceeding the cap in this conversation, for this hire. An earlier approval or your own judgment is not approval. Ask again for each later hire.
 
