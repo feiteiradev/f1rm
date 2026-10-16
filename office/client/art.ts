@@ -211,7 +211,8 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
   }
 }
 
-export function buildRoom(r: RoomLayout) {
+/** A room's walls, floor and desks. A tap on an empty desk calls `onHire`. */
+export function buildRoom(r: RoomLayout, onHire?: () => void) {
   const root = new Container();
   const g = new Graphics();
   root.addChild(g);
@@ -233,6 +234,12 @@ export function buildRoom(r: RoomLayout) {
     const empty = buildDesk(null);
     empty.root.position.set(d.x, d.y);
     drawDesk(empty.fx, "off", 0, empty.skin, false);
+    if (onHire) {
+      empty.root.eventMode = "static";
+      empty.root.hitArea = new Rectangle(0, 0, CELL.w, CELL.h);
+      empty.root.cursor = "pointer";
+      empty.root.on("pointertap", onHire);
+    }
     root.addChild(empty.root);
   }
   return root;

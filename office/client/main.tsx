@@ -8,8 +8,10 @@ import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
+import { HireDialog } from "./hire.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
-import { TellBox } from "./tell.tsx";
+import { LetGo } from "./letgo.tsx";
+import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
 import { poseOf, statusCounts } from "./pose.ts";
@@ -37,7 +39,7 @@ function Counter({ state }: { state: OfficeState }) {
   );
 }
 
-function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onTell: (message: string) => void; onClose: () => void }) {
+function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state: OfficeState; id: string; entries: HistoryEntry[]; onAsk: (question: string) => void; onTell: (message: string) => void; onIntern: (subtask: string) => void; onClose: () => void }) {
   const e = state.employees[id];
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), [id]);
@@ -80,15 +82,17 @@ function Panel({ state, id, entries, onAsk, onTell, onClose }: { state: OfficeSt
         )}
       </dl>
       <JumpButton id={id} />
+      <LetGo id={id} name={name} />
       <AskBox onAsk={onAsk} />
       <TellBox name={name} onTell={onTell} />
+      <InternBox name={name} onIntern={onIntern} />
       <History entries={entries} />
     </aside>
   );
 }
 
 /** One project's office, full screen: its scene, employee panel, whiteboard panel and keyboard roster. `state` is already that project's slice. */
-function Project({ state }: { state: OfficeState }) {
+function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [board, setBoard] = useState<string | null>(null);
   const { history, ask, tell } = useHistory();
@@ -107,7 +111,7 @@ function Project({ state }: { state: OfficeState }) {
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select, setBoard).then((s) => {
+    createScene(host.current!, select, setBoard, onHire).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       s.update(latest.current.state, latest.current.selected);
@@ -132,7 +136,7 @@ function Project({ state }: { state: OfficeState }) {
   return (
     <>
       <div className="scene" ref={host} />
-      {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onClose={() => select(null)} />}
+      {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
       {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
       <BoardList state={state} onOpen={setBoard} />
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
@@ -235,6 +239,7 @@ function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
   const [connected, setConnected] = useState(true);
   const [open, go] = useRoute();
+  const [hiring, setHiring] = useState(false);
   const left = useRef<string | null>(null);
 
   useEffect(() => {
@@ -268,17 +273,19 @@ function Office() {
           </button>
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
+        {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}
       </header>
       <main>
-        {inside && view ? <Project key={inside} state={view} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
+        {inside && view ? <Project key={inside} state={view} onHire={() => setHiring(true)} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
+      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} onClose={() => setHiring(false)} />}
     </>
   );
 }

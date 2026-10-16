@@ -1,6 +1,6 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,12 +20,26 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
   liveSessions: async () => new Set<string>(),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
+  letGo: async (id: string) => {
+    calls.push(`letgo ${id}`);
+    if (letGoFails) throw new Error(letGoFails);
+  },
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
   tell: async (socket: string, sessionId: string, message: string) => {
     calls.push(`tell ${socket} ${sessionId} ${message}`);
     if (tellFails) throw new Error(tellFails);
+  },
+  workingHires: async () => working,
+  startPmInIterm: async (folder: string) => {
+    calls.push(`pm ${folder}`);
+    if (pmFails) throw new Error(pmFails);
+  },
+  spawnBackground: async (argv: string[], cwd: string) => {
+    spawned.push({ argv, cwd });
+    if (spawnFails) throw new Error(spawnFails);
+    return "backgrounded";
   },
   askFork: (sessionId: string, cwd: string, question: string, signal?: AbortSignal) => {
     calls.push(`ask ${sessionId} ${cwd} ${question}`);
@@ -38,6 +52,11 @@ const defaultAnswer = async function* () {
   yield "MANGO.";
 };
 let tellFails = "";
+let letGoFails = "";
+let working: number | null = 0;
+let spawnFails = "";
+let pmFails = "";
+let spawned: { argv: string[]; cwd: string }[] = [];
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
 let server: ReturnType<typeof startServer>;
@@ -48,6 +67,11 @@ afterEach(() => {
   backgroundIds = {};
   askAnswer = defaultAnswer;
   tellFails = "";
+  letGoFails = "";
+  working = 0;
+  spawnFails = "";
+  pmFails = "";
+  spawned = [];
   sockets.forEach((s) => s.close());
   sockets = [];
   server?.stop(true);
@@ -643,6 +667,331 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
   for (const bad of [{}, { message: "  " }, { message: 7 }, { message: "x".repeat(4001) }, "not json"]) {
     expect((await tellOf("s1", bad)).status).toBe(400);
   }
+  expect(calls).toEqual([]);
+});
+
+const SHOP = { "/code/shop": "/code/shop/.git" };
+const ROOM = "/code/shop/.git";
+const ui = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`${base()}/${token}/${path}`, init);
+const hireOf = (body: unknown, init: RequestInit = {}, token = TOKEN) =>
+  ui("hire", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const ASSIGN = { room: ROOM, role: "designer", task: "login-page", brief: "Design the login page. Reply OK and stop." };
+const inRoom = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", ...extra });
+
+test("roles lists the plugin's role files, read from the folder, with the PM left out and the working count per project", async () => {
+  start(SHOP);
+  await inRoom("d1", { agent_type: "f1rm:designer" });
+  await inRoom("d2", { agent_type: "f1rm:designer" });
+  await hook({ ...common("d3", "Stop"), cwd: "/code/shop" });
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => Object.keys(s.employees).length === 4);
+  working = 3;
+  const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
+  const roles = reply.roles;
+  expect(reply.hires).toEqual({ working: 3, cap: 4 });
+  const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
+  expect([...roles.map((r) => r.id)].sort()).toEqual(files);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
+  const designer = roles.find((r) => r.id === "designer");
+  const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
+  expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
+  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
+  expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
+  const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
+  expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
+  working = null;
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 4 });
+});
+
+test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const brief = "Design the login page.\n$(rm -rf /) 'quoted' --flag";
+  const res = await hireOf({ ...ASSIGN, brief, cwd: "/etc", folder: "/etc" });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(spawned).toEqual([
+    {
+      cwd: "/code/shop",
+      argv: ["claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page", `/design-pipeline\n\n${brief}`],
+    },
+  ]);
+});
+
+test("Hire reports to the project's PM when it has one, and takes a lower model", async () => {
+  start(SHOP);
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  expect((await hireOf({ ...ASSIGN, model: "haiku" })).status).toBe(200);
+  expect(spawned[0].argv.slice(8)).toEqual(["/design-pipeline Report to: pm-shop\n\n" + ASSIGN.brief, "--model", "haiku"]);
+  expect((await hireOf({ ...ASSIGN, model: null })).status).toBe(200);
+  expect(spawned[1].argv).not.toContain("--model");
+});
+
+test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const cases: [object | string, number][] = [
+    [{ ...ASSIGN, role: "pm" }, 400],
+    [{ ...ASSIGN, role: "janitor" }, 400],
+    [{ ...ASSIGN, role: "../designer" }, 400],
+    [{ ...ASSIGN, role: 7 }, 400],
+    [{ ...ASSIGN, task: "Login Page" }, 400],
+    [{ ...ASSIGN, task: "--evil" }, 400],
+    [{ ...ASSIGN, task: "" }, 400],
+    [{ ...ASSIGN, model: "gpt-5" }, 400],
+    [{ ...ASSIGN, model: "haiku --dangerously-skip-permissions" }, 400],
+    [{ ...ASSIGN, brief: "  " }, 400],
+    [{ ...ASSIGN, brief: "x".repeat(8001) }, 400],
+    [{ ...ASSIGN, room: "/code/shop" }, 404],
+    [{ ...ASSIGN, room: "constructor" }, 404],
+    ["not json", 404],
+  ];
+  for (const [body, status] of cases) expect([JSON.stringify(body), (await hireOf(body)).status]).toEqual([JSON.stringify(body), status]);
+  expect(spawned).toEqual([]);
+});
+
+test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  working = 4;
+  const capped = await hireOf(ASSIGN);
+  expect([capped.status, await capped.json()]).toEqual([409, { error: "4 hires are already working (the cap is 4).", working: 4 }]);
+  working = null;
+  const blind = await hireOf(ASSIGN);
+  expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
+  expect(spawned).toEqual([]);
+});
+
+test("Hire anyway: override spends a slot past the cap, a plain hire after it is still refused, and override must be a boolean", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  working = 4;
+  expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
+  expect(spawned).toEqual([]);
+  expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
+  expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
+  expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
+  working = 5;
+  expect((await hireOf(ASSIGN)).status).toBe(409);
+  expect(spawned.length).toBe(1);
+});
+
+test("Hire says so when claude fails to start the session", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  spawnFails = "not a git repository";
+  const res = await hireOf(ASSIGN);
+  expect([res.status, await res.json()]).toEqual([502, { error: "Hire failed: not a git repository" }]);
+});
+
+test("Roles and Hire need the UI token, the right method and the browser's own origin", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  expect((await hireOf(ASSIGN, {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/hire`, { method: "POST", body: JSON.stringify(ASSIGN) })).status).toBe(401);
+  expect((await ui("hire")).status).toBe(405);
+  expect((await hireOf(ASSIGN, { headers: { origin: "https://evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await hireOf(ASSIGN, { headers: { host: "evil.example", "content-type": "application/json" } })).status).toBe(403);
+  expect((await ui("roles", {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/roles`)).status).toBe(401);
+  expect((await ui("roles", { method: "POST" })).status).toBe(405);
+  expect((await ui("roles", { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect(spawned).toEqual([]);
+});
+
+const pmPost = (path: "decide" | "start-pm", body: unknown, init: RequestInit = {}, token = TOKEN) =>
+  ui(path, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const PM_SOCKET = { "x-f1rm-messaging-socket": "/tmp/cc-socks/pm.sock" };
+
+test("Let the PM decide tells the project's PM the need and asks them to hire per the guidelines", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const res = await pmPost("decide", { room: ROOM, need: "  A login page with passkeys.  " });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toStartWith("tell /tmp/cc-socks/pm.sock pm1 ");
+  expect(calls[0]).toContain("per the f1rm guidelines");
+  expect(calls[0]).toContain("f1rm hire");
+  expect(calls[0]).toEndWith("The need:\nA login page with passkeys.");
+});
+
+test("Let the PM decide says so when the project has no PM, the PM has no inbox, or the machine refuses", async () => {
+  start(SHOP);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => ROOM in s.rooms);
+  const none = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([none.status, await none.json()]).toEqual([409, { error: "This project has no PM." }]);
+  await inRoom("pm1", { agent_type: "f1rm:pm" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const quiet = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([quiet.status, await quiet.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
+  await hook({ ...common("pm1", "Stop"), cwd: "/code/shop" }, PM_SOCKET);
+  tellFails = "its inbox socket is gone, so the session has ended";
+  const gone = await pmPost("decide", { room: ROOM, need: "x" });
+  expect([gone.status, await gone.json()]).toEqual([409, { ok: false, error: "Tell failed: its inbox socket is gone, so the session has ended" }]);
+});
+
+test("Let the PM decide refuses an unknown project and a bad need, and tells nobody", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await office((s) => ROOM in s.rooms);
+  const cases: [unknown, number][] = [
+    [{ room: "/code/shop", need: "x" }, 404],
+    [{ room: "constructor", need: "x" }, 404],
+    ["not json", 404],
+    [{ room: ROOM }, 400],
+    [{ room: ROOM, need: "  " }, 400],
+    [{ room: ROOM, need: 7 }, 400],
+    [{ room: ROOM, need: "x".repeat(8001) }, 400],
+  ];
+  for (const [body, status] of cases) expect([JSON.stringify(body), (await pmPost("decide", body)).status]).toEqual([JSON.stringify(body), status]);
+  expect(calls).toEqual([]);
+});
+
+test("Start PM opens a PM tab in the room's repo folder, whatever folder the request names", async () => {
+  start(SHOP);
+  await inRoom("des1", { agent_type: "f1rm:designer" });
+  await office((s) => ROOM in s.rooms);
+  const res = await pmPost("start-pm", { room: ROOM, folder: "/etc", cwd: "/etc" });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toEqual(["pm /code/shop"]);
+});
+
+test("Start PM opens nothing when the project has a PM, the project is unknown, or the tab fails to open", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  const had = await pmPost("start-pm", { room: ROOM });
+  expect([had.status, await had.json()]).toEqual([409, { error: "This project already has a PM." }]);
+  expect((await pmPost("start-pm", { room: "/code/blog/.git" })).status).toBe(404);
+  expect((await pmPost("start-pm", "not json")).status).toBe(404);
+  expect(calls).toEqual([]);
+  await hook({ ...common("pm1", "SessionEnd"), cwd: "/code/shop" });
+  await office((s) => !Object.values(s.employees).some((e) => e.role === "pm"));
+  pmFails = "iTerm2 isn't installed";
+  const failed = await pmPost("start-pm", { room: ROOM });
+  expect([failed.status, await failed.json()]).toEqual([502, { error: "Start PM failed: iTerm2 isn't installed" }]);
+});
+
+test("Let the PM decide and Start PM need the UI token, a POST and the browser's own origin", async () => {
+  start(SHOP);
+  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
+  await office((s) => ROOM in s.rooms);
+  const json = { "content-type": "application/json" };
+  for (const path of ["decide", "start-pm"] as const) {
+    const body = { room: ROOM, need: "x" };
+    expect([path, (await pmPost(path, body, {}, "wrong")).status]).toEqual([path, 401]);
+    expect([path, (await fetch(`${base()}/${path}`, { method: "POST", body: JSON.stringify(body) })).status]).toEqual([path, 401]);
+    expect([path, (await ui(path)).status]).toEqual([path, 405]);
+    expect([path, (await pmPost(path, body, { headers: { origin: "https://evil.example", ...json } })).status]).toEqual([path, 403]);
+    expect([path, (await pmPost(path, body, { headers: { host: "evil.example", ...json } })).status]).toEqual([path, 403]);
+  }
+  expect(calls).toEqual([]);
+});
+
+const letGoOf = (id: string, body: unknown = { confirm: true }, init: RequestInit = {}, token = TOKEN) =>
+  ui(`letgo/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+const internOf = (id: string, body: unknown = { subtask: "Check the staging logs." }, init: RequestInit = {}, token = TOKEN) =>
+  ui(`intern/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+
+test("background says whether claude agents lists the employee's session as a background one", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("fg1", "/code/shop"));
+  const is = async (id: string) => {
+    const res = await ui(`background/${id}`);
+    return [res.status, await res.json()];
+  };
+  expect(await is("bg1")).toEqual([200, { background: true }]);
+  expect(await is("fg1")).toEqual([200, { background: false }]);
+  expect(await is("nobody")).toEqual([200, { background: false }]);
+});
+
+test("Let go stops and removes the background hire's session by its short id, and the employee leaves the office", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("other", "/code/shop"));
+  await office((s) => Object.keys(s.employees).length === 2);
+  const res = await letGoOf("bg1");
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toEqual(["letgo 7c5dcf5d"]);
+  const after = await office((s) => !s.employees.bg1);
+  expect(Object.keys(after.employees)).toEqual(["other"]);
+});
+
+test("Let go does nothing without an explicit confirm, for a session that isn't a background hire, or for an unknown employee", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  await hook(sessionStart("fg1", "/code/shop"));
+  for (const body of [{}, { confirm: false }, { confirm: "yes" }, "not json"]) expect([JSON.stringify(body), (await letGoOf("bg1", body)).status]).toEqual([JSON.stringify(body), 400]);
+  const fg = await letGoOf("fg1");
+  expect([fg.status, await fg.json()]).toEqual([409, { error: "Only a background hire can be let go." }]);
+  expect((await letGoOf("nobody")).status).toBe(404);
+  expect((await letGoOf("constructor")).status).toBe(404);
+  expect(calls).toEqual([]);
+  expect(Object.keys((await office((s) => Object.keys(s.employees).length === 2)).employees).sort()).toEqual(["bg1", "fg1"]);
+});
+
+test("Let go says why claude refused or couldn't finish, and the employee stays", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"));
+  letGoFails = "worktree has unpushed commits";
+  const res = await letGoOf("bg1");
+  expect([res.status, await res.json()]).toEqual([502, { error: "Let go failed: worktree has unpushed commits" }]);
+  expect(Object.keys((await office((s) => Object.keys(s.employees).length === 1)).employees)).toEqual(["bg1"]);
+});
+
+test("Give them an intern tells the employee to hand the named subtask to a sub-agent", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  const res = await internOf("s1", { subtask: "  Check the staging logs.  " });
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toStartWith("tell /tmp/cc-socks/101.sock s1 ");
+  expect(calls[0]).toContain("sub-agent");
+  expect(calls[0]).toEndWith("\nCheck the staging logs.");
+});
+
+test("Give them an intern says why it failed, and refuses a bad subtask or an unknown employee", async () => {
+  start();
+  await hook(sessionStart("quiet", "/code/shop"));
+  await hook(sessionStart("s1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/101.sock" });
+  const none = await internOf("quiet");
+  expect([none.status, await none.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
+  expect((await internOf("nobody")).status).toBe(404);
+  for (const bad of [{}, { subtask: "  " }, { subtask: 7 }, { subtask: "x".repeat(4001) }, "not json"]) expect((await internOf("s1", bad)).status).toBe(400);
+  expect(calls).toEqual([]);
+});
+
+test("Let go, Give them an intern and background need the UI token, the right method and the browser's own origin", async () => {
+  start();
+  backgroundIds = { bg1: "7c5dcf5d" };
+  await hook(sessionStart("bg1", "/code/shop"), { "x-f1rm-messaging-socket": "/tmp/cc-socks/1.sock" });
+  const json = { "content-type": "application/json" };
+  const posts = { letgo: { confirm: true }, intern: { subtask: "x" } };
+  for (const [path, body] of Object.entries(posts)) {
+    const of = (init: RequestInit = {}, token = TOKEN) => ui(`${path}/bg1`, { method: "POST", headers: json, body: JSON.stringify(body), ...init }, token);
+    expect([path, (await of({}, "wrong")).status]).toEqual([path, 401]);
+    expect([path, (await fetch(`${base()}/${path}/bg1`, { method: "POST", body: JSON.stringify(body) })).status]).toEqual([path, 401]);
+    expect([path, (await ui(`${path}/bg1`)).status]).toEqual([path, 405]);
+    expect([path, (await of({ headers: { origin: "https://evil.example", ...json } })).status]).toEqual([path, 403]);
+    expect([path, (await of({ headers: { host: "evil.example", ...json } })).status]).toEqual([path, 403]);
+  }
+  expect((await ui("background/bg1", {}, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/background/bg1`, { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect((await ui("background/bg1", { method: "POST" })).status).toBe(405);
   expect(calls).toEqual([]);
 });
 

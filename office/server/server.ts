@@ -8,9 +8,16 @@ import { boardFile, readBoard, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
+import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
+import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
+const MAX_BRIEF = 8000;
+const PM_DECIDES =
+  "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
+const INTERN =
+  "The user asked, from the f1rm office, that you hand a subtask to an intern: spawn a sub-agent for it, give it everything it needs to work alone, and use its result in your own work. Keep going on your own task meanwhile.\n\nThe subtask:\n";
 
 type Options = {
   port: number;
@@ -90,6 +97,21 @@ export function startServer({
   };
 
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
+  // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
+  // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
+  const folderOf = (room: string) => (basename(room) === ".git" ? dirname(room) : room);
+  const pmOf = (room: string) => Object.values(state.employees).find((e) => e.room === room && e.role === "pm");
+  const tellEmployee = (employee: Employee, message: string) => {
+    // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
+    if (!employee.socket) return Promise.resolve(Response.json({ ok: false, error: "This session has no inbox to tell." }, { status: 409 }));
+    return machine.tell(employee.socket, employee.sessionId, message).then(
+      () => Response.json({ ok: true }),
+      (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
+    );
+  };
+
+  // What the office records when a session is gone, so a replay shows the same departure.
+  const departure = (e: Employee): F1rmEvent => ({ sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() });
 
   let boards: Record<string, BoardRow[]> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
@@ -134,7 +156,7 @@ export function startServer({
       if (!same(given, token)) return new Response("unauthorized", { status: 401 });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       }
       if (rest[0] === "jump" && rest.length === 2) {
@@ -165,12 +187,104 @@ export function startServer({
         if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) {
           return Response.json({ ok: false, error: `Tell a message of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
         }
-        // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
-        if (!employee.socket) return Response.json({ ok: false, error: "This session has no inbox to tell." }, { status: 409 });
-        return machine.tell(employee.socket, employee.sessionId, message.trim()).then(
+        return tellEmployee(employee, message.trim());
+      }
+      if (rest[0] === "intern" && rest.length === 2) {
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
+        const subtask = ((await req.json().catch(() => null)) as { subtask?: unknown } | null)?.subtask;
+        if (typeof subtask !== "string" || !subtask.trim() || subtask.length > MAX_MESSAGE) {
+          return Response.json({ ok: false, error: `Name a subtask of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
+        }
+        return tellEmployee(employee, INTERN + subtask.trim());
+      }
+      if (rest[0] === "background" && rest.length === 2) {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
+        const employee = employeeOf(rest[1]);
+        return Response.json({ background: !!employee && (await machine.backgroundId(employee.sessionId)) !== null });
+      }
+      if (rest[0] === "letgo" && rest.length === 2) {
+        const employee = employeeOf(rest[1]);
+        if (!employee) return Response.json({ error: "No such employee." }, { status: 404 });
+        if (((await req.json().catch(() => null)) as { confirm?: unknown } | null)?.confirm !== true) {
+          return Response.json({ error: "Letting someone go needs an explicit confirm." }, { status: 400 });
+        }
+        const id = await machine.backgroundId(employee.sessionId);
+        if (!id) return Response.json({ error: "Only a background hire can be let go." }, { status: 409 });
+        try {
+          await machine.letGo(id);
+        } catch (err) {
+          return Response.json({ error: `Let go failed: ${(err as Error).message}` }, { status: 502 });
+        }
+        // The session may never send its own SessionEnd, so the office records the departure itself.
+        const gone = departure(employee);
+        append.run(gone.at, JSON.stringify(gone));
+        state = reduce(state, gone);
+        push();
+        return Response.json({ ok: true });
+      }
+      if (rest[0] === "roles" && rest.length === 1) {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
+        const room = url.searchParams.get("room");
+        const staff = Object.values(state.employees);
+        // Company order, like the desks; a role file the office doesn't know goes last.
+        const order = (id: string) => {
+          const known = roleOfAgentType(`f1rm:${id}`);
+          return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
+        };
+        // The cap counts every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
+        const hires = await machine.workingHires();
+        return Response.json({
+          roles: readRoles()
+            .sort((a, b) => order(a.id) - order(b.id))
+            .map((r) => {
+              const known = roleOfAgentType(`f1rm:${r.id}`);
+              const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
+              return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
+            }),
+          hires: { working: hires, cap: CAP },
+        });
+      }
+      if (rest[0] === "hire" && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        const { room, role, task, brief, model, override } = body ?? {};
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (override != null && typeof override !== "boolean")) {
+          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        }
+        const folder = folderOf(room);
+        let argv: string[];
+        try {
+          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+        } catch (err) {
+          if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
+          return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
+        // ponytail: two hires posted at the same instant can both pass the count before either shows in `claude agents`; serialize them if that is felt.
+        return machine.spawnBackground(argv, folder).then(
           () => Response.json({ ok: true }),
-          (err: Error) => Response.json({ ok: false, error: `Tell failed: ${err.message}` }, { status: 409 }),
+          (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
         );
+      }
+      if ((rest[0] === "decide" || rest[0] === "start-pm") && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        const { room, need } = body ?? {};
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        const pm = pmOf(room);
+        if (rest[0] === "start-pm") {
+          if (pm) return Response.json({ error: "This project already has a PM." }, { status: 409 });
+          return machine.startPmInIterm(folderOf(room)).then(
+            () => Response.json({ ok: true }),
+            (err: Error) => Response.json({ error: `Start PM failed: ${err.message}` }, { status: 502 }),
+          );
+        }
+        if (typeof need !== "string" || !need.trim() || need.length > MAX_BRIEF) {
+          return Response.json({ error: `Describe the need in 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        }
+        if (!pm) return Response.json({ error: "This project has no PM." }, { status: 409 });
+        return tellEmployee(pm, PM_DECIDES + need.trim());
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
@@ -205,7 +319,7 @@ export function startServer({
         // Replay must see the same departures, or a dead session keeps its name and the next arrival is renamed.
         for (const e of Object.values(state.employees)) {
           if (next.employees[e.sessionId]) continue;
-          const gone: F1rmEvent = { sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() };
+          const gone = departure(e);
           append.run(gone.at, JSON.stringify(gone));
         }
         state = next;

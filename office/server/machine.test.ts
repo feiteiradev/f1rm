@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { machine as realMachine } from "./machine.ts";
+import { machine as realMachine, shellQuote } from "./machine.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-machine-"));
 const log = join(dir, "calls.log");
@@ -58,6 +58,27 @@ test("liveSessions is null when claude agents fails, so nobody is mistaken for g
   expect(await claudeAgents('{"error":"x"}')).toBeNull();
 });
 
+test("workingHires counts the background sessions that are working or blocked, and is null when claude can't say", async () => {
+  const out = JSON.stringify([
+    { kind: "background", state: "working" },
+    { kind: "background", state: "blocked" },
+    { kind: "background", state: "done" },
+    { kind: "interactive", state: "working" },
+  ]);
+  expect((await run("machine.workingHires()", out)).value).toBe(2);
+  expect((await run("machine.workingHires()", "[]", { all: 1 })).value).toBeNull();
+});
+
+test("spawnBackground runs the argv as given in the folder, without the parent session's variables, and says why it failed", async () => {
+  const folder = realpathSync(mkdtempSync(join(dir, "folder-")));
+  const argv = ["claude", "--bg", "--worktree", "w", "a brief with $(rm -rf /) and\nnewlines"];
+  const ok = await run(`machine.spawnBackground(${JSON.stringify(argv)}, ${JSON.stringify(folder)})`, "backgrounded · 7c5dcf5d");
+  expect(ok.value).toBe("backgrounded · 7c5dcf5d");
+  expect(ok.calls).toEqual([["claude", "--bg", "--worktree", "w", "a brief with $(rm -rf /) and newlines", "[env:0]"]]);
+  expect(ok.cwds).toEqual([folder]);
+  expect((await run(`machine.spawnBackground(["claude", "--bg"], ${JSON.stringify(folder)})`, "not a git repository", { all: 1 })).value).toEqual({ threw: "not a git repository" });
+});
+
 test("backgroundId finds the attach handle of a background session, among finished ones too", async () => {
   const out = JSON.stringify([
     { pid: 1, cwd: "/a", kind: "interactive", sessionId: "same" },
@@ -92,6 +113,28 @@ test("attachInIterm types `claude attach <id>` into a new tab, and refuses an id
   expect(calls[0].at(-2)).toBe("claude attach 7c5dcf5d");
   const bad = await run(`machine.attachInIterm("7c5; rm -rf ~")`);
   expect([bad.value, bad.calls]).toEqual([{ threw: "bad background session id" }, []]);
+});
+
+test("startPmInIterm types `cd <folder> && f1rm pm` into a new tab, quoting the folder so it stays one word", async () => {
+  const plain = realpathSync(mkdtempSync(join(dir, "pm-")));
+  const { calls } = await run(`machine.startPmInIterm(${JSON.stringify(plain)})`);
+  expect(calls[0].slice(0, 2)).toEqual(["osascript", "-e"]);
+  expect(calls[0].at(-2)).toBe(`cd '${plain}' && f1rm pm`);
+
+  const hostile = join(plain, `it's $(id) "x" ; rm -rf ~`);
+  mkdirSync(hostile);
+  const quoted = await run(`machine.startPmInIterm(${JSON.stringify(hostile)})`);
+  expect(quoted.calls[0].at(-2)).toBe(`cd '${plain}/it'\\''s $(id) "x" ; rm -rf ~' && f1rm pm`);
+  const word = Bun.spawnSync(["sh", "-c", `printf %s ${shellQuote(hostile)}`]).stdout.toString();
+  expect(word).toBe(hostile);
+});
+
+test("startPmInIterm refuses a folder that is relative, holds a control character, or is gone, and opens no tab", async () => {
+  const plain = realpathSync(mkdtempSync(join(dir, "pm-")));
+  for (const [folder, why] of [["code/shop", "bad project folder"], [`${plain}\nrm -rf ~`, "bad project folder"], [`${plain}\u001b[2J`, "bad project folder"], [join(plain, "gone"), "the project folder is gone"]]) {
+    const r = await run(`machine.startPmInIterm(${JSON.stringify(folder)})`);
+    expect([r.value, r.calls]).toEqual([{ threw: why }, []]);
+  }
 });
 
 test("openVsCode runs `code <folder>`, and falls back to `open -a` when that fails", async () => {
@@ -184,4 +227,51 @@ test("tell refuses a path that isn't an absolute, existing socket file", async (
   await Bun.sleep(50);
   box.stop();
   expect(box.received).toEqual([]);
+});
+
+// A `claude` that keeps listing session 7c5dcf5d until `rm` has run $GONE_AFTER times, as a real one did right after `stop`.
+const lgDir = mkdtempSync(join(dir, "letgo-"));
+writeFileSync(
+  join(lgDir, "claude"),
+  `#!/bin/sh
+echo "$*" >> "$LG/calls"
+n=$(cat "$LG/rms" 2>/dev/null || echo 0)
+case "$1" in
+  stop) exit 1 ;;
+  rm) echo $((n + 1)) > "$LG/rms"; [ -n "$RM_FAIL" ] && { echo "$RM_FAIL" >&2; exit 1; } ;;
+  agents) if [ "$n" -ge "$GONE_AFTER" ]; then echo '[{"id":"0badf00d","kind":"background"}]'; else echo '[{"id":"7c5dcf5d","kind":"background"},{"id":"0badf00d","kind":"background"}]'; fi ;;
+esac
+exit 0
+`,
+);
+chmodSync(join(lgDir, "claude"), 0o755);
+async function letGo(id: string, goneAfter: number, rmFail = "") {
+  for (const f of ["calls", "rms"]) rmSync(join(lgDir, f), { force: true });
+  const child = Bun.spawn(
+    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify(await machine.letGo(${JSON.stringify(id)}, { tries: 4, waitMs: 10 }).then(() => "gone", (e) => ({ threw: e.message }))))`],
+    { env: { ...process.env, PATH: `${lgDir}:${process.env.PATH}`, LG: lgDir, GONE_AFTER: String(goneAfter), RM_FAIL: rmFail }, stdout: "pipe" },
+  );
+  const value = JSON.parse(await new Response(child.stdout).text());
+  const calls = existsSync(join(lgDir, "calls")) ? readFileSync(join(lgDir, "calls"), "utf8").trim().split("\n").filter((l) => !l.startsWith("agents")) : [];
+  return { value, calls };
+}
+
+test("letGo stops the session, then repeats rm until claude agents --all no longer lists it", async () => {
+  const quick = await letGo("7c5dcf5d", 1);
+  expect([quick.value, quick.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
+  const raced = await letGo("7c5dcf5d", 3);
+  expect([raced.value, raced.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+test("letGo gives up when the session never leaves the list, and says what claude said when rm refuses", async () => {
+  expect((await letGo("7c5dcf5d", 99)).value).toEqual({ threw: "7c5dcf5d is still listed after 4 tries" });
+  const refused = await letGo("7c5dcf5d", 99, "worktree has unpushed commits");
+  expect([refused.value, refused.calls]).toEqual([{ threw: "worktree has unpushed commits" }, ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+test("letGo refuses an id that could be read as a flag or a shell word, and runs nothing", async () => {
+  for (const bad of ["--force", "7c5; rm -rf ~", ""]) {
+    const r = await letGo(bad, 1);
+    expect([bad, r.value, r.calls]).toEqual([bad, { threw: "bad background session id" }, []]);
+  }
 });

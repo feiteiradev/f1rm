@@ -1,0 +1,123 @@
+.hire-btn {
+  font: inherit;
+  color: var(--amber);
+  background: transparent;
+  border: 1px solid var(--amber);
+  padding: 2px 12px;
+  cursor: pointer;
+}
+.hire-btn:hover { color: var(--bg); background: var(--amber); }
+.hire-btn:active { transform: translateY(1px); }
+
+.hire {
+  width: min(780px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  margin: auto;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+  overflow: auto;
+  scrollbar-color: var(--line) var(--surface);
+}
+.hire::backdrop { background: rgb(8 10 16 / 0.6); }
+.hire ::selection { color: var(--bg); background: var(--amber); }
+.hire header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 16px 0; }
+.hire h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.hire button {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.hire button:hover { border-color: var(--muted); }
+.hire button:active { transform: translateY(1px); }
+.hire .loading, .hire .note-demo { margin: 0; padding: 16px; color: var(--muted); }
+.hire .note-demo { color: var(--amber); }
+
+.hire form { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; padding: 16px; }
+.hire fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.hire legend, .hire .fields label { color: var(--muted); padding: 0; }
+.hire legend { margin-bottom: 6px; }
+
+.hire .role {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 2px 10px;
+  margin-top: -1px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.hire .role:hover { background: var(--bg); }
+.hire .role[data-chosen] { z-index: 1; border-color: var(--amber); background: var(--bg); }
+.hire .role input { grid-row: 1; margin: 3px 0 0; accent-color: var(--amber); }
+.hire .who { overflow-wrap: anywhere; }
+.hire .name { font-weight: 700; }
+.hire .title { color: var(--muted); }
+.hire .working { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hire .what, .hire .kit { grid-column: 2 / -1; }
+.hire .kit { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+.hire .fields { display: flex; flex-direction: column; min-width: 0; }
+.hire .fields label:not(:first-child) { margin-top: 12px; }
+.hire .fields label { margin-bottom: 4px; }
+.hire textarea, .hire input:not([type="radio"]), .hire select {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 6px 8px;
+  caret-color: var(--amber);
+}
+.hire textarea { resize: vertical; min-height: 7em; }
+.hire textarea::placeholder { color: var(--muted); opacity: 0.8; }
+.hire textarea:focus-visible, .hire input:focus-visible, .hire select:focus-visible { border-color: var(--amber); }
+.hire input[aria-invalid="true"] { border-color: var(--amber); }
+.hire .help { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.hire .fields > button {
+  margin-top: 16px;
+  color: var(--bg);
+  background: var(--amber);
+  border-color: var(--amber);
+  font-weight: 700;
+}
+.hire .fields > button:hover { border-color: var(--text); }
+.hire .fields > button:disabled { opacity: 0.5; cursor: default; }
+.hire .problem { margin: 8px 0 0; padding: 0 16px 0 0; color: var(--amber); min-height: 1.45em; overflow-wrap: anywhere; }
+.hire > .problem { padding: 16px; margin: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .hire[open] { animation: hire-in 160ms cubic-bezier(0.16, 1, 0.3, 1); }
+  .hire[open]::backdrop { animation: hire-fade 160ms ease-out; }
+}
+@keyframes hire-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes hire-fade { from { opacity: 0; } }
+
+@media (max-width: 720px) {
+  .hire form { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .hire { width: 100%; max-height: 92%; margin: auto 0 0; }
+}
+
+.hire .count { grid-column: 1 / -1; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hire .count[data-full] { color: var(--amber); }
+.hire .fields > button.anyway { color: var(--amber); background: transparent; border-color: var(--amber); }
+.hire .fields > button.anyway:hover { color: var(--bg); background: var(--amber); }
+.hire .confirm { margin-top: 8px; padding: 8px; border: 1px solid var(--amber); }
+.hire .confirm p { margin: 0 0 8px; }
+.hire .confirm button + button { margin-left: 8px; }
+
+.hire .pm { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid var(--line); }
+.hire .pm p { margin: 0 0 8px; color: var(--muted); }
+.hire .pm > button { margin-right: 8px; }
+.hire .pm button:disabled { opacity: 0.5; cursor: default; }
+.hire .pm .jump { display: inline-block; vertical-align: top; }
+.hire .pm .jump p { margin-bottom: 0; color: var(--amber); }

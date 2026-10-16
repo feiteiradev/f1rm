@@ -1,5 +1,5 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
-import { lstatSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { connect } from "node:net";
 import { basename, dirname, isAbsolute } from "node:path";
 
@@ -24,6 +24,9 @@ const ITERM ='application id "com.googlecode.iterm2"';
 // A leading "-" would let an id be read as a flag.
 const SAFE_ID = /^\w[\w-]*$/;
 
+/** One shell word that holds `s` literally, in sh, bash, zsh and fish alike. */
+export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
 export async function agents(all: boolean): Promise<any[] | null> {
   try {
@@ -37,6 +40,13 @@ export async function agents(all: boolean): Promise<any[] | null> {
   } catch {
     return null;
   }
+}
+
+/** Runs `claude` with `args` and no stdin; the exit code and what it printed. */
+async function claude(...args: string[]) {
+  const proc = Bun.spawn(["claude", ...args], { env: claudeEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+  const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  return { code: await proc.exited, text: (err || out).trim() };
 }
 
 /** Runs AppleScript; the arguments reach `on run argv`, so nothing is spliced into the script text. */
@@ -170,10 +180,44 @@ export const machine = {
     return list && new Set(list.map((a) => a?.sessionId).filter((id): id is string => typeof id === "string"));
   },
 
+  /** How many background hires hold a slot, or null if `claude agents --json` can't say. A blocked hire waits on a person and still holds its slot; interactive sessions are the user's, not hires. */
+  async workingHires(): Promise<number | null> {
+    const list = await agents(false);
+    return list && list.filter((a) => a?.kind === "background" && (a.state === "working" || a.state === "blocked")).length;
+  },
+
+  /** Runs `argv` (a `claude --bg` start) in `cwd` with no stdin and no shell. Resolves with what it printed; throws with its error output if it fails. */
+  async spawnBackground(argv: string[], cwd: string): Promise<string> {
+    const proc = Bun.spawn(argv, { cwd, env: claudeEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+    const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    const code = await proc.exited;
+    if (code !== 0) throw new Error((err || out).trim().slice(-300) || `claude exited with ${code}`);
+    return out.trim();
+  },
+
   /** The short id `claude attach` takes for a background session, or null if Claude Code lists none. */
   async backgroundId(sessionId: string): Promise<string | null> {
     const found = (await agents(true))?.find((a) => a?.kind === "background" && a.sessionId === sessionId);
     return typeof found?.id === "string" && SAFE_ID.test(found.id) ? found.id : null;
+  },
+
+  /**
+   * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
+   * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
+   */
+  async letGo(id: string, { tries = 10, waitMs = 1000 } = {}): Promise<void> {
+    if (!SAFE_ID.test(id)) throw new Error("bad background session id");
+    // A session that already ended makes `stop` fail, and `rm` works on it all the same.
+    await claude("stop", id);
+    // ponytail: a refused `rm` is final and unpushed work is never discarded; offer `--discard-unpushed` behind its own confirm if refusals are felt.
+    for (let i = 0; i < tries; i++) {
+      const rm = await claude("rm", id);
+      if (rm.code !== 0) throw new Error(rm.text.slice(-300) || `claude rm exited with ${rm.code}`);
+      const list = await agents(true);
+      if (list && !list.some((a) => a?.id === id)) return;
+      await Bun.sleep(waitMs);
+    }
+    throw new Error(`${id} is still listed after ${tries} tries`);
   },
 
   /** Brings the iTerm2 tab with this `$ITERM_SESSION_ID` to the front. False if no such tab is open. */
@@ -188,6 +232,13 @@ export const machine = {
   async attachInIterm(backgroundId: string): Promise<void> {
     if (!SAFE_ID.test(backgroundId)) throw new Error("bad background session id");
     await osascript(RUN_IN_NEW_TAB, `claude attach ${backgroundId}`);
+  },
+
+  /** Opens a new iTerm2 tab in `folder` running `f1rm pm`. The folder reaches a shell line, so it is single-quoted and anything that could act as a keystroke is refused. */
+  async startPmInIterm(folder: string): Promise<void> {
+    if (!isAbsolute(folder) || /[\x00-\x1f\x7f]/.test(folder)) throw new Error("bad project folder");
+    if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) throw new Error("the project folder is gone");
+    await osascript(RUN_IN_NEW_TAB, `cd ${shellQuote(folder)} && f1rm pm`);
   },
 
   /** Focuses the VS Code window open on `folder` (VS Code opens one if there is none). */

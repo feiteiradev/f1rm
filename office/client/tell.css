@@ -34,3 +34,10 @@
 .history [data-kind="tell"] .tag { color: var(--tell); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; }
 .history [data-kind="tell"] .state { margin-top: 2px; color: var(--muted); }
 .history [data-kind="tell"][data-state="failed"] .state { color: var(--tell); }
+
+.panel .intern { margin-top: 16px; }
+.intern label { display: block; margin-bottom: 6px; font-weight: 700; }
+.intern .row { display: flex; gap: 8px; }
+.intern input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); padding: 6px 8px; }
+.intern button:disabled { opacity: 0.5; cursor: default; }
+.intern .warn { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
