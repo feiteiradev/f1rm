@@ -81,6 +81,12 @@ const visit = async (room) => {
   await page.locator(".door", { hasText: room }).click();
   await page.locator(`.boards button`, { hasText: `Board, ${room}:` }).waitFor({ state: "attached" });
   await page.waitForTimeout(500);
+  // The first entry asks the project's edition; this office keeps settings, so answer it once.
+  const ask = page.locator("dialog.edition-ask");
+  if (await ask.count()) {
+    await ask.getByRole("button", { name: "Work", exact: true }).click();
+    await ask.waitFor({ state: "detached" });
+  }
 };
 await page.locator(".door").first().waitFor();
 await page.waitForFunction(() => document.querySelectorAll(".door").length === 2);

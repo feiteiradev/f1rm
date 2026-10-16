@@ -171,6 +171,9 @@ await page.waitForFunction(() => document.querySelector(".door[data-empty]")?.te
 await door("my shop").focus();
 await page.keyboard.press("Enter");
 await page.locator(".back").waitFor();
+// The first entry asks the project's edition; this office keeps settings, so answer it once.
+await page.locator("dialog.edition-ask").getByRole("button", { name: "Work", exact: true }).click();
+await page.locator("dialog.edition-ask").waitFor({ state: "detached" });
 await page.waitForFunction(() => document.querySelectorAll(".door").length === 0);
 const shopHash = await hash();
 assert.match(shopHash, /^#\/project\/.+/);
@@ -240,9 +243,9 @@ await shot("05-after-reload");
 await page.keyboard.press("Meta+k");
 const dialog = page.getByRole("dialog", { name: "Jump to an employee" });
 await dialog.waitFor();
-assert.equal(await page.getByRole("option").count(), 5, "⌘K lists everyone in every project");
+assert.equal(await dialog.getByRole("option").count(), 5, "⌘K lists everyone in every project");
 await page.keyboard.type("blog");
-assert.equal(await page.getByRole("option").count(), 1);
+assert.equal(await dialog.getByRole("option").count(), 1);
 await shot("06-palette-other-project");
 await page.keyboard.press("Enter");
 await page.locator(".crumb", { hasText: "blog" }).waitFor();
