@@ -38,7 +38,7 @@ const f1rmHandlers = (settings: any) =>
         .map((h: any) => ({ event, matcher: g.matcher, ...h })),
     ),
   );
-const secretOf = (settings: any) => f1rmHandlers(settings).find((h) => h.type === "http").headers["X-F1rm-Secret"];
+const secretOf = (home: string) => readFileSync(join(home, ".f1rm", "ingest-headers"), "utf8").split(": ")[1].trim();
 
 test("install adds a hook with the ingest secret for every observed event, keeping everything else", () => {
   const home = tempHome(userSettings);
@@ -53,44 +53,28 @@ test("install adds a hook with the ingest secret for every observed event, keepi
   expect(settings.hooks.Stop[0]).toEqual(userSettings.hooks.Stop[0]);
 
   const handlers = f1rmHandlers(settings);
-  const secret = secretOf(settings);
+  const secret = secretOf(home);
   expect(secret).toMatch(/^[\w-]{32,}$/);
-
-  // SessionStart only runs command hooks, so it POSTs with curl; everything else is an http hook.
-  const sessionStart = handlers.filter((h) => h.event === "SessionStart");
-  expect(sessionStart).toHaveLength(1);
-  expect(sessionStart[0].type).toBe("command");
-  expect(sessionStart[0].command).toContain("http://127.0.0.1:4170/ingest");
   const headersFile = join(home, ".f1rm", "ingest-headers");
-  expect(sessionStart[0].command).toContain(`-H @'${headersFile}'`);
-  expect(sessionStart[0].command).not.toContain(secret); // argv is world-readable via ps
   expect(readFileSync(headersFile, "utf8")).toBe(`X-F1rm-Secret: ${secret}\n`);
   expect(statSync(headersFile).mode & 0o777).toBe(0o600);
 
-  const http = handlers.filter((h) => h.event !== "SessionStart");
-  expect(http.map((h) => h.event).sort()).toEqual(
-    [
-      "SessionEnd",
-      "UserPromptSubmit",
-      "PreToolUse",
-      "PostToolUse",
-      "PostToolUseFailure",
-      "PermissionRequest",
-      "Notification",
-      "Stop",
-      "SubagentStart",
-      "SubagentStop",
-      "CwdChanged",
-    ].sort(),
+  // Every hook is curl, never an http hook: Claude Code shows an http hook's refused connection as an error whenever the
+  // office is stopped, while `|| true` keeps curl silent. curl prints the office's reply, which carries its decisions.
+  expect(handlers.map((h) => h.event).sort()).toEqual(
+    ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SubagentStart", "SubagentStop", "CwdChanged"].sort(),
   );
-  for (const h of http) {
-    expect(h.type).toBe("http");
+  for (const h of handlers) {
+    expect(h.type).toBe("command");
     expect(h.matcher).toBeUndefined(); // every tool, every notification
-    expect(h.url).toBe("http://127.0.0.1:4170/ingest");
-    expect(h.headers["X-F1rm-Secret"]).toBe(secret);
+    expect(h.command).toStartWith("curl -sf ");
+    expect(h.command).toContain(`-H @'${headersFile}'`);
+    expect(h.command).toEndWith("--data-binary @- http://127.0.0.1:4170/ingest || true");
+    expect(h.command).not.toContain(secret); // argv is world-readable via ps
     // a stuck office must not stall sessions, except that the permission hook is held for the browser
     if (h.event === "PermissionRequest") expect(h.timeout).toBeGreaterThan(DEFAULT_TIMEOUT_S);
     else expect(h.timeout).toBeLessThanOrEqual(5);
+    expect(h.command).toContain(`-m ${h.timeout} `);
   }
 
   expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
@@ -127,30 +111,34 @@ test("install collects no messaging token, so no hook puts it on curl's command 
   expect(JSON.stringify(settingsOf(home))).not.toContain("MESSAGING_TOKEN");
 });
 
-test("an install that still forwards the messaging token is upgraded in place, then uninstalls exactly", () => {
+test("an older install's http hooks, with or without the messaging token, become curl hooks in place, then uninstall exactly", () => {
   const home = tempHome(userSettings);
   f1rm(home, "install");
-  const old = settingsOf(home);
-  const header = "X-F1rm-Messaging-Token";
-  for (const groups of Object.values(old.hooks) as any[]) {
-    for (const h of groups.flatMap((g: any) => g.hooks)) {
-      if (h.type === "http" && h.headers?.["X-F1rm-Secret"]) {
-        h.headers[header] = "$CLAUDE_CODE_MESSAGING_TOKEN";
-        h.allowedEnvVars.push("CLAUDE_CODE_MESSAGING_TOKEN");
-      }
-      if (h.type === "command" && h.command.includes(".f1rm/ingest-headers")) {
-        h.command = h.command.replace(" --data-binary", ` -H "${header}: $CLAUDE_CODE_MESSAGING_TOKEN" --data-binary`);
-      }
-    }
-  }
+  const secret = secretOf(home);
+  // What installs before every hook was curl wrote: SessionStart by curl to /dev/null, every other event an http hook.
+  const old = structuredClone(userSettings) as any;
+  const headersFile = join(home, ".f1rm", "ingest-headers");
+  const env = ["ITERM_SESSION_ID", "TERM_PROGRAM", "CLAUDE_CODE_MESSAGING_SOCKET"];
+  const http = (event: string, token: boolean) => ({
+    type: "http",
+    url: "http://127.0.0.1:4170/ingest",
+    headers: {
+      "X-F1rm-Secret": secret, "X-F1rm-Iterm-Session": "$ITERM_SESSION_ID", "X-F1rm-Term-Program": "$TERM_PROGRAM", "X-F1rm-Messaging-Socket": "$CLAUDE_CODE_MESSAGING_SOCKET",
+      ...(token && { "X-F1rm-Messaging-Token": "$CLAUDE_CODE_MESSAGING_TOKEN" }),
+    },
+    allowedEnvVars: token ? [...env, "CLAUDE_CODE_MESSAGING_TOKEN"] : env,
+    timeout: event === "PermissionRequest" ? 2 * DEFAULT_TIMEOUT_S : 5,
+  });
+  const events = ["SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SubagentStart", "SubagentStop", "CwdChanged"];
+  old.hooks.SessionStart = [{ hooks: [{ type: "command", command: `curl -s -m 5 -o /dev/null -H 'Content-Type: application/json' -H @'${headersFile}' -H "X-F1rm-Iterm-Session: $ITERM_SESSION_ID" -H "X-F1rm-Term-Program: $TERM_PROGRAM" -H "X-F1rm-Messaging-Socket: $CLAUDE_CODE_MESSAGING_SOCKET" --data-binary @- http://127.0.0.1:4170/ingest || true`, timeout: 5 }] }];
+  events.forEach((event, i) => (old.hooks[event] ??= []).push({ hooks: [http(event, i % 2 === 0)] }));
   writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
 
   expect(f1rm(home, "install").code).toBe(0);
   const upgraded = settingsOf(home);
   expect(JSON.stringify(upgraded)).not.toContain("MESSAGING_TOKEN");
-  expect(f1rmHandlers(upgraded)).toHaveLength(f1rmHandlers(old).length);
-  expect(secretOf(upgraded)).toBe(secretOf(old));
-  expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json.f1rm-backup"), "utf8"))).toEqual(userSettings);
+  expect(f1rmHandlers(upgraded).map((h) => h.type)).toEqual(Array(12).fill("command"));
+  expect(secretOf(home)).toBe(secret);
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(settingsOf(home)).toEqual(userSettings);
 });
@@ -263,29 +251,30 @@ test("start serves the office on loopback and opens its URL with a fresh UI toke
       terminal: { itermSessionId: "w0t1p0:ABCD", termProgram: "iTerm.app" },
     });
 
-    // PreToolUse: an http hook, with allowed env vars interpolated into its headers
-    const pre = handlers.find((h) => h.event === "PreToolUse");
-    const headers = Object.fromEntries(
-      Object.entries<string>(pre.headers).map(([k, v]) => [
-        k,
-        v.replace(/\$\{?(\w+)\}?/g, (_, name) => (pre.allowedEnvVars.includes(name) ? sessionEnv[name] ?? "" : "")),
-      ]),
-    );
-    const res = await fetch(pre.url, {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: payload("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/x/notes.md" } }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe(""); // empty body: no decision, Claude Code carries on
+    // PreToolUse: the same curl, and its reply is what Claude Code reads. Empty: no decision, Claude Code carries on.
+    const run = (event: string, extra = {}) =>
+      Bun.spawnSync(["sh", "-c", handlers.find((h) => h.event === event).command], { stdin: Buffer.from(payload(event, extra)), env: { PATH: process.env.PATH!, ...sessionEnv } });
+    const pre = run("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/x/notes.md" } });
+    expect([pre.exitCode, pre.stdout.toString()]).toEqual([0, ""]);
     const working = await until((s) => s.employees.s1?.status === "working");
     expect(working?.employees.s1).toMatchObject({
       activity: "Read notes.md",
       terminal: { itermSessionId: "w0t1p0:ABCD", termProgram: "iTerm.app" },
     });
+    // A decision comes back through curl's output: a Designer may not hire.
+    run("UserPromptSubmit", { prompt: "go", agent_type: "f1rm:designer" });
+    await until((s) => s.employees.s1?.role === "designer");
+    const held = run("PreToolUse", { tool_name: "Bash", tool_input: { command: "f1rm hire designer designer-a a brief" } });
+    expect(JSON.parse(held.stdout.toString()).hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
     ws.close();
   } finally {
     proc.kill();
+    await proc.exited;
+  }
+  // With the office stopped, every hook stays silent: no output, no error, a clean exit. This is what keeps a session quiet.
+  for (const h of handlers) {
+    const ran = Bun.spawnSync(["sh", "-c", h.command], { stdin: Buffer.from("{}"), env: { PATH: process.env.PATH! } });
+    expect([h.event, ran.exitCode, ran.stdout.toString(), ran.stderr.toString()]).toEqual([h.event, 0, "", ""]);
   }
 });
 

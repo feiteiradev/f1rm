@@ -81,7 +81,7 @@ The office can steer your sessions, so it is locked to you.
 
 - The server listens on `127.0.0.1` only.
 - The browser needs a fresh token on every launch. `start` prints the URL that carries it.
-- Hooks need a separate secret written at install time. The SessionStart hook reads it from a file only you can read, so it never shows up in the process list.
+- Hooks need a separate secret written at install time. Every hook reads it from a file only you can read, so it never shows up in the process list. The hooks are quiet `curl` calls: with the office stopped they do nothing, and your sessions show no errors.
 - Every request has its `Host` and `Origin` checked, and the server sends no CORS headers.
 - Approvals show the full command before the Approve button, and each approval answers exactly one request.
 
