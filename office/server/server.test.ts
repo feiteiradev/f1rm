@@ -1096,3 +1096,48 @@ test("Approve and Deny need the UI token, a POST and the browser's own origin", 
   expect((await decide("approve", "no-such-id")).status).toBe(404);
   expect(await settled(held)).toBe(false); // none of that answered it
 });
+
+// The PreToolUse reply: a deny holds the call, an empty 200 lets it run.
+async function held(r: Response) {
+  const body = await r.text();
+  return body ? JSON.parse(body).hookSpecificOutput : null;
+}
+
+test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's is denied, and so is its intern's", async () => {
+  start();
+  const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(agent_type && { agent_type }) });
+  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
+  await office((s) => Object.keys(s.employees).length === 5);
+  const run = (id: string, command: string, extra = {}) => hook({ ...preToolUse(id, "Bash", { command }), ...extra });
+  for (const id of ["p", "l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
+  for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
+    const out = await held(await run("d", command));
+    expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
+    expect(out.permissionDecisionReason).toContain("Only the PM and team leads hire");
+  }
+  expect((await held(await run("v", "f1rm hire designer designer-a a b", { agent_id: "agent-1", agent_type: "Explore" })))?.permissionDecision).toBe("deny");
+  expect(await held(await run("d", "git status && echo f1rm is hiring"))).toBeNull();
+});
+
+test("a company employee runs at most 2 interns at once, counting calls not started yet; a freelancer is never held", async () => {
+  start();
+  await hook({ ...common("d", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:designer" });
+  await hook({ ...common("f", "UserPromptSubmit"), prompt: "go" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const agent = (id: string) => hook(preToolUse(id, "Agent", { description: "look", prompt: "look around", subagent_type: "Explore" }));
+  expect(await held(await agent("d"))).toBeNull();
+  expect(await held(await agent("d"))).toBeNull();
+  const third = await held(await agent("d"));
+  expect(third?.permissionDecision).toBe("deny");
+  expect(third.permissionDecisionReason).toContain("2 interns working");
+  for (let i = 0; i < 4; i++) expect(await held(await agent("f"))).toBeNull();
+
+  // Both start, then one stops: a slot frees.
+  const sub = (event: string, agent_id: string) => hook({ ...common("d", event), agent_id, agent_type: "Explore" });
+  await sub("SubagentStart", "a1");
+  await sub("SubagentStart", "a2");
+  expect((await held(await agent("d")))?.permissionDecision).toBe("deny");
+  await sub("SubagentStop", "a1");
+  await office((s) => Object.keys(s.interns).length === 1);
+  expect(await held(await agent("d"))).toBeNull();
+});

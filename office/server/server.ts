@@ -13,6 +13,14 @@ import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
+// The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
+// at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
+// in the plugin are what is left.
+const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
+const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher"]);
+export const INTERNS = 2;
+// An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
+const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
 const PM_DECIDES =
   "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
@@ -75,6 +83,25 @@ export function startServer({
 
   // ponytail: replays the whole log on every start; add snapshots or pruning when startup gets slow.
   let state = emptyOffice();
+  // Agent calls let through and not started yet, by session: parallel calls all reach PreToolUse before any SubagentStart.
+  const pendingInterns = new Map<string, number[]>();
+  /** Why the company's rules stop this tool call, or null to let it run. */
+  function refusal(sessionId: string, payload: Record<string, any>): string | null {
+    const role = state.employees[sessionId]?.role;
+    if (!role) return null;
+    const tool = String(payload.tool_name ?? "");
+    if (tool === "Bash" && SPECIALISTS.has(role) && HIRE_COMMAND.test(String(payload.tool_input?.command ?? ""))) {
+      return "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.";
+    }
+    if (tool === "Agent" || tool === "Task") {
+      const now = clock();
+      const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
+      const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;
+      if (running + pending.length >= INTERNS) return `You already have ${INTERNS} interns working, the most an employee runs at once. Wait for one to finish, or do this step yourself.`;
+      pendingInterns.set(sessionId, [...pending, now]);
+    }
+    return null;
+  }
   for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
     try {
       state = reduce(state, JSON.parse(row.event));
@@ -143,6 +170,13 @@ export function startServer({
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
+          if (event.kind === "PreToolUse") {
+            const why = refusal(event.sessionId, payload);
+            if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
+          }
+          if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
+            pendingInterns.get(event.sessionId)?.shift();
+          }
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
             const decision = await approvals.hold(event.sessionId, String(payload.tool_name ?? ""), payload.tool_input, event.at, req.signal);
