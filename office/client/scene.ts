@@ -5,7 +5,7 @@ import { seedFor, seedOf } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { poseOf } from "./pose.ts";
-import { buildWhiteboard, whiteboardCount } from "./whiteboard.ts";
+import { buildTeamSign, buildWhiteboard, teamSignLabel, whiteboardCount } from "./whiteboard.ts";
 
 export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
 
@@ -22,7 +22,7 @@ const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void, onHire: () => void, onStartPm: () => void): Promise<Scene> {
+export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string, team?: string) => void, onHire: () => void, onStartPm: () => void): Promise<Scene> {
   await loadArt();
   const app = await newApp(host);
 
@@ -62,7 +62,9 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       // Lets taps through to the whiteboard under it.
       overlay.eventMode = "none";
       const rows = latest.boards?.[r.room.id] ?? [];
-      rooms.addChild(shell, buildWhiteboard(r, rows, () => onBoard(r.room.id)), overlay);
+      const signs = r.pods.map((p) => buildTeamSign(p, latest.teamBoards?.[r.room.id]?.[p.team] ?? [], () => onBoard(r.room.id, p.team)));
+      rooms.addChild(shell, buildWhiteboard(r, rows, () => onBoard(r.room.id)), ...signs, overlay);
+      for (const p of r.pods) roomLabels.addChild(teamSignLabel(p, scale));
       const count = whiteboardCount(r, rows, scale);
       if (count) {
         count.alpha = r.empty ? 0.4 : 1;

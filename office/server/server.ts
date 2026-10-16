@@ -4,12 +4,12 @@ import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, type BoardRow } from "./board.ts";
+import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
-import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
+import { ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
@@ -141,8 +141,9 @@ export function startServer({
   const departure = (e: Employee): F1rmEvent => ({ sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() });
 
   let boards: Record<string, BoardRow[]> = {};
+  let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
-  const snapshot = () => JSON.stringify({ ...state, boards, approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -282,15 +283,15 @@ export function startServer({
       if (rest[0] === "hire" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-        const { room, role, task, brief, model, override } = body ?? {};
+        const { room, role, task, team, brief, model, override } = body ?? {};
         if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (override != null && typeof override !== "boolean")) {
-          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (team != null && typeof team !== "string") || (override != null && typeof override !== "boolean")) {
+          return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
         const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
@@ -370,12 +371,20 @@ export function startServer({
     reading = true;
     try {
       const next: Record<string, BoardRow[]> = {};
+      const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
       for (const id of Object.keys(state.rooms)) {
         const rows = await readBoard(boardFile(boardsDir, id));
         if (rows.length) next[id] = rows;
+        // Only the boards of teams someone in the room works in.
+        const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t) => t !== null));
+        for (const team of teams) {
+          const teamRows = await readBoard(teamBoardFile(boardsDir, id, team));
+          if (teamRows.length) (nextTeams[id] ??= {})[team] = teamRows;
+        }
       }
-      if (JSON.stringify(next) !== JSON.stringify(boards)) {
+      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards)) {
         boards = next;
+        teamBoards = nextTeams;
         push();
       }
     } finally {

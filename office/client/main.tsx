@@ -13,7 +13,7 @@ import { JumpButton, Palette } from "./jump.tsx";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
 import { InternBox, TellBox } from "./tell.tsx";
-import { roleTitle } from "../people.ts";
+import { roleTitle, teamOf } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
 import { poseOf, statusCounts } from "./pose.ts";
 import { createScene, type Scene } from "./scene.ts";
@@ -27,6 +27,9 @@ const IDLE_TEXT = "On a coffee break";
 const statusText = (e: { role: string | null; status: Status }) => (e.role === "pm" && e.status === "idle" ? "Waiting for you" : STATUS_TEXT[e.status]);
 const DEMO = import.meta.env.MODE === "demo";
 const NOBODY: OfficeState = { rooms: {}, employees: {}, interns: {} };
+/** The teams with a lead in the room, which a hire can join. */
+const teamsIn = (state: OfficeState, room: string) =>
+  [...new Set(Object.values(state.employees).filter((e) => e.room === room && e.role === "lead").map(teamOf).filter((t) => t !== null))].sort();
 
 function Counter({ state }: { state: OfficeState }) {
   const counts = statusCounts(state);
@@ -50,6 +53,7 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
   if (!e) return null;
   const { name } = e, role = roleTitle(e.role);
   const interns = Object.values(state.interns).filter((i) => i.parent === id);
+  const team = teamOf(e);
   const pm = e.role === "pm";
   const idle = pm ? "Its last message is in its terminal. Press Talk to answer." : IDLE_TEXT;
   const activity = e.status === "offline" ? "None" : e.activity || (e.status === "idle" ? idle : "None");
@@ -73,6 +77,12 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
         )}
         <dt>Room</dt>
         <dd title={e.cwd}>{state.rooms[e.room]?.name}</dd>
+        {team && (
+          <>
+            <dt>Team</dt>
+            <dd>{team}</dd>
+          </>
+        )}
         <dt>Status</dt>
         <dd data-status={e.status}>
           <span className="swatch" aria-hidden />
@@ -125,7 +135,8 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
       setPmNote(null);
     }, 30_000);
   }
-  const [board, setBoard] = useState<string | null>(null);
+  const [board, setBoard] = useState<{ id: string; team?: string } | null>(null);
+  const openBoard = (id: string, team?: string) => setBoard({ id, team });
   const { history, ask, tell } = useHistory();
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<Scene | null>(null);
@@ -142,7 +153,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select, setBoard, onHire, startPm).then((s) => {
+    createScene(host.current!, select, openBoard, onHire, startPm).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       s.update(latest.current.state, latest.current.selected);
@@ -168,8 +179,8 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     <>
       <div className="scene" ref={host} />
       {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
-      {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
-      <BoardList state={state} onOpen={setBoard} />
+      {board && state.rooms[board.id] && <BoardPanel key={`${board.id}/${board.team ?? ""}`} state={state} id={board.id} team={board.team} onClose={() => setBoard(null)} />}
+      <BoardList state={state} onOpen={openBoard} />
       {pmNote && <p className="note low pm-note" role="status">{pmNote}</p>}
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
       <ul className="roster">
@@ -317,7 +328,7 @@ function Office() {
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
-      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} onClose={() => setHiring(false)} />}
+      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </>
   );
 }

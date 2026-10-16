@@ -4,9 +4,10 @@ import type { OfficeState } from "../server/office.ts";
 import { boardSummary } from "./board.ts";
 import "./board.css";
 
-export function BoardPanel({ state, id, onClose }: { state: OfficeState; id: string; onClose: () => void }) {
-  const rows = state.boards?.[id] ?? [];
-  const name = state.rooms[id]?.name ?? "Room";
+/** A room's board, or with `team` that team's board. */
+export function BoardPanel({ state, id, team, onClose }: { state: OfficeState; id: string; team?: string; onClose: () => void }) {
+  const rows = (team ? state.teamBoards?.[id]?.[team] : state.boards?.[id]) ?? [];
+  const name = (state.rooms[id]?.name ?? "Room") + (team ? ` / ${team}` : "");
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -17,7 +18,7 @@ export function BoardPanel({ state, id, onClose }: { state: OfficeState; id: str
       removeEventListener("keydown", onKey);
       opener?.focus?.();
     };
-  }, [id]);
+  }, [id, team]);
   return (
     <aside className="board-panel" aria-label={`Board, ${name}`}>
       <header>
@@ -57,17 +58,24 @@ export function BoardPanel({ state, id, onClose }: { state: OfficeState; id: str
   );
 }
 
-/** One button per room, out of sight until focused, like the roster. */
-export function BoardList({ state, onOpen }: { state: OfficeState; onOpen: (id: string) => void }) {
+/** One button per room and per team board, out of sight until focused, like the roster. */
+export function BoardList({ state, onOpen }: { state: OfficeState; onOpen: (id: string, team?: string) => void }) {
   return (
     <ul className="boards" aria-label="Boards">
-      {Object.values(state.rooms).map((room) => (
+      {Object.values(state.rooms).flatMap((room) => [
         <li key={room.id}>
           <button onClick={() => onOpen(room.id)}>
             Board, {room.name}: {boardSummary(state.boards?.[room.id] ?? [])}
           </button>
-        </li>
-      ))}
+        </li>,
+        ...Object.entries(state.teamBoards?.[room.id] ?? {}).map(([team, rows]) => (
+          <li key={`${room.id}/${team}`}>
+            <button onClick={() => onOpen(room.id, team)}>
+              Board, {room.name} / {team}: {boardSummary(rows)}
+            </button>
+          </li>
+        )),
+      ])}
     </ul>
   );
 }

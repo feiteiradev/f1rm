@@ -83,6 +83,17 @@ export function nameFor(sessionId: string, taken: ReadonlySet<string>): string {
   return `${NAMES[seed % NAMES.length]} ${sessionId.slice(0, 6)}`;
 }
 
+/**
+ * The team an employee works in, read from its session name, which `f1rm hire` sets: a lead is `lead-<team>` and a team
+ * member `<team>.<role>-<task>`. Anyone else, freelancers included, is in no team.
+ */
+export function teamOf(e: { role: RoleId | null; title?: string }): string | null {
+  const slug = "[a-z0-9]+(?:-[a-z0-9]+)*";
+  if (!e.role || e.role === "pm") return null;
+  const m = new RegExp(e.role === "lead" ? `^lead-(${slug})$` : `^(${slug})\\.`).exec(e.title ?? "");
+  return m ? m[1] : null;
+}
+
 export const roleTitle = (role: RoleId | null) => (role ? ROLES[role].title : "Freelancer");
 /** A role's shirt with this session's skin and hair; a freelancer's whole look comes from its session id, never in the lead's shirt. */
 export function seedFor(e: { sessionId: string; role: RoleId | null }): number {

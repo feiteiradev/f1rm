@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
-import { CELL, CORNER, layoutOffice, ROOM, rosterOf } from "./layout.ts";
+import { CELL, CORNER, layoutOffice, POD, ROOM, rosterOf } from "./layout.ts";
 import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { argsText } from "./approvals.ts";
@@ -115,6 +115,36 @@ test("the PM sits at the table in the corner, alone; a second PM takes a desk, a
   expect(rosterOf(office(["r"], staff))[0].sessionId).toBe("p");
   const nobody = layoutOffice(office(["r"], [employee("f", "r")]), 480, 300).rooms[0];
   expect([nobody.desks[0].table, nobody.desks[0].employee]).toEqual([true, undefined]);
+});
+
+test("each team is a pod with its lead at the head and its members beside it; staff outside teams and freelancers keep their places", () => {
+  const staff = [
+    employee("p", "r", { role: "pm" }),
+    employee("ls", "r", { role: "lead", title: "lead-search", name: "Sol" }),
+    employee("lc", "r", { role: "lead", title: "lead-checkout", name: "Cy" }),
+    employee("cd", "r", { role: "designer", title: "checkout.designer-landing", name: "Ada" }),
+    employee("cf", "r", { role: "frontend", title: "checkout.frontend-dev-form", name: "Bo" }),
+    employee("sb", "r", { role: "backend", title: "search.backend-dev-api", name: "Di" }),
+    employee("solo", "r", { role: "designer", title: "designer-logo", name: "Eve" }),
+    employee("f", "r"),
+  ];
+  const [room] = layoutOffice(office(["r"], staff), 400).rooms;
+  const [table, ...desks] = room.desks;
+  expect(table.employee?.sessionId).toBe("p");
+  const row = (y: number) => desks.filter((d) => d.y === y).map((d) => d.employee?.sessionId);
+  const ys = [...new Set(desks.map((d) => d.y))];
+  expect(ys.map(row)).toEqual([["lc", "cd", "cf"], ["ls", "sb", undefined], ["solo", undefined, undefined], ["f", undefined, undefined]]);
+  expect(desks.filter((d) => d.y === ys[0]).every((d) => d.team === "checkout")).toBe(true);
+  expect(desks.filter((d) => d.y >= ys[2]).some((d) => d.team)).toBe(false);
+  expect(desks.filter((d) => d.y === ys[3]).every((d) => d.hot)).toBe(true);
+  expect(room.pods.map((p) => p.team)).toEqual(["checkout", "search"]);
+  // Each pod's sign sits above its lead's desk, inside the pod.
+  const [checkout, search] = room.pods;
+  expect(ys[0] - checkout.y).toBe(POD.sign);
+  expect(checkout.y + checkout.h).toBe(search.y);
+  expect(search.y + search.h).toBe(ys[2]);
+  const none = layoutOffice(office(["r"], [employee("d", "r", { role: "designer", title: "designer-x" })]), 400).rooms[0];
+  expect(none.pods).toEqual([]);
 });
 
 test("employees take desks in session id order, filling rows of three", () => {

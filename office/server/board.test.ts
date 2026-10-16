@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { boardFile, MAX_BOARD_BYTES, parseBoard } from "./board.ts";
+import { boardFile, MAX_BOARD_BYTES, teamBoardFile, parseBoard } from "./board.ts";
 import { startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -115,4 +115,22 @@ test("a board bigger than the read cap still yields a bounded state", async () =
   const s = await next((s) => (s.boards?.["/code/shop/.git"]?.length ?? 0) > 0);
   expect(s.boards!["/code/shop/.git"].length).toBeLessThanOrEqual(65);
   expect(JSON.stringify(s).length).toBeLessThan(MAX_BOARD_BYTES * 2);
+});
+
+test("a team's board, next to the PM's, reaches the office for every team someone in the room works in", async () => {
+  const { boardsDir, next } = await officeWithRepo();
+  const room = "/code/shop/.git";
+  await fetch(`http://127.0.0.1:${server.port}/ingest`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-f1rm-secret": SECRET },
+    body: JSON.stringify({ session_id: "lead", cwd: "/code/shop", hook_event_name: "UserPromptSubmit", prompt: "go", agent_type: "f1rm:lead", session_title: "lead-checkout" }),
+  });
+  mkdirSync(boardsDir);
+  expect(teamBoardFile(boardsDir, room, "checkout")).toBe(join(boardsDir, "-code-shop.team.checkout.md"));
+  writeFileSync(teamBoardFile(boardsDir, room, "checkout"), example);
+  // A board for a team nobody here works in stays unread.
+  writeFileSync(teamBoardFile(boardsDir, room, "search"), example);
+  const s = await next((s) => s.teamBoards?.[room]?.checkout?.length === 3);
+  expect(Object.keys(s.teamBoards![room])).toEqual(["checkout"]);
+  expect(s.boards).toEqual({});
 });

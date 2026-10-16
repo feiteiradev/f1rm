@@ -60,6 +60,8 @@ export const COLORS = {
   frame: 0xd9e4ea,
   rug: 0x5b3a4e,
   rugEdge: 0x7d5068,
+  pod: 0x3b4a6b,
+  podEdge: 0x5a6d96,
 };
 
 // Character layers in the char sheet: skin, shirt, hair as [col, row]. Skin tones sampled for the raised arm.
@@ -262,6 +264,12 @@ export function buildRoom(r: RoomLayout, onHire?: () => void, onStartPm?: () => 
   box(g, r.x, r.y + ROOM.wall - 3, r.w, 3, COLORS.baseboard);
   for (const [x, y, w, h] of [[r.x, r.y, r.w, 1], [r.x, r.y + r.h - 1, r.w, 1], [r.x, r.y, 1, r.h], [r.x + r.w - 1, r.y, 1, r.h]]) {
     box(g, x, y, w, h, COLORS.outside);
+  }
+  // A team's rug runs under its sign and every desk of its pod.
+  for (const p of r.pods) {
+    box(g, p.x - 2, p.y, p.w + 4, p.h - 4, COLORS.pod);
+    box(g, p.x - 1, p.y + 1, p.w + 2, p.h - 6, COLORS.podEdge, 0.5);
+    box(g, p.x, p.y + 2, p.w, p.h - 8, COLORS.pod);
   }
   for (const d of r.desks) {
     if (!d.hot) continue;

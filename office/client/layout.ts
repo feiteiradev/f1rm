@@ -1,19 +1,22 @@
 // Where everything goes: a pure function of server state and the available width. Units are art pixels.
 import type { Employee, OfficeState, Room } from "../server/office.ts";
-import { ROLE_IDS } from "../people.ts";
+import { ROLE_IDS, teamOf } from "../people.ts";
 
 export const CELL = { w: 36, h: 64 };
 export const ROOM = { cols: 3, wall: 22, pad: 6, maxCols: 6 };
 /** The PM's glass corner at the left of every room: its table (a desk cell) and a chair for you beside it. */
 export const CORNER = { w: 62, h: 72, table: { x: 4, y: 6 } };
+/** A team's pod: its rows of desks, with room above the first for the sign that names the team and carries its board. */
+export const POD = { sign: 14 };
 const MARGIN = 8;
 const GAP = 8;
 
 /** `hot` desks are the shared ones at the back of a room, where freelancers sit; the `table` is the PM's, in the corner. */
-export type Desk = { x: number; y: number; hot: boolean; table?: boolean; employee?: Employee };
+export type Desk = { x: number; y: number; hot: boolean; table?: boolean; team?: string; employee?: Employee };
 export type Box = { x: number; y: number; w: number; h: number };
 /** `desks[0]` is always the PM's table. */
-export type RoomLayout = Box & { room: Room; empty: boolean; corner: Box; desks: Desk[] };
+export type Pod = Box & { team: string };
+export type RoomLayout = Box & { room: Room; empty: boolean; corner: Box; pods: Pod[]; desks: Desk[] };
 
 /** Integer art scale keeps pixels square; narrow windows drop to 2x and wide ones step up. */
 export const scaleFor = (px: number) => (px < 760 ? 2 : px < 1100 ? 3 : 4);
@@ -33,7 +36,7 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
   const out: RoomLayout[] = [];
   let y = MARGIN;
   for (const room of rooms) {
-    // Company staff take the front desks in role order (shifts of a role by counter), freelancers the hot desks behind
+    // Company staff take the front desks in role order (then by name), freelancers the hot desks behind
     // them, by session id. Both orders are stable while nobody joins or leaves, with no arrival order in the state.
     const here = staff.filter((e) => e.room === room.id);
     const company = here
@@ -43,21 +46,37 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
     const pm = company[0]?.role === "pm" ? company[0] : undefined;
     const crew = pm ? company.slice(1) : company;
     const freelancers = here.filter((e) => !e.role).sort((a, b) => a.sessionId.localeCompare(b.sessionId));
-    const crewSeats = Math.ceil(crew.length / cols) * cols;
-    const seats = Math.max(cols, crewSeats + Math.ceil(freelancers.length / cols) * cols);
-    const people = [...crew, ...Array(crewSeats - crew.length).fill(undefined), ...freelancers];
-    const h = Math.max(ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h, ROOM.wall + CORNER.h + ROOM.pad, solo ? fill - MARGIN * 2 : 0);
+    // Each team is a pod of whole rows, its lead at the head (company order puts leads first); then staff in no team, then freelancers.
+    const teams = [...new Set(crew.map(teamOf).filter((t) => t !== null))].sort();
+    type Row = { seats: (Employee | undefined)[]; hot: boolean; team?: string };
+    const rowsOf = (people: Employee[], hot: boolean, team?: string): Row[] =>
+      Array.from({ length: Math.ceil(people.length / cols) }, (_, r) => ({ seats: Array.from({ length: cols }, (_, c) => people[r * cols + c]), hot, team }));
+    const rows: Row[] = [
+      ...teams.flatMap((t) => rowsOf(crew.filter((e) => teamOf(e) === t), false, t)),
+      ...rowsOf(crew.filter((e) => teamOf(e) === null), false),
+      ...rowsOf(freelancers, true),
+    ];
+    if (!rows.length) rows.push({ seats: Array(cols).fill(undefined), hot: false });
+    const signs = rows.filter((r, i) => r.team && rows[i - 1]?.team !== r.team).length;
+    const content = rows.length * CELL.h + signs * POD.sign;
+    const h = Math.max(ROOM.wall + ROOM.pad * 2 + content, ROOM.wall + CORNER.h + ROOM.pad, solo ? fill - MARGIN * 2 : 0);
     // Whole plank rows (8), so the floor lines meet the desks the same way in every room.
-    const slack = Math.floor((h - (ROOM.wall + ROOM.pad * 2 + (seats / cols) * CELL.h)) / 16) * 8;
+    const slack = Math.floor((h - (ROOM.wall + ROOM.pad * 2 + content)) / 16) * 8;
     const corner = { x: MARGIN, y: y + ROOM.wall, w: CORNER.w, h: CORNER.h };
     const table: Desk = { x: corner.x + CORNER.table.x, y: corner.y + CORNER.table.y, hot: false, table: true, employee: pm };
-    const desks = Array.from({ length: seats }, (_, i) => ({
-      x: MARGIN + inset + (i % cols) * CELL.w,
-      y: y + ROOM.wall + ROOM.pad + slack + Math.floor(i / cols) * CELL.h,
-      hot: i >= crewSeats && freelancers.length > 0,
-      employee: people[i],
-    }));
-    out.push({ room, x: MARGIN, y, w: roomW, h, empty: here.length === 0, corner, desks: [table, ...desks] });
+    const desks: Desk[] = [];
+    const pods: Pod[] = [];
+    let top = y + ROOM.wall + ROOM.pad + slack;
+    rows.forEach((row, i) => {
+      if (row.team && rows[i - 1]?.team !== row.team) {
+        pods.push({ team: row.team, x: MARGIN + inset, y: top, w: cols * CELL.w, h: POD.sign });
+        top += POD.sign;
+      }
+      if (row.team) pods.at(-1)!.h += CELL.h;
+      row.seats.forEach((employee, c) => desks.push({ x: MARGIN + inset + c * CELL.w, y: top, hot: row.hot && freelancers.length > 0, ...(row.team && { team: row.team }), employee }));
+      top += CELL.h;
+    });
+    out.push({ room, x: MARGIN, y, w: roomW, h, empty: here.length === 0, corner, pods, desks: [table, ...desks] });
     y += h + GAP;
   }
   return { rooms: out, height: y - GAP + MARGIN };

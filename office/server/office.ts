@@ -44,6 +44,8 @@ export type OfficeState = {
   interns: Record<string, Intern>;
   /** Each room's board rows, only for rooms that have a board. The server adds this to what it pushes; the reducer never sees it. */
   boards?: Record<string, BoardRow[]>;
+  /** Each room's team boards, by team, only for teams that have one. Added by the server like `boards`. */
+  teamBoards?: Record<string, Record<string, BoardRow[]>>;
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */
   approvals?: Approval[];
 };

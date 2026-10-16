@@ -1,4 +1,4 @@
-// The Hire dialog: the plugin's roles, read live, a brief, a task name and a model. It hires into the open project.
+// The Hire dialog: the plugin's roles, read live, a brief, a task name (a team name for a lead), a team and a model. It hires into the open project.
 import { useEffect, useId, useRef, useState } from "react";
 import { MODELS } from "../people.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
@@ -31,13 +31,15 @@ function useRoles(room: string) {
   return { roles, hires, setHires, error };
 }
 
-export function HireDialog({ room, name, pm, onClose }: { room: string; name: string; pm: { sessionId: string; name: string } | null; onClose: () => void }) {
+/** `teams` are the project's live teams, which a specialist can join. */
+export function HireDialog({ room, name, pm, teams, onClose }: { room: string; name: string; pm: { sessionId: string; name: string } | null; teams: string[]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { roles, hires, setHires, error: loadError } = useRoles(room);
   const [roleId, setRoleId] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
   const [task, setTask] = useState<string | null>(null);
   const [model, setModel] = useState("");
+  const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   // The office refused for the cap, so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
@@ -56,6 +58,7 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
 
   const full = hires?.working != null && hires.working >= hires.cap;
   const role = roles?.find((r) => r.id === (roleId ?? roles[0]?.id));
+  const lead = role?.id === "lead";
   // The task name follows the brief until it is edited by hand.
   const taskName = task ?? taskFrom(brief);
   const ready = !!role && !!brief.trim() && TASK_NAME.test(taskName) && !busy;
@@ -66,7 +69,7 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
     setProblem(null);
     setCapped(false);
     setConfirming(false);
-    const { error, reply } = await send("hire", { room, role: role.id, task: taskName, brief: brief.trim(), model: model || null, override });
+    const { error, reply } = await send("hire", { room, role: role.id, task: taskName, team: !lead && team ? team : null, brief: brief.trim(), model: model || null, override });
     if (error === null) return onClose();
     setBusy(false);
     setProblem(error);
@@ -135,9 +138,9 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
               value={brief}
               onChange={(e) => setBrief(e.target.value)}
               onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && (e.preventDefault(), hire())}
-              placeholder="Design the login page. Acceptance criteria: ..."
+              placeholder={lead ? "The slice: its goal and acceptance criteria, the milestone, the other teams and their leads, fixed contracts ..." : "Design the login page. Acceptance criteria: ..."}
             />
-            <label htmlFor={`${id}-task`}>Task name</label>
+            <label htmlFor={`${id}-task`}>{lead ? "Team name" : "Task name"}</label>
             <input
               id={`${id}-task`}
               value={taskName}
@@ -147,7 +150,20 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
               autoComplete="off"
               spellCheck={false}
             />
-            <p id={`${id}-task-help`} className="help">Lowercase words joined by hyphens. It names the worktree and its branch.</p>
+            <p id={`${id}-task-help`} className="help">
+              {lead ? `Lowercase words joined by hyphens. It names the team, and its lead lead-${taskName || "<team>"}.` : "Lowercase words joined by hyphens. It names the worktree and its branch."}
+            </p>
+            {!lead && teams.length > 0 && (
+              <>
+                <label htmlFor={`${id}-team`}>Team</label>
+                <select id={`${id}-team`} value={team} onChange={(e) => setTeam(e.target.value)}>
+                  <option value="">No team (reports to the PM)</option>
+                  {teams.map((t) => (
+                    <option key={t} value={t}>{t} (reports to lead-{t})</option>
+                  ))}
+                </select>
+              </>
+            )}
             <label htmlFor={`${id}-model`}>Model</label>
             <select id={`${id}-model`} value={model} onChange={(e) => setModel(e.target.value)}>
               <option value="">{role ? `${role.model} (the role's own)` : "The role's own"}</option>
