@@ -21,6 +21,10 @@ const MAX_MESSAGE = 4000;
 const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
+// A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
+const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
+/** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
+const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
 // An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
 const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
@@ -97,6 +101,9 @@ export function startServer({
     const tool = String(payload.tool_name ?? "");
     if (tool === "Bash" && SPECIALISTS.has(role) && HIRE_COMMAND.test(String(payload.tool_input?.command ?? ""))) {
       return "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.";
+    }
+    if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
+      return "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.";
     }
     if (tool === "Agent" || tool === "Task") {
       const now = clock();

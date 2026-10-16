@@ -1162,3 +1162,21 @@ test("a Founder project lists and hires the founder roles; a Work project, or on
   expect((await setEdition("work")).status).toBe(200);
   expect((await hireOf(marketer)).status).toBe(400);
 });
+
+test("a Founder role's connector tools that send, publish, post or schedule are denied; its drafts, Work roles and freelancers are not", async () => {
+  start();
+  for (const [id, type] of [["m", "f1rm:marketer"], ["d", "f1rm:designer"], ["f", undefined]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(type && { agent_type: type }) });
+  }
+  await office((s) => Object.keys(s.employees).length === 3);
+  const call = (id: string, tool: string) => hook(preToolUse(id, tool, {}));
+  for (const tool of ["mcp__claude_ai_Gmail__send_email", "mcp__x__createPost", "mcp__claude_ai_Higgsfield__tiktok_publish_status", "mcp__buffer__schedule-post"]) {
+    const out = await held(await call("m", tool));
+    expect([tool, out?.permissionDecision]).toEqual([tool, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Drafts only");
+  }
+  for (const tool of ["mcp__claude_ai_Gmail__create_draft", "mcp__db__postgres_query", "mcp__garden__compost", "mcp__claude_ai_Canva__generate_design", "Write"]) {
+    expect([tool, await held(await call("m", tool))]).toEqual([tool, null]);
+  }
+  for (const id of ["d", "f"]) expect(await held(await call(id, "mcp__claude_ai_Gmail__send_email"))).toBeNull();
+});
