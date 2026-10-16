@@ -34,6 +34,27 @@ Sessions you start after `install` appear in the office. `bun office/cli/f1rm.ts
 
 To keep the office running in the background and at login, so the hooks always reach it, run `f1rm service` once. Run it again after a `git pull` to restart the office on the new code. `f1rm start` then just opens the page, and `f1rm service off` removes the background office. Its log is `~/.f1rm/office.log`.
 
+## Commands
+
+`f1rm` below is short for `bun office/cli/f1rm.ts`. To type `f1rm` from any folder, add this line to your `~/.zshrc`, with your clone's path:
+
+```sh
+alias f1rm="bun /path/to/f1rm/office/cli/f1rm.ts"
+```
+
+| Command | What it does |
+| :- | :- |
+| `f1rm install` | Adds f1rm's hooks to `~/.claude/settings.json`, after backing it up. |
+| `f1rm uninstall` | Removes exactly what `install` added. Keeps your event log, boards and editions in `~/.f1rm/`. |
+| `f1rm start` | Opens the office in your browser. If the background office isn't running, runs one in this terminal until you stop it. |
+| `f1rm service` | Runs the office in the background and at login. Run it again to restart it on new code. |
+| `f1rm service off` | Stops the background office and removes it from login. Your sessions keep working; the hooks just go quiet. |
+| `f1rm edition` | Prints this repo's edition. `f1rm edition work` or `f1rm edition founder` sets it. |
+| `f1rm pm` | Starts this repo's PM in this terminal. Extra flags go to `claude`, for example `f1rm pm --model sonnet`. |
+| `f1rm hire` | Starts a lead or a specialist in the background. The PM and leads run it; `f1rm hire --help` shows the syntax. |
+| `f1rm demo` | Opens the recorded demo, with no server and no Claude Code. Needs `bun run build` first. |
+| `f1rm serve` | Runs the office server in the foreground. This is what `service` runs. |
+
 ## The company
 
 Install the plugin, then start a PM in the repo you want to work on:
