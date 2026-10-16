@@ -235,7 +235,12 @@ function service() {
   writeFileSync(PLIST, plist);
   const domain = `gui/${process.getuid!()}`;
   launchctl("bootout", `${domain}/${SERVICE}`);
-  if (launchctl("bootstrap", domain, PLIST) !== 0) throw new Error(`launchctl could not load ${PLIST}; see ${log}`);
+  // bootout returns before launchd has finished stopping a running office; bootstrap fails until it has.
+  let tries = 20;
+  while (launchctl("bootstrap", domain, PLIST) !== 0) {
+    if (--tries === 0) throw new Error(`launchctl could not load ${PLIST}; see ${log}`);
+    Bun.sleepSync(250);
+  }
   console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
 }
 
