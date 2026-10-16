@@ -9,7 +9,7 @@ f1rm also ships a company: a Claude Code plugin with six roles (PM, Designer, Fr
 ## What you get
 
 - **A lobby with a door per project.** Each door shows how many people are inside and whether someone is waiting for you. Enter a door to see that project's office full screen.
-- **Live employees.** Sessions you start in any terminal arrive as freelancers. Sessions started as a role, such as `claude --agent f1rm:designer`, take that role's desk and name. Sub-agents walk out as interns and leave when they finish.
+- **Live employees.** Sessions you start in any terminal arrive as freelancers. Sessions started as a role, such as `claude --agent f1rm:designer`, take that role's desk and shirt. Everyone gets a name of their own. Sub-agents walk out as interns and leave when they finish.
 - **The PM's table.** The PM, the one you talk to, sits at its own table in a glass corner, with a chair for you. When its turn ends, a "?" over your chair says it is waiting for your answer, and its panel's Talk button takes you to its terminal. A tap on the empty table starts a PM.
 - **Jump.** Click an employee and press Jump to bring their exact iTerm2 tab to the front. `⌘K` searches everyone by name, role, project or task.
 - **Ask.** A side question is answered by a read-only copy of the employee's session. Their work is never touched.

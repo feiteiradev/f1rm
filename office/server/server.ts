@@ -240,7 +240,7 @@ export function startServer({
             .map((r) => {
               const known = roleOfAgentType(`f1rm:${r.id}`);
               const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
-              return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
+              return { ...r, title: known ? ROLES[known].title : r.id, working };
             }),
           hires: { working: hires, cap: CAP },
         });

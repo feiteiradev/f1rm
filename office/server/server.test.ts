@@ -430,8 +430,6 @@ test("a hook whose cwd is not an absolute path is dropped, so it can never reach
   expect(calls).toEqual([]);
 });
 
-const ROLE_NAMES = ["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"];
-
 test("a session started with --agent is that role's employee, titled by --name; any other session is a freelancer", async () => {
   start();
   const prompt = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...extra });
@@ -446,22 +444,14 @@ test("a session started with --agent is that role's employee, titled by --name; 
   await prompt("n", {});
 
   const { employees: e } = await office((s) => Object.keys(s.employees).length === 9);
-  const seen = (id: string) => [e[id].role, e[id].name];
-  expect(seen("d")).toEqual(["designer", "Maya"]);
-  expect(seen("f")).toEqual(["frontend", "Felix"]);
-  expect(seen("b")).toEqual(["backend", "Bruno"]);
-  expect(seen("p")).toEqual(["pm", "Priya"]);
-  expect(seen("v")).toEqual(["reviewer", "Ines"]);
-  expect(seen("r")).toEqual(["researcher", "Kofi"]);
+  const roles = Object.fromEntries(["d", "f", "b", "p", "v", "r", "x", "e", "n"].map((id) => [id, e[id].role]));
+  expect(roles).toEqual({ d: "designer", f: "frontend", b: "backend", p: "pm", v: "reviewer", r: "researcher", x: null, e: null, n: null });
+  expect(new Set(Object.values(e).map((x) => x.name)).size).toBe(9);
   expect(e.d.title).toBe("login-redesign");
-  for (const id of ["x", "e", "n"]) {
-    expect(e[id].role).toBeNull();
-    expect(ROLE_NAMES).not.toContain(e[id].name);
-  }
 
   // Later events without the fields keep them.
   await hook(preToolUse("d", "Bash", { command: "ls" }));
-  expect((await office(() => true)).employees.d).toMatchObject({ role: "designer", name: "Maya", title: "login-redesign" });
+  expect((await office(() => true)).employees.d).toMatchObject({ role: "designer", name: e.d.name, title: "login-redesign" });
 });
 
 test("tool events from inside a sub-agent do not give the session the sub-agent's role", async () => {
@@ -471,34 +461,37 @@ test("tool events from inside a sub-agent do not give the session the sub-agent'
   const { employees } = await office((s) => s.employees.s1?.tool === "Read");
   expect(employees.s1.role).toBeNull();
 
-  // The main session's own event names the role, and the employee takes the role's name.
+  // The main session's own event names the role, and the employee keeps its name.
   await hook({ ...preToolUse("s1", "Read", { file_path: "/a" }), agent_type: "f1rm:designer" });
-  expect((await office(() => true)).employees.s1).toMatchObject({ role: "designer", name: "Maya" });
+  expect((await office(() => true)).employees.s1).toMatchObject({ role: "designer", name: employees.s1.name });
 });
 
-test("concurrent shifts of a role count up, and a freed counter is reused", async () => {
+test("shifts of one role each get their own name, with no counter, and keep it while others come and go", async () => {
   start();
   const shift = (id: string) => hook({ ...common(id, "SessionStart"), source: "startup", agent_type: "f1rm:designer" });
   await shift("a");
   await shift("b");
   await shift("c");
   const names = async () => Object.fromEntries(Object.entries((await office(() => true)).employees).map(([id, e]) => [id, e.name]));
-  expect(await names()).toEqual({ a: "Maya", b: "Maya (2)", c: "Maya (3)" });
+  const first = await names();
+  expect(new Set(Object.values(first)).size).toBe(3);
+  expect(Object.values(first).some((n) => n.includes("("))).toBe(false);
 
   await hook({ ...common("a", "SessionEnd"), reason: "other" });
-  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)" });
+  expect(await names()).toEqual({ b: first.b, c: first.c });
   await shift("d");
-  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)", d: "Maya" });
+  const after = await names();
+  expect([after.b, after.c]).toEqual([first.b, first.c]);
+  expect([first.b, first.c]).not.toContain(after.d);
 });
 
-test("freelancer names are unique among the employees present and never a role's name, even with 120 sessions", async () => {
+test("names are unique among the employees present, even with 120 sessions", async () => {
   start();
   const ids = Array.from({ length: 120 }, (_, i) => `session-${i}`);
   for (const id of ids) await hook(sessionStart(id, "/code/shop"));
   const { employees } = await office((s) => Object.keys(s.employees).length === ids.length);
   const names = Object.values(employees).map((e) => e.name);
   expect(new Set(names).size).toBe(ids.length);
-  for (const name of names) expect(ROLE_NAMES).not.toContain(name.replace(/ \(\d+\)$/, ""));
 });
 
 test("a sub-agent is an intern of its parent from its start to its stop, and never an employee", async () => {
@@ -694,7 +687,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
-  expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
+  expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
   expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };

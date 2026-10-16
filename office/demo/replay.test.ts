@@ -35,7 +35,10 @@ test("the demo shows rooms, all six roles, freelancers, interns, and working, wa
   expect(seen((s) => Object.values(s.employees).map((e) => e.role))).toEqual(new Set([null, "pm", "designer", "frontend", "backend", "reviewer", "researcher"]));
   expect(seen((s) => Object.values(s.employees).map((e) => e.status))).toEqual(new Set(["working", "waiting", "idle", "offline"]));
   expect(Math.max(...states.map((s) => Object.keys(s.interns).length))).toBeGreaterThanOrEqual(1);
-  expect(seen((s) => Object.values(s.employees).map((e) => e.name)).has("Maya (2)")).toBe(true);
+  // Two designers at once, each with a name of its own and no counter.
+  const designers = states.map((s) => Object.values(s.employees).filter((e) => e.role === "designer").map((e) => e.name)).find((n) => n.length >= 2)!;
+  expect(new Set(designers).size).toBe(designers.length);
+  expect(designers.some((n) => n.includes("("))).toBe(false);
 });
 
 test("the fixture has no prompt, path, secret or private title in it", () => {

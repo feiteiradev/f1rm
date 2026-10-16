@@ -47,19 +47,18 @@ test("the counter tallies working, waiting and idle employees", () => {
   expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0, offline: 0 });
 });
 
-test("a role keeps its fixed name and look; its counter takes the lowest free number", () => {
-  expect(ROLE_IDS.map((r) => ROLES[r].name)).toEqual(["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"]);
-  expect(new Set(ROLE_IDS.map((r) => ROLES[r].seed)).size).toBe(6);
-  expect(new Set(ROLE_IDS.map((r) => decodeLook(ROLES[r].seed).shirt)).size).toBe(6);
-  expect(seedFor({ sessionId: "a", role: "designer" })).toBe(seedFor({ sessionId: "b", role: "designer" }));
-  expect(nameFor("a", "designer", new Set())).toBe("Maya");
-  expect(nameFor("a", "designer", new Set(["Maya"]))).toBe("Maya (2)");
-  expect(nameFor("a", "designer", new Set(["Maya", "Maya (3)"]))).toBe("Maya (2)");
+test("each role wears its own shirt, while skin and hair vary by session; the lead's shirt is no one else's", () => {
+  expect(new Set(ROLE_IDS.map((r) => ROLES[r].shirt)).size).toBe(ROLE_IDS.length);
+  const designers = Array.from({ length: 30 }, (_, i) => decodeLook(seedFor({ sessionId: `d-${i}`, role: "designer" })));
+  expect(new Set(designers.map((l) => l.shirt))).toEqual(new Set([ROLES.designer.shirt]));
+  expect(new Set(designers.map((l) => `${l.skin}/${l.hair}`)).size).toBeGreaterThan(5);
+  const freelancers = Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt);
+  expect(freelancers.includes(ROLES.lead.shirt)).toBe(false);
 });
 
 test("only f1rm's own agent types are roles", () => {
   const cases: [unknown, RoleId | undefined][] = [
-    ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"],
+    ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"], ["f1rm:lead", "lead"],
     ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"],
     ["f1rm:pm-dev", undefined], ["f1rm:designer-dev", undefined], ["f1rm:frontend", undefined], ["f1rm:backend", undefined],
     ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],
@@ -68,14 +67,15 @@ test("only f1rm's own agent types are roles", () => {
   for (const [agentType, role] of cases) expect(roleOfAgentType(agentType)).toBe(role);
 });
 
-test("a freelancer keeps one name and look for the same session id, and 100 of them never share a name", () => {
-  const name = (id: string, taken = new Set<string>()) => nameFor(id, null, taken);
-  expect(name("abc")).toBe(name("abc"));
+test("everyone keeps one name for the same session id, and 4,000 people in one office never share one or get a counter", () => {
+  expect(nameFor("abc", new Set())).toBe(nameFor("abc", new Set()));
   const taken = new Set<string>();
-  for (let i = 0; i < 100; i++) taken.add(name(`session-${i}`, taken));
-  expect(taken.size).toBe(100);
-  for (const role of ROLE_IDS) expect(taken.has(ROLES[role].name)).toBe(false);
-  expect(new Set(Array.from({ length: 60 }, (_, i) => seedFor({ sessionId: `session-${i}`, role: null }))).size).toBe(60);
+  for (let i = 0; i < 4000; i++) taken.add(nameFor(`session-${i}`, taken));
+  expect(taken.size).toBe(4000);
+  expect([...taken].some((n) => /\(\d+\)/.test(n))).toBe(false);
+  expect([...taken].filter((n) => !n.includes(" ")).length).toBeGreaterThan(150);
+  expect([...taken].some((n) => /^\w+ [A-Z]\.$/.test(n))).toBe(true);
+  expect(new Set(Array.from({ length: 60 }, (_, i) => seedFor({ sessionId: `session-${i}`, role: null }))).size).toBeGreaterThan(30);
 });
 
 test("rooms sort by name, and a room with nobody in it is empty", () => {

@@ -64,7 +64,8 @@ export const COLORS = {
 
 // Character layers in the char sheet: skin, shirt, hair as [col, row]. Skin tones sampled for the raised arm.
 const SKINS: [number, number, number][] = [[0, 0, 0xe5c49d], [0, 1, 0xc8a480], [0, 2, 0x9f7c4d]];
-const SHIRTS: [number, number][] = [[7, 0], [11, 0], [15, 0], [7, 5], [15, 5], [11, 5]];
+// The seventh, a dark suit with a white front, is the team lead's.
+const SHIRTS: [number, number][] = [[7, 0], [11, 0], [15, 0], [7, 5], [15, 5], [11, 5], [16, 6]];
 const HAIRS: [number, number][] = [[19, 0], [23, 0], [19, 4], [23, 4], [19, 8], [21, 0]];
 
 const CHAR = { x: 15, y: 11 };

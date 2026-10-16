@@ -8,7 +8,7 @@ import "./hire.css";
 
 /** The working hires against the cap; `working` is null when the office couldn't count them. */
 type Hires = { working: number | null; cap: number };
-type Role = { id: string; name: string; title: string; description: string; skills: string[]; model: string; working: number };
+type Role = { id: string; title: string; description: string; skills: string[]; model: string; working: number };
 
 const DEMO = import.meta.env.MODE === "demo";
 
@@ -117,7 +117,7 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
               <label key={r.id} className="role" data-chosen={r.id === role?.id || undefined}>
                 <input type="radio" name={`${id}-role`} value={r.id} checked={r.id === role?.id} onChange={() => setRoleId(r.id)} />
                 <span className="who">
-                  <span className="name">{r.name}</span> <span className="title">{r.title}</span>
+                  <span className="name">{r.title}</span>
                 </span>
                 <span className="working">{r.working} working</span>
                 <span className="what">{r.description}</span>
@@ -155,7 +155,7 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
-            <button type="submit" disabled={!ready}>{busy ? "Hiring…" : role ? `Hire ${role.name}` : "Hire"}</button>
+            <button type="submit" disabled={!ready}>{busy ? "Hiring…" : role ? `Hire a ${role.title.toLowerCase()}` : "Hire"}</button>
             <p className="problem" role="alert">{problem}</p>
             {capped && !confirming && (
               <button type="button" className="anyway" onClick={() => setConfirming(true)}>Hire anyway</button>
@@ -163,7 +163,7 @@ export function HireDialog({ room, name, pm, onClose }: { room: string; name: st
             {capped && confirming && (
               <div className="confirm" role="group" aria-label="Confirm hiring past the cap">
                 <p>
-                  Hire {role!.name} past the cap? That makes {(hires?.working ?? 0) + 1} hires working, each using your Claude usage. Your yes is the approval to exceed the cap.
+                  Hire a {role!.title.toLowerCase()} past the cap? That makes {(hires?.working ?? 0) + 1} hires working, each using your Claude usage. Your yes is the approval to exceed the cap.
                 </p>
                 <button type="button" onClick={() => hire(true)}>Yes, hire anyway</button>
                 <button type="button" onClick={() => setConfirming(false)}>Cancel</button>

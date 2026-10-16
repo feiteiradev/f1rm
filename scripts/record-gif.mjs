@@ -38,9 +38,9 @@ try {
   await page.locator(".door", { hasText: "atlas-api" }).click();
   await page.locator(".back").waitFor();
   // The demo's atlas PM ends its turn about six seconds in, and waits for you until about 40.
-  await page.getByRole("button", { name: /^Priya.*Waiting for you$/ }).waitFor({ timeout: 20_000 });
+  await page.getByRole("button", { name: /, PM, atlas-api, Waiting for you$/ }).waitFor({ timeout: 20_000 });
   await film(3200);
-  await page.getByRole("button", { name: /^Priya.*Waiting for you$/ }).dispatchEvent("click");
+  await page.getByRole("button", { name: /, PM, atlas-api, Waiting for you$/ }).dispatchEvent("click");
   await page.locator(".panel").waitFor();
   await film(2200);
   await page.keyboard.press("Escape");
