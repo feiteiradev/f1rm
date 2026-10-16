@@ -17,7 +17,7 @@ const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
 const repos = { "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git", "/code/docs": "/code/docs/.git" };
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
-  machine: { gitCommonDir: (cwd) => repos[cwd] ?? null },
+  machine: { gitCommonDir: (cwd) => repos[cwd] ?? null, backgroundId: async () => null },
 });
 const base = `http://127.0.0.1:${server.port}`;
 

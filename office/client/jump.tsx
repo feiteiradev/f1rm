@@ -28,11 +28,11 @@ function useJump() {
   return { error, busy, jump, clear: () => setError(null) };
 }
 
-export function JumpButton({ id }: { id: string }) {
+export function JumpButton({ id, label = "Jump to terminal" }: { id: string; label?: string }) {
   const { error, busy, jump } = useJump();
   return (
     <div className="jump">
-      <button onClick={() => jump(id)} disabled={busy}>Jump to terminal</button>
+      <button onClick={() => jump(id)} disabled={busy}>{label}</button>
       <p role="status">{error}</p>
     </div>
   );
