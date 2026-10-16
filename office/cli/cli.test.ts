@@ -414,6 +414,15 @@ test("service writes a login agent that runs `f1rm serve` with this PATH, and re
   ]);
 });
 
+test("service restarts a running office: it retries the load while launchd is still unloading the old one", () => {
+  const home = tempHome();
+  const stub = stubBin();
+  writeFileSync(join(stub.bin, "launchctl"), `#!/bin/sh\necho "launchctl $@" >> "${stub.bin}/calls.log"\n[ "$1" = bootstrap ] && [ ! -e "${stub.bin}/gone" ] && touch "${stub.bin}/gone" && exit 5\nexit 0\n`, { mode: 0o755 });
+  stub.run(home, "install");
+  expect(stub.run(home, "service").code).toBe(0);
+  expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(2);
+});
+
 test("service off, and uninstall, unload the login agent and remove it", () => {
   for (const off of [["service", "off"], ["uninstall"]]) {
     const home = tempHome();
