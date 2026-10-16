@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
 import { layoutOffice, scaleFor } from "../office/client/layout.ts";
 import { projectState } from "../office/client/lobby.ts";
+import { decodeLook, seedFor } from "../office/people.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "roles-proof-out");
@@ -117,25 +118,18 @@ await shot(page, "01-company");
 
 const g = await geometry(page, "shop");
 const names = Object.fromEntries(Object.entries(g.s.employees).map(([id, e]) => [id, e.name]));
-assert.deepEqual(
-  ["pm", "des1", "des2", "fe", "be", "rev", "res", "blogdes"].map((id) => names[id]),
-  ["Priya", "Maya", "Maya (2)", "Felix", "Bruno", "Ines", "Kofi", "Maya (3)"],
-  "roles keep their fixed names and concurrent Designer shifts get a counter",
-);
-for (const id of ["free1", "free2", "free3", "blogfree"]) {
-  assert.equal(g.s.employees[id].role, null);
-  assert.ok(!["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"].includes(names[id]), `freelancer ${names[id]} is not a role name`);
-}
+for (const id of ["free1", "free2", "free3", "blogfree"]) assert.equal(g.s.employees[id].role, null);
 assert.equal(new Set(Object.values(names)).size, Object.keys(names).length, "every name is unique");
+assert.ok(Object.values(names).every((n) => !n.includes("(")), "and none carries a counter");
 
 const labels = await roster(page);
-for (const want of ["Priya, PM, shop", "Maya, Designer, shop", "Maya (2), Designer, shop", "Felix, Frontend dev, shop", "Bruno, Backend dev, shop", "Ines, Reviewer, shop", "Kofi, Researcher, shop"]) {
+for (const want of [`${names.pm}, PM, shop`, `${names.des1}, Designer, shop`, `${names.des2}, Designer, shop`, `${names.fe}, Frontend dev, shop`, `${names.be}, Backend dev, shop`, `${names.rev}, Reviewer, shop`, `${names.res}, Researcher, shop`]) {
   assert.ok(labels.some((l) => l.startsWith(want)), `roster has "${want}": ${labels.join(" | ")}`);
 }
 for (const id of ["free1", "free2", "free3"]) assert.ok(labels.some((l) => l.startsWith(`${names[id]}, Freelancer`)), `${names[id]} is listed as a Freelancer`);
 await enter(page, "blog");
 const blogLabels = await roster(page);
-assert.ok(blogLabels.some((l) => l.startsWith("Maya (3), Designer, blog")), `blog's roster has Maya (3): ${blogLabels.join(" | ")}`);
+assert.ok(blogLabels.some((l) => l.startsWith(`${names.blogdes}, Designer, blog`)), `blog's roster has its Designer: ${blogLabels.join(" | ")}`);
 assert.ok(blogLabels.some((l) => l.startsWith(`${names.blogfree}, Freelancer`)), "and its freelancer");
 assert.ok(blogLabels.every((l) => l.includes(", blog,")), "blog lists only blog");
 await shot(page, "01b-blog");
@@ -157,27 +151,32 @@ assert.notDeepEqual(staffPx, mat, "a staff desk does not");
 await shot(page, "02-shop-room", g.clipOf(shopRoom.x, shopRoom.y, shopRoom.w, shopRoom.h));
 
 // Same role, same sprite, everywhere; different roles, different sprites. Compared on a motion-free page.
-const headIn = async (room, id) => {
-  const gs = await geometry(still, room);
-  return pixels(still, gs.clipOf(gs.deskOf(id).x + 15, gs.deskOf(id).y + 11, 16, 16));
+// The torso, between the arms, is all shirt; above it, the head.
+const partIn = async (room, id, part) => {
+  const gs = await geometry(still, room), d = gs.deskOf(id);
+  return pixels(still, part === "shirt" ? gs.clipOf(d.x + 20, d.y + 20, 6, 3) : gs.clipOf(d.x + 15, d.y + 11, 16, 8));
 };
-const [mayaShop, priya, felix] = [await headIn("shop", "des1"), await headIn("shop", "pm"), await headIn("shop", "fe")];
-const head = (id) => headIn("shop", id);
+const shirt = (id) => partIn("shop", id, "shirt");
+const [designerShirt, pmShirt, feShirt] = [await shirt("des1"), await shirt("pm"), await shirt("fe")];
 await enter(still, "blog");
-const mayaBlog = await headIn("blog", "blogdes");
-await shot(still, "03-maya-blog-motion-free");
+const blogShirt = await partIn("blog", "blogdes", "shirt");
+await shot(still, "03-designer-blog-motion-free");
 await enter(still, "shop");
-assert.equal(mayaShop, mayaBlog, "Maya looks the same in both rooms");
-assert.equal(await head("des2"), mayaShop, "and for the second shift");
-assert.equal(new Set([mayaShop, priya, felix]).size, 3, "roles look different from each other");
-await shot(still, "03-maya-shop-motion-free");
+assert.equal(blogShirt, designerShirt, "a Designer wears the Designer's shirt in every room");
+assert.equal(await shirt("des2"), designerShirt, "and so does the second Designer");
+assert.equal(new Set([designerShirt, pmShirt, feShirt]).size, 3, "roles wear different shirts");
+const lookOf = (id) => decodeLook(seedFor(g.s.employees[id]));
+if (lookOf("des1").skin !== lookOf("des2").skin || lookOf("des1").hair !== lookOf("des2").hair) {
+  assert.notEqual(await partIn("shop", "des1", "head"), await partIn("shop", "des2", "head"), "two Designers differ in skin or hair");
+}
+await shot(still, "03-shop-motion-free");
 
 // The panel carries the session title.
 const des2 = g.deskOf("des2"), box = await page.locator(".scene canvas").boundingBox();
 await page.mouse.click((des2.x + 18) * SCALE, box.y + (des2.y + 24) * SCALE);
 await page.locator(".panel").waitFor();
 const panelText = await page.locator(".panel").innerText();
-for (const want of ["Maya (2)", "Designer", "pricing-page"]) assert.ok(panelText.includes(want), `panel shows ${want}: ${panelText}`);
+for (const want of [names.des2, "Designer", "pricing-page"]) assert.ok(panelText.includes(want), `panel shows ${want}: ${panelText}`);
 await shot(page, "04-panel");
 await page.keyboard.press("Escape");
 
@@ -202,7 +201,7 @@ await shot(page, "06-intern-arrived", g.clipOf(parent.x - 36, parent.y - 8, 108,
 const withIntern = await state();
 assert.deepEqual(withIntern.interns, { "agent-aaa": { agentId: "agent-aaa", parent: "des2", type: "Explore" } });
 assert.equal(Object.keys(withIntern.employees).length, Object.keys(g.s.employees).length, "an intern is not an employee");
-assert.ok((await roster(page)).some((l) => l.startsWith("Maya (2), Designer, shop") && l.endsWith("1 intern")));
+assert.ok((await roster(page)).some((l) => l.startsWith(`${names.des2}, Designer, shop`) && l.endsWith("1 intern")));
 const duringCounts = await counts();
 assert.equal(Object.values(duringCounts).reduce((a, b) => a + b), Object.values(before).reduce((a, b) => a + b), "the counter counts employees only");
 

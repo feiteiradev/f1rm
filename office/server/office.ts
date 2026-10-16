@@ -44,6 +44,8 @@ export type OfficeState = {
   interns: Record<string, Intern>;
   /** Each room's board rows, only for rooms that have a board. The server adds this to what it pushes; the reducer never sees it. */
   boards?: Record<string, BoardRow[]>;
+  /** Each room's team boards, by team, only for teams that have one. Added by the server like `boards`. */
+  teamBoards?: Record<string, Record<string, BoardRow[]>>;
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */
   approvals?: Approval[];
 };
@@ -184,7 +186,7 @@ export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
       ...others,
       [e.sessionId]: {
         sessionId: e.sessionId,
-        name: before && before.role === role ? before.name : nameFor(e.sessionId, role, new Set(Object.values(others).map((o) => o.name))),
+        name: before ? before.name : nameFor(e.sessionId, new Set(Object.values(others).map((o) => o.name))),
         role,
         title: e.title ?? before?.title,
         status: (strayStop ? undefined : STATUS[e.kind]) ?? (before && before.status !== "offline" ? before.status : "idle"),

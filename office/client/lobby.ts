@@ -43,6 +43,7 @@ export function projectState(state: OfficeState, roomId: string): OfficeState {
     employees,
     interns: keep(state.interns, (i) => i.parent in employees),
     ...(state.boards?.[roomId] && { boards: { [roomId]: state.boards[roomId] } }),
+    ...(state.teamBoards?.[roomId] && { teamBoards: { [roomId]: state.teamBoards[roomId] } }),
   };
 }
 

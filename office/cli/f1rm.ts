@@ -5,7 +5,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, w
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
-import { claudeEnv, machine } from "../server/machine.ts";
+import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 
@@ -277,6 +277,8 @@ const pmPrompt = (name: string) =>
 // ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
 async function pm() {
   const name = pmName(process.cwd());
+  // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
+  if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name)], {
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],

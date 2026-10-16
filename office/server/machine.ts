@@ -180,6 +180,12 @@ export const machine = {
     return list && new Set(list.map((a) => a?.sessionId).filter((id): id is string => typeof id === "string"));
   },
 
+  /** The live background sessions Claude Code lists, with their name, state and folder; null if it can't say. */
+  async backgroundSessions(): Promise<{ name: string; state: string; cwd: string }[] | null> {
+    const list = await agents(false);
+    return list && list.filter((a) => a?.kind === "background").map((a) => ({ name: String(a.name ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
+  },
+
   /** How many background hires hold a slot, or null if `claude agents --json` can't say. A blocked hire waits on a person and still holds its slot; interactive sessions are the user's, not hires. */
   async workingHires(): Promise<number | null> {
     const list = await agents(false);

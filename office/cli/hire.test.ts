@@ -1,14 +1,14 @@
 // Seam 2: the real `f1rm hire`, run against a stub `claude` first on PATH.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
 
-type Session = { kind: string; state?: string };
-const bg = (state: string): Session => ({ kind: "background", state });
+type Session = { kind: string; state?: string; name?: string; cwd?: string };
+const bg = (state: string, name = "elsewhere-x", cwd = "/elsewhere"): Session => ({ kind: "background", state, name, cwd });
 
 /** `claude agents --json` prints `sessions` (or fails when null); any other call records its argv (NUL-separated, so a multi-line prompt survives) and env. */
 function stubClaude(sessions: Session[] | null) {
@@ -90,20 +90,18 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--model", "haiku"]);
 });
 
-test("at 4 working hires, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
-  const stub = stubClaude([bg("working"), bg("working"), bg("blocked"), bg("working")]);
+test("at 6 working background sessions, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
+  const stub = stubClaude([...Array(5).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
-  expect(r.err).toContain("4 hires are already working");
+  expect(r.err).toContain("6 hires are already working (the cap is 6)");
   expect(r.err).toContain("ask whether to wait or exceed the cap");
   expect(stub.argv()).toBeNull();
 });
 
 test("below the cap hire goes ahead: finished hires and interactive sessions do not count", () => {
   const stub = stubClaude([
-    bg("working"),
-    bg("working"),
-    bg("working"),
+    ...Array(5).fill(bg("working")),
     bg("done"),
     bg("stopped"),
     bg("failed"),
@@ -114,7 +112,7 @@ test("below the cap hire goes ahead: finished hires and interactive sessions do 
 });
 
 test("--override hires past the cap", () => {
-  const stub = stubClaude(Array(5).fill(bg("working")));
+  const stub = stubClaude(Array(7).fill(bg("working")));
   const r = hire(stub, ["--override", ...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).toBe(0);
   expect(stub.argv()![2]).toBe("f1rm:designer");
@@ -153,4 +151,73 @@ test.each([
 
 test("hire --help prints the syntax", () => {
   expect(hire(stubClaude([]), ["--help"]).out).toContain("usage: f1rm hire [--override]");
+});
+
+// Teams: the repo a lead runs in is the folder `f1rm hire` runs in.
+const repoDir = () => realpathSync(mkdtempSync(join(tmpdir(), "f1rm-repo-")));
+const worktree = (repo: string, task: string) => join(repo, ".claude", "worktrees", task);
+
+test("a lead runs as lead-<team> in the repo, with no worktree, starting with the guidelines and reporting to the PM", () => {
+  const stub = stubClaude([]);
+  const r = hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir());
+  expect(r.code).toBe(0);
+  expect(stub.argv()).toEqual([
+    "--bg", "--agent", "f1rm:lead", "--name", "lead-checkout",
+    `/f1rm:f1rm-guidelines Before you start, load these with the Skill tool: f1rm:hire. Report to: pm-shop\n\n${BRIEF}`,
+  ]);
+});
+
+test("a hire into a team is <team>.<role>-<task> in its own worktree and reports to the team's lead", () => {
+  const repo = repoDir();
+  const stub = stubClaude([bg("done", "lead-checkout", repo)]);
+  expect(hire(stub, ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
+  expect(stub.argv()!.slice(0, 7)).toEqual(["--bg", "--agent", "f1rm:designer", "--name", "checkout.designer-landing", "--worktree", "landing"]);
+  expect(stub.argv()![7]).toBe(`/design-pipeline Report to: lead-checkout\n\n${BRIEF}`);
+});
+
+test.each([
+  [["lead", "lead-x", "checkout", BRIEF], 'name must be "lead-checkout"'],
+  [["--team", "checkout", "designer", "designer-landing", "landing", BRIEF], 'name must be "checkout.designer-landing"'],
+  [["--team", "search", "designer", "search.designer-landing", "landing", BRIEF], 'team "search" has no lead running in this repo'],
+  [["--team", "blog", "designer", "blog.designer-landing", "landing", BRIEF], 'team "blog" has no lead running in this repo'],
+  [["--team", "checkout", "lead", "lead-checkout", "checkout", BRIEF], "only the PM hires leads"],
+])("hire %j is refused", (args, message) => {
+  const repo = repoDir();
+  const stub = stubClaude([bg("done", "lead-checkout", repo), bg("done", "lead-blog", "/code/blog")]);
+  const r = hire(stub, args, repo);
+  expect(r.err).toContain(message);
+  expect(stub.argv()).toBeNull();
+});
+
+test("a project runs at most 2 teams: a third lead is refused, leads elsewhere do not count, and --override passes", () => {
+  const repo = repoDir();
+  const two = [bg("done", "lead-checkout", repo), bg("working", "lead-search", repo), bg("working", "lead-blog", "/code/blog")];
+  const r = hire(stubClaude(two), [...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo);
+  expect(r.code).not.toBe(0);
+  expect(r.err).toContain("this project already has 2 teams (the cap is 2)");
+  expect(hire(stubClaude(two.slice(1)), [...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo).code).toBe(0);
+  expect(hire(stubClaude(two), ["--override", ...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo).code).toBe(0);
+});
+
+test("a team works at most 2 at once, its Reviewer included; finished members free their slot", () => {
+  const repo = repoDir();
+  const lead = bg("done", "lead-checkout", repo);
+  const busy = [lead, bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("blocked", "checkout.reviewer-review-api", worktree(repo, "review-api"))];
+  const r = hire(stubClaude(busy), ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo);
+  expect(r.err).toContain("team checkout already has 2 working (the cap is 2 per team)");
+  const freed = [lead, bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("done", "checkout.backend-dev-api", worktree(repo, "api"))];
+  expect(hire(stubClaude(freed), ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
+  expect(hire(stubClaude(busy), ["--override", "--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
+});
+
+test("one specialist per task: a task a live session works in is refused, even with --override", () => {
+  const repo = repoDir();
+  const taken = [bg("done", "designer-landing", worktree(repo, "landing"))];
+  for (const flags of [[], ["--override"]]) {
+    const stub = stubClaude(taken);
+    const r = hire(stub, [...flags, ...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF], repo);
+    expect(r.err).toContain('a session already works on task "landing": one specialist per task');
+    expect(stub.argv()).toBeNull();
+  }
+  expect(hire(stubClaude(taken), [...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF], repoDir()).code).toBe(0);
 });

@@ -15,6 +15,9 @@ export const repoDir = (roomId: string) => (basename(roomId) === ".git" ? dirnam
 /** `~/.f1rm/boards/<repo>.md`, as the f1rm-guidelines skill states: every character that is not an ASCII letter or digit becomes `-`. */
 export const boardFile = (boardsDir: string, roomId: string) => join(boardsDir, repoDir(roomId).replace(/[^A-Za-z0-9]/gu, "-") + ".md");
 
+/** A team's board, `~/.f1rm/boards/<repo>.team.<team>.md`: the encoded repo has no `.`, so the name can't be mistaken. `team` is a slug. */
+export const teamBoardFile = (boardsDir: string, roomId: string, team: string) => boardFile(boardsDir, roomId).replace(/\.md$/, `.team.${team}.md`);
+
 // Control characters and bidi overrides could scramble or spoof what the board seems to say.
 const clip = (s: string, n: number) => {
   s = s.replace(/[\p{Cc}‪-‮⁦-⁩]/gu, " ").trim();

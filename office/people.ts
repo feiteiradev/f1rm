@@ -1,8 +1,8 @@
-// Who an employee is: the six company roles with their fixed names and looks, and the freelancer name pool.
+// Who an employee is: the company roles with their shirts, and the name pool everyone's name comes from.
 // Shared by the server (which assigns names) and the client (which draws them), so it imports nothing.
 
 // A look is a seed that packs three sprite choices; the sprite sheet offers this many of each.
-const SKINS = 3, SHIRTS = 6, HAIRS = 6;
+const SKINS = 3, SHIRTS = 7, HAIRS = 6;
 const look = (skin: number, shirt: number, hair: number) => skin + SKINS * (shirt + SHIRTS * hair);
 export const decodeLook = (seed: number) => ({
   skin: seed % SKINS,
@@ -13,20 +13,22 @@ export const decodeLook = (seed: number) => ({
 /** The models a hire can be lowered or raised to, in place of its role's own. */
 export const MODELS = ["haiku", "sonnet", "opus"];
 
-/** In company order, which is also the order staff take desks. */
+/** In company order, which is also the order staff take desks. Each role wears its own shirt; the lead's (the seventh) is no freelancer's. */
 export const ROLES = {
-  pm: { title: "PM", name: "Priya", seed: look(0, 0, 2) },
-  designer: { title: "Designer", name: "Maya", seed: look(1, 1, 0) },
-  frontend: { title: "Frontend dev", name: "Felix", seed: look(2, 2, 1) },
-  backend: { title: "Backend dev", name: "Bruno", seed: look(0, 3, 3) },
-  reviewer: { title: "Reviewer", name: "Ines", seed: look(1, 4, 4) },
-  researcher: { title: "Researcher", name: "Kofi", seed: look(2, 5, 5) },
+  pm: { title: "PM", shirt: 0 },
+  lead: { title: "Team lead", shirt: 6 },
+  designer: { title: "Designer", shirt: 1 },
+  frontend: { title: "Frontend dev", shirt: 2 },
+  backend: { title: "Backend dev", shirt: 3 },
+  reviewer: { title: "Reviewer", shirt: 4 },
+  researcher: { title: "Researcher", shirt: 5 },
 } as const;
 export type RoleId = keyof typeof ROLES;
 export const ROLE_IDS = Object.keys(ROLES) as RoleId[];
 
 const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:pm": "pm",
+  "f1rm:lead": "lead",
   "f1rm:designer": "designer",
   "f1rm:frontend-dev": "frontend",
   "f1rm:backend-dev": "backend",
@@ -34,18 +36,29 @@ const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:researcher": "researcher",
 };
 
-/** Exactly the six agent types of the plugin's role files are roles; any other agent type (another plugin's, a built-in, a near miss) is not. */
+/** Exactly the agent types of the plugin's role files are roles; any other agent type (another plugin's, a built-in, a near miss) is not. */
 export const roleOfAgentType = (agentType: unknown): RoleId | undefined =>
   typeof agentType === "string" && Object.hasOwn(AGENT_TYPES, agentType) ? AGENT_TYPES[agentType] : undefined;
 
-// None of the six role names, so a freelancer is never mistaken for staff.
-// ponytail: 48 names, then the pool repeats with counters ("Tomas (2)"); widen the pool if offices that big get common.
-const FREELANCER_NAMES = [
-  "Tomas", "Livia", "Anders", "Zainab", "Mateo", "Hana", "Oskar", "Elif", "Dario", "Nadia", "Jonas", "Amara",
-  "Soraya", "Ivo", "Greta", "Idris", "Noor", "Caio", "Aiko", "Bianca", "Cyrus", "Dalia", "Emeka", "Freya",
-  "Gael", "Helga", "Imani", "Joaquin", "Katya", "Leif", "Mira", "Nikolai", "Odile", "Pavel", "Quinn", "Rosa",
-  "Stellan", "Thea", "Umar", "Vera", "Wren", "Xavi", "Yara", "Zeno", "Abel", "Beatriz", "Cato", "Dina",
+const NAMES = [
+  "Abel", "Ada", "Adaeze", "Aiko", "Alba", "Alma", "Amara", "Amir", "Anders", "Anika", "Arjun", "Astrid",
+  "Aurora", "Ayla", "Bastian", "Beatriz", "Bela", "Bianca", "Bo", "Bruna", "Caio", "Calla", "Camila", "Cato",
+  "Celeste", "Chidi", "Clara", "Cosmo", "Cyrus", "Dalia", "Dara", "Dario", "Dina", "Ditte", "Dov", "Edda",
+  "Elif", "Elio", "Elsa", "Emeka", "Emil", "Enzo", "Esme", "Ezra", "Fabio", "Farah", "Femi", "Filipa",
+  "Finn", "Flora", "Freya", "Gael", "Gia", "Gideon", "Greta", "Gus", "Hadi", "Hana", "Hedda", "Helga",
+  "Hiro", "Hugo", "Ida", "Idris", "Ilse", "Imani", "Inez", "Ira", "Isak", "Ivo", "Jada", "Jalen",
+  "Jana", "Javi", "Joaquin", "Jonas", "Juno", "Kai", "Kamal", "Karin", "Katya", "Keanu", "Kenji", "Kira",
+  "Lara", "Leif", "Lena", "Lior", "Livia", "Lotte", "Luca", "Lumi", "Lupe", "Mads", "Maeve", "Malik",
+  "Mara", "Marek", "Mateo", "Maxim", "Mei", "Milo", "Mira", "Nadia", "Nalu", "Nell", "Niko", "Nikolai",
+  "Nils", "Noa", "Noor", "Odile", "Olek", "Omar", "Oona", "Oskar", "Otto", "Paloma", "Pavel", "Pia",
+  "Quinn", "Rafa", "Rania", "Ravi", "Remy", "Rhea", "Rio", "Rosa", "Rumi", "Runa", "Sade", "Sami",
+  "Sanne", "Selin", "Sena", "Sigrid", "Silas", "Sina", "Soraya", "Stellan", "Suki", "Sven", "Tala", "Tarik",
+  "Teo", "Thea", "Tiago", "Tomas", "Tove", "Udo", "Uma", "Umar", "Una", "Uri", "Valentina", "Vera",
+  "Vesna", "Vik", "Wanda", "Wren", "Xavi", "Xenia", "Yara", "Yasmin", "Yuki", "Yusuf", "Zainab", "Zara",
+  "Zeno", "Zia", "Zoltan", "Ines", "Kofi", "Priya", "Maya", "Felix", "Bruno", "Aditi", "Bram", "Carys",
+  "Dagny", "Eero", "Fenna", "Goran", "Halim", "Ilka", "Jorun", "Kasimir", "Linnea", "Mika", "Nuno", "Orla",
 ];
+const INITIALS = "ABCDEFGHIJKLMNOPRSTVWZ";
 
 export function seedOf(sessionId: string): number {
   let h = 2166136261;
@@ -54,24 +67,36 @@ export function seedOf(sessionId: string): number {
 }
 
 /**
- * The name a new arrival takes, unique among `taken`. A role keeps its fixed name and, when another shift
- * of the role is in, gets the lowest free counter ("Maya (2)"). A freelancer starts at a name picked by its
- * session id and probes forward, so the same id lands on the same name until the pool runs out, then the
- * pool is reused with a counter.
+ * The name a new arrival takes, unique among `taken`: a first name picked by its session id, probing forward through the
+ * pool, so the same id lands on the same name while it is free. Past the pool, a last initial ("Tomas R.").
  */
-export function nameFor(sessionId: string, role: RoleId | null, taken: ReadonlySet<string>): string {
-  const withCounter = (base: string, n: number) => (n === 1 ? base : `${base} (${n})`);
-  if (role) {
-    for (let n = 1; ; n++) if (!taken.has(withCounter(ROLES[role].name, n))) return withCounter(ROLES[role].name, n);
-  }
-  const start = seedOf(sessionId) % FREELANCER_NAMES.length;
-  for (let n = 1; ; n++) {
-    for (let i = 0; i < FREELANCER_NAMES.length; i++) {
-      const name = withCounter(FREELANCER_NAMES[(start + i) % FREELANCER_NAMES.length], n);
-      if (!taken.has(name)) return name;
+export function nameFor(sessionId: string, taken: ReadonlySet<string>): string {
+  const seed = seedOf(sessionId);
+  const candidates = function* () {
+    for (let i = 0; i < NAMES.length; i++) yield NAMES[(seed + i) % NAMES.length];
+    for (let j = 0; j < INITIALS.length; j++) {
+      for (let i = 0; i < NAMES.length; i++) yield `${NAMES[(seed + i) % NAMES.length]} ${INITIALS[(seed + j) % INITIALS.length]}.`;
     }
-  }
+  };
+  for (const name of candidates()) if (!taken.has(name)) return name;
+  // ponytail: past 4,400 people in one office the session id finishes the name; nobody runs that many.
+  return `${NAMES[seed % NAMES.length]} ${sessionId.slice(0, 6)}`;
+}
+
+/**
+ * The team an employee works in, read from its session name, which `f1rm hire` sets: a lead is `lead-<team>` and a team
+ * member `<team>.<role>-<task>`. Anyone else, freelancers included, is in no team.
+ */
+export function teamOf(e: { role: RoleId | null; title?: string }): string | null {
+  const slug = "[a-z0-9]+(?:-[a-z0-9]+)*";
+  if (!e.role || e.role === "pm") return null;
+  const m = new RegExp(e.role === "lead" ? `^lead-(${slug})$` : `^(${slug})\\.`).exec(e.title ?? "");
+  return m ? m[1] : null;
 }
 
 export const roleTitle = (role: RoleId | null) => (role ? ROLES[role].title : "Freelancer");
-export const seedFor = (e: { sessionId: string; role: RoleId | null }) => (e.role ? ROLES[e.role].seed : seedOf(e.sessionId));
+/** A role's shirt with this session's skin and hair; a freelancer's whole look comes from its session id, never in the lead's shirt. */
+export function seedFor(e: { sessionId: string; role: RoleId | null }): number {
+  const s = seedOf(e.sessionId);
+  return look(s % SKINS, e.role ? ROLES[e.role].shirt : (s >>> 3) % (SHIRTS - 1), (s >>> 7) % HAIRS);
+}

@@ -305,15 +305,17 @@ test("install refuses to touch a settings file it cannot parse", () => {
 });
 
 // A stub `claude` first on PATH records its argv and the session-identifying part of its env.
-function stubClaude(exitCode = 0) {
+/** `claude agents --json` lists `sessions`; any other call is logged. */
+function stubClaude(exitCode = 0, sessions: object[] = []) {
   const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
   const log = join(bin, "claude.log");
+  writeFileSync(join(bin, "agents.json"), JSON.stringify(sessions));
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
+    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${bin}/agents.json"; exit 0; fi\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
     { mode: 0o755 },
   );
-  const lines = () => readFileSync(log, "utf8").trim().split("\n");
+  const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
   return {
     bin,
     args: () => lines().filter((l) => l.startsWith("arg:")).map((l) => l.slice(4)),
@@ -346,6 +348,17 @@ test("pm starts the PM role, named for its repo, with the grilling slash command
   expect(args.slice(0, 4)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop"]);
   expect(args).toHaveLength(5);
   expect(args[4]).toStartWith("/mattpocock-skills:grilling ");
+});
+
+test("pm refuses a second PM for a repo whose PM is running, and starts one when only other repos have theirs", () => {
+  const running = stubClaude(0, [{ kind: "interactive", name: "pm-shop" }]);
+  const r = pmIn(repoDir("shop"), {}, running);
+  expect(r.code).not.toBe(0);
+  expect(r.err).toContain("pm-shop is already running for this repo");
+  expect(running.args()).toEqual([]);
+  const elsewhere = stubClaude(0, [{ kind: "interactive", name: "pm-blog" }, { kind: "background", name: "lead-shop" }]);
+  expect(pmIn(repoDir("shop"), {}, elsewhere).code).toBe(0);
+  expect(elsewhere.args().slice(0, 4)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop"]);
 });
 
 test("the PM's first prompt gives its session name, after the slash command", () => {

@@ -32,6 +32,7 @@ const fakeMachine = () => ({
   askFork: async function* () {},
   tell: async () => {},
   workingHires: async () => 0,
+  backgroundSessions: async () => [],
   spawnBackground: async () => "",
   startPmInIterm: async () => {},
 });
@@ -216,11 +217,12 @@ test("interns and names survive a restart, and interns leave when their parent g
   const first = start();
   await hook(first.server, "boss", "SessionStart", { agent_type: "f1rm:designer", session_title: "login" });
   await hook(first.server, "boss", "SubagentStart", { agent_id: "agent-1", agent_type: "Explore" });
+  const { name } = (await office(first.server, (s) => "agent-1" in s.interns)).employees.boss;
   first.server.stop(true);
 
   const second = start(first.dbPath);
   const restored = await office(second.server, (s) => "agent-1" in s.interns);
-  expect(restored.employees.boss).toMatchObject({ role: "designer", name: "Maya", title: "login" });
+  expect(restored.employees.boss).toMatchObject({ role: "designer", name, title: "login" });
   expect(restored.interns["agent-1"].parent).toBe("boss");
 
   now += 1500;
@@ -228,7 +230,7 @@ test("interns and names survive a restart, and interns leave when their parent g
   expect(quiet.interns).toEqual({});
 });
 
-test("a swept session frees its name for good: the Designer who replaced it is still Maya after a restart", async () => {
+test("a swept session frees its name for good: the Designer who replaced it keeps its name after a restart", async () => {
   now = 1_000_000;
   const first = start();
   await hook(first.server, "old", "SessionStart", { agent_type: "f1rm:designer" });
@@ -236,12 +238,11 @@ test("a swept session frees its name for good: the Designer who replaced it is s
   await office(first.server, (s) => ids(s).length === 0);
   await hook(first.server, "new", "SessionStart", { agent_type: "f1rm:designer" });
   const before = await office(first.server, (s) => ids(s).join() === "new");
-  expect(before.employees.new.name).toBe("Maya");
   first.server.stop(true);
 
   const second = start(first.dbPath);
   const after = await office(second.server, (s) => ids(s).join() === "new");
-  expect(after.employees.new.name).toBe("Maya");
+  expect(after.employees.new.name).toBe(before.employees.new.name);
 });
 
 test("a restarted server answers nothing until its first sweep has dropped the ghosts", async () => {

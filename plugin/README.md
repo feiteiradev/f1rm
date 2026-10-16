@@ -1,6 +1,6 @@
 # f1rm plugin
 
-The f1rm company for Claude Code: six roles, the `f1rm-guidelines` skill and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
+The f1rm company for Claude Code: seven roles, the `f1rm-guidelines` skill and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
 
 ## Install
 
@@ -33,11 +33,14 @@ The plugin name is fixed as `f1rm`. Role memory lives in `~/.claude/agent-memory
 | Role | Agent | Skills | Model |
 | :- | :- | :- | :- |
 | PM | `f1rm:pm` | `mattpocock-skills:grilling`, `f1rm:f1rm-guidelines` | opus |
+| Team lead | `f1rm:lead` | `f1rm:f1rm-guidelines`, `f1rm:hire` | sonnet |
 | Designer | `f1rm:designer` | `design-pipeline` | sonnet |
 | Frontend dev | `f1rm:frontend-dev` | `mattpocock-skills:tdd` | sonnet |
 | Backend dev | `f1rm:backend-dev` | `mattpocock-skills:tdd` | sonnet |
 | Reviewer | `f1rm:reviewer` | `code-review`, `f1rm:f1rm-guidelines` | opus |
 | Researcher | `f1rm:researcher` | none | sonnet |
+
+Only the PM talks to you. For a milestone with slices that can run in parallel, the PM forms up to two teams and hires a Team lead for each; a lead plans its slice, gets the PM's `GO`, hires its own specialists (at most two working at a time), works out contracts with the other leads, and reports to the PM. Specialists never hire: the office's hook blocks `f1rm hire` for them.
 
 Every role has `memory: user`, so it keeps what it learns across projects. The skill names are the ones installed on the author's machine. Edit the `skills:` lists in `agents/` to match yours.
 
@@ -46,11 +49,11 @@ Every role has `memory: user`, so it keeps what it learns across projects. The s
 Claude Code does not apply a role's `skills:` list when the role is the session agent (`--agent`). The files keep the list for use as subagents, and the launcher loads the skills as a slash command at the start of the first prompt:
 
 - `f1rm pm` runs `claude --agent f1rm:pm --name pm-<repo basename> "/mattpocock-skills:grilling Your session name is pm-<repo basename>. ..."`, so the PM interviews you before it plans and its hires know where to report. Extra arguments go to `claude`, for example `f1rm pm --model sonnet`.
-- `f1rm hire <role> <name> <task> "<brief>"` does the same for each hired role: it starts the brief with the role's `skills:` and slash-only commands, adds the PM session to report to, and refuses at 4 working hires unless `--override` is given. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
+- `f1rm hire <role> <name> <task> "<brief>"` does the same for each hired role: it starts the brief with the role's `skills:` and slash-only commands, adds the session to report to (the PM, or `lead-<team>` with `--team <team>`), and refuses past the caps (6 working sessions on the machine, 2 teams per project, 2 working per team) unless `--override` is given, and always refuses a second specialist on one task. `f1rm hire lead lead-<team> <team> "<team brief>"` starts a lead, in the repo itself with no worktree. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
 - By hand, put the slash command first: `claude --agent f1rm:designer "/design-pipeline <brief>"`.
 
 ## Files
 
-- `agents/*.md`: the six roles.
-- `skills/f1rm-guidelines/SKILL.md`: the hiring playbook, brief format, handoff, board format, review and merge flow, cap rule and definition of done.
+- `agents/*.md`: the seven roles.
+- `skills/f1rm-guidelines/SKILL.md`: the hiring playbook, teams, the brief and team brief formats, who talks to whom, handoff, boards, the review and merge flow, the caps, interns, using what is installed, and the definition of done.
 - `plugin.test.ts`: checks the roles, the guidelines and a real install into a throwaway config.

@@ -32,6 +32,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     if (tellFails) throw new Error(tellFails);
   },
   workingHires: async () => working,
+  backgroundSessions: async () => (working === null ? null : Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" }))),
   startPmInIterm: async (folder: string) => {
     calls.push(`pm ${folder}`);
     if (pmFails) throw new Error(pmFails);
@@ -430,8 +431,6 @@ test("a hook whose cwd is not an absolute path is dropped, so it can never reach
   expect(calls).toEqual([]);
 });
 
-const ROLE_NAMES = ["Priya", "Maya", "Felix", "Bruno", "Ines", "Kofi"];
-
 test("a session started with --agent is that role's employee, titled by --name; any other session is a freelancer", async () => {
   start();
   const prompt = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...extra });
@@ -446,22 +445,14 @@ test("a session started with --agent is that role's employee, titled by --name; 
   await prompt("n", {});
 
   const { employees: e } = await office((s) => Object.keys(s.employees).length === 9);
-  const seen = (id: string) => [e[id].role, e[id].name];
-  expect(seen("d")).toEqual(["designer", "Maya"]);
-  expect(seen("f")).toEqual(["frontend", "Felix"]);
-  expect(seen("b")).toEqual(["backend", "Bruno"]);
-  expect(seen("p")).toEqual(["pm", "Priya"]);
-  expect(seen("v")).toEqual(["reviewer", "Ines"]);
-  expect(seen("r")).toEqual(["researcher", "Kofi"]);
+  const roles = Object.fromEntries(["d", "f", "b", "p", "v", "r", "x", "e", "n"].map((id) => [id, e[id].role]));
+  expect(roles).toEqual({ d: "designer", f: "frontend", b: "backend", p: "pm", v: "reviewer", r: "researcher", x: null, e: null, n: null });
+  expect(new Set(Object.values(e).map((x) => x.name)).size).toBe(9);
   expect(e.d.title).toBe("login-redesign");
-  for (const id of ["x", "e", "n"]) {
-    expect(e[id].role).toBeNull();
-    expect(ROLE_NAMES).not.toContain(e[id].name);
-  }
 
   // Later events without the fields keep them.
   await hook(preToolUse("d", "Bash", { command: "ls" }));
-  expect((await office(() => true)).employees.d).toMatchObject({ role: "designer", name: "Maya", title: "login-redesign" });
+  expect((await office(() => true)).employees.d).toMatchObject({ role: "designer", name: e.d.name, title: "login-redesign" });
 });
 
 test("tool events from inside a sub-agent do not give the session the sub-agent's role", async () => {
@@ -471,34 +462,37 @@ test("tool events from inside a sub-agent do not give the session the sub-agent'
   const { employees } = await office((s) => s.employees.s1?.tool === "Read");
   expect(employees.s1.role).toBeNull();
 
-  // The main session's own event names the role, and the employee takes the role's name.
+  // The main session's own event names the role, and the employee keeps its name.
   await hook({ ...preToolUse("s1", "Read", { file_path: "/a" }), agent_type: "f1rm:designer" });
-  expect((await office(() => true)).employees.s1).toMatchObject({ role: "designer", name: "Maya" });
+  expect((await office(() => true)).employees.s1).toMatchObject({ role: "designer", name: employees.s1.name });
 });
 
-test("concurrent shifts of a role count up, and a freed counter is reused", async () => {
+test("shifts of one role each get their own name, with no counter, and keep it while others come and go", async () => {
   start();
   const shift = (id: string) => hook({ ...common(id, "SessionStart"), source: "startup", agent_type: "f1rm:designer" });
   await shift("a");
   await shift("b");
   await shift("c");
   const names = async () => Object.fromEntries(Object.entries((await office(() => true)).employees).map(([id, e]) => [id, e.name]));
-  expect(await names()).toEqual({ a: "Maya", b: "Maya (2)", c: "Maya (3)" });
+  const first = await names();
+  expect(new Set(Object.values(first)).size).toBe(3);
+  expect(Object.values(first).some((n) => n.includes("("))).toBe(false);
 
   await hook({ ...common("a", "SessionEnd"), reason: "other" });
-  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)" });
+  expect(await names()).toEqual({ b: first.b, c: first.c });
   await shift("d");
-  expect(await names()).toEqual({ b: "Maya (2)", c: "Maya (3)", d: "Maya" });
+  const after = await names();
+  expect([after.b, after.c]).toEqual([first.b, first.c]);
+  expect([first.b, first.c]).not.toContain(after.d);
 });
 
-test("freelancer names are unique among the employees present and never a role's name, even with 120 sessions", async () => {
+test("names are unique among the employees present, even with 120 sessions", async () => {
   start();
   const ids = Array.from({ length: 120 }, (_, i) => `session-${i}`);
   for (const id of ids) await hook(sessionStart(id, "/code/shop"));
   const { employees } = await office((s) => Object.keys(s.employees).length === ids.length);
   const names = Object.values(employees).map((e) => e.name);
   expect(new Set(names).size).toBe(ids.length);
-  for (const name of names) expect(ROLE_NAMES).not.toContain(name.replace(/ \(\d+\)$/, ""));
 });
 
 test("a sub-agent is an intern of its parent from its start to its stop, and never an employee", async () => {
@@ -688,19 +682,19 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   working = 3;
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
-  expect(reply.hires).toEqual({ working: 3, cap: 4 });
+  expect(reply.hires).toEqual({ working: 3, cap: 6 });
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files);
-  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
-  expect(designer).toMatchObject({ name: "Maya", title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
+  expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
   expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
   working = null;
-  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 4 });
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 6 });
 });
 
 test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
@@ -756,9 +750,9 @@ test("at the cap Hire answers 409 with the working count and spawns nothing; whe
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 4;
+  working = 6;
   const capped = await hireOf(ASSIGN);
-  expect([capped.status, await capped.json()]).toEqual([409, { error: "4 hires are already working (the cap is 4).", working: 4 }]);
+  expect([capped.status, await capped.json()]).toEqual([409, { error: "6 hires are already working (the cap is 6).", working: 6 }]);
   working = null;
   const blind = await hireOf(ASSIGN);
   expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
@@ -769,13 +763,13 @@ test("Hire anyway: override spends a slot past the cap, a plain hire after it is
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 4;
+  working = 6;
   expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
   expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
   expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
-  working = 5;
+  working = 7;
   expect((await hireOf(ASSIGN)).status).toBe(409);
   expect(spawned.length).toBe(1);
 });
@@ -1101,4 +1095,49 @@ test("Approve and Deny need the UI token, a POST and the browser's own origin", 
   expect((await decide("deny", approval.id, TOKEN, { headers: { host: "evil.example" } })).status).toBe(403);
   expect((await decide("approve", "no-such-id")).status).toBe(404);
   expect(await settled(held)).toBe(false); // none of that answered it
+});
+
+// The PreToolUse reply: a deny holds the call, an empty 200 lets it run.
+async function held(r: Response) {
+  const body = await r.text();
+  return body ? JSON.parse(body).hookSpecificOutput : null;
+}
+
+test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's is denied, and so is its intern's", async () => {
+  start();
+  const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(agent_type && { agent_type }) });
+  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
+  await office((s) => Object.keys(s.employees).length === 5);
+  const run = (id: string, command: string, extra = {}) => hook({ ...preToolUse(id, "Bash", { command }), ...extra });
+  for (const id of ["p", "l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
+  for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
+    const out = await held(await run("d", command));
+    expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
+    expect(out.permissionDecisionReason).toContain("Only the PM and team leads hire");
+  }
+  expect((await held(await run("v", "f1rm hire designer designer-a a b", { agent_id: "agent-1", agent_type: "Explore" })))?.permissionDecision).toBe("deny");
+  expect(await held(await run("d", "git status && echo f1rm is hiring"))).toBeNull();
+});
+
+test("a company employee runs at most 2 interns at once, counting calls not started yet; a freelancer is never held", async () => {
+  start();
+  await hook({ ...common("d", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:designer" });
+  await hook({ ...common("f", "UserPromptSubmit"), prompt: "go" });
+  await office((s) => Object.keys(s.employees).length === 2);
+  const agent = (id: string) => hook(preToolUse(id, "Agent", { description: "look", prompt: "look around", subagent_type: "Explore" }));
+  expect(await held(await agent("d"))).toBeNull();
+  expect(await held(await agent("d"))).toBeNull();
+  const third = await held(await agent("d"));
+  expect(third?.permissionDecision).toBe("deny");
+  expect(third.permissionDecisionReason).toContain("2 interns working");
+  for (let i = 0; i < 4; i++) expect(await held(await agent("f"))).toBeNull();
+
+  // Both start, then one stops: a slot frees.
+  const sub = (event: string, agent_id: string) => hook({ ...common("d", event), agent_id, agent_type: "Explore" });
+  await sub("SubagentStart", "a1");
+  await sub("SubagentStart", "a2");
+  expect((await held(await agent("d")))?.permissionDecision).toBe("deny");
+  await sub("SubagentStop", "a1");
+  await office((s) => Object.keys(s.interns).length === 1);
+  expect(await held(await agent("d"))).toBeNull();
 });

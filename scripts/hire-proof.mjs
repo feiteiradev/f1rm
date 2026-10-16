@@ -27,6 +27,7 @@ const server = startServer({
     gitCommonDir: (cwd) => (["/code/shop", "/code/blog"].includes(cwd) ? `${cwd}/.git` : null),
     liveSessions: async () => new Set(),
     workingHires: async () => working,
+    backgroundSessions: async () => (working === null ? null : Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" }))),
     tell: async (socket, sessionId, message) => void told.push({ socket, sessionId, message }),
     backgroundId: async (sessionId) => backgroundIds[sessionId] ?? null,
     letGo: async (id) => void letGone.push(id),
@@ -66,15 +67,15 @@ try {
   await dialog.locator(".role").first().waitFor();
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
   const names = await dialog.locator(".role .name").allInnerTexts();
-  assert.deepEqual([...names].sort(), ["Bruno", "Felix", "Ines", "Kofi", "Maya"], "five roles, each with its fixed name, and no PM");
-  assert.equal(await dialog.locator(".count").innerText(), "1 of 4 hires working.", "the dialog counts the working hires against the cap");
-  const maya = dialog.locator(".role", { hasText: "Maya" });
-  assert.match(await maya.innerText(), /1 working/, "Maya's row counts the Designer already working");
+  assert.deepEqual([...names].sort(), ["Backend dev", "Designer", "Frontend dev", "Researcher", "Reviewer", "Team lead"], "six roles by title, and no PM");
+  assert.equal(await dialog.locator(".count").innerText(), "1 of 6 hires working.", "the dialog counts the working hires against the cap");
+  const maya = dialog.locator(".role", { hasText: "Designer" });
+  assert.match(await maya.innerText(), /1 working/, "the Designer row counts the Designer already working");
   assert.match(await maya.innerText(), /sonnet.*design-pipeline/s, "the row names the model and skills");
   await page.screenshot({ path: join(OUT, "01-dialog.png") });
 
   await maya.click();
-  assert.equal(await page.getByRole("button", { name: "Hire Maya" }).isDisabled(), true, "no brief, no hire");
+  assert.equal(await page.getByRole("button", { name: "Hire a designer" }).isDisabled(), true, "no brief, no hire");
   await page.getByLabel("Brief", { exact: true }).fill("Design the login page. Reply OK and stop.");
   assert.equal(await page.getByLabel("Task name", { exact: true }).inputValue(), "design-the-login-page", "the task name comes from the brief");
   await page.getByLabel("Task name", { exact: true }).fill("login-page");
@@ -83,10 +84,10 @@ try {
   assert.deepEqual(await page.getByLabel("Model", { exact: true }).locator("option").allInnerTexts(), ["sonnet (the role's own)", "haiku", "opus"]);
   await page.getByLabel("Model", { exact: true }).selectOption("haiku");
   await page.getByLabel("Task name", { exact: true }).fill("Login Page");
-  assert.equal(await page.getByRole("button", { name: "Hire Maya" }).isDisabled(), true, "a bad task name blocks the hire");
+  assert.equal(await page.getByRole("button", { name: "Hire a designer" }).isDisabled(), true, "a bad task name blocks the hire");
   await page.getByLabel("Task name", { exact: true }).fill("login-page");
   await page.screenshot({ path: join(OUT, "02-filled.png") });
-  await page.getByRole("button", { name: "Hire Maya" }).click();
+  await page.getByRole("button", { name: "Hire a designer" }).click();
   await dialog.waitFor({ state: "detached" });
   assert.deepEqual(spawned, [
     {
@@ -116,22 +117,22 @@ try {
   await dialog.waitFor({ state: "detached" });
   assert.equal(await page.locator(".panel").count(), 0, "an empty desk opens no employee panel");
 
-  working = 3;
+  working = 5;
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "3 of 4 hires working.");
+  assert.equal(await dialog.locator(".count").innerText(), "5 of 6 hires working.");
   await page.getByLabel("Brief", { exact: true }).fill("One more");
-  working = 4;
+  working = 6;
   await page.getByRole("button", { name: /^Hire / }).click();
-  await page.getByText("4 hires are already working (the cap is 4).").waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "4 of 4 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
+  await page.getByText("6 hires are already working (the cap is 6).").waitFor();
+  assert.equal(await dialog.locator(".count").innerText(), "6 of 6 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
   assert.equal(spawned.length, 1, "nothing spawned at the cap");
   assert.equal(await dialog.getByRole("group", { name: "Confirm hiring past the cap" }).count(), 0, "no confirm until Hire anyway is pressed");
   await page.screenshot({ path: join(OUT, "03-cap.png") });
 
   await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
   const confirm = dialog.getByRole("group", { name: "Confirm hiring past the cap" });
-  assert.match(await confirm.innerText(), /Hire Maya past the cap\? That makes 5 hires working/);
+  assert.match(await confirm.innerText(), /Hire a designer past the cap\? That makes 7 hires working/);
   await page.screenshot({ path: join(OUT, "03b-confirm.png") });
   await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(await confirm.count(), 0, "Cancel closes the confirm");
@@ -148,7 +149,7 @@ try {
 
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "4 of 4 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
+  assert.equal(await dialog.locator(".count").innerText(), "6 of 6 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
 
@@ -187,7 +188,7 @@ try {
   await page.locator(".roster button", { hasText: "PM," }).dispatchEvent("click");
   await fromPm;
   assert.equal(await panel.getByRole("button", { name: "Let go", exact: true }).count(), 0, "a session that is not a background hire has no Let go");
-  await panel.getByLabel("Give Priya an intern", { exact: true }).fill("Check the staging logs.");
+  await panel.getByRole("textbox", { name: /^Give .+ an intern$/ }).fill("Check the staging logs.");
   await panel.getByRole("button", { name: "Send", exact: true }).click();
   await panel.getByText("Sent to its inbox.").waitFor();
   assert.equal(told.length, told0 + 1, "Give them an intern sends one Tell");
@@ -203,8 +204,8 @@ try {
   await letGo.waitFor();
   await page.screenshot({ path: join(OUT, "09-let-go.png") });
   await letGo.click();
-  const sure = panel.getByRole("group", { name: "Confirm letting Maya go" });
-  assert.match(await sure.innerText(), /Let Maya go\? This stops the session and removes it from Claude Code/);
+  const sure = panel.getByRole("group", { name: /^Confirm letting .+ go$/ });
+  assert.match(await sure.innerText(), /Let .+ go\? This stops the session and removes it from Claude Code/);
   await page.screenshot({ path: join(OUT, "10-let-go-confirm.png") });
   await sure.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(await sure.count(), 0, "Cancel closes the confirm");
@@ -213,7 +214,7 @@ try {
   await sure.getByRole("button", { name: "Yes, let go", exact: true }).click();
   await panel.waitFor({ state: "detached" });
   assert.deepEqual(letGone, ["7c5dcf5d"], "a confirmed Let go stops and removes the session by its short id");
-  assert.equal(await page.locator(".roster button", { hasText: "Designer," }).count(), 0, "Maya has left the office");
+  assert.equal(await page.locator(".roster button", { hasText: "Designer," }).count(), 0, "the Designer has left the office");
 
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 780 } })).newPage();
   watch(phone);

@@ -9,8 +9,9 @@ f1rm also ships a company: a Claude Code plugin with six roles (PM, Designer, Fr
 ## What you get
 
 - **A lobby with a door per project.** Each door shows how many people are inside and whether someone is waiting for you. Enter a door to see that project's office full screen.
-- **Live employees.** Sessions you start in any terminal arrive as freelancers. Sessions started as a role, such as `claude --agent f1rm:designer`, take that role's desk and name. Sub-agents walk out as interns and leave when they finish.
+- **Live employees.** Sessions you start in any terminal arrive as freelancers. Sessions started as a role, such as `claude --agent f1rm:designer`, take that role's desk and shirt. Everyone gets a name of their own. Sub-agents walk out as interns and leave when they finish.
 - **The PM's table.** The PM, the one you talk to, sits at its own table in a glass corner, with a chair for you. When its turn ends, a "?" over your chair says it is waiting for your answer, and its panel's Talk button takes you to its terminal. A tap on the empty table starts a PM.
+- **Teams.** For a milestone with slices that can run in parallel, the PM forms up to two teams. Each team is a pod on its own rug, its Team lead at the head and a sign that carries the team's board. Leads hire their own specialists, at most two working at a time, and report to the PM, the only one who talks to you.
 - **Jump.** Click an employee and press Jump to bring their exact iTerm2 tab to the front. `⌘K` searches everyone by name, role, project or task.
 - **Ask.** A side question is answered by a read-only copy of the employee's session. Their work is never touched.
 - **Tell.** A message the employee reads at their next step, without stopping a running tool.
@@ -42,7 +43,7 @@ claude plugin install f1rm@f1rm
 bun /path/to/f1rm/office/cli/f1rm.ts pm
 ```
 
-The PM interviews you, writes the task board, and hires specialists with `f1rm hire`. Each hire runs as a background session in its own git worktree. At most four hires work at once unless you approve more. The Reviewer checks every change and is the only one who merges, locally, never pushing. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow.
+The PM interviews you, writes the task board, and hires specialists with `f1rm hire`. Each hire runs as a background session in its own git worktree. At most six background sessions work at once unless you approve more. For a milestone with slices that can run in parallel, the PM forms up to two teams, each run by a Team lead that hires its own specialists, at most two working at a time. The Reviewer checks every change and is the only one who merges, locally, never pushing. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow.
 
 You can also hire from the office: the Hire button in a project, or a click on an empty desk, opens a dialog with the plugin's roles. Pick one, write a brief, and it starts the same way `f1rm hire` does. In a project with a PM, "Let the PM decide" sends your brief to them as a message instead. In one without, "Start PM" opens an iTerm tab in the repo running `f1rm pm` (`f1rm` must be on the PATH of your iTerm shell).
 

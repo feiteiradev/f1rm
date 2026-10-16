@@ -25,6 +25,7 @@ const server = startServer({
     startPmInIterm: async (folder) => void pmTabs.push(folder),
     backgroundId: async () => null,
     workingHires: async () => 0,
+    backgroundSessions: async () => [],
   },
 });
 const base = `http://127.0.0.1:${server.port}`;
@@ -78,27 +79,27 @@ try {
   assert.equal(await page.locator(".panel").count(), 0, "the empty table opens no panel");
 
   await send("pm1", "UserPromptSubmit", { prompt: "plan", agent_type: "f1rm:pm" });
-  await roster("Priya").waitFor();
+  await roster(", PM,").waitFor();
   await page.getByText("Starting a PM in a new iTerm tab…").waitFor({ state: "detached" });
-  assert.match(await roster("Priya").innerText(), /, Working$/);
+  assert.match(await roster(", PM,").innerText(), /, Working$/);
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(OUT, "02-pm-working.png") });
 
   await tapTable();
   const panel = page.locator(".panel");
   await panel.waitFor();
-  assert.equal(await panel.locator("h2").innerText(), "Priya", "a tap on the table opens the PM");
+  assert.equal(await panel.locator("h2").innerText(), (await roster(", PM,").innerText()).split(",")[0], "a tap on the table opens the PM");
   assert.equal(await panel.getByRole("button").nth(1).innerText(), "Talk", "Talk is the panel's first action, after Close");
   assert.equal(await panel.getByRole("button", { name: "Jump to terminal" }).count(), 0);
 
   await send("pm1", "Stop");
   await panel.getByText("Waiting for you").waitFor();
-  assert.match(await roster("Priya").innerText(), /, Waiting for you$/, "an idle PM waits for you, in the roster too");
+  assert.match(await roster(", PM,").innerText(), /, Waiting for you$/, "an idle PM waits for you, in the roster too");
   await panel.getByText("Its last message is in its terminal. Press Talk to answer.").waitFor();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(OUT, "03-your-turn.png") });
-  assert.match(await roster("Maya").innerText(), /, Working$/, "other roles keep their own status words");
+  assert.match(await roster(", Designer,").innerText(), /, Working$/, "other roles keep their own status words");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(OUT, "04-phone.png") });

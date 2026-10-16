@@ -4,15 +4,24 @@ import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, type BoardRow } from "./board.ts";
+import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
-import { ROLE_IDS, ROLES, roleOfAgentType } from "../people.ts";
+import { ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
+// The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
+// at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
+// in the plugin are what is left.
+// ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
+const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
+const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher"]);
+export const INTERNS = 2;
+// An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
+const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
 const PM_DECIDES =
   "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
@@ -75,6 +84,25 @@ export function startServer({
 
   // ponytail: replays the whole log on every start; add snapshots or pruning when startup gets slow.
   let state = emptyOffice();
+  // Agent calls let through and not started yet, by session: parallel calls all reach PreToolUse before any SubagentStart.
+  const pendingInterns = new Map<string, number[]>();
+  /** Why the company's rules stop this tool call, or null to let it run. */
+  function refusal(sessionId: string, payload: Record<string, any>): string | null {
+    const role = state.employees[sessionId]?.role;
+    if (!role) return null;
+    const tool = String(payload.tool_name ?? "");
+    if (tool === "Bash" && SPECIALISTS.has(role) && HIRE_COMMAND.test(String(payload.tool_input?.command ?? ""))) {
+      return "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.";
+    }
+    if (tool === "Agent" || tool === "Task") {
+      const now = clock();
+      const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
+      const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;
+      if (running + pending.length >= INTERNS) return `You already have ${INTERNS} interns working, the most an employee runs at once. Wait for one to finish, or do this step yourself.`;
+      pendingInterns.set(sessionId, [...pending, now]);
+    }
+    return null;
+  }
   for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
     try {
       state = reduce(state, JSON.parse(row.event));
@@ -114,8 +142,9 @@ export function startServer({
   const departure = (e: Employee): F1rmEvent => ({ sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() });
 
   let boards: Record<string, BoardRow[]> = {};
+  let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
-  const snapshot = () => JSON.stringify({ ...state, boards, approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -143,6 +172,13 @@ export function startServer({
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
+          if (event.kind === "PreToolUse") {
+            const why = refusal(event.sessionId, payload);
+            if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
+          }
+          if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
+            pendingInterns.get(event.sessionId)?.shift();
+          }
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
             const decision = await approvals.hold(event.sessionId, String(payload.tool_name ?? ""), payload.tool_input, event.at, req.signal);
@@ -227,10 +263,10 @@ export function startServer({
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
         const room = url.searchParams.get("room");
         const staff = Object.values(state.employees);
-        // Company order, like the desks; a role file the office doesn't know goes last.
+        // Company order, like the desks, but the specialists first: they are the usual hire, so the first one is preselected. Then the lead, then a role file the office doesn't know.
         const order = (id: string) => {
           const known = roleOfAgentType(`f1rm:${id}`);
-          return known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length;
+          return known === "lead" ? ROLE_IDS.length : known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length + 1;
         };
         // The cap counts every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
         const hires = await machine.workingHires();
@@ -240,7 +276,7 @@ export function startServer({
             .map((r) => {
               const known = roleOfAgentType(`f1rm:${r.id}`);
               const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
-              return { ...r, name: known ? ROLES[known].name : r.id, title: known ? ROLES[known].title : r.id, working };
+              return { ...r, title: known ? ROLES[known].title : r.id, working };
             }),
           hires: { working: hires, cap: CAP },
         });
@@ -248,15 +284,15 @@ export function startServer({
       if (rest[0] === "hire" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-        const { room, role, task, brief, model, override } = body ?? {};
+        const { room, role, task, team, brief, model, override } = body ?? {};
         if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (override != null && typeof override !== "boolean")) {
-          return Response.json({ error: `Hire needs a role, a task name, a model that is a string, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
+        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (team != null && typeof team !== "string") || (override != null && typeof override !== "boolean")) {
+          return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
         const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, name: `${role}-${task}`, task, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
@@ -336,12 +372,20 @@ export function startServer({
     reading = true;
     try {
       const next: Record<string, BoardRow[]> = {};
+      const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
       for (const id of Object.keys(state.rooms)) {
         const rows = await readBoard(boardFile(boardsDir, id));
         if (rows.length) next[id] = rows;
+        // Only the boards of teams someone in the room works in.
+        const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t) => t !== null));
+        for (const team of teams) {
+          const teamRows = await readBoard(teamBoardFile(boardsDir, id, team));
+          if (teamRows.length) (nextTeams[id] ??= {})[team] = teamRows;
+        }
       }
-      if (JSON.stringify(next) !== JSON.stringify(boards)) {
+      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards)) {
         boards = next;
+        teamBoards = nextTeams;
         push();
       }
     } finally {
