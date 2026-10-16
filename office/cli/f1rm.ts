@@ -39,7 +39,7 @@ const ENV_HEADERS: Record<string, string> = {
 };
 // Installs from before amendment 2 also forwarded the token. They are still f1rm's: install upgrades them, uninstall removes them.
 const SHAPES = [ENV_HEADERS, { ...ENV_HEADERS, "X-F1rm-Messaging-Token": "CLAUDE_CODE_MESSAGING_TOKEN" }];
-// Seconds; keeps a stuck office from stalling sessions. A dead office is a connection error, which Claude Code ignores.
+// Seconds; keeps a stuck office from stalling sessions.
 const HOOK_TIMEOUT = 5;
 // PermissionRequest is held for the browser, so its hook must outlast the broker or Claude Code cancels the hook before the broker answers.
 const APPROVAL_HOOK_TIMEOUT = 2 * DEFAULT_TIMEOUT_S;
@@ -65,15 +65,22 @@ type Settings = { hooks?: Record<string, { matcher?: string; hooks: Handler[] }[
 
 type Created = { hooks: boolean; events: string[] };
 
-function curlHook(url: string, envHeaders = ENV_HEADERS): Handler {
+/**
+ * Every f1rm hook is curl, not an `http` hook: Claude Code shows a stopped office's refused connection as an error on every
+ * http hook, while `|| true` keeps a command hook silent. curl prints the office's reply, which carries a hold or a decision
+ * (PermissionRequest, PreToolUse) for Claude Code to read; -f keeps an error page out of that reply.
+ */
+function curlHook(url: string, event = "", envHeaders = ENV_HEADERS): Handler {
+  const timeout = event === "PermissionRequest" ? APPROVAL_HOOK_TIMEOUT : HOOK_TIMEOUT;
   const env = Object.entries(envHeaders).map(([h, v]) => ` -H "${h}: $${v}"`).join("");
   return {
     type: "command",
-    command: `curl -s -m ${HOOK_TIMEOUT} -o /dev/null -H 'Content-Type: application/json' -H @'${HEADERS_FILE}'${env} --data-binary @- ${url} || true`,
-    timeout: HOOK_TIMEOUT,
+    command: `curl -sf -m ${timeout} -H 'Content-Type: application/json' -H @'${HEADERS_FILE}'${env} --data-binary @- ${url} || true`,
+    timeout,
   };
 }
 
+// Installs from before every hook was curl used http hooks. They are still f1rm's: install replaces them, uninstall removes them.
 function httpHook(url: string, secret: string, event = "", envHeaders = ENV_HEADERS): Handler {
   return {
     type: "http",
@@ -84,18 +91,16 @@ function httpHook(url: string, secret: string, event = "", envHeaders = ENV_HEAD
   };
 }
 
-// SessionStart only runs command hooks, so that one event POSTs with curl instead.
-const handlerFor = (event: string, url: string, secret: string) => (event === "SessionStart" ? curlHook(url) : httpHook(url, secret, event));
+const handlerFor = (event: string, url: string) => curlHook(url, event);
 
 // A handler is f1rm's only if it is exactly what install writes. The timeout is left out so an install from before it varied per event is still recognised, and replaced.
 const isF1rmHttp = (h: Handler) =>
   h.type === "http" &&
   !!h.headers?.[SECRET_HEADER] &&
   SHAPES.some((env) => isDeepStrictEqual({ ...h, timeout: 0 }, { ...httpHook(String(h.url), h.headers![SECRET_HEADER], "", env), timeout: 0 }));
-const isF1rmCurl = (h: Handler) => {
-  const url = /--data-binary @- (\S+) \|\| true$/.exec(String(h.command))?.[1];
-  return h.type === "command" && !!url && SHAPES.some((env) => isDeepStrictEqual(h, curlHook(url, env)));
-};
+// A curl hook is f1rm's when it posts f1rm's secret file to an /ingest URL; nothing else reads ~/.f1rm/ingest-headers.
+const isF1rmCurl = (h: Handler) =>
+  h.type === "command" && String(h.command).includes(`-H @'${HEADERS_FILE}'`) && /--data-binary @- http:\/\/127\.0\.0\.1:\d+\/ingest \|\| true$/.test(String(h.command));
 const isF1rm = (h: Handler) => isF1rmHttp(h) || isF1rmCurl(h);
 
 function readSettings(): Settings {
@@ -112,8 +117,18 @@ function writeSettings(settings: Settings) {
   writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + "\n");
 }
 
-/** An installed f1rm http hook handler (holding the URL and secret), if any. */
-const installed = (s: Settings) => Object.values(s.hooks ?? {}).flat().flatMap((g) => g.hooks).find(isF1rmHttp);
+const f1rmHandlers = (s: Settings) => Object.values(s.hooks ?? {}).flat().flatMap((g) => g.hooks).filter(isF1rm);
+/** Where the installed hooks post, and their secret; null when f1rm's hooks aren't installed. */
+function installed(s: Settings): { url: string; secret: string } | null {
+  const [h] = f1rmHandlers(s);
+  if (!h) return null;
+  if (h.type === "http") return { url: String(h.url), secret: h.headers![SECRET_HEADER] };
+  const url = /(http:\/\/127\.0\.0\.1:\d+\/ingest) \|\| true$/.exec(String(h.command))?.[1];
+  const secret = existsSync(HEADERS_FILE) ? readFileSync(HEADERS_FILE, "utf8").split(": ")[1]?.trim() : undefined;
+  return url && secret ? { url, secret } : null;
+}
+/** Hooks from an older install (http hooks, which show errors while the office is stopped) that install would replace. */
+const outdated = (s: Settings) => f1rmHandlers(s).some(isF1rmHttp);
 
 /** Removes f1rm's handlers, and the groups that held only them. */
 function withoutF1rm(s: Settings): Settings {
@@ -139,14 +154,14 @@ const readCreated = (): Created => {
 function install(): string[] {
   const done = [installBin()];
   const before = readSettings();
-  const secret = installed(before)?.headers?.[SECRET_HEADER] ?? randomBytes(32).toString("base64url");
+  const secret = installed(before)?.secret ?? randomBytes(32).toString("base64url");
   const url = `http://127.0.0.1:${Number(process.env.F1RM_PORT ?? DEFAULT_PORT)}/ingest`;
   const after = withoutF1rm(before);
   const created: Created = installed(before)
     ? readCreated()
     : { hooks: !before.hooks, events: EVENTS.filter((e) => !before.hooks?.[e]) };
   after.hooks ??= {};
-  for (const event of EVENTS) (after.hooks[event] ??= []).push({ hooks: [handlerFor(event, url, secret)] });
+  for (const event of EVENTS) (after.hooks[event] ??= []).push({ hooks: [handlerFor(event, url)] });
 
   mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
   writeFileSync(HEADERS_FILE, `${SECRET_HEADER}: ${secret}\n`, { mode: 0o600 });
@@ -193,7 +208,7 @@ function serve() {
   const settings = readSettings();
   const hook = installed(settings);
   if (!hook) throw new Error("hooks not installed: run `f1rm install` first");
-  const port = Number(new URL(hook.url!).port);
+  const port = Number(new URL(hook.url).port);
   const token = randomBytes(32).toString("base64url");
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
@@ -204,10 +219,10 @@ function serve() {
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
 
   const approvalTimeout = seconds("F1RM_APPROVAL_TIMEOUT", DEFAULT_TIMEOUT_S);
-  const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
+  const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writeFileSync(URL_FILE, url, { mode: 0o600 });
   chmodSync(URL_FILE, 0o600);
@@ -315,9 +330,13 @@ async function here() {
 
 async function openHere(room: string, name: string): Promise<string> {
   const notes: string[] = [];
-  if (!installed(readSettings())) {
+  const settings = readSettings();
+  if (!installed(settings)) {
     install();
     notes.push("installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once");
+  } else if (outdated(settings)) {
+    install();
+    notes.push("updated f1rm's hooks, so a stopped office no longer shows hook errors");
   }
   let url = await runningOffice();
   if (!url) {
