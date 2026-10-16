@@ -134,6 +134,17 @@ test("the guidelines run editions: Work and Founder, the founder playbook, draft
   expect(role("reviewer").body).toContain("content checklist");
 });
 
+test("/f1rm is a skill only the user runs: it runs `f1rm here` with its arguments before the model, pre-approved for that alone, and replies with its line", () => {
+  const { fm, body } = parts(join(PLUGIN, "skills", "f1rm", "SKILL.md"));
+  expect(fm.name).toBe("f1rm");
+  expect(fm["disable-model-invocation"]).toBe(true);
+  expect(fm["allowed-tools"]).toBe("Bash(f1rm here:*)");
+  expect(fm["argument-hint"]).toBe("[off | edition work|founder | pm]");
+  expect(body).toContain("!`f1rm here $ARGUMENTS`");
+  expect(body).toContain("Reply with exactly the line above and nothing else.");
+  expect(body).toContain("f1rm isn't set up on this machine");
+});
+
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
   const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
@@ -199,7 +210,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   expect(claude("plugin", "install", "f1rm@f1rm").code).toBe(0);
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
-  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
+  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm", "f1rm-guidelines", "hire"]);
   expect(details.out).toMatch(/Agents \(12\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
