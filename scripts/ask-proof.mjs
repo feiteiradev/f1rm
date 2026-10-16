@@ -112,6 +112,9 @@ try {
   // The page opens on the lobby; Ask lives in the project's office behind the door.
   await page.locator(".door").first().click();
   await page.locator(".back").waitFor();
+  // The first entry asks the project's edition; this office keeps settings, so answer it once.
+  await page.locator("dialog.edition-ask").getByRole("button", { name: "Work", exact: true }).click();
+  await page.locator("dialog.edition-ask").waitFor({ state: "detached" });
   await page.locator(".roster button").first().focus();
   await page.keyboard.press("Enter");
   const panel = page.locator(".panel");

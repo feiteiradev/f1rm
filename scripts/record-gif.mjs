@@ -1,5 +1,5 @@
 // Records the README's docs/f1rm.gif from the static demo build: the lobby, the atlas-api office with its PM waiting
-// at the table, the PM's panel, and the lobby again. Run `bun run build` first, then:
+// at the table, the PM's panel, the lemonade Founder project with its launch team, and the lobby again. Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome bun scripts/record-gif.mjs
 // Needs ffmpeg. The demo is the scrubbed recording, so nothing private can end up in the gif.
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ const files = Bun.spawn(["python3", "-m", "http.server", String(PORT), "--bind",
 });
 await Bun.sleep(800);
 const browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
-const page = await (await browser.newContext({ viewport: { width: 800, height: 480 } })).newPage();
+const page = await (await browser.newContext({ viewport: { width: 1000, height: 600 } })).newPage();
 
 const list = [];
 /** Screenshots for `ms`, one frame per FRAME_MS. */
@@ -32,8 +32,8 @@ async function film(ms) {
 
 try {
   await page.goto(`http://127.0.0.1:${PORT}/`);
-  // All four projects have arrived about five seconds into the replay.
-  await page.waitForFunction(() => document.querySelectorAll(".door").length === 4, null, { timeout: 20_000 });
+  // All five projects have arrived about five seconds into the replay.
+  await page.waitForFunction(() => document.querySelectorAll(".door").length === 5, null, { timeout: 20_000 });
   await film(1800);
   await page.locator(".door", { hasText: "atlas-api" }).click();
   await page.locator(".back").waitFor();
@@ -44,6 +44,10 @@ try {
   await page.locator(".panel").waitFor();
   await film(2200);
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Lobby" }).click();
+  await page.locator(".door", { hasText: "lemonade" }).click();
+  await page.locator(".back").waitFor();
+  await film(2600);
   await page.getByRole("button", { name: "Lobby" }).click();
   await page.locator(".door").first().waitFor();
   await film(1800);

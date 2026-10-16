@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -328,11 +328,13 @@ function pm(extraEnv: Record<string, string>, stub: ReturnType<typeof stubClaude
 }
 
 function pmIn(cwd: string, extraEnv: Record<string, string>, stub: ReturnType<typeof stubClaude>, ...args: string[]) {
+  const { stdin, HOME = tempHome(), ...env } = extraEnv;
   const r = Bun.spawnSync(["bun", CLI, "pm", ...args], {
     cwd,
-    env: { ...process.env, HOME: tempHome(), PATH: `${stub.bin}:${process.env.PATH}`, ...extraEnv },
+    env: { ...process.env, HOME, PATH: `${stub.bin}:${process.env.PATH}`, ...env },
+    ...(stdin !== undefined && { stdin: Buffer.from(stdin) }),
   });
-  return { code: r.exitCode, err: r.stderr.toString() };
+  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
 
 const repoDir = (name: string) => {
@@ -475,4 +477,42 @@ test("uninstall keeps the event log and the PM's boards", () => {
   expect(existsSync(join(home, ".f1rm", "boards", "shop.md"))).toBe(true);
   expect(existsSync(join(home, ".f1rm", "events.db"))).toBe(true);
   expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(false);
+});
+
+const edition = (cwd: string, home: string, ...args: string[]) => {
+  const r = Bun.spawnSync(["bun", CLI, "edition", ...args], { cwd, env: { ...process.env, HOME: home } });
+  return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.stderr.toString() };
+};
+
+test("f1rm edition prints a repo's edition, sets it outside the repo, and refuses anything but work or founder", () => {
+  const home = tempHome(), repo = repoDir("shop");
+  expect(edition(repo, home).out).toBe("none chosen yet (counts as work)");
+  expect(edition(repo, home, "founder")).toMatchObject({ code: 0, out: "edition: founder" });
+  expect(edition(repo, home).out).toBe("founder");
+  expect(readdirSync(repo)).toEqual([]);
+  const files = readdirSync(join(home, ".f1rm", "projects"));
+  expect(files).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8"))).toEqual({ edition: "founder" });
+  expect(edition(repoDir("blog"), home).out).toBe("none chosen yet (counts as work)");
+  const bad = edition(repo, home, "startup");
+  expect(bad.code).not.toBe(0);
+  expect(bad.err).toContain("usage: f1rm edition [work|founder]");
+});
+
+test("pm asks a repo's edition the first time, saves it, and tells the PM; with no answer it starts as Work and asks again", () => {
+  const home = tempHome(), repo = repoDir("shop");
+  const silent = stubClaude();
+  const first = pmIn(repo, { HOME: home }, silent);
+  expect(first.out).toContain("Is shop a Work or a Founder project? [w/f]");
+  expect(silent.args()[4]).toContain("This is a Work project");
+  expect(edition(repo, home).out).toBe("none chosen yet (counts as work)");
+
+  const answered = stubClaude();
+  expect(pmIn(repo, { HOME: home, stdin: "f\n" }, answered).code).toBe(0);
+  expect(answered.args()[4]).toContain("This is a Founder project: follow the founder playbook in the guidelines.");
+  expect(edition(repo, home).out).toBe("founder");
+
+  const again = stubClaude();
+  expect(pmIn(repo, { HOME: home }, again).out).not.toContain("Work or a Founder");
+  expect(again.args()[4]).toContain("This is a Founder project");
 });

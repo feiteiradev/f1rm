@@ -28,11 +28,11 @@ test("the fixture's final frame is the reducer's fold of the same events", () =>
   expect(Object.keys(last.employees).sort()).toEqual(Object.keys(folded.employees).sort());
 });
 
-test("the demo shows rooms, all six roles, freelancers, interns, and working, waiting, idle and offline employees", () => {
+test("the demo shows rooms, every Work role, a Founder team, freelancers, interns, and working, waiting, idle and offline employees", () => {
   const states = frames(events).map((f) => f.state);
   const seen = (pick: (s: OfficeState) => Iterable<string | null>) => new Set(states.flatMap((s) => [...pick(s)]));
   expect(Math.max(...states.map((s) => Object.keys(s.rooms).length))).toBeGreaterThanOrEqual(3);
-  expect(seen((s) => Object.values(s.employees).map((e) => e.role))).toEqual(new Set([null, "pm", "designer", "frontend", "backend", "reviewer", "researcher"]));
+  expect(seen((s) => Object.values(s.employees).map((e) => e.role))).toEqual(new Set([null, "pm", "lead", "designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo"]));
   expect(seen((s) => Object.values(s.employees).map((e) => e.status))).toEqual(new Set(["working", "waiting", "idle", "offline"]));
   expect(Math.max(...states.map((s) => Object.keys(s.interns).length))).toBeGreaterThanOrEqual(1);
   // Two designers at once, each with a name of its own and no counter.

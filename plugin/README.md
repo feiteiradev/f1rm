@@ -1,6 +1,6 @@
 # f1rm plugin
 
-The f1rm company for Claude Code: seven roles, the `f1rm-guidelines` skill and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
+The f1rm company for Claude Code: twelve roles, the `f1rm-guidelines` skill and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
 
 ## Install
 
@@ -39,8 +39,15 @@ The plugin name is fixed as `f1rm`. Role memory lives in `~/.claude/agent-memory
 | Backend dev | `f1rm:backend-dev` | `mattpocock-skills:tdd` | sonnet |
 | Reviewer | `f1rm:reviewer` | `code-review`, `f1rm:f1rm-guidelines` | opus |
 | Researcher | `f1rm:researcher` | none | sonnet |
+| Marketer (Founder) | `f1rm:marketer` | `cro`, `anthropic-skills:content-creator`, `brandkit` | sonnet |
+| SEO specialist (Founder) | `f1rm:seo-specialist` | `seo-audit`, `ai-seo` | sonnet |
+| Social media (Founder) | `f1rm:social-media` | `social`, `content-calendar-sms`, `anthropic-skills:fabrica` | sonnet |
+| Sales (Founder) | `f1rm:sales` | `anthropic-skills:6-first-customers-acquisition-plan`, `anthropic-skills:7-fast-revenue-strategy` | sonnet |
+| Strategist (Founder) | `f1rm:strategist` | `anthropic-skills:1-startup-idea-validator`, `anthropic-skills:3-customer-pain-point-researcher`, `anthropic-skills:4-lean-startup-business-plan-builder` | sonnet |
 
 Only the PM talks to you. For a milestone with slices that can run in parallel, the PM forms up to two teams and hires a Team lead for each; a lead plans its slice, gets the PM's `GO`, hires its own specialists (at most two working at a time), works out contracts with the other leads, and reports to the PM. Specialists never hire: the office's hook blocks `f1rm hire` for them.
+
+Every project is a **Work** or a **Founder** project, which you choose the first time you open it (or with `f1rm edition work|founder`). Work is the engineering company. Founder adds the five go-to-market roles, which draft under `growth/` and never post, publish, send or spend: approved work waits on the PM's board as `publish` for you to put out.
 
 Every role has `memory: user`, so it keeps what it learns across projects. The skill names are the ones installed on the author's machine. Edit the `skills:` lists in `agents/` to match yours.
 
@@ -54,6 +61,6 @@ Claude Code does not apply a role's `skills:` list when the role is the session 
 
 ## Files
 
-- `agents/*.md`: the seven roles.
-- `skills/f1rm-guidelines/SKILL.md`: the hiring playbook, teams, the brief and team brief formats, who talks to whom, handoff, boards, the review and merge flow, the caps, interns, using what is installed, and the definition of done.
+- `agents/*.md`: the twelve roles.
+- `skills/f1rm-guidelines/SKILL.md`: the hiring playbook, editions and the founder playbook, drafts only, teams, the brief and team brief formats, who talks to whom, handoff, boards, the review and merge flow, the caps, interns, using what is installed, and the definition of done.
 - `plugin.test.ts`: checks the roles, the guidelines and a real install into a throwaway config.

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boardFile, MAX_BOARD_BYTES, teamBoardFile, parseBoard } from "./board.ts";
+import { projectFile, readEdition, writeEdition } from "./editions.ts";
 import { startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -61,9 +62,9 @@ writeFileSync(join(clientDir, "index.html"), "<!doctype html>");
 
 async function officeWithRepo() {
   dir = mkdtempSync(join(tmpdir(), "f1rm-board-"));
-  const boardsDir = join(dir, "boards");
+  const boardsDir = join(dir, "boards"), projectsDir = join(dir, "projects");
   server = startServer({
-    port: 0, secret: SECRET, token: TOKEN, clientDir, boardsDir, boardPollMs: 20,
+    port: 0, secret: SECRET, token: TOKEN, clientDir, boardsDir, projectsDir, boardPollMs: 20,
     machine: { gitCommonDir: () => "/code/shop/.git", liveSessions: async () => new Set<string>() } as any,
   });
   await fetch(`http://127.0.0.1:${server.port}/ingest`, {
@@ -83,7 +84,7 @@ async function officeWithRepo() {
         else if (Date.now() - t0 > 2000) reject(new Error("no matching state")), clearInterval(tick);
       }, 10);
     });
-  return { boardsDir, next, seen };
+  return { boardsDir, projectsDir, next, seen };
 }
 
 test("a missing board is no rows and no error, and an edit reaches the open socket without a reconnect", async () => {
@@ -133,4 +134,22 @@ test("a team's board, next to the PM's, reaches the office for every team someon
   const s = await next((s) => s.teamBoards?.[room]?.checkout?.length === 3);
   expect(Object.keys(s.teamBoards![room])).toEqual(["checkout"]);
   expect(s.boards).toEqual({});
+});
+
+test("a project's edition reaches the office from its file, and the office sets it only to work or founder for a room it knows", async () => {
+  const { projectsDir, next } = await officeWithRepo();
+  const room = "/code/shop/.git";
+  expect((await next((s) => !!s.rooms[room])).editions).toEqual({});
+  expect(projectFile(projectsDir, room)).toBe(join(projectsDir, "-code-shop.json"));
+  writeEdition(projectFile(projectsDir, room), "founder");
+  await next((s) => s.editions?.[room] === "founder");
+
+  const set = (body: object) => fetch(`http://127.0.0.1:${server.port}/${TOKEN}/edition`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  expect((await set({ room, edition: "work" })).status).toBe(200);
+  expect(readEdition(projectFile(projectsDir, room))).toBe("work");
+  await next((s) => s.editions?.[room] === "work");
+  expect((await set({ room, edition: "startup" })).status).toBe(400);
+  expect((await set({ room: "/code/nope", edition: "work" })).status).toBe(404);
+  expect((await fetch(`http://127.0.0.1:${server.port}/wrong-token/edition`, { method: "POST", body: JSON.stringify({ room, edition: "founder" }) })).status).toBe(401);
+  expect(readEdition(projectFile(projectsDir, room))).toBe("work");
 });

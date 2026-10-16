@@ -1,7 +1,8 @@
 // `f1rm hire`: the only way the PM starts a lead or a specialist and a lead starts its team, so the caps live in code. The office's Hire dialog uses `planHire` too.
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { MODELS } from "../people.ts";
+import { FOUNDER_ONLY, MODELS, roleOfAgentType } from "../people.ts";
+import { editionFile, readEdition, type Edition } from "../server/editions.ts";
 import { claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
@@ -56,6 +57,8 @@ export type HireRequest = {
   team?: string | null;
   /** The repo's main working directory, where leads run and worktrees live. */
   cwd: string;
+  /** The project's edition; a founder role is hired only in a Founder project. Work when not chosen. */
+  edition?: Edition | null;
   brief: string;
   /** The PM session the hire reports to, or null when the project has none. */
   reportTo: string | null;
@@ -81,6 +84,10 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (team != null && !SLUG.test(team)) throw new Error(`team "${team}" must be lowercase words joined by hyphens`);
   if (team != null && role === "lead") throw new Error("a lead heads a team and joins none: only the PM hires leads, without --team");
   if (model && !MODELS.includes(model)) throw new Error(`model "${model}" must be one of ${MODELS.join(", ")}`);
+  const known = roleOfAgentType(`f1rm:${role}`);
+  if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
+    throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` to hire one.`);
+  }
   const lead = role === "lead";
   const name = lead ? `lead-${task}` : team ? `${team}.${role}-${task}` : `${role}-${task}`;
   if (req.name && req.name !== name) throw new Error(`this hire's name must be "${name}"`);
@@ -128,7 +135,7 @@ export async function hire(args: string[]): Promise<number> {
   if (!role) throw new Error(USAGE);
   let argv: string[];
   try {
-    argv = await planHire({ role, name, task, team, cwd: process.cwd(), brief, reportTo: reportTo ?? pmName(process.cwd()), override, extra });
+    argv = await planHire({ role, name, task, team, cwd: process.cwd(), edition: readEdition(editionFile(process.cwd())), brief, reportTo: reportTo ?? pmName(process.cwd()), override, extra });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(

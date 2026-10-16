@@ -83,7 +83,7 @@ const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
 function start(repos?: Record<string, string>, approvalTimeoutMs?: number) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs });
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -683,8 +683,9 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
   expect(reply.hires).toEqual({ working: 3, cap: 6 });
+  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
-  expect([...roles.map((r) => r.id)].sort()).toEqual(files);
+  expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
   expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
@@ -1140,4 +1141,42 @@ test("a company employee runs at most 2 interns at once, counting calls not star
   await sub("SubagentStop", "a1");
   await office((s) => Object.keys(s.interns).length === 1);
   expect(await held(await agent("d"))).toBeNull();
+});
+
+test("a Founder project lists and hires the founder roles; a Work project, or one with no edition, refuses them", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const ids = async () => ((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: { id: string }[] }).roles.map((r) => r.id);
+  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
+  expect((await ids()).some((r) => founder.includes(r))).toBe(false);
+  const marketer = { ...ASSIGN, role: "marketer" };
+  const refused = await hireOf(marketer);
+  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` to hire one."]);
+
+  const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
+  expect((await setEdition("founder")).status).toBe(200);
+  expect(await ids()).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...founder, "lead"]);
+  expect((await hireOf(marketer)).status).toBe(200);
+  expect(spawned.at(-1)!.argv.slice(2, 4)).toEqual(["--agent", "f1rm:marketer"]);
+  expect((await setEdition("work")).status).toBe(200);
+  expect((await hireOf(marketer)).status).toBe(400);
+});
+
+test("a Founder role's connector tools that send, publish, post or schedule are denied; its drafts, Work roles and freelancers are not", async () => {
+  start();
+  for (const [id, type] of [["m", "f1rm:marketer"], ["d", "f1rm:designer"], ["f", undefined]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(type && { agent_type: type }) });
+  }
+  await office((s) => Object.keys(s.employees).length === 3);
+  const call = (id: string, tool: string) => hook(preToolUse(id, tool, {}));
+  for (const tool of ["mcp__claude_ai_Gmail__send_email", "mcp__x__createPost", "mcp__claude_ai_Higgsfield__tiktok_publish_status", "mcp__buffer__schedule-post"]) {
+    const out = await held(await call("m", tool));
+    expect([tool, out?.permissionDecision]).toEqual([tool, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Drafts only");
+  }
+  for (const tool of ["mcp__claude_ai_Gmail__create_draft", "mcp__db__postgres_query", "mcp__garden__compost", "mcp__claude_ai_Canva__generate_design", "Write"]) {
+    expect([tool, await held(await call("m", tool))]).toEqual([tool, null]);
+  }
+  for (const id of ["d", "f"]) expect(await held(await call(id, "mcp__claude_ai_Gmail__send_email"))).toBeNull();
 });

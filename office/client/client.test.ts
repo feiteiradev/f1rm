@@ -47,18 +47,19 @@ test("the counter tallies working, waiting and idle employees", () => {
   expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0, offline: 0 });
 });
 
-test("each role wears its own shirt, while skin and hair vary by session; the lead's shirt is no one else's", () => {
+test("each role wears its own shirt, while skin and hair vary by session; the lead's and the founder roles' shirts are no freelancer's", () => {
   expect(new Set(ROLE_IDS.map((r) => ROLES[r].shirt)).size).toBe(ROLE_IDS.length);
   const designers = Array.from({ length: 30 }, (_, i) => decodeLook(seedFor({ sessionId: `d-${i}`, role: "designer" })));
   expect(new Set(designers.map((l) => l.shirt))).toEqual(new Set([ROLES.designer.shirt]));
   expect(new Set(designers.map((l) => `${l.skin}/${l.hair}`)).size).toBeGreaterThan(5);
-  const freelancers = Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt);
-  expect(freelancers.includes(ROLES.lead.shirt)).toBe(false);
+  const freelancers = new Set(Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt));
+  for (const r of ["lead", "marketer", "seo", "social", "sales", "strategist"] as const) expect(freelancers.has(ROLES[r].shirt)).toBe(false);
 });
 
 test("only f1rm's own agent types are roles", () => {
   const cases: [unknown, RoleId | undefined][] = [
     ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"], ["f1rm:lead", "lead"],
+    ["f1rm:marketer", "marketer"], ["f1rm:seo-specialist", "seo"], ["f1rm:social-media", "social"], ["f1rm:sales", "sales"], ["f1rm:strategist", "strategist"], ["f1rm:seo", undefined],
     ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"],
     ["f1rm:pm-dev", undefined], ["f1rm:designer-dev", undefined], ["f1rm:frontend", undefined], ["f1rm:backend", undefined],
     ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],
@@ -257,4 +258,14 @@ test("the Hire dialog's task name comes from the brief's first words and always 
   expect(taskFrom("x".repeat(60))).toBe("x".repeat(40));
   expect(taskFrom("日本語 ...")).toBe("");
   for (const brief of ["Design the login page", "a b c d e f", "A".repeat(50) + "-b"]) expect(taskFrom(brief)).toMatch(TASK_NAME);
+});
+
+test("a Founder project's room is marked founder, and its board counts what waits to be published", async () => {
+  const { boardSummary } = await import("./board.ts");
+  const state = { ...office(["a", "b"], [employee("s1", "a"), employee("s2", "b")]), editions: { a: "founder" as const } };
+  const { rooms } = layoutOffice(state, 400);
+  expect(rooms.map((r) => [r.room.id, r.founder])).toEqual([["a", true], ["b", false]]);
+  const row = (status: string) => ({ id: "T1", owner: "-", status, branch: "-", task: "x" });
+  expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tasks done, 2 to publish");
+  expect(boardSummary([row("done")])).toBe("1 of 1 task done");
 });

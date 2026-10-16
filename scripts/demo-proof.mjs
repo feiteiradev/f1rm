@@ -26,7 +26,7 @@ page.on("websocket", (w) => problems.push(`websocket opened: ${w.url()}`));
 
 try {
   await page.goto(`http://127.0.0.1:${PORT}/`);
-  const ROOMS = ["pixel-pet", "atlas-api", "garden-site", "notes-cli"];
+  const ROOMS = ["pixel-pet", "atlas-api", "garden-site", "notes-cli", "lemonade"];
   const roster = () => page.locator(".roster button").evaluateAll((bs) => bs.map((b) => ({ pose: b.dataset.pose, text: b.textContent })));
   const lobby = async () => {
     if (await page.locator(".back").count()) await page.getByRole("button", { name: "Lobby" }).click();
@@ -42,8 +42,10 @@ try {
 
   // The demo opens on the same lobby: one door per project.
   await page.locator(".door").first().waitFor();
-  await page.waitForFunction(() => document.querySelectorAll(".door").length === 4, null, { timeout: 60_000 });
+  await page.waitForFunction(() => document.querySelectorAll(".door").length === 5, null, { timeout: 60_000 });
   assert.deepEqual(await page.locator(".door .name").allInnerTexts(), ROOMS.slice().sort());
+  // Every door shows its edition; lemonade is the Founder project.
+  assert.deepEqual(await page.locator(".door .edition").allInnerTexts(), ROOMS.slice().sort().map((r) => (r === "lemonade" ? "Founder" : "Work")));
   assert.equal(await page.evaluate(() => location.hash), "", "the demo lands in the lobby");
   await page.screenshot({ path: join(OUT, "demo-lobby.png") });
 
@@ -78,7 +80,7 @@ try {
   assert.deepEqual(Object.keys(seen).sort(), Object.keys(wanted).sort(), "every state showed up inside some project");
 
   const text = all.map((e) => e.text).join("\n");
-  for (const role of ["PM", "Designer", "Frontend dev", "Backend dev", "Reviewer", "Researcher", "Freelancer"]) assert.match(text, new RegExp(`, ${role},`), role);
+  for (const role of ["PM", "Team lead", "Designer", "Frontend dev", "Backend dev", "Reviewer", "Researcher", "Marketer", "SEO specialist", "Freelancer"]) assert.match(text, new RegExp(`, ${role},`), role);
   for (const room of ROOMS) assert.match(text, new RegExp(`, ${room},`), room);
   const one = await visit("pixel-pet");
   assert.ok(one.every((e) => e.text.includes(", pixel-pet,")), "a project shows only its own employees");
@@ -92,7 +94,7 @@ try {
   await page.keyboard.press("Escape");
   await page.keyboard.press("Control+k");
   await page.keyboard.type("garden");
-  await page.getByRole("combobox").press("Enter");
+  await page.getByRole("dialog", { name: "Jump to an employee" }).getByRole("combobox").press("Enter");
   await page.locator(".palette .problem").filter({ hasText: "Jump needs a live office" }).waitFor();
   await page.locator(".crumb", { hasText: "garden-site" }).waitFor();
   await page.screenshot({ path: join(OUT, "demo-palette-other-project.png") });
@@ -101,6 +103,14 @@ try {
   const hosts = new Set(requests.filter((u) => u.startsWith("http")).map((u) => new URL(u).host));
   assert.deepEqual([...hosts], [`127.0.0.1:${PORT}`], "only the static file server was asked for anything");
   assert.ok(!requests.some((u) => /jump\/|\/ws\b/.test(u)), "no jump or socket request");
+  // The Founder project: its launch team's pod, the brick wall, and nothing that asks a question the recording can't answer.
+  await page.getByRole("dialog", { name: "Jump to an employee" }).getByRole("combobox").press("Escape");
+  await page.locator(".palette-backdrop").waitFor({ state: "detached" });
+  await visit("lemonade");
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("dialog.edition-ask").count(), 0, "the demo never asks an edition");
+  assert.ok((await page.locator(".boards button").allTextContents()).some((t) => /lemonade: .*2 to publish/.test(t)), "the Founder board counts what waits to be published");
+  await page.screenshot({ path: join(OUT, "demo-founder.png") });
   console.log("demo proof passed:", JSON.stringify(seen));
 } finally {
   await browser.close();

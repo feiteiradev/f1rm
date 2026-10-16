@@ -5,11 +5,12 @@ import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
+import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
-import { ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
+import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
@@ -18,8 +19,12 @@ const MAX_MESSAGE = 4000;
 // in the plugin are what is left.
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
-const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher"]);
+const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
+// A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
+const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
+/** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
+const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
 // An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
 const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
@@ -39,6 +44,8 @@ type Options = {
   dbPath?: string;
   /** Where the PM's board files live; without it no room has a board. */
   boardsDir?: string;
+  /** Where each project's edition file lives (`~/.f1rm/projects`). */
+  projectsDir?: string;
   /** How often the board files are checked for edits. */
   boardPollMs?: number;
   /** How long a PermissionRequest hook is held for the browser before the terminal prompt decides. */
@@ -70,6 +77,7 @@ export function startServer({
   port, secret, token, machine, clientDir,
   dbPath = ":memory:",
   boardsDir,
+  projectsDir,
   boardPollMs = 500,
   approvalTimeoutMs = DEFAULT_TIMEOUT_S * 1000,
   clock = Date.now,
@@ -93,6 +101,9 @@ export function startServer({
     const tool = String(payload.tool_name ?? "");
     if (tool === "Bash" && SPECIALISTS.has(role) && HIRE_COMMAND.test(String(payload.tool_input?.command ?? ""))) {
       return "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.";
+    }
+    if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
+      return "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.";
     }
     if (tool === "Agent" || tool === "Task") {
       const now = clock();
@@ -143,8 +154,10 @@ export function startServer({
 
   let boards: Record<string, BoardRow[]> = {};
   let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
+  let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
-  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, approvals: approvals.list() });
+  // Without a settings folder there is nowhere to keep an edition, so the page isn't told about editions at all and never asks.
+  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, ...(projectsDir && { editions }), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -272,6 +285,8 @@ export function startServer({
         const hires = await machine.workingHires();
         return Response.json({
           roles: readRoles()
+            // A Work project hires no founder role; a project with no edition chosen counts as Work.
+            .filter((r) => editions[room ?? ""] === "founder" || !FOUNDER_ONLY.has(roleOfAgentType(`f1rm:${r.id}`)!))
             .sort((a, b) => order(a.id) - order(b.id))
             .map((r) => {
               const known = roleOfAgentType(`f1rm:${r.id}`);
@@ -280,6 +295,17 @@ export function startServer({
             }),
           hires: { working: hires, cap: CAP },
         });
+      }
+      if (rest[0] === "edition" && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const { room, edition } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (!isEdition(edition)) return Response.json({ error: "The edition is work or founder." }, { status: 400 });
+        if (!projectsDir) return Response.json({ error: "This office keeps no project settings." }, { status: 500 });
+        writeEdition(projectFile(projectsDir, room), edition);
+        editions = { ...editions, [room]: edition };
+        push();
+        return Response.json({ ok: true });
       }
       if (rest[0] === "hire" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
@@ -292,7 +318,7 @@ export function startServer({
         const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
@@ -368,9 +394,19 @@ export function startServer({
   // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
   let reading = false;
   async function readBoards() {
-    if (!boardsDir || reading) return;
+    if (reading) return;
     reading = true;
     try {
+      const nextEditions: Record<string, Edition> = {};
+      for (const id of projectsDir ? Object.keys(state.rooms) : []) {
+        const edition = readEdition(projectFile(projectsDir!, id));
+        if (edition) nextEditions[id] = edition;
+      }
+      if (JSON.stringify(nextEditions) !== JSON.stringify(editions)) {
+        editions = nextEditions;
+        push();
+      }
+      if (!boardsDir) return;
       const next: Record<string, BoardRow[]> = {};
       const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
       for (const id of Object.keys(state.rooms)) {

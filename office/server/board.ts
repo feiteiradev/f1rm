@@ -12,8 +12,10 @@ const MAX_CELL = { id: 16, owner: 60, status: 16, branch: 60, task: 200 };
 /** The room's repo directory: a git room is its common dir, whose parent is the main working directory (as in the room's name). */
 export const repoDir = (roomId: string) => (basename(roomId) === ".git" ? dirname(roomId) : roomId);
 
-/** `~/.f1rm/boards/<repo>.md`, as the f1rm-guidelines skill states: every character that is not an ASCII letter or digit becomes `-`. */
-export const boardFile = (boardsDir: string, roomId: string) => join(boardsDir, repoDir(roomId).replace(/[^A-Za-z0-9]/gu, "-") + ".md");
+/** The repo's main working directory with every character that is not an ASCII letter or digit as `-`, as the f1rm-guidelines skill states. */
+export const repoKey = (roomId: string) => repoDir(roomId).replace(/[^A-Za-z0-9]/gu, "-");
+/** `~/.f1rm/boards/<repo>.md`. */
+export const boardFile = (boardsDir: string, roomId: string) => join(boardsDir, repoKey(roomId) + ".md");
 
 /** A team's board, `~/.f1rm/boards/<repo>.team.<team>.md`: the encoded repo has no `.`, so the name can't be mistaken. `team` is a slug. */
 export const teamBoardFile = (boardsDir: string, roomId: string, team: string) => boardFile(boardsDir, roomId).replace(/\.md$/, `.team.${team}.md`);

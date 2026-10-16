@@ -18,6 +18,11 @@ const ROLES: Record<string, string[]> = {
   "backend-dev": ["mattpocock-skills:tdd"],
   reviewer: ["code-review", GUIDELINES],
   researcher: [],
+  marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
+  "seo-specialist": ["seo-audit", "ai-seo"],
+  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica"],
+  sales: ["anthropic-skills:6-first-customers-acquisition-plan", "anthropic-skills:7-fast-revenue-strategy"],
+  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
 };
 const SLASH_ONLY = ["research", "security-review"];
 
@@ -30,7 +35,7 @@ const role = (name: string) => parts(join(PLUGIN, "agents", `${name}.md`));
 const guidelines = readFileSync(join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), "utf8");
 const section = (heading: string) => guidelines.split(/^## /m).find((s) => s.startsWith(heading + "\n")) ?? "";
 
-test("the plugin ships exactly the seven roles", () => {
+test("the plugin ships exactly the twelve roles", () => {
   expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual(Object.keys(ROLES).map((r) => `${r}.md`).sort());
 });
 
@@ -106,6 +111,29 @@ test("specialists never hire and answer only their Report to; the PM hires only 
   for (const s of ["`PLAN <team>`", "`GO <team>`", "`DONE <team>`", "f1rm hire --team <team>", "Only the PM talks to the user"]) expect(lead).toContain(s);
 });
 
+test("the guidelines run editions: Work and Founder, the founder playbook, drafts only, the content checklist and publish", () => {
+  for (const h of ["Editions", "Founder playbook", "Drafts only"]) expect(section(h).trim().length).toBeGreaterThan(100);
+  expect(section("Editions")).toContain("~/.f1rm/projects/<repo>.json");
+  expect(section("Editions")).toContain("refuses a Founder-only role in a Work project");
+  const playbook = section("Founder playbook");
+  for (const s of ["the customer, the problem they have, the offer, and the channel", "**Strategist first**", "`growth/brand.md`", "`growth/marketing/`", "`launch` team"]) expect(playbook).toContain(s);
+  const drafts = section("Drafts only");
+  for (const s of ["never post, publish, send, schedule or spend", "paid credits", "`publish`"]) expect(drafts).toContain(s);
+  expect(section("Review and merge flow")).toContain("**content checklist**");
+  expect(section("Board format")).toContain("`publish` means approved founder work waiting for the user to put it out");
+  for (const r of ["marketer", "seo-specialist", "social-media", "sales", "strategist"]) {
+    const { body } = role(r);
+    expect(body).toContain("Drafts only: never post, publish, send, schedule or spend");
+    expect(body).toContain("Read `growth/brand.md` before drafting anything");
+    expect(body).toMatch(/Deliver files under `growth\/(marketing|seo|social|sales|strategy)\/`/);
+    expect(body).toContain("Report only to the session in your `Report to`");
+  }
+  expect(role("marketer").body).toContain("your first task is to write it");
+  expect(role("pm").body).toContain("In a Founder project, follow the founder playbook as well");
+  expect(role("pm").body).toContain("keep the `publish` list");
+  expect(role("reviewer").body).toContain("content checklist");
+});
+
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
   const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
@@ -172,7 +200,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
-  expect(details.out).toMatch(/Agents \(7\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(12\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 

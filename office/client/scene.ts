@@ -72,6 +72,14 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       }
 
       const [table] = r.desks;
+      // The founder's list: approved work on the PM's board waiting to go out, counted under the table.
+      const toPublish = rows.filter((row) => row.status === "publish").length;
+      if (toPublish) {
+        const note = new Text({ text: `${toPublish} to publish`, style: { ...LABEL, fontSize: 11, fill: 0xe08ad3 } });
+        note.anchor.set(0.5, 0);
+        note.position.set((table.x + CELL.w / 2) * scale, (table.y + TABLE.h) * scale + 14);
+        roomLabels.addChild(note);
+      }
       if (!table.employee) {
         const invite = new Text({ text: "Start PM", style: LABEL });
         invite.anchor.set(0.5, 0);

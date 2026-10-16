@@ -1,6 +1,6 @@
 ---
 name: f1rm-guidelines
-description: How the f1rm company works. Roster and hiring, teams and leads, briefs, who talks to whom, boards, the Reviewer's merge flow, the caps and done. Load before planning, hiring, reviewing or merging.
+description: How the f1rm company works. Roster and hiring, Work and Founder editions, teams and leads, briefs, who talks to whom, boards, the Reviewer's merge flow, drafts only, the caps and done. Load before planning, hiring, reviewing or merging.
 ---
 
 # f1rm guidelines
@@ -20,6 +20,11 @@ Hierarchy: the user, then one PM per repo. In a milestone without teams the PM h
 | `backend-dev` | Server, data, API implementation | `mattpocock-skills:tdd` |
 | `reviewer` | Review and local merge of every finished branch | `code-review`, `f1rm:f1rm-guidelines`, `security-review` |
 | `researcher` | A question that needs current, cited facts | `research` |
+| `marketer` | Founder only. Positioning, landing copy, launch plans, conversion, and `growth/brand.md` first | `cro`, `anthropic-skills:content-creator`, `brandkit` |
+| `seo-specialist` | Founder only. Audits, keywords, AI-search visibility | `seo-audit`, `ai-seo` |
+| `social-media` | Founder only. A content calendar, posts, carousels, short videos | `social`, `content-calendar-sms`, `anthropic-skills:fabrica` |
+| `sales` | Founder only. First customers, outreach drafts, pricing | `anthropic-skills:6-first-customers-acquisition-plan`, `anthropic-skills:7-fast-revenue-strategy` |
+| `strategist` | Founder only. Idea validation, niche, customer pain points, a business plan | `anthropic-skills:1-startup-idea-validator`, `anthropic-skills:3-customer-pain-point-researcher`, `anthropic-skills:4-lean-startup-business-plan-builder` |
 
 Playbook:
 
@@ -49,6 +54,31 @@ Playbook:
 6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`; a team member `<team>.<role>-<task slug>`, for example `checkout.designer-landing`; a lead `lead-<team>`. `f1rm hire` refuses any other name. Team and task slugs are lowercase words joined by hyphens, unique on their board.
 7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline` or `/research`. Only the first slash command in a prompt expands, so `f1rm hire` names the role's other skills in the brief and the hire loads them with the Skill tool before starting. `/research` is a command, not a Skill-tool skill, so it is always a role's first entry. `/security-review` is built in, and the Reviewer loads it with the Skill tool. `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
+
+## Editions
+
+Every project is **Work** or **Founder**, and the user chooses: the office asks on the first entry, `f1rm pm` asks on its first run, and the top bar or `f1rm edition work|founder` changes it. It lives in `~/.f1rm/projects/<repo>.json`, outside the repo. Never set it yourself.
+
+- **Work** is the engineering company: every role above that is not marked Founder only.
+- **Founder** adds the five Founder-only roles for a product of the user's own. `f1rm hire` refuses a Founder-only role in a Work project, and a project with no edition chosen counts as Work.
+- The PM's first prompt states the edition. When the user switches a project to Work, Founder roles already working finish their tasks and no new one is hired.
+
+## Founder playbook
+
+In a Founder project the PM follows this on top of everything else here.
+
+1. **Interview the business too.** Ask about the customer, the problem they have, the offer, and the channel that reaches them, as well as what to build.
+2. **Strategist first** when the idea is not validated, that is, when no customer has confirmed the problem. A plan built on an untested idea waits for the Strategist's verdict, the way a task waits for the Researcher's facts.
+3. **Brand first.** If the repo has no `growth/brand.md`, the Marketer's first task writes it: the voice, the audience, words to avoid, and the claims the product can back. Every Founder role reads it before drafting.
+4. **Go-to-market alongside the build.** Put launch work (landing copy, SEO, social, outreach, pricing) on the board next to the engineering tasks, ordered by what the launch needs. A team can mix roles, for example a `launch` team with a Frontend dev, a Marketer and an SEO specialist.
+5. **Where it lands.** Founder work is files in the repo, under `growth/marketing/`, `growth/seo/`, `growth/social/`, `growth/sales/` and `growth/strategy/`, delivered as commits on the hire's worktree branch and merged by the Reviewer like code.
+
+## Drafts only
+
+- Founder roles draft. They never post, publish, send, schedule or spend. The user puts everything out.
+- Connectors are fine for drafts, for example a Canva design or a Gmail draft. The office's hook blocks a Founder role's connector tools whose names say send, publish, post or schedule.
+- Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the PM asks the user for each spend and passes the answer down.
+- When the Reviewer approves founder work that is meant to go out, the PM marks its board row `publish` and tells the user. When the user says it is out, the PM marks the row `done`.
 
 ## Teams
 
@@ -133,7 +163,7 @@ Each repo has one board file, written only by the PM, and each team has its own,
 
 - **id.** `T<n>`, never reused.
 - **owner.** The hire's session name, or `-` before hiring.
-- **status.** One of `todo`, `doing`, `review`, `done`, `blocked`. `doing` means a hire is working. `review` means the branch awaits the Reviewer. `done` follows Reviewer sign-off only.
+- **status.** One of `todo`, `doing`, `review`, `publish`, `done`, `blocked`. `doing` means a hire is working. `review` means the branch awaits the Reviewer. `publish` means approved founder work waiting for the user to put it out. `done` follows Reviewer sign-off only, and for work meant to go out, the user saying it is out.
 - **branch.** `worktree-<task slug>`, or `-` before hiring.
 - **task.** One line, without `|`.
 - One row per task. Update the row in place. Never delete rows.
@@ -145,7 +175,11 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes.
 
 1. Receive from whoever hired you, the PM or your team's lead, the branch, its brief and the base branch. The base branch defaults to the branch checked out in the main working directory. The main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`.
 2. Stop and report to the session in your `Report to` if the main working directory has uncommitted changes. Never stash or discard them.
-3. Review the diff `base...branch` with the code-review skill. Add the security-review skill when the change touches authentication, user data, secrets, permissions, network input or shell execution. Check each acceptance criterion's proving check.
+3. Review the diff `base...branch` with the code-review skill. Add the security-review skill when the change touches authentication, user data, secrets, permissions, network input or shell execution. Check each acceptance criterion's proving check. For work that is not code (founder work under `growth/`), skip code review and check the **content checklist** instead:
+   - every acceptance criterion is met;
+   - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
+   - it follows `growth/brand.md`;
+   - nothing in it was posted, published, sent or paid for.
 4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself.
 5. Otherwise, in the Reviewer's own worktree:
    - `git reset --hard <base>` on the Reviewer's throwaway branch, then `git merge --no-ff <branch>`.
@@ -182,6 +216,6 @@ A task is done when all of these hold, and not before.
 1. Every acceptance criterion has a check that fails without the change and passes with it.
 2. The repo's full check command is green on the merged result.
 3. The Reviewer has signed off with `APPROVED` and merged the branch locally into the base branch.
-4. The board row says `done`.
+4. The board row says `done`. Founder work meant to go out passes through `publish` first, and is done when the user says it is out.
 
 The PM reports a task to the user as done only on this basis. A hire's own `DONE` means ready for review. A team is done when every task on its board is done and its lead has sent `DONE <team>`.

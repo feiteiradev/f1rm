@@ -221,3 +221,20 @@ test("one specialist per task: a task a live session works in is refused, even w
   }
   expect(hire(stubClaude(taken), [...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF], repoDir()).code).toBe(0);
 });
+
+test("a founder role is refused in a Work project, or one with no edition, and hired in a Founder project", async () => {
+  const { projectFile, writeEdition } = await import("../server/editions.ts");
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-home-"))), repo = repoDir();
+  const marketer = [...pmArgs, "marketer", "marketer-launch", "launch", BRIEF];
+  const unset = stubClaude([]);
+  const r = hire(unset, marketer, repo, { HOME: home });
+  expect(r.err).toContain("marketer is a Founder role and this is a Work project");
+  expect(unset.argv()).toBeNull();
+  writeEdition(projectFile(join(home, ".f1rm", "projects"), repo), "founder");
+  const founder = stubClaude([]);
+  expect(hire(founder, marketer, repo, { HOME: home }).code).toBe(0);
+  expect(founder.argv()!.slice(0, 7)).toEqual(["--bg", "--agent", "f1rm:marketer", "--name", "marketer-launch", "--worktree", "launch"]);
+  expect(founder.argv()![7]).toStartWith("/cro Before you start, load these with the Skill tool: anthropic-skills:content-creator, brandkit. Report to: pm-shop");
+  writeEdition(projectFile(join(home, ".f1rm", "projects"), repo), "work");
+  expect(hire(stubClaude([]), marketer, repo, { HOME: home }).err).toContain("Founder role");
+});

@@ -8,17 +8,20 @@ export const CHIP_COLORS: Record<string, number> = {
   review: 0xd98a12,
   done: 0x3b6fd4,
   blocked: 0xd64545,
+  // Approved founder work waiting for the user to put it out.
+  publish: 0xc04fb0,
 };
 
 export const boardCounts = (rows: BoardRow[]) => ({
   total: rows.length,
   done: rows.filter((r) => r.status === "done").length,
   blocked: rows.filter((r) => r.status === "blocked").length,
+  publish: rows.filter((r) => r.status === "publish").length,
 });
 
 /** The whole board in a phrase, for the text version. */
 export function boardSummary(rows: BoardRow[]): string {
   if (!rows.length) return "No tasks";
-  const { total, done, blocked } = boardCounts(rows);
-  return `${done} of ${total} ${total === 1 ? "task" : "tasks"} done${blocked ? `, ${blocked} blocked` : ""}`;
+  const { total, done, blocked, publish } = boardCounts(rows);
+  return `${done} of ${total} ${total === 1 ? "task" : "tasks"} done${blocked ? `, ${blocked} blocked` : ""}${publish ? `, ${publish} to publish` : ""}`;
 }

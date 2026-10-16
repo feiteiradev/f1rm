@@ -36,6 +36,7 @@
 .board-panel [data-board-status="done"] .chip { background: #5b8def; }
 .board-panel [data-board-status="blocked"] .chip { background: #e05a5a; }
 .board-panel [data-board-status="todo"] .chip { background: transparent; border: 1px solid var(--muted); }
+.board-panel [data-board-status="publish"] .chip { background: #c04fb0; }
 
 /* Out of sight until focused, like the roster. */
 .boards {

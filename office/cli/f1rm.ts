@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start | demo | pm | hire
+// The f1rm CLI: install | uninstall | start | demo | edition | pm | hire
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -8,6 +8,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
+import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
 const F1RM_DIR = join(process.env.HOME!, ".f1rm");
@@ -187,7 +188,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writeFileSync(URL_FILE, url, { mode: 0o600 });
   chmodSync(URL_FILE, 0o600);
@@ -271,15 +272,35 @@ function demo() {
 
 // The plugin's roles ignore `skills:` as a session agent, so the PM's first prompt loads grilling as a slash command.
 // The name comes after it so hires can address their reports to it.
-const pmPrompt = (name: string) =>
-  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
+const EDITION_LINE: Record<Edition, string> = {
+  work: "This is a Work project: an engineering company.",
+  founder: "This is a Founder project: follow the founder playbook in the guidelines.",
+};
+const pmPrompt = (name: string, edition: Edition) =>
+  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. ${EDITION_LINE[edition]} I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
+
+/** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
+function edition() {
+  const want = process.argv[3];
+  if (want === undefined) return console.log(readEdition(editionFile(process.cwd())) ?? "none chosen yet (counts as work)");
+  if (!isEdition(want)) throw new Error("usage: f1rm edition [work|founder]");
+  writeEdition(editionFile(process.cwd()), want);
+  console.log(`edition: ${want}`);
+}
 
 // ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
 async function pm() {
   const name = pmName(process.cwd());
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
-  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name)], {
+  // The first PM in a repo sets its edition. With no answer (no terminal), it starts as Work and asks again next time.
+  let chosen = readEdition(editionFile(process.cwd()));
+  if (!chosen) {
+    const answer = prompt(`Is ${name.slice(3)} a Work or a Founder project? [w/f]`)?.trim().toLowerCase() ?? "";
+    chosen = answer.startsWith("f") ? "founder" : answer.startsWith("w") ? "work" : null;
+    if (chosen) writeEdition(editionFile(process.cwd()), chosen);
+  }
+  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],
   });
@@ -293,12 +314,13 @@ const commands: Record<string, () => void | Promise<void>> = {
   serve: () => void serve(),
   service,
   demo,
+  edition,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
 };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | pm [claude flags] | hire <role> <name> <task> <brief>");
+  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief>");
   process.exit(1);
 }
 try {
