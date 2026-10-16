@@ -79,6 +79,33 @@ test("the guidelines cover every item the spec lists", () => {
   expect(section("Definition of done")).toContain("Reviewer has signed off");
 });
 
+test("the guidelines run teams: when to form them, the team brief, PLAN/GO/DONE, who talks to whom, the caps, interns, team boards and installed skills", () => {
+  for (const h of ["Teams", "Team brief", "Who talks to whom", "Interns", "Use what is installed"]) expect(section(h).trim().length).toBeGreaterThan(100);
+  const teams = section("Teams");
+  for (const s of ["two or more slices that can run in parallel", "At most 2 teams", "hires only leads", "No nested teams", "`PLAN <team>`", "`GO <team>`", "`DONE <team>`"]) expect(teams).toContain(s);
+  expect(section("Who talks to whom")).toContain("Only the PM talks to the user");
+  expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
+  const caps = section("Cap rule");
+  for (const s of ["**6 background sessions working at once**", "**2 teams**", "**2 working in a team**", "**One specialist per task**"]) expect(caps).toContain(s);
+  expect(section("Interns")).toContain("**at most 2 interns**");
+  expect(section("Board format")).toContain("~/.f1rm/boards/<repo>.team.<team>.md");
+  expect(section("Use what is installed")).toContain("skills, slash commands and plugins");
+});
+
+test("specialists never hire and answer only their Report to; the PM hires only leads in a team milestone and lets a lead go after DONE", () => {
+  for (const name of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]) {
+    const { body } = role(name);
+    expect(body).toContain("Never hire or start a session");
+    expect(body).toContain("Report only to the session in your `Report to`");
+    expect(body).toMatch(/at most 2 interns/i);
+  }
+  const pm = role("pm").body;
+  expect(pm).toContain("In a milestone with teams, hire only leads");
+  expect(pm).toContain("After `DONE <team>`, let the lead go");
+  const lead = role("lead").body;
+  for (const s of ["`PLAN <team>`", "`GO <team>`", "`DONE <team>`", "f1rm hire --team <team>", "Only the PM talks to the user"]) expect(lead).toContain(s);
+});
+
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
   const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
