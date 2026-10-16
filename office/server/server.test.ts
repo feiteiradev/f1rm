@@ -83,7 +83,7 @@ const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
 function start(repos?: Record<string, string>, approvalTimeoutMs?: number) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs });
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -683,8 +683,9 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
   expect(reply.hires).toEqual({ working: 3, cap: 6 });
+  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
-  expect([...roles.map((r) => r.id)].sort()).toEqual(files);
+  expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
   expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
@@ -1140,4 +1141,24 @@ test("a company employee runs at most 2 interns at once, counting calls not star
   await sub("SubagentStop", "a1");
   await office((s) => Object.keys(s.interns).length === 1);
   expect(await held(await agent("d"))).toBeNull();
+});
+
+test("a Founder project lists and hires the founder roles; a Work project, or one with no edition, refuses them", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  const ids = async () => ((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: { id: string }[] }).roles.map((r) => r.id);
+  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
+  expect((await ids()).some((r) => founder.includes(r))).toBe(false);
+  const marketer = { ...ASSIGN, role: "marketer" };
+  const refused = await hireOf(marketer);
+  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` to hire one."]);
+
+  const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
+  expect((await setEdition("founder")).status).toBe(200);
+  expect(await ids()).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...founder, "lead"]);
+  expect((await hireOf(marketer)).status).toBe(200);
+  expect(spawned.at(-1)!.argv.slice(2, 4)).toEqual(["--agent", "f1rm:marketer"]);
+  expect((await setEdition("work")).status).toBe(200);
+  expect((await hireOf(marketer)).status).toBe(400);
 });

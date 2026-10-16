@@ -3,6 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { repoKey } from "./board.ts";
+import { machine } from "./machine.ts";
 
 export const EDITIONS = ["work", "founder"] as const;
 export type Edition = (typeof EDITIONS)[number];
@@ -20,6 +21,11 @@ export function readEdition(file: string): Edition | null {
     return null;
   }
 }
+
+/** `~/.f1rm/projects`, where the CLI and the office keep each project's edition. */
+export const projectsDir = () => join(process.env.HOME!, ".f1rm", "projects");
+/** The edition file for the repo at `cwd`: its room id, the git common dir or the folder itself. */
+export const editionFile = (cwd: string, m: Pick<typeof machine, "gitCommonDir"> = machine) => projectFile(projectsDir(), m.gitCommonDir(cwd) ?? cwd);
 
 export function writeEdition(file: string, edition: Edition) {
   mkdirSync(dirname(file), { recursive: true });

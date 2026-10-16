@@ -10,7 +10,7 @@ import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, t
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
-import { ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
+import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
@@ -19,7 +19,7 @@ const MAX_MESSAGE = 4000;
 // in the plugin are what is left.
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
-const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher"]);
+const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
 const PENDING_MS = 60_000;
@@ -277,6 +277,8 @@ export function startServer({
         const hires = await machine.workingHires();
         return Response.json({
           roles: readRoles()
+            // A Work project hires no founder role; a project with no edition chosen counts as Work.
+            .filter((r) => editions[room ?? ""] === "founder" || !FOUNDER_ONLY.has(roleOfAgentType(`f1rm:${r.id}`)!))
             .sort((a, b) => order(a.id) - order(b.id))
             .map((r) => {
               const known = roleOfAgentType(`f1rm:${r.id}`);
@@ -308,7 +310,7 @@ export function startServer({
         const folder = folderOf(room);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, machine) : null, model, override: override === true }, machine);
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

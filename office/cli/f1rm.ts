@@ -8,7 +8,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
-import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "../server/editions.ts";
+import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
 const F1RM_DIR = join(process.env.HOME!, ".f1rm");
@@ -188,7 +188,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rmHttp);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: join(F1RM_DIR, "projects"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
+  startServer({ port, secret: hook.headers![SECRET_HEADER], token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writeFileSync(URL_FILE, url, { mode: 0o600 });
   chmodSync(URL_FILE, 0o600);
@@ -279,15 +279,12 @@ const EDITION_LINE: Record<Edition, string> = {
 const pmPrompt = (name: string, edition: Edition) =>
   `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. ${EDITION_LINE[edition]} I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
 
-/** This repo's edition file: the room id the office uses, its git common dir or the folder itself. */
-const editionFile = (cwd = process.cwd()) => projectFile(join(F1RM_DIR, "projects"), machine.gitCommonDir(cwd) ?? cwd);
-
 /** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
 function edition() {
   const want = process.argv[3];
-  if (want === undefined) return console.log(readEdition(editionFile()) ?? "none chosen yet (counts as work)");
+  if (want === undefined) return console.log(readEdition(editionFile(process.cwd())) ?? "none chosen yet (counts as work)");
   if (!isEdition(want)) throw new Error("usage: f1rm edition [work|founder]");
-  writeEdition(editionFile(), want);
+  writeEdition(editionFile(process.cwd()), want);
   console.log(`edition: ${want}`);
 }
 
@@ -297,11 +294,11 @@ async function pm() {
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // The first PM in a repo sets its edition. With no answer (no terminal), it starts as Work and asks again next time.
-  let chosen = readEdition(editionFile());
+  let chosen = readEdition(editionFile(process.cwd()));
   if (!chosen) {
     const answer = prompt(`Is ${name.slice(3)} a Work or a Founder project? [w/f]`)?.trim().toLowerCase() ?? "";
     chosen = answer.startsWith("f") ? "founder" : answer.startsWith("w") ? "work" : null;
-    if (chosen) writeEdition(editionFile(), chosen);
+    if (chosen) writeEdition(editionFile(process.cwd()), chosen);
   }
   const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
     env: claudeEnv(),

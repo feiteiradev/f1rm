@@ -47,18 +47,19 @@ test("the counter tallies working, waiting and idle employees", () => {
   expect(statusCounts(office([], []))).toEqual({ working: 0, waiting: 0, idle: 0, offline: 0 });
 });
 
-test("each role wears its own shirt, while skin and hair vary by session; the lead's shirt is no one else's", () => {
+test("each role wears its own shirt, while skin and hair vary by session; the lead's and the founder roles' shirts are no freelancer's", () => {
   expect(new Set(ROLE_IDS.map((r) => ROLES[r].shirt)).size).toBe(ROLE_IDS.length);
   const designers = Array.from({ length: 30 }, (_, i) => decodeLook(seedFor({ sessionId: `d-${i}`, role: "designer" })));
   expect(new Set(designers.map((l) => l.shirt))).toEqual(new Set([ROLES.designer.shirt]));
   expect(new Set(designers.map((l) => `${l.skin}/${l.hair}`)).size).toBeGreaterThan(5);
-  const freelancers = Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt);
-  expect(freelancers.includes(ROLES.lead.shirt)).toBe(false);
+  const freelancers = new Set(Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt));
+  for (const r of ["lead", "marketer", "seo", "social", "sales", "strategist"] as const) expect(freelancers.has(ROLES[r].shirt)).toBe(false);
 });
 
 test("only f1rm's own agent types are roles", () => {
   const cases: [unknown, RoleId | undefined][] = [
     ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"], ["f1rm:lead", "lead"],
+    ["f1rm:marketer", "marketer"], ["f1rm:seo-specialist", "seo"], ["f1rm:social-media", "social"], ["f1rm:sales", "sales"], ["f1rm:strategist", "strategist"], ["f1rm:seo", undefined],
     ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"],
     ["f1rm:pm-dev", undefined], ["f1rm:designer-dev", undefined], ["f1rm:frontend", undefined], ["f1rm:backend", undefined],
     ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],

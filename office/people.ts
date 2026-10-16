@@ -2,7 +2,7 @@
 // Shared by the server (which assigns names) and the client (which draws them), so it imports nothing.
 
 // A look is a seed that packs three sprite choices; the sprite sheet offers this many of each.
-const SKINS = 3, SHIRTS = 7, HAIRS = 6;
+const SKINS = 3, SHIRTS = 12, HAIRS = 6;
 const look = (skin: number, shirt: number, hair: number) => skin + SKINS * (shirt + SHIRTS * hair);
 export const decodeLook = (seed: number) => ({
   skin: seed % SKINS,
@@ -13,7 +13,7 @@ export const decodeLook = (seed: number) => ({
 /** The models a hire can be lowered or raised to, in place of its role's own. */
 export const MODELS = ["haiku", "sonnet", "opus"];
 
-/** In company order, which is also the order staff take desks. Each role wears its own shirt; the lead's (the seventh) is no freelancer's. */
+/** In company order, which is also the order staff take desks. Each role wears its own shirt; freelancers wear only the first six. */
 export const ROLES = {
   pm: { title: "PM", shirt: 0 },
   lead: { title: "Team lead", shirt: 6 },
@@ -22,9 +22,16 @@ export const ROLES = {
   backend: { title: "Backend dev", shirt: 3 },
   reviewer: { title: "Reviewer", shirt: 4 },
   researcher: { title: "Researcher", shirt: 5 },
+  marketer: { title: "Marketer", shirt: 7 },
+  seo: { title: "SEO specialist", shirt: 8 },
+  social: { title: "Social media", shirt: 9 },
+  sales: { title: "Sales", shirt: 10 },
+  strategist: { title: "Strategist", shirt: 11 },
 } as const;
 export type RoleId = keyof typeof ROLES;
 export const ROLE_IDS = Object.keys(ROLES) as RoleId[];
+/** The go-to-market roles only a Founder project hires. */
+export const FOUNDER_ONLY: ReadonlySet<RoleId> = new Set(["marketer", "seo", "social", "sales", "strategist"]);
 
 const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:pm": "pm",
@@ -34,6 +41,11 @@ const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:backend-dev": "backend",
   "f1rm:reviewer": "reviewer",
   "f1rm:researcher": "researcher",
+  "f1rm:marketer": "marketer",
+  "f1rm:seo-specialist": "seo",
+  "f1rm:social-media": "social",
+  "f1rm:sales": "sales",
+  "f1rm:strategist": "strategist",
 };
 
 /** Exactly the agent types of the plugin's role files are roles; any other agent type (another plugin's, a built-in, a near miss) is not. */
@@ -95,8 +107,9 @@ export function teamOf(e: { role: RoleId | null; title?: string }): string | nul
 }
 
 export const roleTitle = (role: RoleId | null) => (role ? ROLES[role].title : "Freelancer");
-/** A role's shirt with this session's skin and hair; a freelancer's whole look comes from its session id, never in the lead's shirt. */
+const FREELANCER_SHIRTS = 6;
+/** A role's shirt with this session's skin and hair; a freelancer's whole look comes from its session id, in a plain shirt. */
 export function seedFor(e: { sessionId: string; role: RoleId | null }): number {
   const s = seedOf(e.sessionId);
-  return look(s % SKINS, e.role ? ROLES[e.role].shirt : (s >>> 3) % (SHIRTS - 1), (s >>> 7) % HAIRS);
+  return look(s % SKINS, e.role ? ROLES[e.role].shirt : (s >>> 3) % FREELANCER_SHIRTS, (s >>> 7) % HAIRS);
 }

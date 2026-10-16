@@ -18,6 +18,11 @@ const ROLES: Record<string, string[]> = {
   "backend-dev": ["mattpocock-skills:tdd"],
   reviewer: ["code-review", GUIDELINES],
   researcher: [],
+  marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
+  "seo-specialist": ["seo-audit", "ai-seo"],
+  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica"],
+  sales: ["anthropic-skills:6-first-customers-acquisition-plan", "anthropic-skills:7-fast-revenue-strategy"],
+  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
 };
 const SLASH_ONLY = ["research", "security-review"];
 
@@ -30,7 +35,7 @@ const role = (name: string) => parts(join(PLUGIN, "agents", `${name}.md`));
 const guidelines = readFileSync(join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), "utf8");
 const section = (heading: string) => guidelines.split(/^## /m).find((s) => s.startsWith(heading + "\n")) ?? "";
 
-test("the plugin ships exactly the seven roles", () => {
+test("the plugin ships exactly the twelve roles", () => {
   expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual(Object.keys(ROLES).map((r) => `${r}.md`).sort());
 });
 
@@ -172,7 +177,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
-  expect(details.out).toMatch(/Agents \(7\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(12\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 
