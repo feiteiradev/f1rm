@@ -5,6 +5,7 @@ import { statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
+import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
@@ -39,6 +40,8 @@ type Options = {
   dbPath?: string;
   /** Where the PM's board files live; without it no room has a board. */
   boardsDir?: string;
+  /** Where each project's edition file lives (`~/.f1rm/projects`). */
+  projectsDir?: string;
   /** How often the board files are checked for edits. */
   boardPollMs?: number;
   /** How long a PermissionRequest hook is held for the browser before the terminal prompt decides. */
@@ -70,6 +73,7 @@ export function startServer({
   port, secret, token, machine, clientDir,
   dbPath = ":memory:",
   boardsDir,
+  projectsDir,
   boardPollMs = 500,
   approvalTimeoutMs = DEFAULT_TIMEOUT_S * 1000,
   clock = Date.now,
@@ -143,8 +147,9 @@ export function startServer({
 
   let boards: Record<string, BoardRow[]> = {};
   let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
+  let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
-  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, editions, approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -281,6 +286,17 @@ export function startServer({
           hires: { working: hires, cap: CAP },
         });
       }
+      if (rest[0] === "edition" && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const { room, edition } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (!isEdition(edition)) return Response.json({ error: "The edition is work or founder." }, { status: 400 });
+        if (!projectsDir) return Response.json({ error: "This office keeps no project settings." }, { status: 500 });
+        writeEdition(projectFile(projectsDir, room), edition);
+        editions = { ...editions, [room]: edition };
+        push();
+        return Response.json({ ok: true });
+      }
       if (rest[0] === "hire" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -368,9 +384,19 @@ export function startServer({
   // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
   let reading = false;
   async function readBoards() {
-    if (!boardsDir || reading) return;
+    if (reading) return;
     reading = true;
     try {
+      const nextEditions: Record<string, Edition> = {};
+      for (const id of projectsDir ? Object.keys(state.rooms) : []) {
+        const edition = readEdition(projectFile(projectsDir!, id));
+        if (edition) nextEditions[id] = edition;
+      }
+      if (JSON.stringify(nextEditions) !== JSON.stringify(editions)) {
+        editions = nextEditions;
+        push();
+      }
+      if (!boardsDir) return;
       const next: Record<string, BoardRow[]> = {};
       const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
       for (const id of Object.keys(state.rooms)) {
