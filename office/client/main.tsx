@@ -286,6 +286,9 @@ function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
   const [connected, setConnected] = useState(true);
   const [open, go] = useRoute();
+  // The socket handler is set up once, so it calls the latest `go` through a ref.
+  const goRef = useRef(go);
+  goRef.current = go;
   const [hiring, setHiring] = useState(false);
   // "Not now" on the edition question lasts until the project is left.
   const [notNow, setNotNow] = useState<string | null>(null);
@@ -296,7 +299,12 @@ function Office() {
     const url = new URL("ws", location.href);
     url.protocol = "ws:";
     const ws = new WebSocket(url);
-    ws.onmessage = (m) => setState(JSON.parse(m.data));
+    ws.onmessage = (m) => {
+      const message = JSON.parse(m.data);
+      // `/f1rm` in a project's folder: this page shows that project, as if its door was clicked.
+      if (typeof message.show === "string") return goRef.current(message.show);
+      setState(message);
+    };
     ws.onclose = () => setConnected(false);
     return () => ws.close();
   }, []);

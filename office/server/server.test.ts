@@ -1180,3 +1180,25 @@ test("a Founder role's connector tools that send, publish, post or schedule are 
   }
   for (const id of ["d", "f"]) expect(await held(await call(id, "mcp__claude_ai_Gmail__send_email"))).toBeNull();
 });
+
+test("show moves the open office pages to a project and says how many there were; an unknown project or token is refused", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  // Only the page below may be connected: the helper's socket would count, and choke on a show message.
+  for (const ws of sockets.splice(0)) ws.close();
+  await Bun.sleep(50);
+  const show = (room: string, token = TOKEN) => ui("show", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) }, token);
+  const page = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: base() } } as any);
+  sockets.push(page);
+  const shown = new Promise<unknown>((resolve) => (page.onmessage = (m) => { const msg = JSON.parse(String(m.data)); if ("show" in msg) resolve(msg); }));
+  await new Promise((r) => (page.onopen = r));
+  const r = await show(ROOM);
+  expect([r.status, await r.json()]).toEqual([200, { pages: 1 }]);
+  expect(await shown).toEqual({ show: ROOM });
+  page.close();
+  await Bun.sleep(50);
+  expect(await (await show(ROOM)).json()).toEqual({ pages: 0 });
+  expect((await show("/code/nope")).status).toBe(404);
+  expect((await show(ROOM, "wrong")).status).toBe(401);
+});

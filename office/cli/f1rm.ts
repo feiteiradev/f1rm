@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start | demo | edition | pm | hire
+// The f1rm CLI: install | uninstall | start | service | demo | edition | here | pm | hire
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -9,6 +9,7 @@ import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
+import { repoDir, roomName } from "../server/board.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
 const F1RM_DIR = join(process.env.HOME!, ".f1rm");
@@ -18,6 +19,12 @@ const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 const CREATED_FILE = join(F1RM_DIR, "created.json");
 // The running office's tokenized URL, so `f1rm start` can open an office that is already up.
 const URL_FILE = join(F1RM_DIR, "office-url");
+// The `f1rm` command `install` puts on PATH, so a terminal and the `/f1rm` skill both find this clone.
+const BIN = join(process.env.HOME!, ".local", "bin", "f1rm");
+const CLI_FILE = join(import.meta.dir, "f1rm.ts");
+const binScript = () => `#!/bin/sh\n# f1rm's command, written by \`f1rm install\`.\nexec "${process.execPath}" "${CLI_FILE}" "$@"\n`;
+/** A PATH command that runs f1rm's CLI is ours to replace or remove; anything else at that path is left alone. */
+const binIsOurs = () => !existsSync(BIN) || readFileSync(BIN, "utf8").includes("office/cli/f1rm.ts");
 const SERVICE = "dev.f1rm.office";
 const PLIST = join(process.env.HOME!, "Library", "LaunchAgents", `${SERVICE}.plist`);
 const DEFAULT_PORT = 4170;
@@ -128,7 +135,9 @@ const readCreated = (): Created => {
   }
 };
 
-function install() {
+/** Adds f1rm's hooks, and the `f1rm` command to `~/.local/bin`. Returns what it did, a line each. */
+function install(): string[] {
+  const done = [installBin()];
   const before = readSettings();
   const secret = installed(before)?.headers?.[SECRET_HEADER] ?? randomBytes(32).toString("base64url");
   const url = `http://127.0.0.1:${Number(process.env.F1RM_PORT ?? DEFAULT_PORT)}/ingest`;
@@ -144,10 +153,19 @@ function install() {
   chmodSync(HEADERS_FILE, 0o600); // mode only applies to a file being created
   writeFileSync(CREATED_FILE, JSON.stringify(created));
 
-  if (JSON.stringify(after) === JSON.stringify(before)) return console.log("f1rm hooks already installed.");
+  if (JSON.stringify(after) === JSON.stringify(before)) return ["f1rm hooks already installed.", ...done];
   if (existsSync(SETTINGS) && !installed(before)) copyFileSync(SETTINGS, SETTINGS + ".f1rm-backup");
   writeSettings(after);
-  console.log(`f1rm hooks installed in ${SETTINGS}`);
+  return [`f1rm hooks installed in ${SETTINGS}`, ...done];
+}
+
+function installBin(): string {
+  if (!binIsOurs()) return `${BIN} exists and isn't f1rm's, so it was left alone.`;
+  mkdirSync(dirname(BIN), { recursive: true });
+  writeFileSync(BIN, binScript(), { mode: 0o755 });
+  chmodSync(BIN, 0o755);
+  const onPath = (process.env.PATH ?? "").split(":").includes(dirname(BIN));
+  return onPath ? `f1rm command installed in ${BIN}.` : `f1rm command installed in ${BIN}. Add ${dirname(BIN)} to your PATH to run it from anywhere.`;
 }
 
 function uninstall() {
@@ -158,9 +176,10 @@ function uninstall() {
   for (const event of created.events) if (after.hooks![event]?.length === 0) delete after.hooks![event];
   if (created.hooks && Object.keys(after.hooks!).length === 0) delete after.hooks;
   writeSettings(after);
-  if (existsSync(PLIST)) serviceOff();
-  // The event log and the PM's boards stay: they are the user's history, not install state.
+  if (existsSync(PLIST)) stopService();
+  // The event log, the boards and the editions stay: they are the user's history, not install state.
   for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE]) rmSync(f, { force: true });
+  if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
 
@@ -216,6 +235,11 @@ const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** Runs the office at login and keeps it running, so the hooks always reach it. Running it again restarts it. */
 function service() {
   if (process.argv[3] === "off") return serviceOff();
+  startService();
+  console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
+}
+
+function startService() {
   if (!installed(readSettings())) throw new Error("hooks not installed: run `f1rm install` first");
   const log = join(F1RM_DIR, "office.log");
   const args = [process.execPath, join(import.meta.dir, "f1rm.ts"), "serve"].map((a) => `<string>${xml(a)}</string>`).join("");
@@ -242,14 +266,73 @@ function service() {
     if (--tries === 0) throw new Error(`launchctl could not load ${PLIST}; see ${log}`);
     Bun.sleepSync(250);
   }
-  console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
 }
 
 function serviceOff() {
+  stopService();
+  console.log("f1rm background office stopped and removed.");
+}
+
+function stopService() {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
   rmSync(URL_FILE, { force: true });
-  console.log("f1rm background office stopped and removed.");
+}
+
+/** The running office's URL, once it answers, or null after `ms`. */
+async function officeWithin(ms: number): Promise<string | null> {
+  for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(250)) {
+    const url = await runningOffice();
+    if (url) return url;
+  }
+  return null;
+}
+
+const HERE_USAGE = "/f1rm opens the office on this project, starting it if needed. /f1rm off stops it. /f1rm edition work|founder sets this project's edition. /f1rm pm opens this project's PM in a new iTerm tab.";
+
+/** What `/f1rm` runs, in the folder it was typed in. Prints one line, and never the office's token: it goes to the model. */
+async function here() {
+  const [what, arg] = process.argv.slice(3);
+  const cwd = process.cwd();
+  const room = machine.gitCommonDir(cwd) ?? cwd;
+  const name = roomName(room);
+  if (what === undefined) return console.log(await openHere(room, name));
+  if (what === "off") {
+    const running = existsSync(PLIST) || (await runningOffice()) !== null;
+    if (existsSync(PLIST)) stopService();
+    return console.log(running ? "Stopped the f1rm office. Your sessions keep working." : "The f1rm office wasn't running.");
+  }
+  if (what === "edition" && isEdition(arg)) {
+    writeEdition(editionFile(cwd), arg);
+    return console.log(`${name} is now a ${arg === "founder" ? "Founder" : "Work"} project.`);
+  }
+  if (what === "pm") {
+    await machine.startPmInIterm(repoDir(room));
+    return console.log(`Opened ${name}'s PM in a new iTerm tab.`);
+  }
+  console.log(HERE_USAGE);
+}
+
+async function openHere(room: string, name: string): Promise<string> {
+  const notes: string[] = [];
+  if (!installed(readSettings())) {
+    install();
+    notes.push("installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once");
+  }
+  let url = await runningOffice();
+  if (!url) {
+    startService();
+    url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
+    if (!url) return `The f1rm office didn't start; see ${join(F1RM_DIR, "office.log")}.`;
+    notes.push("started it in the background");
+  }
+  // An office page already open moves to this project; only with none open does a new tab open on it.
+  const shown = await fetch(new URL("show", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) })
+    .then(async (r) => r.ok && ((await r.json()) as { pages: number }).pages > 0)
+    .catch(() => false);
+  if (shown) return `Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
+  Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
+  return `Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
 }
 
 // The recorded office on its own static build: no hooks, no database, no session of yours involved.
@@ -308,19 +391,20 @@ async function pm() {
 }
 
 const commands: Record<string, () => void | Promise<void>> = {
-  install,
+  install: () => install().forEach((line) => console.log(line)),
   uninstall,
   start,
   serve: () => void serve(),
   service,
   demo,
   edition,
+  here,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
 };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief>");
+  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | edition [work|founder] | here [off | edition work|founder | pm] | pm [claude flags] | hire <role> <name> <task> <brief>");
   process.exit(1);
 }
 try {

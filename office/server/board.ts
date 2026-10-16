@@ -12,6 +12,9 @@ const MAX_CELL = { id: 16, owner: 60, status: 16, branch: 60, task: 200 };
 /** The room's repo directory: a git room is its common dir, whose parent is the main working directory (as in the room's name). */
 export const repoDir = (roomId: string) => (basename(roomId) === ".git" ? dirname(roomId) : roomId);
 
+/** A room's name, as the office shows it: the main working directory's folder name, without a bare repo's `.git`. */
+export const roomName = (roomId: string) => basename(repoDir(roomId)).replace(/\.git$/, "");
+
 /** The repo's main working directory with every character that is not an ASCII letter or digit as `-`, as the f1rm-guidelines skill states. */
 export const repoKey = (roomId: string) => repoDir(roomId).replace(/[^A-Za-z0-9]/gu, "-");
 /** `~/.f1rm/boards/<repo>.md`. */
