@@ -149,7 +149,8 @@ export function startServer({
   let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
   let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
-  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, editions, approvals: approvals.list() });
+  // Without a settings folder there is nowhere to keep an edition, so the page isn't told about editions at all and never asks.
+  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, ...(projectsDir && { editions }), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({

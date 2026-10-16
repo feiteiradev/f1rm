@@ -8,6 +8,7 @@ import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
+import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
 import { LetGo } from "./letgo.tsx";
@@ -249,6 +250,9 @@ function Lobby({ state, onOpen }: { state: OfficeState; onOpen: (roomId: string)
                 <span className="plaque">
                   <span className="name" title={d.room.name}>{d.room.name}</span>
                   <span className="meta">
+                    {state.editions?.[d.room.id] && (
+                      <span className="edition" data-edition={state.editions[d.room.id]}>{state.editions[d.room.id] === "founder" ? "Founder" : "Work"}</span>
+                    )}
                     <span className="people">{d.count === 0 ? "empty" : `${d.count} inside`}</span>
                     {d.waiting && <span className="wait"><span className="swatch" aria-hidden /> waiting</span>}
                   </span>
@@ -283,6 +287,8 @@ function Office() {
   const [connected, setConnected] = useState(true);
   const [open, go] = useRoute();
   const [hiring, setHiring] = useState(false);
+  // "Not now" on the edition question lasts until the project is left.
+  const [notNow, setNotNow] = useState<string | null>(null);
   const left = useRef<string | null>(null);
 
   useEffect(() => {
@@ -303,6 +309,7 @@ function Office() {
     if (inside) document.querySelector<HTMLElement>(".back")?.focus();
     else if (left.current) [...document.querySelectorAll<HTMLElement>(".door")].find((d) => d.dataset.room === left.current)?.focus();
     left.current = inside;
+    if (inside !== notNow) setNotNow(null);
   }, [inside]);
 
   const empty = state && Object.keys(state.rooms).length === 0;
@@ -317,6 +324,7 @@ function Office() {
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
+        {inside && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
@@ -328,6 +336,9 @@ function Office() {
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
+      {inside && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
+        <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
+      )}
       {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </>
   );
