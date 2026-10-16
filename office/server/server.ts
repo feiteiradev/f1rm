@@ -297,7 +297,7 @@ export function startServer({
         });
       }
       if (rest[0] === "show" && rest.length === 1) {
-        // `/f1rm` asks the open office pages to show a project, so it opens a new tab only when none is open.
+        // A bare `f1rm` asks the open office pages to show a project, so it opens a new tab only when none is open.
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const { room } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
         if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });

@@ -506,22 +506,22 @@ test("pm asks a repo's edition the first time, saves it, and tells the PM; with 
   expect(again.args()[4]).toContain("This is a Founder project");
 });
 
-// `f1rm here` is what `/f1rm` runs: one line back, and the office's token never in it.
-async function hereIn(cwd: string, home: string, bin: string, ...args: string[]) {
+// A bare `f1rm` in a folder: one line back, and the office's token never in it.
+async function f1rmIn(cwd: string, home: string, bin: string, ...args: string[]) {
   // async spawn: a sync one would block this process, and with it the office that has to answer
-  const proc = Bun.spawn(["bun", CLI, "here", ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", CLI, ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = [await proc.exited, await new Response(proc.stdout).text(), await new Response(proc.stderr).text()];
   return { code, out: out.trim(), err };
 }
 
-test("here on a fresh machine installs the hooks, starts the background office, waits for it, and opens this folder's project", async () => {
+test("a bare f1rm on a fresh machine installs the hooks, starts the background office, waits for it, and opens this folder's project", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("shop"));
   const stub = stubBin();
   const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
   const url = `http://127.0.0.1:${office.port}/secret-token/`;
   // launchd loading the office: the office writes its URL once it is up.
   writeFileSync(join(stub.bin, "launchctl"), `#!/bin/sh\necho "launchctl $@" >> "${stub.bin}/calls.log"\n[ "$1" = bootstrap ] && printf '%s' '${url}' > "${home}/.f1rm/office-url"\nexit 0\n`, { mode: 0o755 });
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.code).toBe(0);
   expect(r.out).toBe("Opened the f1rm office on shop (installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once; started it in the background).");
@@ -530,30 +530,33 @@ test("here on a fresh machine installs the hooks, starts the background office, 
   expect(stub.calls().at(-1)).toBe(`open ${url}#/project/${encodeURIComponent(folder)}`);
 });
 
-test("here with the office running just opens this folder's project, in one line", async () => {
+test("a bare f1rm with the office running just opens this folder's project, in one line", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
   const stub = stubBin();
   stub.run(home, "install");
   const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
   const url = `http://127.0.0.1:${office.port}/tok/`;
   writeFileSync(join(home, ".f1rm", "office-url"), url);
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.out).toBe("Opened the f1rm office on blog.");
   expect(stub.calls()).toEqual([`open ${url}#/project/${encodeURIComponent(folder)}`]);
 });
 
-test("here off stops the background office, here edition sets this folder's, and anything else lists what /f1rm does", async () => {
+test("help prints the usage line and exits 0; an unknown command, here included, prints it and exits 1", async () => {
   const home = tempHome(), folder = repoDir("shop");
   const stub = stubBin();
-  stub.run(home, "install");
-  stub.run(home, "service");
-  expect((await hereIn(folder, home, stub.bin, "off")).out).toBe("Stopped the f1rm office. Your sessions keep working.");
-  expect(existsSync(join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist"))).toBe(false);
-  expect((await hereIn(folder, home, stub.bin, "off")).out).toBe("The f1rm office wasn't running.");
-  expect((await hereIn(folder, home, stub.bin, "edition", "founder")).out).toBe("shop is now a Founder project.");
-  expect(edition(folder, home).out).toBe("founder");
-  for (const args of [["help"], ["edition", "startup"]]) expect((await hereIn(folder, home, stub.bin, ...args)).out).toStartWith("/f1rm opens the office on this project");
+  for (const arg of ["help", "-h", "--help"]) {
+    const r = await f1rmIn(folder, home, stub.bin, arg);
+    expect(r.code).toBe(0);
+    expect(r.out).toStartWith("usage: f1rm | install | uninstall");
+  }
+  for (const arg of ["here", "nonsense"]) {
+    const r = await f1rmIn(folder, home, stub.bin, arg);
+    expect(r.code).toBe(1);
+    expect(r.err).toStartWith("usage: f1rm | install | uninstall");
+    expect(r.err).not.toContain("here");
+  }
 });
 
 test("install puts the f1rm command in ~/.local/bin, and uninstall removes it only when it is f1rm's", () => {
@@ -571,7 +574,7 @@ test("install puts the f1rm command in ~/.local/bin, and uninstall removes it on
   expect(readFileSync(bin, "utf8")).toBe("#!/bin/sh\necho mine\n");
 });
 
-test("here with an office page open moves that page to this folder's project and opens no new tab", async () => {
+test("a bare f1rm with an office page open moves that page to this folder's project and opens no new tab", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
   const stub = stubBin();
   stub.run(home, "install");
@@ -581,7 +584,7 @@ test("here with an office page open moves that page to this folder's project and
     fetch: async (req) => (req.method === "POST" && new URL(req.url).pathname === "/tok/show" ? (asked.push(await req.json()), Response.json({ pages: 1 })) : new Response("office")),
   });
   writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.out).toBe("Your office tab now shows blog.");
   expect(asked).toEqual([{ room: folder }]);

@@ -301,7 +301,7 @@ function Office() {
     const ws = new WebSocket(url);
     ws.onmessage = (m) => {
       const message = JSON.parse(m.data);
-      // `/f1rm` in a project's folder: this page shows that project, as if its door was clicked.
+      // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
       if (typeof message.show === "string") return goRef.current(message.show);
       setState(message);
     };
