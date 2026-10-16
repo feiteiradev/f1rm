@@ -4,7 +4,7 @@ A pixel-art office for your Claude Code sessions. Every session on your Mac is a
 
 f1rm also ships a company: a Claude Code plugin with six roles (PM, Designer, Frontend dev, Backend dev, Reviewer, Researcher) and the guidelines they work by. You talk to the PM. The PM hires the rest.
 
-![The f1rm lobby, a project office at work, and an employee's panel](docs/f1rm.gif)
+![The f1rm lobby, a project office with its PM waiting for you at the table, and the PM's panel](docs/f1rm.gif)
 
 ## What you get
 
@@ -66,7 +66,7 @@ The office can steer your sessions, so it is locked to you.
 
 ## Development
 
-`bun run check` runs the tests, the typecheck and both builds. The `scripts/` folder holds the browser proofs (`lobby-proof.mjs`, `office-proof.mjs`, `jump-proof.mjs` and others) and `smoke.ts`, which re-checks the Claude Code behaviour f1rm relies on after an upgrade.
+`bun run check` runs the tests, the typecheck and both builds. The `scripts/` folder holds the browser proofs (`lobby-proof.mjs`, `office-proof.mjs`, `jump-proof.mjs` and others) and `smoke.ts`, which re-checks the Claude Code behaviour f1rm relies on after an upgrade. `record-gif.mjs` re-records `docs/f1rm.gif` from the demo build.
 
 ## Credits
 
