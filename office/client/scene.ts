@@ -2,14 +2,14 @@
 import { Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
 import { seedFor, seedOf } from "../people.ts";
-import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TICK_MS, type DeskArt } from "./art.ts";
+import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { poseOf } from "./pose.ts";
 import { buildWhiteboard, whiteboardCount } from "./whiteboard.ts";
 
 export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
 
-type Person = { art: DeskArt; name: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; drawn: string };
+type Person = { art: DeskArt; name: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
 /** An intern walking out from its parent's seat (`born`), or back to it once stopped (`left`); times are performance.now() ms. */
 type Walker = { sprite: Container; parent: string; slot: number; born: number; left?: number };
 type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
@@ -22,7 +22,7 @@ const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void, onHire: () => void): Promise<Scene> {
+export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string) => void, onHire: () => void, onStartPm: () => void): Promise<Scene> {
   await loadArt();
   const app = await newApp(host);
 
@@ -56,7 +56,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
     roomLabels.removeChildren().forEach((c) => c.destroy());
     const present = new Set<string>();
     for (const r of laidOut) {
-      const shell = buildRoom(r, onHire);
+      const shell = buildRoom(r, onHire, onStartPm);
       const overlay = new Graphics().rect(r.x, r.y, r.w, r.h).fill(COLORS.night);
       overlay.alpha = dimmers.get(r.room.id)?.now ?? 0;
       // Lets taps through to the whiteboard under it.
@@ -67,6 +67,15 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       if (count) {
         count.alpha = r.empty ? 0.4 : 1;
         roomLabels.addChild(count);
+      }
+
+      const [table] = r.desks;
+      if (!table.employee) {
+        const invite = new Text({ text: "Start PM", style: LABEL });
+        invite.anchor.set(0.5, 0);
+        invite.alpha = 0.7;
+        invite.position.set((table.x + CELL.w / 2) * scale, (table.y + TABLE.h) * scale);
+        roomLabels.addChild(invite);
       }
 
       const label = new Text({ text: clip(r.empty ? `${r.room.name} (empty)` : r.room.name, 22), style: LABEL });
@@ -85,19 +94,19 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         if (!e) continue;
         seen.add(e.sessionId);
         let p = people.get(e.sessionId);
-        // A freelancer whose role turns up later changes look.
-        if (p && p.seed !== seedFor(e)) {
+        // A freelancer whose role turns up later changes look, and a second PM who moves up to the table changes furniture.
+        if (p && (p.seed !== seedFor(e) || p.table !== !!d.table)) {
           removePerson(e.sessionId, p);
           p = undefined;
         }
         if (!p) {
-          const art = buildDesk(seedFor(e));
+          const art = buildDesk(seedFor(e), d.table);
           art.root.eventMode = "static";
-          art.root.hitArea = new Rectangle(0, 0, CELL.w, CELL.h);
+          art.root.hitArea = d.table ? new Rectangle(0, 0, TABLE.w, TABLE.h) : new Rectangle(0, 0, CELL.w, CELL.h);
           art.root.cursor = "pointer";
           art.root.on("pointertap", () => onSelect(e.sessionId));
           desks.addChild(art.root);
-          p = { art, name: new Text({ text: e.name, style: LABEL }), employee: e, seed: seedFor(e), hot: d.hot, drawn: "" };
+          p = { art, name: new Text({ text: e.name, style: LABEL }), employee: e, seed: seedFor(e), hot: d.hot, table: !!d.table, drawn: "" };
           people.set(e.sessionId, p);
         }
         p.employee = e;
@@ -106,7 +115,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         p.drawn = "";
         p.art.root.position.set(d.x, d.y);
         p.name.anchor.set(0.5, 0);
-        p.name.position.set((d.x + CELL.w / 2) * scale, (d.y + 57) * scale);
+        p.name.position.set((d.x + CELL.w / 2) * scale, (d.y + (d.table ? TABLE.h : 57)) * scale);
         names.addChild(p.name);
       }
     }
@@ -167,7 +176,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       p.drawn = key;
       p.art.person.y = bob(pose, f);
       p.art.person.alpha = p.name.alpha = pose === "off" ? 0.4 : 1;
-      drawDesk(p.art.fx, pose, f, p.art.skin, id === selected, p.hot);
+      drawDesk(p.art.fx, pose, f, p.art.skin, id === selected, p.hot, p.table);
     }
     for (const d of dimmers.values()) {
       d.now += (d.target - d.now) * 0.12;

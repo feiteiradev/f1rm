@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
-import { CELL, layoutOffice, ROOM, rosterOf } from "./layout.ts";
+import { CELL, CORNER, layoutOffice, ROOM, rosterOf } from "./layout.ts";
 import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { argsText } from "./approvals.ts";
@@ -93,19 +93,35 @@ test("staff take the front desks in role order, freelancers the hot desks behind
   ];
   const [room] = layoutOffice(office(["r"], staff), 400).rooms;
   expect(room.desks.map((d) => [d.employee?.sessionId, d.hot])).toEqual([
-    ["p", false], ["d", false], ["d2", false],
-    ["d10", false], [undefined, false], [undefined, false],
+    ["p", false],
+    ["d", false], ["d2", false], ["d10", false],
     ["f1", true], ["f2", true], [undefined, true],
   ]);
   const quiet = layoutOffice(office(["r"], [employee("p", "r", { role: "pm" })]), 400).rooms[0];
   expect(quiet.desks.some((d) => d.hot)).toBe(false);
 });
 
+test("the PM sits at the table in the corner, alone; a second PM takes a desk, and with no PM the table waits empty", () => {
+  const staff = [employee("p", "r", { role: "pm", name: "Priya" }), employee("p2", "r", { role: "pm", name: "Priya (2)" }), employee("d", "r", { role: "designer" }), employee("f", "r")];
+  const [room] = layoutOffice(office(["r"], staff), 480, 300).rooms;
+  const [table, ...desks] = room.desks;
+  expect([table.table, table.employee?.sessionId]).toEqual([true, "p"]);
+  expect(desks.map((d) => d.employee?.sessionId).filter(Boolean)).toEqual(["p2", "d", "f"]);
+  expect(desks.some((d) => d.table)).toBe(false);
+  // The table sits inside the corner, and every desk sits right of it.
+  expect(table.x).toBeGreaterThanOrEqual(room.corner.x);
+  expect(table.y + CELL.h).toBeLessThanOrEqual(room.corner.y + room.corner.h);
+  expect(Math.min(...desks.map((d) => d.x))).toBeGreaterThanOrEqual(room.corner.x + CORNER.w);
+  expect(rosterOf(office(["r"], staff))[0].sessionId).toBe("p");
+  const nobody = layoutOffice(office(["r"], [employee("f", "r")]), 480, 300).rooms[0];
+  expect([nobody.desks[0].table, nobody.desks[0].employee]).toEqual([true, undefined]);
+});
+
 test("employees take desks in session id order, filling rows of three", () => {
   const staff = ["s4", "s2", "s1", "s3"].map((id) => employee(id, "r"));
   const [room] = layoutOffice(office(["r"], staff), 400).rooms;
-  expect(room.desks.map((d) => d.employee?.sessionId)).toEqual(["s1", "s2", "s3", "s4", undefined, undefined]);
-  expect(room.desks[3].y - room.desks[0].y).toBe(CELL.h);
+  expect(room.desks.map((d) => d.employee?.sessionId)).toEqual([undefined, "s1", "s2", "s3", "s4", undefined, undefined]);
+  expect(room.desks[4].y - room.desks[1].y).toBe(CELL.h);
 });
 
 test("the roster keeps its order when a session's event moves it to the end of the state", () => {
@@ -169,16 +185,16 @@ test("one open project fills the view: its room spans the width and height, with
   const six = ["a", "b", "c", "d", "e", "f"].map((id, i) => employee(id, "r", { role: ROLE_IDS[i] }));
   const { rooms, height } = layoutOffice(office(["r"], six), 480, 225);
   const solo = rooms[0];
-  expect(new Set(solo.desks.slice(0, 6).map((d) => d.y)).size).toBe(1);
+  expect(new Set(solo.desks.slice(1, 7).map((d) => d.y)).size).toBe(1);
   expect(solo.w).toBeGreaterThanOrEqual(480 - 16);
   expect(solo.h).toBeGreaterThanOrEqual(225 - 16);
   expect(height).toBeLessThanOrEqual(225);
-  const above = solo.desks[0].y - (solo.y + ROOM.wall), below = solo.y + solo.h - (solo.desks[0].y + CELL.h);
+  const above = solo.desks[1].y - (solo.y + ROOM.wall), below = solo.y + solo.h - (solo.desks[1].y + CELL.h);
   expect(Math.abs(above - below)).toBeLessThanOrEqual(16);
-  const left = solo.desks[0].x - solo.x, right = solo.x + solo.w - (solo.desks[5].x + CELL.w);
+  const left = solo.desks[1].x - (solo.corner.x + solo.corner.w), right = solo.x + solo.w - (solo.desks[6].x + CELL.w);
   expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
   const narrow = layoutOffice(office(["r"], six), 120, 400).rooms[0];
-  expect(narrow.desks.length).toBe(ROOM.cols * 2);
+  expect(narrow.desks.length).toBe(1 + ROOM.cols * 2);
   const crowd = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => employee(id, "r"));
   expect(layoutOffice(office(["r"], crowd), 480, 100).height).toBeGreaterThan(100);
 });

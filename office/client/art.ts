@@ -2,7 +2,7 @@
 import { Application, Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import indoorUrl from "./assets/roguelikeIndoor_transparent.png";
 import charUrl from "./assets/roguelikeChar_transparent.png";
-import { CELL, ROOM, type RoomLayout } from "./layout.ts";
+import { CELL, ROOM, type Box, type RoomLayout } from "./layout.ts";
 import { decodeLook } from "../people.ts";
 import { DOOR, type DoorSlot } from "./lobby.ts";
 import type { Pose } from "./pose.ts";
@@ -56,6 +56,10 @@ export const COLORS = {
   green: 0x3ddc84,
   mat: 0x3f5f66,
   matEdge: 0x56808a,
+  glass: 0xb8d8e6,
+  frame: 0xd9e4ea,
+  rug: 0x5b3a4e,
+  rugEdge: 0x7d5068,
 };
 
 // Character layers in the char sheet: skin, shirt, hair as [col, row]. Skin tones sampled for the raised arm.
@@ -65,6 +69,10 @@ const HAIRS: [number, number][] = [[19, 0], [23, 0], [19, 4], [23, 4], [19, 8], 
 
 const CHAR = { x: 15, y: 11 };
 const DESK = { x: 2, y: 24 };
+// Your chair at the PM's table, beside it and facing it; the "?" bubble hangs over it.
+const GUEST = { x: 34, y: 28 };
+/** The PM's table and your chair, in the desk's own frame: what a tap on it hits. The PM's name goes under it, at `h`. */
+export const TABLE = { w: GUEST.x + 16, h: 45 };
 
 export type DeskArt = { root: Container; person: Container; fx: Graphics; skin: number };
 
@@ -76,16 +84,18 @@ function dress(parent: Container, seed: number, x: number, y: number): number {
   return skin[2];
 }
 
-export function buildDesk(seed: number | null): DeskArt {
+/** A desk, or with `table` the PM's oval meeting table with your chair beside it. */
+export function buildDesk(seed: number | null, table = false): DeskArt {
   const root = new Container();
   const person = new Container();
   let skin = SKINS[0][2];
   if (seed === null) put(root, indoor, 0, 2, CHAR.x, CHAR.y + 1);
   else skin = dress(person, seed, CHAR.x, CHAR.y);
   root.addChild(person);
-  for (const [c, r, dx, dy] of [[0, 0, 0, 0], [2, 0, 16, 0], [0, 1, 0, 16], [2, 1, 16, 16]]) {
-    put(root, indoor, c, r, DESK.x + dx, DESK.y + dy);
-  }
+  // A desk is two table tiles deep; the oval meeting table is one.
+  const tops = table ? [[3, 0, 0, 0], [4, 0, 16, 0]] : [[0, 0, 0, 0], [2, 0, 16, 0], [0, 1, 0, 16], [2, 1, 16, 16]];
+  for (const [c, r, dx, dy] of tops) put(root, indoor, c, r, DESK.x + dx, DESK.y + dy);
+  if (table) put(root, indoor, 3, 2, GUEST.x, GUEST.y);
   const fx = new Graphics();
   root.addChild(fx);
   return { root, person, fx, skin };
@@ -149,6 +159,16 @@ function bubble(g: Graphics, x: number, y: number, color: number) {
   box(g, x + 5, y + 8, 2, 2, color);
 }
 
+/** The "?" over your chair at the PM's table: the PM's turn is over and it waits for your answer. */
+function yourTurn(g: Graphics, x: number, y: number) {
+  bubble(g, x, y, 0xf3ecd8);
+  box(g, x + 4, y + 1, 3, 1, INK);
+  box(g, x + 3, y + 2, 1, 1, INK);
+  box(g, x + 7, y + 2, 1, 2, INK);
+  box(g, x + 5, y + 4, 2, 1, INK);
+  box(g, x + 5, y + 6, 2, 1, INK);
+}
+
 /** The amber "!" bubble of someone waiting for permission, with its top-left at (x, y). */
 function raisedHand(g: Graphics, x: number, y: number) {
   bubble(g, x, y, COLORS.amber);
@@ -156,7 +176,8 @@ function raisedHand(g: Graphics, x: number, y: number) {
   box(g, x + 5, y + 6, 2, 1, INK);
 }
 
-export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean, hot = false) {
+/** `table` draws the PM at its table, where a coffee break means your turn. */
+export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selected: boolean, hot = false, table = false) {
   g.clear();
   screen(g, pose, f);
   if (hot) {
@@ -193,6 +214,8 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
   } else if (pose === "running") {
     bubble(g, head - 6, 1, 0x10261a);
     for (let i = 0; i < 3; i++) box(g, head - 4 + i * 3, f % 3 === i ? 3 : 5, 2, 2, COLORS.green);
+  } else if (pose === "coffee" && table) {
+    yourTurn(g, GUEST.x + 3, GUEST.y - 15 + ((f >> 3) % 2));
   } else if (pose === "coffee") {
     box(g, CHAR.x + 14, 18, 5, 5, 0xe9e4d6);
     box(g, CHAR.x + 14, 18, 5, 1, 0x4a2f1c);
@@ -203,7 +226,7 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
     }
   }
   if (selected) {
-    const c = COLORS.amber, x = 1, y = 7, w = CELL.w - 2, h = 51;
+    const c = COLORS.amber, x = 1, y = 7, w = (table ? TABLE.w : CELL.w) - 2, h = (table ? TABLE.h : 58) - 7;
     box(g, x, y, w, 1, c);
     box(g, x, y + h - 1, w, 1, c);
     box(g, x, y, 1, h, c);
@@ -211,8 +234,24 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
   }
 }
 
-/** A room's walls, floor and desks. A tap on an empty desk calls `onHire`. */
-export function buildRoom(r: RoomLayout, onHire?: () => void) {
+/** The PM's corner: a rug under the table, glass on the two sides that face the office, a gap to walk in by. */
+function glassCorner(g: Graphics, c: Box) {
+  box(g, c.x + 3, c.y + 3, c.w - 8, c.h - 16, COLORS.rug);
+  box(g, c.x + 4, c.y + 4, c.w - 10, c.h - 18, COLORS.rugEdge, 0.5);
+  box(g, c.x + 5, c.y + 5, c.w - 12, c.h - 20, COLORS.rug);
+  // The doorway is the gap between the front pane and the side wall.
+  const rx = c.x + c.w - 3, by = c.y + c.h - 10, x = c.x + 1, w = c.w - 22;
+  box(g, rx, c.y, 3, c.h, COLORS.glass, 0.35);
+  box(g, rx, c.y, 1, c.h, COLORS.frame, 0.8);
+  box(g, x, by, w, 10, COLORS.glass, 0.3);
+  box(g, x, by, w, 1, COLORS.frame);
+  box(g, x, by + 9, w, 1, COLORS.frame, 0.7);
+  for (let m = x + 13; m < x + w - 2; m += 13) box(g, m, by + 1, 1, 8, COLORS.frame, 0.5);
+  box(g, x + w - 1, by, 1, 10, COLORS.frame);
+}
+
+/** A room's walls, floor and desks. A tap on an empty desk calls `onHire`, on the empty PM table `onStartPm`. */
+export function buildRoom(r: RoomLayout, onHire?: () => void, onStartPm?: () => void) {
   const root = new Container();
   const g = new Graphics();
   root.addChild(g);
@@ -229,16 +268,18 @@ export function buildRoom(r: RoomLayout, onHire?: () => void) {
     box(g, d.x + 1, d.y + 9, CELL.w - 2, CELL.h - 12, COLORS.matEdge, 0.5);
   }
   put(root, indoor, 16, 0, r.x + r.w - 20, r.y + ROOM.wall - 14);
+  glassCorner(g, r.corner);
   for (const d of r.desks) {
     if (d.employee) continue;
-    const empty = buildDesk(null);
+    const empty = buildDesk(null, d.table);
     empty.root.position.set(d.x, d.y);
-    drawDesk(empty.fx, "off", 0, empty.skin, false);
-    if (onHire) {
+    drawDesk(empty.fx, "off", 0, empty.skin, false, false, d.table);
+    const onTap = d.table ? onStartPm : onHire;
+    if (onTap) {
       empty.root.eventMode = "static";
-      empty.root.hitArea = new Rectangle(0, 0, CELL.w, CELL.h);
+      empty.root.hitArea = d.table ? new Rectangle(0, 0, TABLE.w, TABLE.h) : new Rectangle(0, 0, CELL.w, CELL.h);
       empty.root.cursor = "pointer";
-      empty.root.on("pointertap", onHire);
+      empty.root.on("pointertap", onTap);
     }
     root.addChild(empty.root);
   }

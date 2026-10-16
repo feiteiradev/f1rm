@@ -11,6 +11,7 @@ import { BoardList, BoardPanel } from "./board.tsx";
 import { HireDialog } from "./hire.tsx";
 import { JumpButton, Palette } from "./jump.tsx";
 import { LetGo } from "./letgo.tsx";
+import { post } from "./post.ts";
 import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
@@ -22,6 +23,9 @@ import "./lobby.css";
 const COUNTERS: [Status, string][] = [["working", "Active"], ["waiting", "Waiting"], ["idle", "Idle"]];
 const STATUS_TEXT: Record<Status, string> = { working: "Working", waiting: "Waiting for permission", idle: "Idle", offline: "Offline" };
 const IDLE_TEXT = "On a coffee break";
+// The PM is the one you talk to: when its turn ends, the next move is yours.
+const statusText = (e: { role: string | null; status: Status }) => (e.role === "pm" && e.status === "idle" ? "Waiting for you" : STATUS_TEXT[e.status]);
+const DEMO = import.meta.env.MODE === "demo";
 const NOBODY: OfficeState = { rooms: {}, employees: {}, interns: {} };
 
 function Counter({ state }: { state: OfficeState }) {
@@ -46,7 +50,9 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
   if (!e) return null;
   const { name } = e, role = roleTitle(e.role);
   const interns = Object.values(state.interns).filter((i) => i.parent === id);
-  const activity = e.status === "offline" ? "None" : e.activity || (e.status === "idle" ? IDLE_TEXT : "None");
+  const pm = e.role === "pm";
+  const idle = pm ? "Its last message is in its terminal. Press Talk to answer." : IDLE_TEXT;
+  const activity = e.status === "offline" ? "None" : e.activity || (e.status === "idle" ? idle : "None");
   return (
     <aside className="panel" aria-label={`${name}, ${role}`}>
       <header>
@@ -70,7 +76,7 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
         <dt>Status</dt>
         <dd data-status={e.status}>
           <span className="swatch" aria-hidden />
-          {STATUS_TEXT[e.status]}
+          {statusText(e)}
         </dd>
         <dt>Activity</dt>
         <dd className="activity">{activity}</dd>
@@ -81,7 +87,7 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
           </>
         )}
       </dl>
-      <JumpButton id={id} />
+      <JumpButton id={id} label={pm ? "Talk" : undefined} />
       <LetGo id={id} name={name} />
       <AskBox onAsk={onAsk} />
       <TellBox name={name} onTell={onTell} />
@@ -92,8 +98,33 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
 }
 
 /** One project's office, full screen: its scene, employee panel, whiteboard panel and keyboard roster. `state` is already that project's slice. */
-function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) {
+function Project({ room, state, onHire }: { room: string; state: OfficeState; onHire: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [pmNote, setPmNote] = useState<string | null>(null);
+  const starting = useRef(false);
+  const hasPm = Object.values(state.employees).some((e) => e.role === "pm");
+  useEffect(() => {
+    if (!hasPm) return;
+    starting.current = false;
+    setPmNote(null);
+  }, [hasPm]);
+  // A tap on the empty table. Taps while a PM is on its way open no second tab: it takes a few seconds to arrive, and the server refuses a second PM only once the first has.
+  // ponytail: a PM slower than 30 s to arrive can be started twice; track the tab itself if that shows up.
+  async function startPm() {
+    if (DEMO) return setPmNote("Starting a PM needs a live office; this is a recording.");
+    if (starting.current) return;
+    starting.current = true;
+    setPmNote("Starting a PM in a new iTerm tab…");
+    const error = await post("start-pm", { room });
+    if (error) {
+      starting.current = false;
+      return setPmNote(error);
+    }
+    setTimeout(() => {
+      starting.current = false;
+      setPmNote(null);
+    }, 30_000);
+  }
   const [board, setBoard] = useState<string | null>(null);
   const { history, ask, tell } = useHistory();
   const host = useRef<HTMLDivElement>(null);
@@ -111,7 +142,7 @@ function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) 
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select, setBoard, onHire).then((s) => {
+    createScene(host.current!, select, setBoard, onHire, startPm).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       s.update(latest.current.state, latest.current.selected);
@@ -139,6 +170,7 @@ function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) 
       {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
       {board && state.rooms[board] && <BoardPanel state={state} id={board} onClose={() => setBoard(null)} />}
       <BoardList state={state} onOpen={setBoard} />
+      {pmNote && <p className="note low pm-note" role="status">{pmNote}</p>}
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
       <ul className="roster">
         {rosterOf(state).map((e) => {
@@ -146,7 +178,7 @@ function Project({ state, onHire }: { state: OfficeState; onHire: () => void }) 
           return (
             <li key={e.sessionId}>
               <button data-pose={poseOf(e)} onClick={() => select(e.sessionId)}>
-                {e.name}, {roleTitle(e.role)}, {state.rooms[e.room]?.name}, {STATUS_TEXT[e.status]}
+                {e.name}, {roleTitle(e.role)}, {state.rooms[e.room]?.name}, {statusText(e)}
                 {interns > 0 && `, ${interns} ${interns === 1 ? "intern" : "interns"}`}
               </button>
             </li>
@@ -280,7 +312,7 @@ function Office() {
         {view && <Counter state={view} />}
       </header>
       <main>
-        {inside && view ? <Project key={inside} state={view} onHire={() => setHiring(true)} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
+        {inside && view ? <Project key={inside} room={inside} state={view} onHire={() => setHiring(true)} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}

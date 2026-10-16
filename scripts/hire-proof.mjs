@@ -104,7 +104,7 @@ try {
   });
   const room = Object.values(s.rooms)[0];
   const { rooms } = layoutOffice(projectState(s, room.id), Math.floor(1440 / SCALE), Math.floor((await page.locator(".scene").evaluate((e) => e.clientHeight)) / SCALE));
-  const empty = rooms[0].desks.find((d) => !d.employee);
+  const empty = rooms[0].desks.find((d) => !d.employee && !d.table);
   const box = await page.locator(".scene canvas").boundingBox();
   const [x, y] = [(empty.x + 18) * SCALE, box.y + (empty.y + 40) * SCALE];
   // The scene finds its click target on a frame after the pointer arrives, so a move-and-click in one breath can miss.

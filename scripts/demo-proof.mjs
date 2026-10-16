@@ -84,8 +84,9 @@ try {
   assert.ok(one.every((e) => e.text.includes(", pixel-pet,")), "a project shows only its own employees");
 
   // Jump and the palette do nothing to a server that isn't there.
+  // The first in the roster is the PM, whose Jump is called Talk.
   await page.locator(".roster button").first().dispatchEvent("click");
-  await page.getByRole("button", { name: "Jump to terminal" }).click();
+  await page.getByRole("button", { name: "Talk", exact: true }).click();
   await page.getByText("Jump needs a live office").waitFor();
   await page.screenshot({ path: join(OUT, "demo-jump-note.png") });
   await page.keyboard.press("Escape");
