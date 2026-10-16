@@ -178,11 +178,12 @@ test("a hire into a team is <team>.<role>-<task> in its own worktree and reports
 test.each([
   [["lead", "lead-x", "checkout", BRIEF], 'name must be "lead-checkout"'],
   [["--team", "checkout", "designer", "designer-landing", "landing", BRIEF], 'name must be "checkout.designer-landing"'],
-  [["--team", "search", "designer", "search.designer-landing", "landing", BRIEF], 'team "search" has no lead running'],
+  [["--team", "search", "designer", "search.designer-landing", "landing", BRIEF], 'team "search" has no lead running in this repo'],
+  [["--team", "blog", "designer", "blog.designer-landing", "landing", BRIEF], 'team "blog" has no lead running in this repo'],
   [["--team", "checkout", "lead", "lead-checkout", "checkout", BRIEF], "only the PM hires leads"],
 ])("hire %j is refused", (args, message) => {
   const repo = repoDir();
-  const stub = stubClaude([bg("done", "lead-checkout", repo)]);
+  const stub = stubClaude([bg("done", "lead-checkout", repo), bg("done", "lead-blog", "/code/blog")]);
   const r = hire(stub, args, repo);
   expect(r.err).toContain(message);
   expect(stub.argv()).toBeNull();

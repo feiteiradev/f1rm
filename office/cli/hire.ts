@@ -89,7 +89,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
   const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
-  if (team && !live.some((s) => s.name === `lead-${team}`)) throw new Error(`team "${team}" has no lead running (lead-${team})`);
+  if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
   // One specialist per task, whatever the caps say: a second hire there would work the same branch.
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {

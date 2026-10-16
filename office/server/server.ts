@@ -16,6 +16,7 @@ const MAX_MESSAGE = 4000;
 // The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
+// ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher"]);
 export const INTERNS = 2;
