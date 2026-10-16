@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: install | uninstall | start | service | demo | edition | here | pm | hire
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -9,7 +9,7 @@ import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
-import { repoDir, roomName } from "../server/board.ts";
+import { roomName } from "../server/board.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
 const F1RM_DIR = join(process.env.HOME!, ".f1rm");
@@ -19,7 +19,7 @@ const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 const CREATED_FILE = join(F1RM_DIR, "created.json");
 // The running office's tokenized URL, so `f1rm start` can open an office that is already up.
 const URL_FILE = join(F1RM_DIR, "office-url");
-// The `f1rm` command `install` puts on PATH, so a terminal and the `/f1rm` skill both find this clone.
+// The `f1rm` command `install` puts on PATH, so a terminal finds this clone.
 const BIN = join(process.env.HOME!, ".local", "bin", "f1rm");
 const CLI_FILE = join(import.meta.dir, "f1rm.ts");
 const binScript = () => `#!/bin/sh\n# f1rm's command, written by \`f1rm install\`.\nexec "${process.execPath}" "${CLI_FILE}" "$@"\n`;
@@ -303,29 +303,10 @@ async function officeWithin(ms: number): Promise<string | null> {
   return null;
 }
 
-const HERE_USAGE = "/f1rm opens the office on this project, starting it if needed. /f1rm off stops it. /f1rm edition work|founder sets this project's edition. /f1rm pm opens this project's PM in a new iTerm tab.";
-
-/** What `/f1rm` runs, in the folder it was typed in. Prints one line, and never the office's token: it goes to the model. */
-async function here() {
-  const [what, arg] = process.argv.slice(3);
-  const cwd = process.cwd();
-  const room = machine.gitCommonDir(cwd) ?? cwd;
-  const name = roomName(room);
-  if (what === undefined) return console.log(await openHere(room, name));
-  if (what === "off") {
-    const running = existsSync(PLIST) || (await runningOffice()) !== null;
-    if (existsSync(PLIST)) stopService();
-    return console.log(running ? "Stopped the f1rm office. Your sessions keep working." : "The f1rm office wasn't running.");
-  }
-  if (what === "edition" && isEdition(arg)) {
-    writeEdition(editionFile(cwd), arg);
-    return console.log(`${name} is now a ${arg === "founder" ? "Founder" : "Work"} project.`);
-  }
-  if (what === "pm") {
-    await machine.startPmInIterm(repoDir(room));
-    return console.log(`Opened ${name}'s PM in a new iTerm tab.`);
-  }
-  console.log(HERE_USAGE);
+/** A bare `f1rm`, typed in a project's folder. Prints one line, and never the office's token. */
+async function open() {
+  const room = machine.gitCommonDir(process.cwd()) ?? process.cwd();
+  console.log(await openHere(room, roomName(room)));
 }
 
 async function openHere(room: string, name: string): Promise<string> {
@@ -417,13 +398,19 @@ const commands: Record<string, () => void | Promise<void>> = {
   service,
   demo,
   edition,
-  here,
+  "": open,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
 };
-const command = commands[process.argv[2] ?? ""];
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief>";
+const arg = process.argv[2] ?? "";
+if (["help", "-h", "--help"].includes(arg)) {
+  console.log(USAGE);
+  process.exit(0);
+}
+const command = commands[arg];
 if (!command) {
-  console.error("usage: f1rm install | uninstall | start | service [off] | serve | demo | edition [work|founder] | here [off | edition work|founder | pm] | pm [claude flags] | hire <role> <name> <task> <brief>");
+  console.error(USAGE);
   process.exit(1);
 }
 try {
