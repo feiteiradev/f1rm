@@ -159,7 +159,7 @@ test("the roster table names each hireable role with the commands `f1rm hire` lo
   }
 });
 
-test("research and security-review are slash commands: briefs start with them, no role invokes them as skills", () => {
+test("research and security-review are slash commands: --skills research and --level high bring them in, no role invokes them as skills", () => {
   const playbook = section("Roster and hiring playbook");
   for (const c of SLASH_ONLY) {
     expect(playbook).toContain(`\`/${c}\``);
@@ -169,6 +169,72 @@ test("research and security-review are slash commands: briefs start with them, n
     }
   }
   expect(playbook).toMatch(/brief of a hire starts with/i);
+  for (const s of ["`--skills research`", "`--level high`", "`--skills security-review` is refused", "never loaded at the start", "`--content`"]) expect(playbook).toContain(s);
+});
+
+// The skills the Workflows section names for each role, beyond its `skills:` list.
+const WORKFLOW_SKILLS: Record<string, string[]> = {
+  "frontend-dev": ["run", "design-pipeline"],
+  "backend-dev": ["mattpocock-skills:diagnosing-bugs"],
+  reviewer: ["security-review"],
+  researcher: ["research"],
+};
+const bare = (skill: string) => skill.split(":").pop()!;
+
+test("the Workflows section has an entry for every role, naming its skills, and every skill it names is in a role file or the roster", () => {
+  const flows = section("Workflows");
+  const entries = flows.split(/^- \*\*/m).slice(1);
+  for (const r of Object.keys(ROLES)) {
+    const entry = entries.find((e) => e.startsWith(`${r}**`));
+    expect(entry, `${r} has a Workflows entry`).toBeDefined();
+    for (const s of [...ROLES[r], ...(WORKFLOW_SKILLS[r] ?? [])]) expect(entry!, `${r} names ${s}`).toContain(bare(s));
+  }
+  const everything = [section("Roster and hiring playbook"), ...Object.keys(ROLES).map((r) => readFileSync(join(PLUGIN, "agents", `${r}.md`), "utf8"))].join("\n");
+  const named = [...flows.matchAll(/`\/?([a-z][a-z0-9-]*(?::[a-z0-9-]+)?)`/g)].map((m) => m[1]);
+  expect(named.length).toBeGreaterThan(15);
+  for (const s of named) expect(everything, `${s} is in a role file or the roster`).toContain(bare(s));
+  // The skills a role runs by hand are in its role file.
+  expect(role("frontend-dev").body).toContain("`run`");
+  expect(role("backend-dev").body).toContain("diagnosing-bugs");
+});
+
+test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permission, ESCALATE, f1rm letgo and the base-fails rule", () => {
+  const handoff = section("Handoff via SendMessage");
+  for (const s of ["exit code", "screenshot", "skills used", "~/.f1rm/evidence/<repo>/<task>/", "`BLOCKED <slug> permission`", "`ESCALATE <slug>`", "one `BLOCKED` message"]) expect(handoff).toContain(s);
+  const flow = section("Review and merge flow");
+  for (const s of ["fails on the base", "`ESCALATE <slug>`", "docs/research/"]) expect(flow).toContain(s);
+  expect(section("Teams")).toContain("`f1rm letgo");
+  expect(section("Who talks to whom")).toContain("`BLOCKED <slug> permission`");
+  expect(guidelines).toContain("Nobody pushes; the user pushes.");
+  const playbook = section("Roster and hiring playbook");
+  for (const s of ["same task goes to the same session", "`review-<task>`", "previous `DONE` report", "what the user must provide"]) expect(playbook).toContain(s);
+});
+
+test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
+  const gates = section("Gates");
+  for (const s of ["skill gate", "delegation gate", "boards, memory, evidence and scratch", "`f1rm:*`", "Load the skills", "security-review"]) expect(gates).toContain(s);
+  const cap = section("Cap rule");
+  expect(cap).toMatch(/lead.*tells? the PM/s);
+  expect(cap).toMatch(/PM.*tells? the user/s);
+});
+
+test("pm.md turns handed work into a board task, sends exploration to a Haiku Explore intern, sends permission blocks to the hire's desk, picks up first, and ends a milestone", () => {
+  const pm = role("pm").body;
+  for (const s of ["including a slash command", "Haiku Explore intern", "never run its command", "Pick up", "claude logs", "f1rm letgo", "close this session"]) expect(pm).toContain(s);
+  const lead = role("lead").body;
+  expect(lead).toContain("f1rm letgo");
+  expect(lead).toMatch(/cap.*Tell the PM/s);
+  expect(role("reviewer").body).toContain("only after main has moved");
+});
+
+test("both READMEs list f1rm letgo, the hire flags and the Workflows section", () => {
+  const readme = readFileSync(join(REPO, "README.md"), "utf8"), plugin = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  expect(readme).toMatch(/^\| `f1rm letgo` \|/m);
+  for (const text of [readme, plugin]) {
+    for (const s of ["--skills", "--level", "--content", "f1rm letgo", "Workflows"]) expect(text).toContain(s);
+  }
+  expect(readme).toContain("(plugin/skills/f1rm-guidelines/SKILL.md#workflows)");
+  expect(plugin).toContain("(skills/f1rm-guidelines/SKILL.md#workflows)");
 });
 
 test("a hire reports to the PM's name, which f1rm pm sets and the PM passes on", () => {

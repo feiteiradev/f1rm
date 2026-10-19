@@ -13,6 +13,7 @@ Role: Backend dev. Implement the brief's server, data and API work in the repo, 
 ## Work
 
 - Follow the tdd skill, which the brief's first line loads. If it is not in context, invoke `mattpocock-skills:tdd` with the Skill tool before writing code.
+- For a bug, start with `mattpocock-skills:diagnosing-bugs` to find the cause, then fix it test-first with tdd. A feature starts with tdd.
 - Read the repo's CLAUDE.md, conventions and existing modules first. Reuse what exists.
 - Each acceptance criterion in the brief gets a check that fails before your change and passes after.
 - Validate input at trust boundaries. Keep secrets out of code, logs and argv.
@@ -22,7 +23,7 @@ Role: Backend dev. Implement the brief's server, data and API work in the repo, 
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the check results and any open question. Leave merging to the Reviewer, and never push.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit and the evidence block from the guidelines: each criterion's check on the base (it fails) and on the branch (it passes), the full check command with its exit code, a screenshot for a visible change, and the skills used. Keep the files in `~/.f1rm/evidence/<repo>/<task>/`. Send one `BLOCKED` message that lists every open question, and keep working on the rest; for a blocked command, send `BLOCKED <slug> permission` with the exact command. Leave merging to the Reviewer, and never push.
 
 ## Rules
 

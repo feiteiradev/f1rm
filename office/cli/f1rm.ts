@@ -361,7 +361,7 @@ const EDITION_LINE: Record<Edition, string> = {
   founder: "This is a Founder project: follow the founder playbook in the guidelines.",
 };
 const pmPrompt = (name: string, edition: Edition) =>
-  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. ${EDITION_LINE[edition]} I am about to describe work for this repo. Open the interview now by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
+  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. ${EDITION_LINE[edition]} First pick up: read this repo's board and \`claude agents --json\`, run \`claude logs <id>\` for each hire on a \`doing\` or \`review\` row, update the rows, and tell me where things were left; with no board, skip this. Then open the interview by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
 
 /** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
 function edition() {

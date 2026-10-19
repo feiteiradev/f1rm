@@ -362,6 +362,14 @@ test("the PM's first prompt gives its session name, after the slash command", ()
   expect(prompt).toContain("Your session name is pm-shop.");
 });
 
+test("the PM's first prompt asks it to pick up from the board and the live sessions before the interview", () => {
+  const stub = stubClaude();
+  pmIn(repoDir("shop"), {}, stub);
+  const prompt = stub.args()[4];
+  for (const s of ["claude agents --json", "claude logs", "`doing` or `review`"]) expect(prompt).toContain(s);
+  expect(prompt.indexOf("claude agents --json")).toBeLessThan(prompt.indexOf("interview"));
+});
+
 test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
   const repo = repoDir("shop");
   Bun.spawnSync(["git", "init", "-q", repo]);

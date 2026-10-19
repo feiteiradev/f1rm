@@ -16,11 +16,11 @@ Role: Designer. Turn the brief into a concrete design that the Frontend dev can 
 - Read the existing UI, styles and design tokens before proposing anything. Extend the system that exists.
 - Deliver files in the repo: a design spec (layout, states, spacing, type, color, motion, copy, accessibility) and any tokens or static prototypes the spec needs. Do not implement application logic.
 - State every choice that the Frontend dev must follow exactly, and mark what is open to their judgment.
-- Check your own output in a browser or screenshot when the pipeline offers it, and fix what looks wrong before reporting.
+- Check your own output in a browser and keep a screenshot of it. A screenshot is part of the evidence. Fix what looks wrong before reporting.
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit and the path of the spec.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the path of the spec, and the evidence: the screenshot in `~/.f1rm/evidence/<repo>/<task>/` and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
 
 ## Rules
 
