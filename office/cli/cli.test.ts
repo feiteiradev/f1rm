@@ -544,7 +544,7 @@ test("a bare f1rm on a fresh machine installs the hooks, starts the background o
   const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.code).toBe(0);
-  expect(r.out).toBe("Opened the f1rm office on shop (installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once; started it in the background).");
+  expect(r.out).toBe("Opened the f1rm office on shop (installed f1rm's hooks after backing up your settings; restart Claude Code sessions that are already open so they appear; started it in the background).");
   expect(r.out).not.toContain("secret-token");
   expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toContain("/ingest");
   expect(stub.calls().at(-1)).toBe(`open ${url}#/project/${encodeURIComponent(folder)}`);
@@ -571,7 +571,7 @@ test("help prints the usage line and exits 0; an unknown command, here included,
     expect(r.code).toBe(0);
     expect(r.out).toStartWith("usage: f1rm | install | uninstall");
   }
-  for (const arg of ["here", "nonsense"]) {
+  for (const arg of ["here", "nonsense", "toString", "constructor", "__proto__"]) {
     const r = await f1rmIn(folder, home, stub.bin, arg);
     expect(r.code).toBe(1);
     expect(r.err).toStartWith("usage: f1rm | install | uninstall");

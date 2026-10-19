@@ -312,15 +312,12 @@ async function officeWithin(ms: number): Promise<string | null> {
 /** A bare `f1rm`, typed in a project's folder. Prints one line, and never the office's token. */
 async function open() {
   const room = machine.gitCommonDir(process.cwd()) ?? process.cwd();
-  console.log(await openHere(room, roomName(room)));
-}
-
-async function openHere(room: string, name: string): Promise<string> {
+  const name = roomName(room);
   const notes: string[] = [];
   const settings = readSettings();
   if (!installed(settings)) {
     install();
-    notes.push("installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once");
+    notes.push("installed f1rm's hooks after backing up your settings; restart Claude Code sessions that are already open so they appear");
   } else if (outdated(settings)) {
     install();
     notes.push("updated f1rm's hooks, so a stopped office no longer shows hook errors");
@@ -329,16 +326,16 @@ async function openHere(room: string, name: string): Promise<string> {
   if (!url) {
     startService();
     url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
-    if (!url) return `The f1rm office didn't start; see ${join(F1RM_DIR, "office.log")}.`;
+    if (!url) return console.log(`The f1rm office didn't start; see ${join(F1RM_DIR, "office.log")}.`);
     notes.push("started it in the background");
   }
   // An office page already open moves to this project; only with none open does a new tab open on it.
   const shown = await fetch(new URL("show", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) })
     .then(async (r) => r.ok && ((await r.json()) as { pages: number }).pages > 0)
     .catch(() => false);
-  if (shown) return `Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
+  if (shown) return console.log(`Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
   Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
-  return `Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`;
+  console.log(`Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
 }
 
 // The recorded office on its own static build: no hooks, no database, no session of yours involved.
@@ -421,7 +418,7 @@ if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);
   process.exit(0);
 }
-const command = commands[arg];
+const command = Object.hasOwn(commands, arg) ? commands[arg] : undefined;
 if (!command) {
   console.error(USAGE);
   process.exit(1);
