@@ -66,9 +66,12 @@ let pmFails = "";
 let spawned: { argv: string[]; cwd: string }[] = [];
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
+let afterEachRestore = () => {};
 let server: ReturnType<typeof startServer>;
 let sockets: WebSocket[] = [];
 afterEach(() => {
+  afterEachRestore();
+  afterEachRestore = () => {};
   calls.length = 0;
   openTabs = new Set();
   backgroundIds = {};
@@ -90,8 +93,8 @@ afterEach(() => {
 const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
-function start(repos?: Record<string, string>, approvalTimeoutMs?: number) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
+function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string) {
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -1126,6 +1129,95 @@ test("only the PM, a lead and the user's own sessions run `f1rm hire`; a special
   }
   expect((await held(await run("v", "f1rm hire designer designer-a a b", { agent_id: "agent-1", agent_type: "Explore" })))?.permissionDecision).toBe("deny");
   expect(await held(await run("d", "git status && echo f1rm is hiring"))).toBeNull();
+});
+
+test("`f1rm hire` is held only as a command; a command that merely mentions it passes", async () => {
+  await delegationOffice();
+  const run = async (command: string) => (await held(await hook(preToolUse("d", "Bash", { command }))))?.permissionDecision ?? null;
+  for (const command of ["f1rm hire designer a b c", "cd x && f1rm hire designer a b c", "ls; f1rm hire designer a b c", "true || f1rm hire designer a b c", "echo hi | f1rm hire designer a b c", "(f1rm hire designer a b c)", "echo $(f1rm hire designer a b c)", "echo hi\nf1rm hire designer a b c", "bun office/cli/f1rm.ts hire designer a b c", "F1RM_X=1 /usr/local/bin/f1rm hire designer a b c"]) {
+    expect([command, await run(command)]).toEqual([command, "deny"]);
+  }
+  for (const command of ['git commit -m "mentions f1rm hire"', 'grep "f1rm hire" README.md', "echo 'ls; f1rm hire designer'", "cat docs/f1rm.ts", "f1rm hired"]) {
+    expect([command, await run(command)]).toEqual([command, null]);
+  }
+});
+
+// A PM, a lead, a designer and a freelancer, to see which of the delegation rules reach whom.
+async function delegationOffice(boardsDir?: string) {
+  start(undefined, undefined, boardsDir);
+  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["f", undefined]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), prompt: "go", session_title: `${id}-title`, ...(type && { agent_type: type }) });
+  }
+  await office((s) => Object.keys(s.employees).length === 4);
+}
+
+test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, memory, evidence and scratch; others write anywhere", async () => {
+  await delegationOffice("/home/me/.f1rm/boards");
+  const home = process.env.HOME;
+  process.env.HOME = "/home/me";
+  afterEachRestore = () => (process.env.HOME = home);
+  const write = async (id: string, tool: string, file_path: string) => held(await hook(preToolUse(id, tool, tool === "NotebookEdit" ? { notebook_path: file_path } : { file_path })));
+  const allowed = ["/home/me/.f1rm/boards/shop.md", "/home/me/.claude/agent-memory/pm/notes.md", "/home/me/.f1rm/evidence/a/shot.png", "/private/tmp/claude-501/x/scratchpad/n.md", "/tmp/claude-501/n.md"];
+  const refused = ["/code/shop/src/login.ts", "/home/me/.f1rm/boards/../events.db", "/home/me/.claude/agent-memory-evil/x.md", "src/login.ts"];
+  for (const id of ["p", "l"]) {
+    for (const tool of ["Write", "Edit", "NotebookEdit"]) {
+      for (const file of allowed) expect([id, tool, file, await write(id, tool, file)]).toEqual([id, tool, file, null]);
+      for (const file of refused) {
+        const out = await write(id, tool, file);
+        expect([id, tool, file, out?.permissionDecision]).toEqual([id, tool, file, "deny"]);
+        expect(out.permissionDecisionReason).toBe("The PM and leads write only boards, memory, evidence and scratch files. Put this work on the board and hire for it.");
+      }
+    }
+  }
+  for (const id of ["d", "f"]) expect(await write(id, "Write", "/code/shop/src/login.ts")).toBeNull();
+});
+
+test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {
+  await delegationOffice();
+  const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
+  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)"];
+  const readOnly = ["git log --oneline", "git status", "git diff HEAD", "git show abc", "git rev-parse HEAD", "git worktree list", "git -C x log", "git log --grep 'git push; git merge'", "echo git push", "gh pr view 3"];
+  for (const id of ["p", "l"]) {
+    for (const command of landing) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toBe("Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
+    }
+    for (const command of readOnly) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  }
+  for (const id of ["d", "f"]) for (const command of landing) expect(await bash(id, command)).toBeNull();
+});
+
+test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordinary intern, and a specialist's call, are not", async () => {
+  await delegationOffice();
+  const call = async (id: string, tool: string, subagent_type: string) => held(await hook(preToolUse(id, tool, { description: "x", prompt: "x", subagent_type })));
+  for (const id of ["p", "l"]) {
+    for (const tool of ["Agent", "Task"]) {
+      const out = await call(id, tool, "f1rm:backend-dev");
+      expect([id, tool, out?.permissionDecision]).toEqual([id, tool, "deny"]);
+      expect(out.permissionDecisionReason).toBe("A role is hired with `f1rm hire`, never started as an intern.");
+    }
+  }
+  expect(await call("p", "Agent", "Explore")).toBeNull();
+  expect(await call("l", "Task", "general-purpose")).toBeNull();
+  expect(await call("d", "Agent", "f1rm:backend-dev")).toBeNull();
+});
+
+test("a refusal is logged with the role, title, tool and rule, and never the command or the file", async () => {
+  await delegationOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await hook(preToolUse("p", "Bash", { command: "git push SECRET-REMOTE" }));
+    await hook(preToolUse("l", "Write", { file_path: "/code/shop/SECRET-FILE.ts", content: "SECRET-BODY" }));
+    await hook(preToolUse("p", "Agent", { description: "x", prompt: "SECRET-PROMPT", subagent_type: "f1rm:designer" }));
+    await hook(preToolUse("d", "Bash", { command: "f1rm hire designer SECRET-NAME" }));
+    await hook(preToolUse("p", "Bash", { command: "git log" }));
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual(["refused pm p-title Bash landing", "refused lead l-title Write write", "refused pm p-title Agent intern-role", "refused designer d-title Bash hire"]);
 });
 
 test("a company employee runs at most 2 interns at once, counting calls not started yet; a freelancer is never held", async () => {

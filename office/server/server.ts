@@ -2,7 +2,7 @@
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
-import { basename, dirname, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
 import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
@@ -19,7 +19,31 @@ const MAX_MESSAGE = 4000;
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
-const HIRE_COMMAND = /\bf1rm(?:\.ts)?\s+hire\b/;
+// `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
+// The PM and the leads coordinate: they write boards, memory, evidence and scratch files, and leave code and landing to others.
+const COORDINATORS = new Set(["pm", "lead"]);
+const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
+const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick"]);
+const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes and `bun`. */
+// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen.
+const simpleCommands = (command: string) => {
+  const out: string[][] = [[]];
+  for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
+  return out.map((words) => {
+    let i = 0;
+    while (i < words.length && (/^\w+=/.test(words[i]) || words[i] === "bun")) i++;
+    return words.slice(i);
+  });
+};
+const runsHire = ([program, sub]: string[]) => ["f1rm", "f1rm.ts"].includes(basename(program ?? "")) && sub === "hire";
+/** The git subcommand a simple command runs, past global options such as `-C <dir>`. */
+const gitSubcommand = ([program, ...args]: string[]) => {
+  if (basename(program ?? "") !== "git") return null;
+  let i = 0;
+  while (i < args.length && args[i].startsWith("-")) i += GIT_OPTIONS_WITH_VALUE.has(args[i]) ? 2 : 1;
+  return args[i] ?? null;
+};
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
@@ -103,17 +127,33 @@ export function startServer({
     const role = state.employees[sessionId]?.role;
     if (!role) return null;
     const tool = String(payload.tool_name ?? "");
-    if (tool === "Bash" && SPECIALISTS.has(role) && HIRE_COMMAND.test(String(payload.tool_input?.command ?? ""))) {
-      return "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.";
+    const input = payload.tool_input ?? {};
+    // Each refusal is logged (stdout is ~/.f1rm/office.log) with who, which tool and which rule, never the command or the contents.
+    const refuse = (rule: string, why: string) => (console.log(`refused ${role} ${state.employees[sessionId]?.title ?? sessionId} ${tool} ${rule}`), why);
+    if (tool === "Bash" && SPECIALISTS.has(role) && simpleCommands(String(input.command ?? "")).some(runsHire)) {
+      return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
+    }
+    if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
+      const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
+      const home = process.env.HOME ?? "";
+      const dirs = [boardsDir, join(home, ".claude", "agent-memory"), join(home, ".f1rm", "evidence")];
+      const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
+      if (!dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
+        return refuse("write", "The PM and leads write only boards, memory, evidence and scratch files. Put this work on the board and hire for it.");
+      }
+    }
+    if (COORDINATORS.has(role) && tool === "Bash" && simpleCommands(String(input.command ?? "")).some((w) => LANDING.has(gitSubcommand(w) ?? ""))) {
+      return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
-      return "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.";
+      return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
     }
     if (tool === "Agent" || tool === "Task") {
+      if (COORDINATORS.has(role) && String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
       const now = clock();
       const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
       const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;
-      if (running + pending.length >= INTERNS) return `You already have ${INTERNS} interns working, the most an employee runs at once. Wait for one to finish, or do this step yourself.`;
+      if (running + pending.length >= INTERNS) return refuse("interns", `You already have ${INTERNS} interns working, the most an employee runs at once. Wait for one to finish, or do this step yourself.`);
       pendingInterns.set(sessionId, [...pending, now]);
     }
     return null;
