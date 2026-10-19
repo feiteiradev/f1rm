@@ -27,15 +27,16 @@ export const repoOf = (cwd: string) => cwd.split("/.claude/worktrees/")[0];
 /** Lets a session go, then removes its worktree and branch if the branch is merged into the base. Throws if it can't be let go or cleaned up. */
 export async function letGoHire(m: Pick<M, "letGo" | "mergedBranch" | "removeWorktree">, s: Session, repo: string): Promise<string> {
   const hire = hireTask(s.name);
-  const branch = hire && !hire.reviewer ? `worktree-${hire.task}` : null;
+  const task = hire && !hire.reviewer ? hire.task : null;
+  const branch = task && `worktree-${task}`;
   const merged = !!branch && m.mergedBranch(repo, branch);
   // Merged work is already in the base, so `claude rm` may discard the worktree's copy of it (see machine.letGo).
   await m.letGo(s.id, merged ? { discardIn: repo } : {});
   // A Reviewer works in the main checkout and a lead has no branch: nothing of theirs to remove.
-  if (!branch) return `${s.name}: let go`;
+  if (!task) return `${s.name}: let go`;
   if (!merged) return `${s.name}: let go, kept ${branch} and its worktree: not merged into the base branch`;
   try {
-    m.removeWorktree(repo, hire.task);
+    m.removeWorktree(repo, task);
   } catch (err) {
     // ponytail: git refuses a worktree with uncommitted files and it is never forced; the person decides what to do with them.
     return `${s.name}: let go, kept ${branch} and its worktree: ${(err as Error).message}`;
