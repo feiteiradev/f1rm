@@ -43,7 +43,7 @@ The office keeps running after you close Claude Code and starts again at login, 
 | `f1rm` | Opens the office on this project: installs or updates the hooks if needed, starts the background office if it isn't running, and shows the project in your office tab, or opens one. Prints one line. |
 | `f1rm install` | Adds f1rm's hooks to `~/.claude/settings.json`, after backing it up, and the `f1rm` command to `~/.local/bin`. |
 | `f1rm uninstall` | Removes exactly what `install` added, the `f1rm` command included. Keeps your event log, boards and editions in `~/.f1rm/`. |
-| `f1rm start` | Opens the office in your browser. If the background office isn't running, runs one in this terminal until you stop it. |
+| `f1rm start` | Opens the office in your browser and exits. If the office isn't running, starts the background office first, as `f1rm service` does. `f1rm serve` runs one in this terminal instead, until you stop it. |
 | `f1rm service` | Runs the office in the background and at login. Run it again to restart it on new code. |
 | `f1rm service off` | Stops the background office and removes it from login. Your sessions keep working; the hooks just go quiet. |
 | `f1rm edition` | Prints this repo's edition. `f1rm edition work` or `f1rm edition founder` sets it. |

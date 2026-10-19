@@ -238,11 +238,16 @@ async function runningOffice(): Promise<string | null> {
   return up ? url : null;
 }
 
-/** Opens the office that is already running (the background service), or runs one here. */
+/** Opens the running office, starting the background one first when none is up, and exits. `f1rm serve` runs one in this terminal. */
 async function start() {
-  const running = await runningOffice();
-  if (running) console.log(`f1rm office: ${running}`);
-  Bun.spawn(["open", running ?? serve()]);
+  let url = await runningOffice();
+  if (!url) {
+    startService();
+    url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
+    if (!url) throw new Error(`the office didn't start; see ${join(F1RM_DIR, "office.log")}`);
+  }
+  console.log(`f1rm office: ${url}`);
+  Bun.spawn(["open", url]);
 }
 
 const launchctl = (...args: string[]) => Bun.spawnSync(["launchctl", ...args], { stdout: "ignore", stderr: "ignore" }).exitCode;

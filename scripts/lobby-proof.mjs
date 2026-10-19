@@ -1,4 +1,4 @@
-// Drives the real `f1rm start` (temp HOME, real git repos) and the built page in headless Chromium, and checks the
+// Drives the real `f1rm serve` (temp HOME, real git repos) and the built page in headless Chromium, and checks the
 // lobby acceptance criteria. Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/lobby-proof.mjs
 // playwright-core is deliberately not a dependency of the repo.
@@ -32,7 +32,7 @@ const shop = repo("my shop"), blog = repo("blog"), docs = repo("docs"), atlas = 
 
 const cli = join(import.meta.dir, "../office/cli/f1rm.ts");
 assert.equal(Bun.spawnSync(["bun", cli, "install"], { env }).exitCode, 0);
-const office = Bun.spawn(["bun", cli, "start"], { env, stdout: "pipe", stderr: "pipe" });
+const office = Bun.spawn(["bun", cli, "serve"], { env, stdout: "pipe", stderr: "pipe" });
 const stdout = office.stdout.getReader();
 let url = "";
 while (!url) url = /f1rm office: (\S+)/.exec(new TextDecoder().decode((await stdout.read()).value))?.[1] ?? "";

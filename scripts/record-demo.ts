@@ -1,4 +1,4 @@
-// Records the demo fixture: runs the real `f1rm start` against a temporary HOME and throwaway git repos,
+// Records the demo fixture: runs the real `f1rm serve` against a temporary HOME and throwaway git repos,
 // posts the scripted session to it, then scrubs the server's own event log into office/demo/fixture.json.
 //   bun scripts/record-demo.ts
 import { Database } from "bun:sqlite";
@@ -15,9 +15,6 @@ const FIXTURE = join(import.meta.dir, "../office/demo/fixture.json");
 const base = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-demo-")));
 const home = join(base, "home");
 mkdirSync(join(home, ".claude"), { recursive: true });
-mkdirSync(join(base, "bin"));
-// `f1rm start` opens the browser; here that must do nothing.
-writeFileSync(join(base, "bin", "open"), "#!/bin/sh\n", { mode: 0o755 });
 
 const git = (cwd: string, ...args: string[]) => {
   const r = Bun.spawnSync(["git", "-c", "user.name=demo", "-c", "user.email=demo@example.com", ...args], { cwd });
@@ -43,10 +40,10 @@ const probe = Bun.serve({ port: 0, fetch: () => new Response() });
 const port = probe.port!;
 await probe.stop(true);
 
-const env = { ...process.env, HOME: home, F1RM_PORT: String(port), PATH: `${join(base, "bin")}:${process.env.PATH}` };
+const env = { ...process.env, HOME: home, F1RM_PORT: String(port) };
 const install = Bun.spawnSync(["bun", CLI, "install"], { env });
 if (!install.success) throw new Error(`install failed: ${install.stderr}`);
-const server = Bun.spawn(["bun", CLI, "start"], { env, stdout: "pipe", stderr: "inherit" });
+const server = Bun.spawn(["bun", CLI, "serve"], { env, stdout: "pipe", stderr: "inherit" });
 await server.stdout.getReader().read(); // the office URL line: the server is up
 
 try {

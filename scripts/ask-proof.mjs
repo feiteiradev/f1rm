@@ -1,4 +1,4 @@
-// Live proof of Ask: a real Haiku session holds a codeword; the real `f1rm start` (temp HOME) serves the office;
+// Live proof of Ask: a real Haiku session holds a codeword; the real `f1rm serve` (temp HOME) serves the office;
 // headless Chrome asks it through the panel. Checks the answer streams in, the target's transcript is
 // byte-identical afterwards, and the fork never becomes an employee or leaves a transcript.
 // Run `bun run build` first, then:
@@ -46,7 +46,7 @@ const hooks = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8
 const targetSettings = join(tmp, "target-settings.json");
 writeFileSync(targetSettings, JSON.stringify({ hooks }));
 
-const server = cli("start");
+const server = cli("serve");
 let url, target;
 const cleanup = () => {
   target?.kill();
@@ -65,7 +65,7 @@ try {
     url = /f1rm office: (\S+)/.exec(seen)?.[1];
     if (url) break;
   }
-  assert.ok(url, "f1rm start printed the office URL");
+  assert.ok(url, "f1rm serve printed the office URL");
 
   const word = `MANGO-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const sid = randomUUID();

@@ -1,5 +1,5 @@
 // Live proof of raised-hand approvals: a real Haiku interactive session (in a PTY, default permission mode) asks to run
-// `touch`; the real `f1rm start` (temp HOME, short approval timeout) holds its PermissionRequest hook; headless Chrome
+// `touch`; the real `f1rm serve` (temp HOME, short approval timeout) holds its PermissionRequest hook; headless Chrome
 // approves it, denies it, or leaves it to time out from the top-bar tray. Checks that the file was created only when it
 // should be, that after the timeout the terminal's own prompt still works, and that with the office stopped the session never waits on it.
 // Run `bun run build` first, then:
@@ -64,7 +64,7 @@ writeFileSync(targetSettings, JSON.stringify({ hooks }));
 const seen = () => (existsSync(timing) ? readFileSync(timing, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 const count = (name) => seen().filter((r) => r.p.hook_event_name === name && r.p.session_id === sid).length;
 
-const server = cli("start");
+const server = cli("serve");
 let url, target, raw = "", trusted = false, sid;
 const cleanup = () => {
   target?.kill();
@@ -89,7 +89,7 @@ try {
     url = /f1rm office: (\S+)/.exec(out)?.[1];
     if (url) break;
   }
-  assert.ok(url, "f1rm start printed the office URL");
+  assert.ok(url, "f1rm serve printed the office URL");
   const origin = new URL(url).origin;
 
   sid = randomUUID();

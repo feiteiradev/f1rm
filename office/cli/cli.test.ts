@@ -146,10 +146,10 @@ test("an older install's http hooks, with or without the messaging token, become
   expect(settingsOf(home)).toEqual(userSettings);
 });
 
-test("start refuses an approval timeout the installed permission hook would not outlast", () => {
+test("serve refuses an approval timeout the installed permission hook would not outlast", () => {
   const home = tempHome();
   f1rm(home, "install");
-  const refused = Bun.spawnSync(["bun", CLI, "start"], { env: { ...process.env, HOME: home, F1RM_APPROVAL_TIMEOUT: String(2 * DEFAULT_TIMEOUT_S) }, timeout: 5000 });
+  const refused = Bun.spawnSync(["bun", CLI, "serve"], { env: { ...process.env, HOME: home, F1RM_APPROVAL_TIMEOUT: String(2 * DEFAULT_TIMEOUT_S) }, timeout: 5000 });
   expect(refused.exitCode).toBe(1);
   expect(refused.stderr.toString()).toContain("F1RM_APPROVAL_TIMEOUT must be shorter");
 });
@@ -197,7 +197,7 @@ test("install and uninstall work when there are no settings yet", () => {
   expect(settingsOf(home)).toEqual({});
 });
 
-test("start serves the office on loopback and opens its URL with a fresh UI token", async () => {
+test("serve runs the office on loopback with a fresh UI token", async () => {
   const home = tempHome();
   const probe = Bun.serve({ port: 0, fetch: () => new Response() });
   const port = probe.port;
@@ -205,25 +205,17 @@ test("start serves the office on loopback and opens its URL with a fresh UI toke
   Bun.spawnSync(["bun", CLI, "install"], { env: { ...process.env, HOME: home, F1RM_PORT: String(port) } });
   const handlers = f1rmHandlers(settingsOf(home));
 
-  // a stub `open` first on PATH records the URL instead of opening a browser
-  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
-  writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$@" >> "${bin}/open.log"\n`, { mode: 0o755 });
-  const proc = Bun.spawn(["bun", CLI, "start"], {
-    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
-    stdout: "pipe",
-  });
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe" });
   try {
     const reader = proc.stdout.getReader();
     let out = "";
     while (!/http:\/\/\S+/.test(out)) {
       const { value, done } = await reader.read();
-      if (done) throw new Error("start exited: " + out);
+      if (done) throw new Error("serve exited: " + out);
       out += new TextDecoder().decode(value);
     }
     const url = out.match(/http:\/\/\S+/)![0];
     expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/[\\w-]{32,}/$`));
-    for (let i = 0; i < 50 && !existsSync(join(bin, "open.log")); i++) await Bun.sleep(20);
-    expect(readFileSync(join(bin, "open.log"), "utf8").trim()).toBe(url);
 
     // Fire the installed hooks the way Claude Code does, from a session in iTerm2,
     // and watch them reach the office that URL shows.
@@ -465,6 +457,23 @@ test("start opens the office that is already running instead of starting another
   expect(out.trim()).toBe(`f1rm office: ${url}`);
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
+
+test("start with no office running starts the background office, opens it, and exits", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  const url = `http://127.0.0.1:${office.port}/tok/`;
+  Bun.spawnSync(["bun", CLI, "install"], { env: { ...process.env, HOME: home, F1RM_PORT: String(office.port) } });
+  // launchd loading the office: the office writes its URL once it is up.
+  writeFileSync(join(stub.bin, "launchctl"), `#!/bin/sh\necho "launchctl $@" >> "${stub.bin}/calls.log"\n[ "$1" = bootstrap ] && printf '%s' '${url}' > "${home}/.f1rm/office-url"\nexit 0\n`, { mode: 0o755 });
+  const proc = Bun.spawn(["bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", timeout: 8000 });
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  office.stop(true);
+  expect(code).toBe(0);
+  expect(out.trim()).toBe(`f1rm office: ${url}`);
+  expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(1);
+  expect(stub.calls().at(-1)).toBe(`open ${url}`);
+}, 10_000);
 
 test("uninstall keeps the event log and the PM's boards", () => {
   const home = tempHome();
