@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "./server.ts";
+import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
 import { machine } from "./machine.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -1353,4 +1354,74 @@ test("the safety net starts the wait over when a hire works again, and keeps wha
   expect(calls).toEqual(["letgo d1"]); // tried once; it threw, so no worktree or branch was removed
   await Bun.sleep(400);
   expect(calls).toEqual(["letgo d1"]); // and not again every tick
+});
+
+// The skill gate: a hire is held until it loads the skills its first prompt names.
+const hired = (id: string, prompt: string, agent_type = "f1rm:backend-dev") => hook({ ...common(id, "UserPromptSubmit"), prompt, agent_type, session_title: `${id}-title` });
+const skillLoaded = (id: string, skill: string, hook_event_name = "PostToolUse") => hook({ ...common(id, hook_event_name), tool_name: "Skill", tool_input: { skill }, tool_use_id: "toolu_2" });
+const tryTool = async (id: string, tool: string, input: object = {}) => (await held(await hook(preToolUse(id, tool, input))))?.permissionDecision ?? null;
+
+test("a hire whose prompt names skills is refused every tool but the reading ones until each Skill call succeeds", async () => {
+  start();
+  await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
+  const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
+  expect(out.permissionDecision).toBe("deny");
+  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to.");
+  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
+  for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
+
+  await skillLoaded("h", "code-review"); // the part after the last ":" matches
+  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If");
+  await skillLoaded("h", "impeccable:impeccable");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBeNull();
+});
+
+test("a failed Skill call does not count as loaded", async () => {
+  start();
+  await hired("h", `/tdd${LOAD_FIRST}impeccable.`);
+  await skillLoaded("h", "impeccable", "PostToolUseFailure");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBe("deny");
+  await skillLoaded("h", "impeccable");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
+});
+
+test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
+  start();
+  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await skillLoaded("r", "ponytail:ponytail-review");
+  const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
+  const out = await send("APPROVED shop-1");
+  expect(out.permissionDecision).toBe("deny");
+  expect(out.permissionDecisionReason).toBe("Run security-review with the Skill tool on the merge before you send APPROVED.");
+  expect(await send("CHANGES shop-1: fix x")).toBeNull();
+  expect(await tryTool("r", "Bash", { command: "git merge --no-ff x" })).toBeNull();
+  await skillLoaded("r", "security-review", "PostToolUseFailure");
+  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
+  await skillLoaded("r", "security-review");
+  expect(await send("APPROVED shop-1")).toBeNull();
+});
+
+test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {
+  start();
+  await hired("p", "Plan the work. Before you start, nothing.", "f1rm:pm");
+  await hook({ ...common("f", "UserPromptSubmit"), prompt: `${LOAD_FIRST}impeccable.` }); // the sentence, from a session that is not a company employee
+  await hired("m", "/code-review medium", "f1rm:reviewer");
+  for (const id of ["p", "f", "m"]) {
+    expect(await tryTool(id, "Bash", { command: "ls" })).toBeNull();
+    expect(await tryTool(id, "SendMessage", { message: "APPROVED x" })).toBeNull();
+  }
+});
+
+test("the prompt text never reaches the events table", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, dbPath });
+  await hired("h", `/tdd${LOAD_FIRST}impeccable. SECRET-BRIEF`);
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(dbPath, { readonly: true });
+  const rows = (db.query("SELECT event FROM events").all() as { event: string }[]).map((r) => r.event).join("\n");
+  db.close();
+  expect(rows).toContain("UserPromptSubmit");
+  expect(rows).not.toContain("SECRET-BRIEF");
+  expect(rows).not.toContain("Before you start");
 });

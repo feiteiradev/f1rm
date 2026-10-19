@@ -18,8 +18,9 @@ const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
 const SLASH_ONLY = ["research"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
-// The skill gate holds the APPROVED message on this exact sentence.
-const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
+// The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
+export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
+export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
 const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
@@ -132,7 +133,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const slash = added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = slash ? [slash, ...own, ...added.filter((s) => s !== slash)] : [...own, ...added];
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"}` : first;
-  const more = (rest.length ? ` Before you start, load these with the Skill tool: ${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
+  const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself, where `f1rm hire` runs.

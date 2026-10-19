@@ -9,7 +9,7 @@ import { isEdition, projectFile, readEdition, writeEdition, type Edition } from 
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
-import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
+import { CAP, HireRefused, LOAD_FIRST, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
 import { hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
@@ -21,7 +21,10 @@ const MAX_MESSAGE = 4000;
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 // `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
 // The PM and the leads coordinate: they write boards, memory, evidence and scratch files, and leave code and landing to others.
-const COORDINATORS = new Set(["pm", "lead"]);
+// While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
+const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
+const bare = (skill: string) => skill.split(":").pop();
+const COORDINATORS =new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick"]);
 const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
@@ -122,6 +125,9 @@ export function startServer({
   let state = emptyOffice();
   // Agent calls let through and not started yet, by session: parallel calls all reach PreToolUse before any SubagentStart.
   const pendingInterns = new Map<string, number[]>();
+  // The skills a hire's first prompt names, and the ones its Skill calls have loaded, by session. The prompt itself is never kept.
+  // ponytail: in memory, so an office restart empties it and the gate fails open; persist it if hires outlive restarts in practice.
+  const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
   /** Why the company's rules stop this tool call, or null to let it run. */
   function refusal(sessionId: string, payload: Record<string, any>): string | null {
     const role = state.employees[sessionId]?.role;
@@ -130,6 +136,15 @@ export function startServer({
     const input = payload.tool_input ?? {};
     // Each refusal is logged (stdout is ~/.f1rm/office.log) with who, which tool and which rule, never the command or the contents.
     const refuse = (rule: string, why: string) => (console.log(`refused ${role} ${state.employees[sessionId]?.title ?? sessionId} ${tool} ${rule}`), why);
+    const gate = skillGates.get(sessionId);
+    if (gate) {
+      const has = (name: string) => [...gate.loaded].some((l) => bare(l) === bare(name));
+      const missing = gate.required.filter((r) => !has(r));
+      if (missing.length && !READING.has(tool)) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to.`);
+      if (gate.security && !has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
+        return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
+      }
+    }
     if (tool === "Bash" && SPECIALISTS.has(role) && simpleCommands(String(input.command ?? "")).some(runsHire)) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
     }
@@ -229,6 +244,15 @@ export function startServer({
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
+          // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one.
+          if (event.kind === "UserPromptSubmit" && state.employees[event.sessionId]?.role) {
+            const prompt = String(payload.prompt ?? "");
+            const at = prompt.indexOf(LOAD_FIRST);
+            const required = at < 0 ? [] : prompt.slice(at + LOAD_FIRST.length).split(/\.(?:\s|$)/)[0].split(",").map((s) => s.trim()).filter(Boolean);
+            const security = prompt.includes(SECURITY);
+            if (required.length || security) skillGates.set(event.sessionId, { required, security, loaded: new Set() });
+          }
+          if (event.kind === "PostToolUse" && payload.tool_name === "Skill" && !payload.agent_id) skillGates.get(event.sessionId)?.loaded.add(String(payload.tool_input?.skill ?? ""));
           if (event.kind === "PreToolUse") {
             const why = refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
