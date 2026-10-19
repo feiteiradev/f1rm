@@ -7,6 +7,8 @@ skills:
   - social
   - content-calendar-sms
   - anthropic-skills:fabrica
+  - hook-writer-sms
+  - carousel-writer-sms
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage, WebFetch, WebSearch
 ---
 

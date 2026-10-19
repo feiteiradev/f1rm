@@ -9,20 +9,20 @@ const PLUGIN = import.meta.dir;
 const REPO = join(PLUGIN, "..");
 
 const GUIDELINES = "f1rm:f1rm-guidelines";
-// research and security-review are slash commands, not Skill-tool skills, so no role lists them.
+// research and security-review are slash commands: `f1rm hire --skills` or `--level high` brings them in, so no role lists them.
 const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
   lead: [GUIDELINES, "f1rm:hire"],
   designer: ["design-pipeline"],
   "frontend-dev": ["mattpocock-skills:tdd"],
   "backend-dev": ["mattpocock-skills:tdd"],
-  reviewer: ["code-review", GUIDELINES],
-  researcher: [],
+  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review"],
+  researcher: ["mattpocock-skills:research"],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
-  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica"],
+  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica", "hook-writer-sms", "carousel-writer-sms"],
   sales: ["anthropic-skills:6-first-customers-acquisition-plan", "anthropic-skills:7-fast-revenue-strategy"],
-  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
+  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:2-profitable-niche-finder", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
 };
 const SLASH_ONLY = ["research", "security-review"];
 
@@ -149,14 +149,13 @@ test("the guidelines run editions: Work and Founder, the founder playbook, draft
 });
 
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
-  const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
   expect(rows.map((r) => r[1])).toEqual(Object.keys(ROLES));
   for (const [, name, cell] of rows) {
     const listed = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     // The PM is never hired, so its row lists only what `f1rm pm` loads.
     const skills = name === "pm" ? ROLES[name].filter((s) => s !== GUIDELINES) : ROLES[name];
-    expect(listed.sort()).toEqual([...skills, ...(slash[name] ?? [])].sort());
+    expect(listed.sort()).toEqual([...skills].sort());
   }
 });
 

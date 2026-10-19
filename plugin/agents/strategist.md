@@ -5,6 +5,7 @@ model: sonnet
 memory: user
 skills:
   - anthropic-skills:1-startup-idea-validator
+  - anthropic-skills:2-profitable-niche-finder
   - anthropic-skills:3-customer-pain-point-researcher
   - anthropic-skills:4-lean-startup-business-plan-builder
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage, WebFetch, WebSearch

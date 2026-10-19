@@ -3,6 +3,8 @@ name: researcher
 description: Researcher. Answers a specific question from live, cited sources and recommends a decision.
 model: sonnet
 memory: user
+skills:
+  - mattpocock-skills:research
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage, WebFetch, WebSearch
 ---
 

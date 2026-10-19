@@ -37,13 +37,13 @@ The plugin name is fixed as `f1rm`. Role memory lives in `~/.claude/agent-memory
 | Designer | `f1rm:designer` | `design-pipeline` | sonnet |
 | Frontend dev | `f1rm:frontend-dev` | `mattpocock-skills:tdd` | sonnet |
 | Backend dev | `f1rm:backend-dev` | `mattpocock-skills:tdd` | sonnet |
-| Reviewer | `f1rm:reviewer` | `code-review`, `f1rm:f1rm-guidelines` | opus |
-| Researcher | `f1rm:researcher` | none | sonnet |
+| Reviewer | `f1rm:reviewer` | `code-review`, `f1rm:f1rm-guidelines`, `ponytail:ponytail-review` | opus |
+| Researcher | `f1rm:researcher` | `mattpocock-skills:research` | sonnet |
 | Marketer (Founder) | `f1rm:marketer` | `cro`, `anthropic-skills:content-creator`, `brandkit` | sonnet |
 | SEO specialist (Founder) | `f1rm:seo-specialist` | `seo-audit`, `ai-seo` | sonnet |
-| Social media (Founder) | `f1rm:social-media` | `social`, `content-calendar-sms`, `anthropic-skills:fabrica` | sonnet |
+| Social media (Founder) | `f1rm:social-media` | `social`, `content-calendar-sms`, `anthropic-skills:fabrica`, `hook-writer-sms`, `carousel-writer-sms` | sonnet |
 | Sales (Founder) | `f1rm:sales` | `anthropic-skills:6-first-customers-acquisition-plan`, `anthropic-skills:7-fast-revenue-strategy` | sonnet |
-| Strategist (Founder) | `f1rm:strategist` | `anthropic-skills:1-startup-idea-validator`, `anthropic-skills:3-customer-pain-point-researcher`, `anthropic-skills:4-lean-startup-business-plan-builder` | sonnet |
+| Strategist (Founder) | `f1rm:strategist` | `anthropic-skills:1-startup-idea-validator`, `anthropic-skills:2-profitable-niche-finder`, `anthropic-skills:3-customer-pain-point-researcher`, `anthropic-skills:4-lean-startup-business-plan-builder` | sonnet |
 
 Only the PM talks to you. For a milestone with slices that can run in parallel, the PM forms up to two teams and hires a Team lead for each; a lead plans its slice, gets the PM's `GO`, hires its own specialists (at most two working at a time), works out contracts with the other leads, and reports to the PM. Specialists never hire: the office's hook blocks `f1rm hire` for them.
 
@@ -56,7 +56,7 @@ Every role has `memory: user`, so it keeps what it learns across projects. The s
 Claude Code does not apply a role's `skills:` list when the role is the session agent (`--agent`). The files keep the list for use as subagents, and the launcher loads the skills as a slash command at the start of the first prompt:
 
 - `f1rm pm` runs `claude --agent f1rm:pm --name pm-<repo basename> "/mattpocock-skills:grilling Your session name is pm-<repo basename>. ..."`, so the PM interviews you before it plans and its hires know where to report. Extra arguments go to `claude`, for example `f1rm pm --model sonnet`.
-- `f1rm hire <role> <name> <task> "<brief>"` does the same for each hired role: it starts the brief with the role's `skills:` and slash-only commands, adds the session to report to (the PM, or `lead-<team>` with `--team <team>`), and refuses past the caps (6 working sessions on the machine, 2 teams per project, 2 working per team) unless `--override` is given, and always refuses a second specialist on one task. `f1rm hire lead lead-<team> <team> "<team brief>"` starts a lead, in the repo itself with no worktree. `/research` (Researcher) and `/security-review` (Reviewer) are slash commands, not Skill-tool skills, so they appear only there and in no `skills:` list.
+- `f1rm hire <role> <name> <task> "<brief>"` does the same for each hired role: it starts the brief with the role's `skills:`, adds the session to report to (the PM, or `lead-<team>` with `--team <team>`), and refuses past the caps (6 working sessions on the machine, 2 teams per project, 2 working per team) unless `--override` is given, and always refuses a second specialist on one task. `f1rm hire lead lead-<team> <team> "<team brief>"` starts a lead, in the repo itself with no worktree. Flags before the role tune the brief: `--skills a,b` adds skills (`research` and `security-review` are slash commands, so one of them becomes the first command), `--level low|medium|high` sets the Reviewer's `/code-review` level (`high` also loads `security-review`), and `--content` starts a Reviewer for a branch with no code on the guidelines and sonnet.
 - By hand, put the slash command first: `claude --agent f1rm:designer "/design-pipeline <brief>"`.
 
 ## Files

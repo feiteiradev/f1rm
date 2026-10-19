@@ -701,7 +701,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
-  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
+  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "ponytail:ponytail-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);

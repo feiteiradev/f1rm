@@ -67,12 +67,52 @@ test("hire without --report-to reports to the PM session of the repo it runs in"
 test.each([
   ["frontend-dev", "/mattpocock-skills:tdd"],
   ["backend-dev", "/mattpocock-skills:tdd"],
-  ["researcher", "/research"],
-  ["reviewer", "/code-review Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, security-review."],
+  ["researcher", "/mattpocock-skills:research"],
+  ["reviewer", "/code-review medium Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review."],
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
   expect(stub.argv()!.find((a) => a.startsWith("/"))).toStartWith(`${commands} Report to: pm-shop\n\n`);
+});
+
+const prompt = (stub: ReturnType<typeof stubClaude>) => stub.argv()!.find((a) => a.startsWith("/"))!;
+
+test("--skills adds to the list; a slash-only skill becomes the first command and the role's own first skill moves into the list", () => {
+  const dev = stubClaude([]);
+  hire(dev, ["--skills", "ponytail:ponytail,vercel:nextjs", ...pmArgs, "frontend-dev", "frontend-dev-x", "x", BRIEF]);
+  expect(prompt(dev)).toStartWith("/mattpocock-skills:tdd Before you start, load these with the Skill tool: ponytail:ponytail, vercel:nextjs. Report to: pm-shop\n\n");
+  const researcher = stubClaude([]);
+  hire(researcher, ["--skills", "research,seo-audit", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]);
+  expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research, seo-audit. Report to: pm-shop\n\n");
+  const reviewer = stubClaude([]);
+  hire(reviewer, ["--skills", "security-review", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
+  expect(prompt(reviewer)).toStartWith("/security-review Before you start, load these with the Skill tool: code-review, f1rm:f1rm-guidelines, ponytail:ponytail-review. Report to: pm-shop");
+});
+
+test("--level sets the reviewer's /code-review level, and high adds security-review to the list; other roles refuse it", () => {
+  const high = stubClaude([]);
+  hire(high, ["--level", "high", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
+  expect(prompt(high)).toStartWith("/code-review high Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, security-review. Report to: pm-shop");
+  const low = stubClaude([]);
+  hire(low, ["--level", "low", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
+  expect(prompt(low)).toStartWith("/code-review low Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review. ");
+  const bad = stubClaude([]);
+  expect(hire(bad, ["--level", "max", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]).err).toContain("level");
+  expect(hire(bad, ["--level", "high", ...pmArgs, "designer", "designer-x", "x", BRIEF]).err).toContain("reviewer only");
+  expect(bad.argv()).toBeNull();
+});
+
+test("--content starts a reviewer with the guidelines, sonnet, no code-review skills and the content line; other roles refuse it", () => {
+  const stub = stubClaude([]);
+  hire(stub, ["--content", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
+  expect(prompt(stub)).toBe(`/f1rm:f1rm-guidelines Report to: pm-shop\n\nThis branch holds no code: use the content checklist.\n${BRIEF}`);
+  expect(stub.argv()!.slice(-4)).toEqual(["--model", "sonnet", "--disallowedTools", "Bash(git push *)"]);
+  const opus = stubClaude([]);
+  hire(opus, ["--content", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF, "--model", "opus"]);
+  expect(opus.argv()!.filter((a) => a === "--model" || a === "sonnet" || a === "opus")).toEqual(["--model", "opus"]);
+  const other = stubClaude([]);
+  expect(hire(other, ["--content", ...pmArgs, "designer", "designer-x", "x", BRIEF]).err).toContain("reviewer only");
+  expect(other.argv()).toBeNull();
 });
 
 test("a reviewer starts with no --worktree, so it runs in the main checkout; every other specialist still gets one", () => {
@@ -107,7 +147,8 @@ test("at 6 working background sessions, hire refuses with a non-zero exit and te
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
   expect(r.err).toContain("6 hires are already working (the cap is 6)");
-  expect(r.err).toContain("ask whether to wait or exceed the cap");
+  expect(r.err).toContain("Tell the session you report to. Only the PM asks the user, and only after the user approves this hire is it rerun with --override.");
+  expect(r.err).not.toContain("Tell the user");
   expect(stub.argv()).toBeNull();
 });
 
