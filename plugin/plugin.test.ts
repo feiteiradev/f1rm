@@ -202,7 +202,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
   const handoff = section("Handoff via SendMessage");
   for (const s of ["exit code", "screenshot", "skills used", "~/.f1rm/evidence/<repo>/<task>/", "`BLOCKED <slug> permission`", "`ESCALATE <slug>`", "one `BLOCKED` message"]) expect(handoff).toContain(s);
   const flow = section("Review and merge flow");
-  for (const s of ["fails on the base", "`ESCALATE <slug>`", "docs/research/"]) expect(flow).toContain(s);
+  for (const s of ["passes on the base proves nothing", "red-<task>", "`ESCALATE <slug>`", "docs/research/"]) expect(flow).toContain(s);
   expect(section("Teams")).toContain("`f1rm letgo");
   expect(section("Who talks to whom")).toContain("`BLOCKED <slug> permission`");
   expect(guidelines).toContain("Nobody pushes; the user pushes.");
@@ -212,7 +212,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
 
 test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
   const gates = section("Gates");
-  for (const s of ["skill gate", "delegation gate", "boards, memory, evidence and scratch", "`f1rm:*`", "Load the skills", "security-review"]) expect(gates).toContain(s);
+  for (const s of ["skill gate", "delegation gate", "boards, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);

@@ -194,7 +194,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 - **Only the PM talks to the user** and asks the user for decisions. Everything reaches the user through the PM.
 - A specialist reports only to the session in its `Report to`: its lead in a team, otherwise the PM. It never messages the user, the PM (unless that is its `Report to`), another team or another specialist.
 - A lead reports to the PM, and messages the other leads directly about contracts, shared files and the order of handoffs. It puts each agreement in its next status report to the PM, rather than copying the PM on every message. Anything that needs the user (scope, a cap override, a product choice) goes to the PM.
-- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. `f1rm hire` passes `--allowedTools` only when the brief names the exact command.
+- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the PM may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
 
 ## Handoff via SendMessage
@@ -257,8 +257,8 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
 4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself. After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third; the PM decides with the user.
 5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
    - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
-   - In it, run each criterion's proving check on the base. It fails on the base; one that passes there proves nothing.
-   - Then `git merge --no-ff <branch>`, where `<branch>` is `worktree-<task>`, and note the merge commit's sha.
+   - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
+   - In the scratch worktree, `git merge --no-ff <branch>`, where `<branch>` is `worktree-<task>`, and note the merge commit's sha.
    - On the merge, run each criterion's check, which passes, and the repo's full check command.
    - A criterion with no check, a check that passes on the base, and a failure on the merge all block: remove the scratch worktree and send `CHANGES REQUESTED`.
    - At `--level high`, run security-review with the Skill tool from the scratch worktree, with `<base>...<merge sha>` as its args. The office holds your approval until it has run.
@@ -288,7 +288,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 The office holds two gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, neither runs.
 
-- The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: Load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
+- The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
 - The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
