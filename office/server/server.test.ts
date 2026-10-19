@@ -1369,6 +1369,9 @@ test("a hire whose prompt names skills is refused every tool but the reading one
   expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to.");
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
   for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
+  // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
+  const fork = await held(await hook({ ...preToolUse("h", "Bash", { command: "git diff main...x" }), agent_id: "fork-1", agent_type: "general-purpose" }));
+  expect(fork?.permissionDecision ?? null).toBeNull();
 
   await skillLoaded("h", "code-review"); // the part after the last ":" matches
   expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If");

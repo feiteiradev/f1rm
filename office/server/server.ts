@@ -24,7 +24,7 @@ const MAX_MESSAGE = 4000;
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
 const bare = (skill: string) => skill.split(":").pop();
-const COORDINATORS =new Set(["pm", "lead"]);
+const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick"]);
 const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
@@ -136,7 +136,8 @@ export function startServer({
     const input = payload.tool_input ?? {};
     // Each refusal is logged (stdout is ~/.f1rm/office.log) with who, which tool and which rule, never the command or the contents.
     const refuse = (rule: string, why: string) => (console.log(`refused ${role} ${state.employees[sessionId]?.title ?? sessionId} ${tool} ${rule}`), why);
-    const gate = skillGates.get(sessionId);
+    // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
+    const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
     if (gate) {
       const has = (name: string) => [...gate.loaded].some((l) => bare(l) === bare(name));
       const missing = gate.required.filter((r) => !has(r));
