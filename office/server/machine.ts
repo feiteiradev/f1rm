@@ -178,9 +178,17 @@ export const machine = {
     return r.success ? r.stdout.toString().trim() : null;
   },
 
-  /** True if `branch` exists and everything on it is already in the branch checked out in the main working directory `repo`. */
+  /**
+   * True if `branch` has landed: its tip is in the branch checked out in the main working directory `repo` but not on that branch's
+   * first-parent history. The Reviewer merges `--no-ff`, so landed work is never on the first-parent chain; a branch with no commits of
+   * its own sits on a base commit, which is on it, and so counts as waiting, not landed.
+   */
   mergedBranch(repo: string, branch: string): boolean {
-    return inBase(repo, `refs/heads/${branch}`);
+    const ref = `refs/heads/${branch}`;
+    if (!inBase(repo, ref)) return false;
+    const tip = Bun.spawnSync(["git", "-C", repo, "rev-parse", ref], { stderr: "ignore" }).stdout.toString().trim();
+    const chain = Bun.spawnSync(["git", "-C", repo, "rev-list", "--first-parent", "HEAD"], { stderr: "ignore" }).stdout.toString().split("\n");
+    return !chain.includes(tip);
   },
 
   /** Removes the hire's worktree `.claude/worktrees/<task>` and its merged branch `worktree-<task>`. Never forced: throws what git said if it refuses (uncommitted files, an unmerged branch). */

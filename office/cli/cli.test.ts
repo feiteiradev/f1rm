@@ -649,14 +649,36 @@ test("letgo lets a named hire go and removes its merged worktree and branch", as
   expect(branches(repo)).toEqual(["main", "worktree-open"]);
 });
 
-test("letgo keeps an unmerged branch and its worktree, and says so", async () => {
+test("letgo does not stop a hire whose branch is not merged, and fails", async () => {
   const repo = repoWithHires();
   const fake = fakeClaude([{ id: "b2", name: "checkout.backend-dev-open", cwd: worktreeOf(repo, "open") }]);
   const r = await letgo(["checkout.backend-dev-open"], fake, repo);
-  expect(r.ok).toBe(true);
-  expect(r.lines).toEqual(["checkout.backend-dev-open: let go, kept worktree-open and its worktree: not merged into the base branch"]);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["checkout.backend-dev-open: not let go: worktree-open is not merged into the base branch"]);
+  expect(fake.calls).toEqual([]);
   expect(existsSync(worktreeOf(repo, "open"))).toBe(true);
   expect(branches(repo)).toContain("worktree-open");
+});
+
+test("letgo does not stop a hire with no commits of its own: a branch at a base commit is waiting, not landed", async () => {
+  const repo = repoWithHires();
+  git(repo, "worktree", "add", "-b", "worktree-fresh", worktreeOf(repo, "fresh"));
+  const fake = fakeClaude([{ id: "f1", name: "frontend-dev-fresh", cwd: worktreeOf(repo, "fresh") }]);
+  const r = await letgo(["frontend-dev-fresh"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["frontend-dev-fresh: not let go: worktree-fresh is not merged into the base branch"]);
+  expect(fake.calls).toEqual([]);
+});
+
+test("letgo does not stop a merged hire whose worktree has uncommitted files, and fails", async () => {
+  const repo = repoWithHires();
+  writeFileSync(join(worktreeOf(repo, "done"), "notes.txt"), "unsaved thoughts");
+  const fake = fakeClaude([{ id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") }]);
+  const r = await letgo(["frontend-dev-done"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["frontend-dev-done: not let go: its worktree has uncommitted files"]);
+  expect(fake.calls).toEqual([]);
+  expect(existsSync(join(worktreeOf(repo, "done"), "notes.txt"))).toBe(true);
 });
 
 test("letgo prints a line per name, and fails if a name isn't a background session of this repo or can't be let go", async () => {
@@ -664,17 +686,17 @@ test("letgo prints a line per name, and fails if a name isn't a background sessi
   const fake = fakeClaude(
     [
       { id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") },
-      { id: "c3", name: "designer-stuck", cwd: worktreeOf(repo, "stuck") },
+      { id: "c3", name: "designer-done", cwd: worktreeOf(repo, "done") },
       { id: "d4", name: "designer-other", cwd: "/elsewhere/.claude/worktrees/other" },
       { id: "e5", name: "frontend-dev-open", kind: "interactive", cwd: worktreeOf(repo, "open") },
     ],
     new Set(["c3"]),
   );
-  const r = await letgo(["frontend-dev-done", "designer-stuck", "designer-other", "frontend-dev-open", "ghost"], fake, repo);
+  const r = await letgo(["designer-done", "frontend-dev-done", "designer-other", "frontend-dev-open", "ghost"], fake, repo);
   expect(r.ok).toBe(false);
   expect(r.lines).toEqual([
+    "designer-done: could not be let go: rm refused: uncommitted work",
     "frontend-dev-done: let go, removed its worktree and branch worktree-done",
-    "designer-stuck: could not be let go: rm refused: uncommitted work",
     "designer-other: no background session with this name in this repo",
     "frontend-dev-open: no background session with this name in this repo",
     "ghost: no background session with this name in this repo",

@@ -1,4 +1,5 @@
 // `f1rm letgo`, and the office's safety net: let a finished hire go, and clean up the worktree and branch it leaves once they are merged.
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { readRoles } from "./hire.ts";
 import type { machine } from "../server/machine.ts";
@@ -7,6 +8,7 @@ export type Session = { id: string; name: string; kind: string; state: string; c
 type M = Pick<typeof machine, "gitCommonDir" | "letGo" | "mergedBranch" | "removeWorktree"> & { sessions: () => Promise<Session[] | null> };
 
 const SLUG = "[a-z0-9]+(?:-[a-z0-9]+)*";
+const NOT_LET_GO = "not let go:";
 let nameRe: RegExp | undefined;
 
 /**
@@ -28,13 +30,18 @@ export const repoOf = (cwd: string) => cwd.split("/.claude/worktrees/")[0];
 export async function letGoHire(m: Pick<M, "letGo" | "mergedBranch" | "removeWorktree">, s: Session, repo: string): Promise<string> {
   const hire = hireTask(s.name);
   const task = hire && !hire.reviewer ? hire.task : null;
-  const branch = task && `worktree-${task}`;
-  const merged = !!branch && m.mergedBranch(repo, branch);
+  // A Reviewer works in the main checkout and a lead has no branch: nothing of theirs to keep.
+  if (!task) {
+    await m.letGo(s.id);
+    return `${s.name}: let go`;
+  }
+  const branch = `worktree-${task}`;
+  // Decided before anything is stopped: unlanded work (a hire waiting after BLOCKED too) is never lost, and neither are uncommitted files.
+  if (!m.mergedBranch(repo, branch)) return `${s.name}: ${NOT_LET_GO} ${branch} is not merged into the base branch`;
+  const wt = `${repo}/.claude/worktrees/${task}`;
+  if (existsSync(wt) && Bun.spawnSync(["git", "-C", wt, "status", "--porcelain"]).stdout.toString().trim()) return `${s.name}: ${NOT_LET_GO} its worktree has uncommitted files`;
   // Merged work is already in the base, so `claude rm` may discard the worktree's copy of it (see machine.letGo).
-  await m.letGo(s.id, merged ? { discardIn: repo } : {});
-  // A Reviewer works in the main checkout and a lead has no branch: nothing of theirs to remove.
-  if (!task) return `${s.name}: let go`;
-  if (!merged) return `${s.name}: let go, kept ${branch} and its worktree: not merged into the base branch`;
+  await m.letGo(s.id, { discardIn: repo });
   try {
     m.removeWorktree(repo, task);
   } catch (err) {
@@ -57,7 +64,9 @@ export async function letgo(names: string[], m: M, cwd: string): Promise<{ lines
     const s = all.find((a) => a.kind === "background" && a.name === name && repoOf(a.cwd) === repo);
     try {
       if (!s) throw new Error("no background session with this name in this repo");
-      lines.push(await letGoHire(m, s, repo));
+      const line = await letGoHire(m, s, repo);
+      if (line.includes(`: ${NOT_LET_GO} `)) ok = false;
+      lines.push(line);
     } catch (err) {
       ok = false;
       lines.push(`${name}: ${s ? "could not be let go: " : ""}${(err as Error).message}`);
