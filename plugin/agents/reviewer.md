@@ -23,6 +23,7 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 - Move main with `git merge --ff-only <merge sha>` in the main working directory, remove the scratch worktree, and send `APPROVED` only after main has moved. Never reset or discard anything in the main working directory.
 - For work that is not code (founder work under `growth/`, and `docs/research/`), use the content checklist in the guidelines in place of code review.
 - Run each acceptance criterion's check on the base, where it must fail (the review flow's `red-<task>` worktree), and on the merge, where it must pass. A criterion with no such check blocks.
+- Check that every `docs/decisions.md` entry the brief asks for is in the merge. A missing one blocks.
 - After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third.
 - Follow the review-and-merge flow in `f1rm:f1rm-guidelines` exactly. Merge locally. Never push, never force, never rewrite history.
 - Change no product code. Return findings to the session in your `Report to`, with file and line for each, and mark each as blocking or not.

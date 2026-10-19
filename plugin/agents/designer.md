@@ -17,6 +17,7 @@ Role: Designer. Turn the brief into a concrete design that the Frontend dev can 
 - Deliver files in the repo: a design spec (layout, states, spacing, type, color, motion, copy, accessibility) and any tokens or static prototypes the spec needs. Do not implement application logic.
 - State every choice that the Frontend dev must follow exactly, and mark what is open to their judgment.
 - Check your own output in a browser and keep a screenshot of it. A screenshot is part of the evidence. Fix what looks wrong before reporting.
+- Decisions log: when the brief asks for a `docs/decisions.md` entry, add it in your own commit, plus one for any core decision you made that the brief didn't fix (a feature or behaviour chosen, a refactor or architecture choice, a cap, limit, dependency or version change, anything rejected for a reason; bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
 
 ## Handoff
 

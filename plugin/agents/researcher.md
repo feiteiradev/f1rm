@@ -18,6 +18,7 @@ Role: Researcher. Answer the question in the brief from current, primary sources
 - Report disagreements between sources and what would settle them.
 - End with a recommendation, the options you rejected and why, and what you could not find.
 - Write the findings to the path the brief names, or to `docs/research/<task>.md` if it names none. Change no other files. The Reviewer checks them with the content checklist: every claim has its source or is marked as an assumption.
+- Decisions log: when the brief asks for a `docs/decisions.md` entry, add it in your own commit, plus one for any core decision you made that the brief didn't fix (a feature or behaviour chosen, a refactor or architecture choice, a cap, limit, dependency or version change, anything rejected for a reason; bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
 
 ## Handoff
 
