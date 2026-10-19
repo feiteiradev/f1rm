@@ -238,18 +238,20 @@ echo "$*" >> "$LG/calls"
 n=$(cat "$LG/rms" 2>/dev/null || echo 0)
 case "$1" in
   stop) exit 1 ;;
-  rm) echo $((n + 1)) > "$LG/rms"; [ -n "$RM_FAIL" ] && { echo "$RM_FAIL" >&2; exit 1; } ;;
+  rm) echo $((n + 1)) > "$LG/rms"; [ -n "$RM_FAIL" ] && { echo "$RM_FAIL" >&2; exit 1; }
+     [ -n "$RM_UNPUSHED" ] && [ "$3" != "--discard-unpushed" ] && { echo "They exist on no remote. Discard the worktree and its commits: claude rm $2 --discard-unpushed $RM_UNPUSHED" >&2; exit 1; }
+     [ "$n" -lt "\${RM_BUSY:-0}" ] && { echo "A Claude Code lock on the worktree names a process that is still running (pid 1)." >&2; exit 1; } ;;
   agents) if [ "$n" -ge "$GONE_AFTER" ]; then echo '[{"id":"0badf00d","kind":"background"}]'; else echo '[{"id":"7c5dcf5d","kind":"background"},{"id":"0badf00d","kind":"background"}]'; fi ;;
 esac
 exit 0
 `,
 );
 chmodSync(join(lgDir, "claude"), 0o755);
-async function letGo(id: string, goneAfter: number, rmFail = "") {
+async function letGo(id: string, goneAfter: number, rmFail = "", rmBusy = 0, unpushed = "", discardIn = "") {
   for (const f of ["calls", "rms"]) rmSync(join(lgDir, f), { force: true });
   const child = Bun.spawn(
-    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify(await machine.letGo(${JSON.stringify(id)}, { tries: 4, waitMs: 10 }).then(() => "gone", (e) => ({ threw: e.message }))))`],
-    { env: { ...process.env, PATH: `${lgDir}:${process.env.PATH}`, LG: lgDir, GONE_AFTER: String(goneAfter), RM_FAIL: rmFail }, stdout: "pipe" },
+    ["bun", "-e", `import { machine } from ${JSON.stringify(import.meta.dir + "/machine.ts")}; console.log(JSON.stringify(await machine.letGo(${JSON.stringify(id)}, { tries: 4, waitMs: 10, discardIn: ${JSON.stringify(discardIn)} }).then(() => "gone", (e) => ({ threw: e.message }))))`],
+    { env: { ...process.env, PATH: `${lgDir}:${process.env.PATH}`, LG: lgDir, GONE_AFTER: String(goneAfter), RM_FAIL: rmFail, RM_BUSY: String(rmBusy), RM_UNPUSHED: unpushed }, stdout: "pipe" },
   );
   const value = JSON.parse(await new Response(child.stdout).text());
   const calls = existsSync(join(lgDir, "calls")) ? readFileSync(join(lgDir, "calls"), "utf8").trim().split("\n").filter((l) => !l.startsWith("agents")) : [];
@@ -261,6 +263,27 @@ test("letGo stops the session, then repeats rm until claude agents --all no long
   expect([quick.value, quick.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
   const raced = await letGo("7c5dcf5d", 3);
   expect([raced.value, raced.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+// Live on 2.1.303: `stop` returns before the process exits, and `rm` refuses while the worktree's lock names it.
+test("letGo waits out an rm refused because the stopped session's process is still exiting", async () => {
+  const busy = await letGo("7c5dcf5d", 3, "", 2);
+  expect([busy.value, busy.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d", "rm 7c5dcf5d"]]);
+});
+
+// Nobody pushes, so `rm` refuses every worktree with commits; it may discard them only when they are already in the base.
+test("letGo discards a worktree's unpushed commits only when they are in the branch checked out in discardIn", async () => {
+  const repo = mkdtempSync(join(dir, "letgo-repo-"));
+  const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...a]).stdout.toString().trim();
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "base");
+  const sha = git("rev-parse", "HEAD");
+  const merged = await letGo("7c5dcf5d", 2, "", 0, `${sha}@0123abcd`, repo);
+  expect([merged.value, merged.calls]).toEqual(["gone", ["stop 7c5dcf5d", "rm 7c5dcf5d", `rm 7c5dcf5d --discard-unpushed ${sha}@0123abcd`]]);
+  const elsewhere = await letGo("7c5dcf5d", 2, "", 0, `${"e".repeat(40)}@0123abcd`, repo);
+  expect([elsewhere.value.threw, elsewhere.calls]).toEqual([expect.stringContaining("exist on no remote"), ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
+  const noRepo = await letGo("7c5dcf5d", 2, "", 0, `${sha}@0123abcd`);
+  expect(noRepo.calls).toEqual(["stop 7c5dcf5d", "rm 7c5dcf5d"]);
 });
 
 test("letGo gives up when the session never leaves the list, and says what claude said when rm refuses", async () => {
