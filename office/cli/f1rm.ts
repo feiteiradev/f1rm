@@ -240,14 +240,17 @@ async function runningOffice(): Promise<string | null> {
 
 /** Opens the running office, starting the background one first when none is up, and exits. `f1rm serve` runs one in this terminal. */
 async function start() {
-  let url = await runningOffice();
-  if (!url) {
-    startService();
-    url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
-    if (!url) throw new Error(`the office didn't start; see ${join(F1RM_DIR, "office.log")}`);
-  }
+  const url = (await runningOffice()) ?? (await startBackgroundOffice());
   console.log(`f1rm office: ${url}`);
   Bun.spawn(["open", url]);
+}
+
+/** Starts the background office and waits for its URL; throws when it doesn't come up. */
+async function startBackgroundOffice(): Promise<string> {
+  startService();
+  const url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
+  if (!url) throw new Error(`the office didn't start; see ${join(F1RM_DIR, "office.log")}`);
+  return url;
 }
 
 const launchctl = (...args: string[]) => Bun.spawnSync(["launchctl", ...args], { stdout: "ignore", stderr: "ignore" }).exitCode;
@@ -324,16 +327,17 @@ async function open() {
   }
   let url = await runningOffice();
   if (!url) {
-    startService();
-    url = await officeWithin(Number(process.env.F1RM_WAIT_MS ?? 15_000));
-    if (!url) return console.log(`The f1rm office didn't start; see ${join(F1RM_DIR, "office.log")}.`);
+    url = await startBackgroundOffice();
     notes.push("started it in the background");
   }
   // An office page already open moves to this project; only with none open does a new tab open on it.
   const shown = await fetch(new URL("show", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) })
     .then(async (r) => r.ok && ((await r.json()) as { pages: number }).pages > 0)
     .catch(() => false);
-  if (shown) return console.log(`Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
+  if (shown) {
+    console.log(`Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
+    return;
+  }
   Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
   console.log(`Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
 }
