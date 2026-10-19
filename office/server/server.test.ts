@@ -1176,7 +1176,7 @@ test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, memory,
 test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {
   await delegationOffice();
   const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
-  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)"];
+  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)", "git pull origin main", "git -C x am fix.patch", "git revert abc", "gh pr merge 3 --squash", "cd x && gh pr merge 3"];
   const readOnly = ["git log --oneline", "git status", "git diff HEAD", "git show abc", "git rev-parse HEAD", "git worktree list", "git -C x log", "git log --grep 'git push; git merge'", "echo git push", "gh pr view 3"];
   for (const id of ["p", "l"]) {
     for (const command of landing) {

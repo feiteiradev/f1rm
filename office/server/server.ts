@@ -26,7 +26,7 @@ const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMes
 const bare = (skill: string) => skill.split(":").pop();
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
-const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick"]);
+const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
 const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
 /** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes and `bun`. */
 // ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen.
@@ -161,7 +161,7 @@ export function startServer({
         return refuse("write", "The PM and leads write only boards, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    if (COORDINATORS.has(role) && tool === "Bash" && simpleCommands(String(input.command ?? "")).some((w) => LANDING.has(gitSubcommand(w) ?? ""))) {
+    if (COORDINATORS.has(role) && tool === "Bash" && simpleCommands(String(input.command ?? "")).some((w) => LANDING.has(gitSubcommand(w) ?? "") || (basename(w[0] ?? "") === "gh" && w[1] === "pr" && w[2] === "merge"))) {
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
