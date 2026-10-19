@@ -271,7 +271,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 `f1rm hire` enforces these, refusing with a non-zero exit and a message naming the cap:
 
-- At most **6 background sessions working at once**, counted across the whole machine, not per repo. Leads, the Reviewer, the Researcher and the user's own background sessions all count.
+- At most **30 background sessions working at once**, counted across the whole machine, not per repo. Leads, the Reviewer, the Researcher and the user's own background sessions all count.
 - At most **2 teams** (live leads) per project.
 - At most **2 working in a team**, its Reviewer included. A finished member frees its slot.
 - **One specialist per task**, which no override skips. Split a task only into tasks that each have their own acceptance criteria and their own files.

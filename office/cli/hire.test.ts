@@ -161,11 +161,11 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--model", "haiku"]);
 });
 
-test("at 6 working background sessions, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
-  const stub = stubClaude([...Array(5).fill(bg("working")), bg("blocked")]);
+test("at 30 working background sessions, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
+  const stub = stubClaude([...Array(29).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
-  expect(r.err).toContain("6 hires are already working (the cap is 6)");
+  expect(r.err).toContain("30 hires are already working (the cap is 30)");
   expect(r.err).toContain("Tell the session you report to. Only the PM asks the user, and only after the user approves this hire is it rerun with --override.");
   expect(r.err).not.toContain("Tell the user");
   expect(stub.argv()).toBeNull();
@@ -173,7 +173,7 @@ test("at 6 working background sessions, hire refuses with a non-zero exit and te
 
 test("below the cap hire goes ahead: finished hires and interactive sessions do not count", () => {
   const stub = stubClaude([
-    ...Array(5).fill(bg("working")),
+    ...Array(29).fill(bg("working")),
     bg("done"),
     bg("stopped"),
     bg("failed"),

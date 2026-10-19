@@ -696,7 +696,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   working = 3;
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
-  expect(reply.hires).toEqual({ working: 3, cap: 6 });
+  expect(reply.hires).toEqual({ working: 3, cap: 30 });
   const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
@@ -709,7 +709,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
   working = null;
-  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 6 });
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 30 });
 });
 
 test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
@@ -765,9 +765,12 @@ test("at the cap Hire answers 409 with the working count and spawns nothing; whe
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 6;
+  working = 29;
+  expect((await hireOf(ASSIGN)).status).toBe(200);
+  spawned.length = 0;
+  working = 30;
   const capped = await hireOf(ASSIGN);
-  expect([capped.status, await capped.json()]).toEqual([409, { error: "6 hires are already working (the cap is 6).", working: 6 }]);
+  expect([capped.status, await capped.json()]).toEqual([409, { error: "30 hires are already working (the cap is 30).", working: 30 }]);
   working = null;
   const blind = await hireOf(ASSIGN);
   expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
@@ -778,13 +781,13 @@ test("Hire anyway: override spends a slot past the cap, a plain hire after it is
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 6;
+  working = 30;
   expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
   expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
   expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
-  working = 7;
+  working = 31;
   expect((await hireOf(ASSIGN)).status).toBe(409);
   expect(spawned.length).toBe(1);
 });
