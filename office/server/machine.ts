@@ -98,6 +98,13 @@ end run`;
 const ASK_PREAMBLE =
   "This is a side question from the user, not a new task. Answer it from this conversation so far. Do not continue or redo the work, and do not change anything. Be brief.\n\n";
 
+/** A session Claude Code lists (`claude agents --json`). */
+export type Session = { id: string; name: string; kind: string; state: string; cwd: string };
+
+/** True if commit `rev` is in the branch checked out in the main working directory `repo`. */
+const inBase = (repo: string, rev: string) =>
+  Bun.spawnSync(["git", "-C", repo, "merge-base", "--is-ancestor", rev, "HEAD"], { stdout: "ignore", stderr: "ignore" }).success;
+
 export const machine = {
   /**
    * Streams the answer to a side question from a read-only Haiku fork of the session. The fork runs in the
@@ -174,6 +181,36 @@ export const machine = {
     return r.success ? r.stdout.toString().trim() : null;
   },
 
+  /**
+   * True if `branch` has landed: its tip is in the branch checked out in the main working directory `repo` but not on that branch's
+   * first-parent history. The Reviewer merges `--no-ff`, so landed work is never on the first-parent chain; a branch with no commits of
+   * its own sits on a base commit, which is on it, and so counts as waiting, not landed.
+   */
+  mergedBranch(repo: string, branch: string): boolean {
+    const ref = `refs/heads/${branch}`;
+    if (!inBase(repo, ref)) return false;
+    const tip = Bun.spawnSync(["git", "-C", repo, "rev-parse", ref], { stderr: "ignore" }).stdout.toString().trim();
+    const chain = Bun.spawnSync(["git", "-C", repo, "rev-list", "--first-parent", "HEAD"], { stderr: "ignore" }).stdout.toString().split("\n");
+    return !chain.includes(tip);
+  },
+
+  /** Removes the hire's worktree `.claude/worktrees/<task>` and its merged branch `worktree-<task>`. Never forced: throws what git said if it refuses (uncommitted files, an unmerged branch). */
+  removeWorktree(repo: string, task: string): void {
+    const git = (...args: string[]) => {
+      const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" });
+      if (!r.success) throw new Error(r.stderr.toString().trim().split("\n").pop() || `git ${args[0]} failed`);
+    };
+    if (statSync(`${repo}/.claude/worktrees/${task}`, { throwIfNoEntry: false })) git("worktree", "remove", `.claude/worktrees/${task}`);
+    // `claude rm` may already have taken the branch with the worktree.
+    if (Bun.spawnSync(["git", "-C", repo, "rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`], { stdout: "ignore" }).success) git("branch", "-d", `worktree-${task}`);
+  },
+
+  /** Every session Claude Code lists, finished ones too (`claude agents --json --all`); null if it can't say. */
+  async sessions(): Promise<Session[] | null> {
+    const list = await agents(true);
+    return list && list.filter((a) => typeof a?.id === "string").map((a) => ({ id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
+  },
+
   /** Ids of the sessions Claude Code lists as live (`claude agents --json`); null if it can't say. */
   async liveSessions(): Promise<Set<string> | null> {
     const list = await agents(false);
@@ -211,13 +248,25 @@ export const machine = {
    * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
    * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
    */
-  async letGo(id: string, { tries = 10, waitMs = 1000 } = {}): Promise<void> {
+  async letGo(id: string, { tries = 10, waitMs = 1000, discardIn = "" } = {}): Promise<void> {
     if (!SAFE_ID.test(id)) throw new Error("bad background session id");
     // A session that already ended makes `stop` fail, and `rm` works on it all the same.
     await claude("stop", id);
-    // ponytail: a refused `rm` is final and unpushed work is never discarded; offer `--discard-unpushed` behind its own confirm if refusals are felt.
+    // `rm` refuses a worktree whose commits are on no remote, and nobody pushes here. With `discardIn` (the repo's main working
+    // directory), the commits it names are discarded only when they are already in the branch checked out there: merged work.
+    let discard: string[] = [];
     for (let i = 0; i < tries; i++) {
-      const rm = await claude("rm", id);
+      const rm = await claude("rm", id, ...discard);
+      const token = /--discard-unpushed ([0-9a-f]{7,64}@[0-9a-f]+)/.exec(rm.text)?.[1];
+      if (rm.code !== 0 && token && discardIn && !discard.length && inBase(discardIn, token.split("@")[0])) {
+        discard = ["--discard-unpushed", token];
+        continue;
+      }
+      // `stop` returns before the process exits, and `rm` refuses while the worktree's lock still names it: wait that out.
+      if (rm.code !== 0 && /still running/.test(rm.text) && i < tries - 1) {
+        await Bun.sleep(waitMs);
+        continue;
+      }
       if (rm.code !== 0) throw new Error(rm.text.slice(-300) || `claude rm exited with ${rm.code}`);
       const list = await agents(true);
       if (list && !list.some((a) => a?.id === id)) return;

@@ -2,7 +2,7 @@
 
 A pixel-art office for your Claude Code sessions. Every session on your Mac is an employee at a desk, in the office of the project it works on. You see who is working, reading, running a command, waiting for permission or on a coffee break. Click someone to jump to their terminal, ask them a question without interrupting them, or tell them something they read at their next step.
 
-f1rm also ships a company: a Claude Code plugin with six roles (PM, Designer, Frontend dev, Backend dev, Reviewer, Researcher) and the guidelines they work by. You talk to the PM. The PM hires the rest.
+f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead, Designer, Frontend dev, Backend dev, Reviewer, Researcher and five Founder roles) and the guidelines they work by. You talk to the PM. The PM hires the rest.
 
 ![The f1rm lobby, a Work project with its PM waiting for you at the table, the PM's panel, and a Founder project's launch team](docs/f1rm.gif)
 
@@ -27,43 +27,37 @@ You need macOS, [Bun](https://bun.sh) 1.3 or later, and Claude Code 2.1.300 or l
 git clone https://github.com/feiteiradev/f1rm && cd f1rm
 bun install && bun run build
 bun office/cli/f1rm.ts install                 # f1rm's hooks (your settings backed up first) and the f1rm command in ~/.local/bin
-claude plugin marketplace add feiteiradev/f1rm && claude plugin install f1rm@f1rm   # the company and /f1rm
+claude plugin marketplace add feiteiradev/f1rm && claude plugin install f1rm@f1rm   # the company
 ```
 
-Then, in any project, run `claude` and type **`/f1rm`**. It starts the office in the background if it isn't running, and shows that project in your office tab, or opens one. Every Claude Code session you start appears in the office.
-
-| In Claude Code | What it does |
-| :- | :- |
-| `/f1rm` | Opens the office on this project, starting it if needed. |
-| `/f1rm off` | Stops the office. Your sessions keep working; the hooks just go quiet. |
-| `/f1rm edition work` or `/f1rm edition founder` | Sets this project's edition. |
-| `/f1rm pm` | Opens this project's PM in a new iTerm tab. |
+Then run **`f1rm`** in your project folder. It starts the office in the background if it isn't running, and shows that project in your office tab, or opens one. Every Claude Code session you start appears in the office.
 
 The office keeps running after you close Claude Code and starts again at login, so the hooks always reach it. After a `git pull`, run `f1rm service` to restart it on the new code. Its log is `~/.f1rm/office.log`. `f1rm uninstall` removes exactly what `install` added, and keeps your event log, boards and editions.
 
 ## Commands
 
-The same things from a terminal. `f1rm install` puts the `f1rm` command in `~/.local/bin`; if that folder isn't on your PATH, add it, or use `bun office/cli/f1rm.ts` in its place.
+`f1rm install` puts the `f1rm` command in `~/.local/bin`; if that folder isn't on your PATH, add it, or use `bun office/cli/f1rm.ts` in its place.
 
 | Command | What it does |
 | :- | :- |
+| `f1rm` | Opens the office on this project: installs or updates the hooks if needed, starts the background office if it isn't running, and shows the project in your office tab, or opens one. Prints one line. |
 | `f1rm install` | Adds f1rm's hooks to `~/.claude/settings.json`, after backing it up, and the `f1rm` command to `~/.local/bin`. |
 | `f1rm uninstall` | Removes exactly what `install` added, the `f1rm` command included. Keeps your event log, boards and editions in `~/.f1rm/`. |
 | `f1rm start` | Opens the office in your browser. If the background office isn't running, runs one in this terminal until you stop it. |
 | `f1rm service` | Runs the office in the background and at login. Run it again to restart it on new code. |
 | `f1rm service off` | Stops the background office and removes it from login. Your sessions keep working; the hooks just go quiet. |
 | `f1rm edition` | Prints this repo's edition. `f1rm edition work` or `f1rm edition founder` sets it. |
-| `f1rm here` | What `/f1rm` runs, with the same arguments, printing one line. |
 | `f1rm pm` | Starts this repo's PM in this terminal. Extra flags go to `claude`, for example `f1rm pm --model sonnet`. |
-| `f1rm hire` | Starts a lead or a specialist in the background. The PM and leads run it; `f1rm hire --help` shows the syntax. |
+| `f1rm hire` | Starts a lead or a specialist in the background. The PM and leads run it; `f1rm hire --help` shows the syntax. Flags before the role: `--skills a,b` adds skills for one task (`--skills research` starts a Researcher on `/research`), `--level low\|medium\|high` sets the Reviewer's `/code-review` level (`high` also runs `security-review` on the merge), and `--content` starts a cheap Sonnet Reviewer for a branch with no code. |
+| `f1rm letgo` | `f1rm letgo <name>...` lets finished hires go: stops them, removes them, and deletes their worktree and branch when the branch is merged. The PM and leads run it after `APPROVED`. |
 | `f1rm demo` | Opens the recorded demo, with no server and no Claude Code. Needs `bun run build` first. |
 | `f1rm serve` | Runs the office server in the foreground. This is what `service` runs. |
 
 ## The company
 
-Start a PM in the repo you want to work on: type `/f1rm pm` in Claude Code there, or run `f1rm pm` in a terminal in that folder.
+Start a PM in the repo you want to work on: run `f1rm pm` in a terminal in that folder.
 
-The PM interviews you, writes the task board, and hires specialists with `f1rm hire`. Each hire runs as a background session in its own git worktree. At most six background sessions work at once unless you approve more. For a milestone with slices that can run in parallel, the PM forms up to two teams, each run by a Team lead that hires its own specialists, at most two working at a time. The Reviewer checks every change and is the only one who merges, locally, never pushing. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow.
+The PM interviews you, writes the task board, and hires specialists with `f1rm hire`. Each hire runs as a background session in its own git worktree. At most six background sessions work at once unless you approve more. For a milestone with slices that can run in parallel, the PM forms up to two teams, each run by a Team lead that hires its own specialists, at most two working at a time. The Reviewer runs in the repo itself, checks every change on a scratch copy, and is the only one who merges, locally, never pushing. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow, including each role's [Workflows](plugin/skills/f1rm-guidelines/SKILL.md#workflows).
 
 You can also hire from the office: the Hire button in a project, or a click on an empty desk, opens a dialog with the plugin's roles. Pick one, write a brief, and it starts the same way `f1rm hire` does. In a project with a PM, "Let the PM decide" sends your brief to them as a message instead. In one without, "Start PM" opens an iTerm tab in the repo running `f1rm pm`.
 

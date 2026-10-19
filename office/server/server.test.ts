@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "./server.ts";
+import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
 import { machine } from "./machine.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -24,6 +25,9 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     calls.push(`letgo ${id}`);
     if (letGoFails) throw new Error(letGoFails);
   },
+  sessions: async () => (await sessionsGate, sessionList),
+  mergedBranch: (_repo: string, branch: string) => mergedBranches.has(branch),
+  removeWorktree: (repo: string, task: string) => void calls.push(`remove ${repo} ${task}`),
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
@@ -54,21 +58,31 @@ const defaultAnswer = async function* () {
 };
 let tellFails = "";
 let letGoFails = "";
+// What `claude agents --json --all` lists, and which branches are merged into the base, for the safety net.
+let sessionList: { id: string; name: string; kind: string; state: string; cwd: string }[] = [];
+let mergedBranches = new Set<string>();
+let sessionsGate: Promise<void> | undefined; // a test sets one that never settles: `claude agents` hanging
 let working: number | null = 0;
 let spawnFails = "";
 let pmFails = "";
 let spawned: { argv: string[]; cwd: string }[] = [];
 let askAnswer: (signal?: AbortSignal) => AsyncGenerator<string> = defaultAnswer;
 
+let afterEachRestore = () => {};
 let server: ReturnType<typeof startServer>;
 let sockets: WebSocket[] = [];
 afterEach(() => {
+  afterEachRestore();
+  afterEachRestore = () => {};
   calls.length = 0;
   openTabs = new Set();
   backgroundIds = {};
   askAnswer = defaultAnswer;
   tellFails = "";
   letGoFails = "";
+  sessionList = [];
+  mergedBranches = new Set();
+  sessionsGate = undefined;
   working = 0;
   spawnFails = "";
   pmFails = "";
@@ -82,8 +96,8 @@ afterEach(() => {
 const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
-function start(repos?: Record<string, string>, approvalTimeoutMs?: number) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
+function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string) {
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -690,7 +704,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
-  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "security-review"]);
+  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "ponytail:ponytail-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
@@ -1120,6 +1134,95 @@ test("only the PM, a lead and the user's own sessions run `f1rm hire`; a special
   expect(await held(await run("d", "git status && echo f1rm is hiring"))).toBeNull();
 });
 
+test("`f1rm hire` is held only as a command; a command that merely mentions it passes", async () => {
+  await delegationOffice();
+  const run = async (command: string) => (await held(await hook(preToolUse("d", "Bash", { command }))))?.permissionDecision ?? null;
+  for (const command of ["f1rm hire designer a b c", "cd x && f1rm hire designer a b c", "ls; f1rm hire designer a b c", "true || f1rm hire designer a b c", "echo hi | f1rm hire designer a b c", "(f1rm hire designer a b c)", "echo $(f1rm hire designer a b c)", "echo hi\nf1rm hire designer a b c", "bun office/cli/f1rm.ts hire designer a b c", "F1RM_X=1 /usr/local/bin/f1rm hire designer a b c", "bun run office/cli/f1rm.ts hire designer a b c", "npx f1rm hire designer a b c", '"f1rm" hire designer a b c']) {
+    expect([command, await run(command)]).toEqual([command, "deny"]);
+  }
+  for (const command of ['git commit -m "mentions f1rm hire"', 'grep "f1rm hire" README.md', "echo 'ls; f1rm hire designer'", "cat docs/f1rm.ts", "f1rm hired"]) {
+    expect([command, await run(command)]).toEqual([command, null]);
+  }
+});
+
+// A PM, a lead, a designer and a freelancer, to see which of the delegation rules reach whom.
+async function delegationOffice(boardsDir?: string) {
+  start(undefined, undefined, boardsDir);
+  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["f", undefined]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), prompt: "go", session_title: `${id}-title`, ...(type && { agent_type: type }) });
+  }
+  await office((s) => Object.keys(s.employees).length === 4);
+}
+
+test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, memory, evidence and scratch; others write anywhere", async () => {
+  await delegationOffice("/home/me/.f1rm/boards");
+  const home = process.env.HOME;
+  process.env.HOME = "/home/me";
+  afterEachRestore = () => (process.env.HOME = home);
+  const write = async (id: string, tool: string, file_path: string) => held(await hook(preToolUse(id, tool, tool === "NotebookEdit" ? { notebook_path: file_path } : { file_path })));
+  const allowed = ["/home/me/.f1rm/boards/shop.md", "/home/me/.claude/agent-memory/pm/notes.md", "/home/me/.f1rm/evidence/a/shot.png", "/private/tmp/claude-501/x/scratchpad/n.md", "/tmp/claude-501/n.md"];
+  const refused = ["/code/shop/src/login.ts", "/home/me/.f1rm/boards/../events.db", "/home/me/.claude/agent-memory-evil/x.md", "src/login.ts"];
+  for (const id of ["p", "l"]) {
+    for (const tool of ["Write", "Edit", "NotebookEdit"]) {
+      for (const file of allowed) expect([id, tool, file, await write(id, tool, file)]).toEqual([id, tool, file, null]);
+      for (const file of refused) {
+        const out = await write(id, tool, file);
+        expect([id, tool, file, out?.permissionDecision]).toEqual([id, tool, file, "deny"]);
+        expect(out.permissionDecisionReason).toBe("The PM and leads write only boards, memory, evidence and scratch files. Put this work on the board and hire for it.");
+      }
+    }
+  }
+  for (const id of ["d", "f"]) expect(await write(id, "Write", "/code/shop/src/login.ts")).toBeNull();
+});
+
+test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {
+  await delegationOffice();
+  const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
+  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)", "git pull origin main", "git -C x am fix.patch", "git revert abc", "gh pr merge 3 --squash", "cd x && gh pr merge 3"];
+  const readOnly = ["git log --oneline", "git status", "git diff HEAD", "git show abc", "git rev-parse HEAD", "git worktree list", "git -C x log", "git log --grep 'git push; git merge'", "echo git push", "gh pr view 3"];
+  for (const id of ["p", "l"]) {
+    for (const command of landing) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toBe("Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
+    }
+    for (const command of readOnly) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  }
+  for (const id of ["d", "f"]) for (const command of landing) expect(await bash(id, command)).toBeNull();
+});
+
+test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordinary intern, and a specialist's call, are not", async () => {
+  await delegationOffice();
+  const call = async (id: string, tool: string, subagent_type: string) => held(await hook(preToolUse(id, tool, { description: "x", prompt: "x", subagent_type })));
+  for (const id of ["p", "l"]) {
+    for (const tool of ["Agent", "Task"]) {
+      const out = await call(id, tool, "f1rm:backend-dev");
+      expect([id, tool, out?.permissionDecision]).toEqual([id, tool, "deny"]);
+      expect(out.permissionDecisionReason).toBe("A role is hired with `f1rm hire`, never started as an intern.");
+    }
+  }
+  expect(await call("p", "Agent", "Explore")).toBeNull();
+  expect(await call("l", "Task", "general-purpose")).toBeNull();
+  expect(await call("d", "Agent", "f1rm:backend-dev")).toBeNull();
+});
+
+test("a refusal is logged with the role, title, tool and rule, and never the command or the file", async () => {
+  await delegationOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await hook(preToolUse("p", "Bash", { command: "git push SECRET-REMOTE" }));
+    await hook(preToolUse("l", "Write", { file_path: "/code/shop/SECRET-FILE.ts", content: "SECRET-BODY" }));
+    await hook(preToolUse("p", "Agent", { description: "x", prompt: "SECRET-PROMPT", subagent_type: "f1rm:designer" }));
+    await hook(preToolUse("d", "Bash", { command: "f1rm hire designer SECRET-NAME" }));
+    await hook(preToolUse("p", "Bash", { command: "git log" }));
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual(["refused pm p-title Bash landing", "refused lead l-title Write write", "refused pm p-title Agent intern-role", "refused designer d-title Bash hire"]);
+});
+
 test("a company employee runs at most 2 interns at once, counting calls not started yet; a freelancer is never held", async () => {
   start();
   await hook({ ...common("d", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:designer" });
@@ -1201,4 +1304,138 @@ test("show moves the open office pages to a project and says how many there were
   expect(await (await show(ROOM)).json()).toEqual({ pages: 0 });
   expect((await show("/code/nope")).status).toBe(404);
   expect((await show(ROOM, "wrong")).status).toBe(401);
+});
+
+test("the safety net lets go a hire that has been done 15 minutes with its branch merged, and nothing else", async () => {
+  const repo = "/code/shop", tree = (task: string) => `${repo}/.claude/worktrees/${task}`;
+  const s = (id: string, name: string, cwd: string, state = "done", kind = "background") => ({ id, name, kind, state, cwd });
+  sessionList = [
+    s("d1", "designer-done", tree("done")),
+    s("t1", "checkout.backend-dev-teamdone", tree("teamdone")),
+    s("r1", "reviewer-review-done", repo),
+    s("u1", "designer-open", tree("open")),
+    s("w1", "frontend-dev-busy", tree("busy"), "working"),
+    s("l1", "lead-checkout", repo),
+    s("n1", "my-own-task", tree("done")),
+    s("i1", "designer-inter", tree("inter"), "done", "interactive"),
+  ];
+  mergedBranches = new Set(["worktree-done", "worktree-teamdone", "worktree-busy", "worktree-inter"]);
+  let now = 1_000_000;
+  const quiet = (ms: number) => Bun.sleep(ms);
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, clock: () => now, letGoAfterMs: 400 });
+  await quiet(250);
+  expect(calls).toEqual([]); // just seen done
+  now += 399;
+  await quiet(250);
+  expect(calls).toEqual([]); // not yet the whole wait
+  now += 2;
+  for (let i = 0; i < 20 && calls.length < 5; i++) await quiet(50);
+  await quiet(250); // the unmerged, working, lead, other-name and interactive sessions stay however long it waits
+  expect(calls.sort()).toEqual([`letgo d1`, `letgo r1`, `letgo t1`, `remove ${repo} done`, `remove ${repo} teamdone`].sort());
+});
+
+test("the office answers while the safety net's first look at `claude agents` is still hanging", async () => {
+  sessionsGate = new Promise(() => {});
+  start();
+  const answer = await Promise.race([hook({ ...common("s1", "UserPromptSubmit"), prompt: "go" }).then(() => "answered"), Bun.sleep(1500).then(() => "held")]);
+  expect(answer).toBe("answered");
+});
+
+test("the safety net starts the wait over when a hire works again, and keeps what it couldn't let go", async () => {
+  const repo = "/code/shop";
+  const hire = { id: "d1", name: "designer-done", kind: "background", state: "done", cwd: `${repo}/.claude/worktrees/done` };
+  sessionList = [hire];
+  mergedBranches = new Set(["worktree-done"]);
+  let now = 1_000_000;
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, clock: () => now, letGoAfterMs: 400 });
+  await Bun.sleep(250);
+  now += 300;
+  sessionList = [{ ...hire, state: "working" }];
+  await Bun.sleep(250);
+  sessionList = [hire];
+  await Bun.sleep(250); // done again: counted from here
+  now += 300;
+  await Bun.sleep(250);
+  expect(calls).toEqual([]);
+  letGoFails = "rm refused: uncommitted work";
+  now += 200;
+  await Bun.sleep(400);
+  expect(calls).toEqual(["letgo d1"]); // tried once; it threw, so no worktree or branch was removed
+  await Bun.sleep(400);
+  expect(calls).toEqual(["letgo d1"]); // and not again every tick
+});
+
+// The skill gate: a hire is held until it loads the skills its first prompt names.
+const hired = (id: string, prompt: string, agent_type = "f1rm:backend-dev") => hook({ ...common(id, "UserPromptSubmit"), prompt, agent_type, session_title: `${id}-title` });
+const skillLoaded = (id: string, skill: string, hook_event_name = "PostToolUse") => hook({ ...common(id, hook_event_name), tool_name: "Skill", tool_input: { skill }, tool_use_id: "toolu_2" });
+const tryTool = async (id: string, tool: string, input: object = {}) => (await held(await hook(preToolUse(id, tool, input))))?.permissionDecision ?? null;
+
+test("a hire whose prompt names skills is refused every tool but the reading ones until each Skill call succeeds", async () => {
+  start();
+  await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
+  const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
+  expect(out.permissionDecision).toBe("deny");
+  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to.");
+  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
+  for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
+  // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
+  const fork = await held(await hook({ ...preToolUse("h", "Bash", { command: "git diff main...x" }), agent_id: "fork-1", agent_type: "general-purpose" }));
+  expect(fork?.permissionDecision ?? null).toBeNull();
+
+  await skillLoaded("h", "code-review"); // another skill that shares the part after the ":" does not count
+  await skillLoaded("h", "impeccable:impeccable"); // nor does a prefixed name for an unprefixed one
+  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If");
+  await skillLoaded("h", "mattpocock-skills:code-review");
+  await skillLoaded("h", "impeccable");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBeNull();
+});
+
+test("a failed Skill call does not count as loaded", async () => {
+  start();
+  await hired("h", `/tdd${LOAD_FIRST}impeccable.`);
+  await skillLoaded("h", "impeccable", "PostToolUseFailure");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBe("deny");
+  await skillLoaded("h", "impeccable");
+  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
+});
+
+test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
+  start();
+  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await skillLoaded("r", "ponytail:ponytail-review");
+  const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
+  const out = await send("APPROVED shop-1");
+  expect(out.permissionDecision).toBe("deny");
+  expect(out.permissionDecisionReason).toBe("Run security-review with the Skill tool on the merge before you send APPROVED.");
+  expect(await send("CHANGES shop-1: fix x")).toBeNull();
+  expect(await tryTool("r", "Bash", { command: "git merge --no-ff x" })).toBeNull();
+  await skillLoaded("r", "security-review", "PostToolUseFailure");
+  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
+  await skillLoaded("r", "security-review");
+  expect(await send("APPROVED shop-1")).toBeNull();
+});
+
+test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {
+  start();
+  await hired("p", "Plan the work. Before you start, nothing.", "f1rm:pm");
+  await hook({ ...common("f", "UserPromptSubmit"), prompt: `${LOAD_FIRST}impeccable.` }); // the sentence, from a session that is not a company employee
+  await hired("m", "/code-review medium", "f1rm:reviewer");
+  for (const id of ["p", "f", "m"]) {
+    expect(await tryTool(id, "Bash", { command: "ls" })).toBeNull();
+    expect(await tryTool(id, "SendMessage", { message: "APPROVED x" })).toBeNull();
+  }
+});
+
+test("the prompt text never reaches the events table", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, dbPath });
+  await hired("h", `/tdd${LOAD_FIRST}impeccable. SECRET-BRIEF`);
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(dbPath, { readonly: true });
+  const rows = (db.query("SELECT event FROM events").all() as { event: string }[]).map((r) => r.event).join("\n");
+  db.close();
+  expect(rows).toContain("UserPromptSubmit");
+  expect(rows).not.toContain("SECRET-BRIEF");
+  expect(rows).not.toContain("Before you start");
 });

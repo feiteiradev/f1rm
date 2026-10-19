@@ -9,20 +9,20 @@ const PLUGIN = import.meta.dir;
 const REPO = join(PLUGIN, "..");
 
 const GUIDELINES = "f1rm:f1rm-guidelines";
-// research and security-review are slash commands, not Skill-tool skills, so no role lists them.
+// research and security-review are slash commands: `f1rm hire --skills` or `--level high` brings them in, so no role lists them.
 const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
   lead: [GUIDELINES, "f1rm:hire"],
   designer: ["design-pipeline"],
   "frontend-dev": ["mattpocock-skills:tdd"],
   "backend-dev": ["mattpocock-skills:tdd"],
-  reviewer: ["code-review", GUIDELINES],
-  researcher: [],
+  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review"],
+  researcher: ["mattpocock-skills:research"],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
-  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica"],
+  "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica", "hook-writer-sms", "carousel-writer-sms"],
   sales: ["anthropic-skills:6-first-customers-acquisition-plan", "anthropic-skills:7-fast-revenue-strategy"],
-  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
+  strategist: ["anthropic-skills:1-startup-idea-validator", "anthropic-skills:2-profitable-niche-finder", "anthropic-skills:3-customer-pain-point-researcher", "anthropic-skills:4-lean-startup-business-plan-builder"],
 };
 const SLASH_ONLY = ["research", "security-review"];
 
@@ -62,6 +62,20 @@ test("the PM interviews before it plans, and only the Reviewer merges and never 
   const reviewer = role("reviewer");
   expect(reviewer.fm.disallowedTools).toBeUndefined(); // a Bash(...) deny removes the whole Bash tool
   expect(reviewer.body).toContain("Never push");
+});
+
+test("the Reviewer merges in a scratch worktree, fast-forwards the main checkout, and approves only once main has moved", () => {
+  const flow = section("Review and merge flow");
+  expect(flow).toContain("git worktree add --detach .claude/worktrees/review-<task> <base>");
+  expect(flow).toContain("git merge --no-ff <branch>");
+  expect(flow).toContain("git merge --ff-only <merge sha>");
+  expect(flow).toContain("git worktree remove");
+  expect(flow).not.toContain("reset --hard");
+  expect(role("reviewer").body).not.toContain("reset --hard");
+  expect(flow.indexOf("--ff-only")).toBeLessThan(flow.indexOf("`APPROVED`"));
+  expect(flow).toMatch(/only after main has moved/);
+  expect(role("reviewer").body).toContain("scratch worktree");
+  expect(role("reviewer").body).toContain("--ff-only");
 });
 
 test("the guidelines cover every item the spec lists", () => {
@@ -134,30 +148,18 @@ test("the guidelines run editions: Work and Founder, the founder playbook, draft
   expect(role("reviewer").body).toContain("content checklist");
 });
 
-test("/f1rm is a skill only the user runs: it runs `f1rm here` with its arguments before the model, pre-approved for that alone, and replies with its line", () => {
-  const { fm, body } = parts(join(PLUGIN, "skills", "f1rm", "SKILL.md"));
-  expect(fm.name).toBe("f1rm");
-  expect(fm["disable-model-invocation"]).toBe(true);
-  expect(fm["allowed-tools"]).toBe("Bash(f1rm here:*)");
-  expect(fm["argument-hint"]).toBe("[off | edition work|founder | pm]");
-  expect(body).toContain("!`f1rm here $ARGUMENTS`");
-  expect(body).toContain("Reply with exactly the line above and nothing else.");
-  expect(body).toContain("f1rm isn't set up on this machine");
-});
-
 test("the roster table names each hireable role with the commands `f1rm hire` loads", () => {
-  const slash: Record<string, string[]> = { reviewer: ["security-review"], researcher: ["research"] };
   const rows = [...section("Roster and hiring playbook").matchAll(/^\| `(\S+)` \| .*? \| (.+?) \|$/gm)];
   expect(rows.map((r) => r[1])).toEqual(Object.keys(ROLES));
   for (const [, name, cell] of rows) {
     const listed = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     // The PM is never hired, so its row lists only what `f1rm pm` loads.
     const skills = name === "pm" ? ROLES[name].filter((s) => s !== GUIDELINES) : ROLES[name];
-    expect(listed.sort()).toEqual([...skills, ...(slash[name] ?? [])].sort());
+    expect(listed.sort()).toEqual([...skills].sort());
   }
 });
 
-test("research and security-review are slash commands: briefs start with them, no role invokes them as skills", () => {
+test("research and security-review are slash commands: --skills research and --level high bring them in, no role invokes them as skills", () => {
   const playbook = section("Roster and hiring playbook");
   for (const c of SLASH_ONLY) {
     expect(playbook).toContain(`\`/${c}\``);
@@ -167,6 +169,72 @@ test("research and security-review are slash commands: briefs start with them, n
     }
   }
   expect(playbook).toMatch(/brief of a hire starts with/i);
+  for (const s of ["`--skills research`", "`--level high`", "`--skills security-review` is refused", "never loaded at the start", "`--content`"]) expect(playbook).toContain(s);
+});
+
+// The skills the Workflows section names for each role, beyond its `skills:` list.
+const WORKFLOW_SKILLS: Record<string, string[]> = {
+  "frontend-dev": ["run", "design-pipeline"],
+  "backend-dev": ["mattpocock-skills:diagnosing-bugs"],
+  reviewer: ["security-review"],
+  researcher: ["research"],
+};
+const bare = (skill: string) => skill.split(":").pop()!;
+
+test("the Workflows section has an entry for every role, naming its skills, and every skill it names is in a role file or the roster", () => {
+  const flows = section("Workflows");
+  const entries = flows.split(/^- \*\*/m).slice(1);
+  for (const r of Object.keys(ROLES)) {
+    const entry = entries.find((e) => e.startsWith(`${r}**`));
+    expect(entry, `${r} has a Workflows entry`).toBeDefined();
+    for (const s of [...ROLES[r], ...(WORKFLOW_SKILLS[r] ?? [])]) expect(entry!, `${r} names ${s}`).toContain(bare(s));
+  }
+  const everything = [section("Roster and hiring playbook"), ...Object.keys(ROLES).map((r) => readFileSync(join(PLUGIN, "agents", `${r}.md`), "utf8"))].join("\n");
+  const named = [...flows.matchAll(/`\/?([a-z][a-z0-9-]*(?::[a-z0-9-]+)?)`/g)].map((m) => m[1]);
+  expect(named.length).toBeGreaterThan(15);
+  for (const s of named) expect(everything, `${s} is in a role file or the roster`).toContain(bare(s));
+  // The skills a role runs by hand are in its role file.
+  expect(role("frontend-dev").body).toContain("`run`");
+  expect(role("backend-dev").body).toContain("diagnosing-bugs");
+});
+
+test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permission, ESCALATE, f1rm letgo and the base-fails rule", () => {
+  const handoff = section("Handoff via SendMessage");
+  for (const s of ["exit code", "screenshot", "skills used", "~/.f1rm/evidence/<repo>/<task>/", "`BLOCKED <slug> permission`", "`ESCALATE <slug>`", "one `BLOCKED` message"]) expect(handoff).toContain(s);
+  const flow = section("Review and merge flow");
+  for (const s of ["passes on the base proves nothing", "red-<task>", "`ESCALATE <slug>`", "docs/research/"]) expect(flow).toContain(s);
+  expect(section("Teams")).toContain("`f1rm letgo");
+  expect(section("Who talks to whom")).toContain("`BLOCKED <slug> permission`");
+  expect(guidelines).toContain("Nobody pushes; the user pushes.");
+  const playbook = section("Roster and hiring playbook");
+  for (const s of ["same task goes to the same session", "`review-<task>`", "previous `DONE` report", "what the user must provide"]) expect(playbook).toContain(s);
+});
+
+test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
+  const gates = section("Gates");
+  for (const s of ["skill gate", "delegation gate", "boards, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
+  const cap = section("Cap rule");
+  expect(cap).toMatch(/lead.*tells? the PM/s);
+  expect(cap).toMatch(/PM.*tells? the user/s);
+});
+
+test("pm.md turns handed work into a board task, sends exploration to a Haiku Explore intern, sends permission blocks to the hire's desk, picks up first, and ends a milestone", () => {
+  const pm = role("pm").body;
+  for (const s of ["including a slash command", "Haiku Explore intern", "never run its command", "Pick up", "claude logs", "f1rm letgo", "close this session"]) expect(pm).toContain(s);
+  const lead = role("lead").body;
+  expect(lead).toContain("f1rm letgo");
+  expect(lead).toMatch(/cap.*Tell the PM/s);
+  expect(role("reviewer").body).toContain("only after main has moved");
+});
+
+test("both READMEs list f1rm letgo, the hire flags and the Workflows section", () => {
+  const readme = readFileSync(join(REPO, "README.md"), "utf8"), plugin = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  expect(readme).toMatch(/^\| `f1rm letgo` \|/m);
+  for (const text of [readme, plugin]) {
+    for (const s of ["--skills", "--level", "--content", "f1rm letgo", "Workflows"]) expect(text).toContain(s);
+  }
+  expect(readme).toContain("(plugin/skills/f1rm-guidelines/SKILL.md#workflows)");
+  expect(plugin).toContain("(skills/f1rm-guidelines/SKILL.md#workflows)");
 });
 
 test("a hire reports to the PM's name, which f1rm pm sets and the PM passes on", () => {
@@ -210,7 +278,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   expect(claude("plugin", "install", "f1rm@f1rm").code).toBe(0);
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
-  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm", "f1rm-guidelines", "hire"]);
+  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
   expect(details.out).toMatch(/Agents \(12\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });

@@ -4,6 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
+import { machine } from "../server/machine.ts";
+import { SLUG } from "./hire.ts";
+import { hireTask, letgo } from "./letgo.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -360,6 +363,14 @@ test("the PM's first prompt gives its session name, after the slash command", ()
   expect(prompt).toContain("Your session name is pm-shop.");
 });
 
+test("the PM's first prompt asks it to pick up from the board and the live sessions before the interview", () => {
+  const stub = stubClaude();
+  pmIn(repoDir("shop"), {}, stub);
+  const prompt = stub.args()[4];
+  for (const s of ["claude agents --json", "claude logs", "`doing` or `review`"]) expect(prompt).toContain(s);
+  expect(prompt.indexOf("claude agents --json")).toBeLessThan(prompt.indexOf("interview"));
+});
+
 test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
   const repo = repoDir("shop");
   Bun.spawnSync(["git", "init", "-q", repo]);
@@ -506,22 +517,22 @@ test("pm asks a repo's edition the first time, saves it, and tells the PM; with 
   expect(again.args()[4]).toContain("This is a Founder project");
 });
 
-// `f1rm here` is what `/f1rm` runs: one line back, and the office's token never in it.
-async function hereIn(cwd: string, home: string, bin: string, ...args: string[]) {
+// A bare `f1rm` in a folder: one line back, and the office's token never in it.
+async function f1rmIn(cwd: string, home: string, bin: string, ...args: string[]) {
   // async spawn: a sync one would block this process, and with it the office that has to answer
-  const proc = Bun.spawn(["bun", CLI, "here", ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", CLI, ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = [await proc.exited, await new Response(proc.stdout).text(), await new Response(proc.stderr).text()];
   return { code, out: out.trim(), err };
 }
 
-test("here on a fresh machine installs the hooks, starts the background office, waits for it, and opens this folder's project", async () => {
+test("a bare f1rm on a fresh machine installs the hooks, starts the background office, waits for it, and opens this folder's project", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("shop"));
   const stub = stubBin();
   const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
   const url = `http://127.0.0.1:${office.port}/secret-token/`;
   // launchd loading the office: the office writes its URL once it is up.
   writeFileSync(join(stub.bin, "launchctl"), `#!/bin/sh\necho "launchctl $@" >> "${stub.bin}/calls.log"\n[ "$1" = bootstrap ] && printf '%s' '${url}' > "${home}/.f1rm/office-url"\nexit 0\n`, { mode: 0o755 });
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.code).toBe(0);
   expect(r.out).toBe("Opened the f1rm office on shop (installed f1rm's hooks after backing up your settings; if this session's door doesn't appear, restart this session once; started it in the background).");
@@ -530,30 +541,33 @@ test("here on a fresh machine installs the hooks, starts the background office, 
   expect(stub.calls().at(-1)).toBe(`open ${url}#/project/${encodeURIComponent(folder)}`);
 });
 
-test("here with the office running just opens this folder's project, in one line", async () => {
+test("a bare f1rm with the office running just opens this folder's project, in one line", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
   const stub = stubBin();
   stub.run(home, "install");
   const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
   const url = `http://127.0.0.1:${office.port}/tok/`;
   writeFileSync(join(home, ".f1rm", "office-url"), url);
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.out).toBe("Opened the f1rm office on blog.");
   expect(stub.calls()).toEqual([`open ${url}#/project/${encodeURIComponent(folder)}`]);
 });
 
-test("here off stops the background office, here edition sets this folder's, and anything else lists what /f1rm does", async () => {
+test("help prints the usage line and exits 0; an unknown command, here included, prints it and exits 1", async () => {
   const home = tempHome(), folder = repoDir("shop");
   const stub = stubBin();
-  stub.run(home, "install");
-  stub.run(home, "service");
-  expect((await hereIn(folder, home, stub.bin, "off")).out).toBe("Stopped the f1rm office. Your sessions keep working.");
-  expect(existsSync(join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist"))).toBe(false);
-  expect((await hereIn(folder, home, stub.bin, "off")).out).toBe("The f1rm office wasn't running.");
-  expect((await hereIn(folder, home, stub.bin, "edition", "founder")).out).toBe("shop is now a Founder project.");
-  expect(edition(folder, home).out).toBe("founder");
-  for (const args of [["help"], ["edition", "startup"]]) expect((await hereIn(folder, home, stub.bin, ...args)).out).toStartWith("/f1rm opens the office on this project");
+  for (const arg of ["help", "-h", "--help"]) {
+    const r = await f1rmIn(folder, home, stub.bin, arg);
+    expect(r.code).toBe(0);
+    expect(r.out).toStartWith("usage: f1rm | install | uninstall");
+  }
+  for (const arg of ["here", "nonsense"]) {
+    const r = await f1rmIn(folder, home, stub.bin, arg);
+    expect(r.code).toBe(1);
+    expect(r.err).toStartWith("usage: f1rm | install | uninstall");
+    expect(r.err).not.toContain("here");
+  }
 });
 
 test("install puts the f1rm command in ~/.local/bin, and uninstall removes it only when it is f1rm's", () => {
@@ -571,7 +585,7 @@ test("install puts the f1rm command in ~/.local/bin, and uninstall removes it on
   expect(readFileSync(bin, "utf8")).toBe("#!/bin/sh\necho mine\n");
 });
 
-test("here with an office page open moves that page to this folder's project and opens no new tab", async () => {
+test("a bare f1rm with an office page open moves that page to this folder's project and opens no new tab", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
   const stub = stubBin();
   stub.run(home, "install");
@@ -581,9 +595,142 @@ test("here with an office page open moves that page to this folder's project and
     fetch: async (req) => (req.method === "POST" && new URL(req.url).pathname === "/tok/show" ? (asked.push(await req.json()), Response.json({ pages: 1 })) : new Response("office")),
   });
   writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
-  const r = await hereIn(folder, home, stub.bin);
+  const r = await f1rmIn(folder, home, stub.bin);
   office.stop(true);
   expect(r.out).toBe("Your office tab now shows blog.");
   expect(asked).toEqual([{ room: folder }]);
   expect(stub.calls()).toEqual([]);
+});
+
+// f1rm letgo: a fake claude (the sessions it lists, stop and rm) over a real temp repo, so the branch and worktree clean-up is real git.
+const git = (cwd: string, ...args: string[]) => {
+  const r = Bun.spawnSync(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+  return r.stdout.toString().trim();
+};
+/** A repo on main with two hires' worktrees: `done` merged into main, `open` with a commit main lacks. */
+function repoWithHires() {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-letgo-")));
+  git(repo, "init", "-b", "main");
+  git(repo, "commit", "--allow-empty", "-m", "start");
+  for (const task of ["done", "open"]) {
+    git(repo, "worktree", "add", "-b", `worktree-${task}`, join(repo, ".claude", "worktrees", task));
+    git(join(repo, ".claude", "worktrees", task), "commit", "--allow-empty", "-m", task);
+  }
+  git(repo, "merge", "--no-ff", "-m", "merge done", "worktree-done");
+  return repo;
+}
+function fakeClaude(sessions: { id: string; name: string; kind?: string; state?: string; cwd: string }[], failRm = new Set<string>()) {
+  const live = sessions.map((s) => ({ kind: "background", state: "done", ...s }));
+  const calls: string[] = [];
+  return {
+    calls,
+    sessions: async () => live.slice(),
+    letGo: async (id: string) => {
+      if (failRm.has(id)) throw new Error("rm refused: uncommitted work");
+      calls.push(`letgo ${id}`);
+      live.splice(live.findIndex((s) => s.id === id), 1);
+    },
+    gitCommonDir: machine.gitCommonDir,
+    mergedBranch: machine.mergedBranch,
+    removeWorktree: machine.removeWorktree,
+  };
+}
+const branches = (repo: string) => git(repo, "branch", "--format=%(refname:short)").split("\n").sort();
+const worktreeOf = (repo: string, task: string) => join(repo, ".claude", "worktrees", task);
+
+test("letgo lets a named hire go and removes its merged worktree and branch", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude([{ id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") }]);
+  const r = await letgo(["frontend-dev-done"], fake, repo);
+  expect(r.ok).toBe(true);
+  expect(r.lines).toEqual(["frontend-dev-done: let go, removed its worktree and branch worktree-done"]);
+  expect(fake.calls).toEqual(["letgo a1"]);
+  expect(existsSync(worktreeOf(repo, "done"))).toBe(false);
+  expect(branches(repo)).toEqual(["main", "worktree-open"]);
+});
+
+test("letgo does not stop a hire whose branch is not merged, and fails", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude([{ id: "b2", name: "checkout.backend-dev-open", cwd: worktreeOf(repo, "open") }]);
+  const r = await letgo(["checkout.backend-dev-open"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["checkout.backend-dev-open: not let go: worktree-open is not merged into the base branch"]);
+  expect(fake.calls).toEqual([]);
+  expect(existsSync(worktreeOf(repo, "open"))).toBe(true);
+  expect(branches(repo)).toContain("worktree-open");
+});
+
+test("letgo does not stop a hire with no commits of its own: a branch at a base commit is waiting, not landed", async () => {
+  const repo = repoWithHires();
+  git(repo, "worktree", "add", "-b", "worktree-fresh", worktreeOf(repo, "fresh"));
+  const fake = fakeClaude([{ id: "f1", name: "frontend-dev-fresh", cwd: worktreeOf(repo, "fresh") }]);
+  const r = await letgo(["frontend-dev-fresh"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["frontend-dev-fresh: not let go: worktree-fresh is not merged into the base branch"]);
+  expect(fake.calls).toEqual([]);
+});
+
+test("letgo does not stop a merged hire whose worktree has uncommitted files, and fails", async () => {
+  const repo = repoWithHires();
+  writeFileSync(join(worktreeOf(repo, "done"), "notes.txt"), "unsaved thoughts");
+  const fake = fakeClaude([{ id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") }]);
+  const r = await letgo(["frontend-dev-done"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual(["frontend-dev-done: not let go: its worktree has uncommitted files"]);
+  expect(fake.calls).toEqual([]);
+  expect(existsSync(join(worktreeOf(repo, "done"), "notes.txt"))).toBe(true);
+});
+
+test("letgo prints a line per name, and fails if a name isn't a background session of this repo or can't be let go", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude(
+    [
+      { id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") },
+      { id: "c3", name: "designer-done", cwd: worktreeOf(repo, "done") },
+      { id: "d4", name: "designer-other", cwd: "/elsewhere/.claude/worktrees/other" },
+      { id: "e5", name: "frontend-dev-open", kind: "interactive", cwd: worktreeOf(repo, "open") },
+    ],
+    new Set(["c3"]),
+  );
+  const r = await letgo(["designer-done", "frontend-dev-done", "designer-other", "frontend-dev-open", "ghost"], fake, repo);
+  expect(r.ok).toBe(false);
+  expect(r.lines).toEqual([
+    "designer-done: could not be let go: rm refused: uncommitted work",
+    "frontend-dev-done: let go, removed its worktree and branch worktree-done",
+    "designer-other: no background session with this name in this repo",
+    "frontend-dev-open: no background session with this name in this repo",
+    "ghost: no background session with this name in this repo",
+  ]);
+  expect(fake.calls).toEqual(["letgo a1"]);
+});
+
+test("letgo lets every session with a reused name go, a stale stopped one too, and cleans up once", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude([
+    { id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done"), state: "stopped" },
+    { id: "a2", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") },
+  ]);
+  const r = await letgo(["frontend-dev-done"], fake, repo);
+  expect(r.ok).toBe(true);
+  expect(r.lines).toEqual(["frontend-dev-done: let go", "frontend-dev-done: let go, removed its worktree and branch worktree-done"]);
+  expect(fake.calls).toEqual(["letgo a1", "letgo a2"]);
+  expect(branches(repo)).toEqual(["main", "worktree-open"]);
+});
+
+test("hireTask takes exactly the task names that hire.ts's SLUG takes", () => {
+  for (const task of ["a", "a-b", "a1-b2-c3", "a--b", "-a", "a-", "A", "a b", "a.b", ""]) {
+    expect([task, hireTask(`frontend-dev-${task}`) !== null]).toEqual([task, SLUG.test(task)]);
+  }
+});
+
+test("letgo lets a Reviewer or a lead go without touching any branch", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude([
+    { id: "r1", name: "reviewer-review-done", cwd: repo },
+    { id: "l1", name: "lead-checkout", cwd: repo },
+  ]);
+  const r = await letgo(["reviewer-review-done", "lead-checkout"], fake, repo);
+  expect(r.lines).toEqual(["reviewer-review-done: let go", "lead-checkout: let go"]);
+  expect(branches(repo)).toEqual(["main", "worktree-done", "worktree-open"]);
 });

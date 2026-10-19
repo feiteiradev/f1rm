@@ -5,6 +5,7 @@ model: sonnet
 memory: user
 skills:
   - anthropic-skills:1-startup-idea-validator
+  - anthropic-skills:2-profitable-niche-finder
   - anthropic-skills:3-customer-pain-point-researcher
   - anthropic-skills:4-lean-startup-business-plan-builder
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage, WebFetch, WebSearch
@@ -23,7 +24,7 @@ Role: Strategist. Test the idea before the product is built around it, and say p
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the paths, and what is ready to publish. Leave merging to the Reviewer, and never push.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the paths, what is ready to publish, and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Leave merging to the Reviewer, and never push.
 
 ## Rules
 
