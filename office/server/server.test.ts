@@ -1373,9 +1373,11 @@ test("a hire whose prompt names skills is refused every tool but the reading one
   const fork = await held(await hook({ ...preToolUse("h", "Bash", { command: "git diff main...x" }), agent_id: "fork-1", agent_type: "general-purpose" }));
   expect(fork?.permissionDecision ?? null).toBeNull();
 
-  await skillLoaded("h", "code-review"); // the part after the last ":" matches
-  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If");
-  await skillLoaded("h", "impeccable:impeccable");
+  await skillLoaded("h", "code-review"); // another skill that shares the part after the ":" does not count
+  await skillLoaded("h", "impeccable:impeccable"); // nor does a prefixed name for an unprefixed one
+  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If");
+  await skillLoaded("h", "mattpocock-skills:code-review");
+  await skillLoaded("h", "impeccable");
   expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBeNull();
 });

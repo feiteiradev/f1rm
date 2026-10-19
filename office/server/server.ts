@@ -23,7 +23,6 @@ const MAX_MESSAGE = 4000;
 // The PM and the leads coordinate: they write boards, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
-const bare = (skill: string) => skill.split(":").pop();
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
@@ -142,7 +141,7 @@ export function startServer({
     // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
     const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
     if (gate) {
-      const has = (name: string) => [...gate.loaded].some((l) => bare(l) === bare(name));
+      const has = (name: string) => gate.loaded.has(name);
       const missing = gate.required.filter((r) => !has(r));
       if (missing.length && !READING.has(tool)) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to.`);
       if (gate.security && !has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
