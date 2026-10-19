@@ -1,5 +1,5 @@
 // Live proof of Let go: `f1rm hire` starts one real Haiku background session (hooks off, so it never reaches any office);
-// the real `f1rm start` (temp HOME, its own port) serves an office that shows it, because the proof reports the session's
+// the real `f1rm serve` (temp HOME, its own port) serves an office that shows it, because the proof reports the session's
 // start to that office; headless Chrome lets it go from its panel; `claude agents --json --all` must then no longer list it.
 // Cleanup removes its worktree, branch and the agent-memory folder it created.
 // Run `bun run build` first, then:
@@ -58,7 +58,7 @@ await cli("install").exited;
 const secret = /X-F1rm-Secret: (\S+)/i.exec(readFileSync(join(home, ".f1rm/ingest-headers"), "utf8"))?.[1];
 assert.ok(secret, "install wrote the ingest secret into the temp home");
 
-const server = cli("start");
+const server = cli("serve");
 let hired;
 const cleanup = async () => {
   server.kill();
@@ -89,7 +89,7 @@ try {
     url = /f1rm office: (\S+)/.exec(out)?.[1];
     if (url) break;
   }
-  assert.ok(url, "f1rm start printed the office URL");
+  assert.ok(url, "f1rm serve printed the office URL");
   const base = new URL(url).origin;
 
   const hire = Bun.spawn(

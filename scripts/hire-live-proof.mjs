@@ -1,4 +1,4 @@
-// Live proof of Hire: the real `f1rm start` (temp HOME, its own port) serves the office; headless Chrome hires one Haiku
+// Live proof of Hire: the real `f1rm serve` (temp HOME, its own port) serves the office; headless Chrome hires one Haiku
 // Designer through the dialog; a real background session starts in its own worktree. Checks that `claude agents --json`
 // lists it by name and that its hooks, which come from the real ~/.claude/settings.json, reach the real office
 // (read from ~/.f1rm/office-url), then stops it, removes it, its worktree, its branch and the agent-memory it created.
@@ -56,7 +56,7 @@ await cli("install").exited;
 const secret = /X-F1rm-Secret: (\S+)/i.exec(readFileSync(join(home, ".f1rm/ingest-headers"), "utf8"))?.[1];
 assert.ok(secret, "install wrote the ingest secret into the temp home");
 
-const server = cli("start");
+const server = cli("serve");
 let hired;
 const cleanup = async () => {
   server.kill();
@@ -88,7 +88,7 @@ try {
     url = /f1rm office: (\S+)/.exec(out)?.[1];
     if (url) break;
   }
-  assert.ok(url, "f1rm start printed the office URL");
+  assert.ok(url, "f1rm serve printed the office URL");
   const base = new URL(url).origin;
 
   // A hook event with the repo as its cwd makes the repo's room, the way any session in it would.

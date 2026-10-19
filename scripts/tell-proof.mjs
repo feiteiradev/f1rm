@@ -1,4 +1,4 @@
-// Live proof of Tell: a real Haiku interactive session (in a PTY) runs a long tool; the real `f1rm start` (temp HOME)
+// Live proof of Tell: a real Haiku interactive session (in a PTY) runs a long tool; the real `f1rm serve` (temp HOME)
 // serves the office; headless Chrome tells it a codeword through the panel while the tool runs. Checks, from timestamps
 // of the target's own hooks, that the message was read after the running tool finished (not before, not by killing
 // it), that the codeword came back, and that Ask and Tell look different in the panel.
@@ -61,7 +61,7 @@ for (const event of ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolU
 writeFileSync(targetSettings, JSON.stringify({ hooks }));
 const seen = () => (existsSync(timing) ? readFileSync(timing, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-const server = cli("start");
+const server = cli("serve");
 let url, target, raw = "", trusted = false;
 const cleanup = () => {
   target?.kill();
@@ -85,7 +85,7 @@ try {
     url = /f1rm office: (\S+)/.exec(out)?.[1];
     if (url) break;
   }
-  assert.ok(url, "f1rm start printed the office URL");
+  assert.ok(url, "f1rm serve printed the office URL");
 
   const sid = randomUUID();
   target = Bun.spawn(
