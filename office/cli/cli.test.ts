@@ -550,6 +550,16 @@ test("a bare f1rm on a fresh machine installs the hooks, starts the background o
   expect(stub.calls().at(-1)).toBe(`open ${url}#/project/${encodeURIComponent(folder)}`);
 });
 
+test("a bare f1rm exits 1 with the message on stderr when the background office does not start, as start does", async () => {
+  const home = tempHome(), folder = realpathSync(repoDir("shop"));
+  const stub = stubBin(); // its launchctl loads nothing, so no office ever writes its URL
+  const r = await f1rmIn(folder, home, stub.bin);
+  expect(r.code).toBe(1);
+  expect(r.out).toBe("");
+  expect(r.err).toContain("the office didn't start; see");
+  expect(stub.calls().some((c) => c.startsWith("open "))).toBe(false);
+}, 10_000);
+
 test("a bare f1rm with the office running just opens this folder's project, in one line", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
   const stub = stubBin();
