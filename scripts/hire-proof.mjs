@@ -68,7 +68,7 @@ try {
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
   const names = await dialog.locator(".role .name").allInnerTexts();
   assert.deepEqual([...names].sort(), ["Backend dev", "Designer", "Frontend dev", "Researcher", "Reviewer", "Team lead"], "six roles by title, and no PM");
-  assert.equal(await dialog.locator(".count").innerText(), "1 of 6 hires working.", "the dialog counts the working hires against the cap");
+  assert.equal(await dialog.locator(".count").innerText(), "1 of 30 hires working.", "the dialog counts the working hires against the cap");
   const maya = dialog.locator(".role", { hasText: "Designer" });
   assert.match(await maya.innerText(), /1 working/, "the Designer row counts the Designer already working");
   assert.match(await maya.innerText(), /sonnet.*design-pipeline/s, "the row names the model and skills");
@@ -117,22 +117,22 @@ try {
   await dialog.waitFor({ state: "detached" });
   assert.equal(await page.locator(".panel").count(), 0, "an empty desk opens no employee panel");
 
-  working = 5;
+  working = 29;
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "5 of 6 hires working.");
+  assert.equal(await dialog.locator(".count").innerText(), "29 of 30 hires working.");
   await page.getByLabel("Brief", { exact: true }).fill("One more");
-  working = 6;
+  working = 30;
   await page.getByRole("button", { name: /^Hire / }).click();
-  await page.getByText("6 hires are already working (the cap is 6).").waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "6 of 6 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
+  await page.getByText("30 hires are already working (the cap is 30).").waitFor();
+  assert.equal(await dialog.locator(".count").innerText(), "30 of 30 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
   assert.equal(spawned.length, 1, "nothing spawned at the cap");
   assert.equal(await dialog.getByRole("group", { name: "Confirm hiring past the cap" }).count(), 0, "no confirm until Hire anyway is pressed");
   await page.screenshot({ path: join(OUT, "03-cap.png") });
 
   await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
   const confirm = dialog.getByRole("group", { name: "Confirm hiring past the cap" });
-  assert.match(await confirm.innerText(), /Hire a designer past the cap\? That makes 7 hires working/);
+  assert.match(await confirm.innerText(), /Hire a designer past the cap\? That makes 31 hires working/);
   await page.screenshot({ path: join(OUT, "03b-confirm.png") });
   await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(await confirm.count(), 0, "Cancel closes the confirm");
@@ -149,7 +149,7 @@ try {
 
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "6 of 6 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
+  assert.equal(await dialog.locator(".count").innerText(), "30 of 30 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
 

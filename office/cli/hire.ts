@@ -11,7 +11,7 @@ export const USAGE =
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
 /** Working background sessions on the whole machine, leads and the user's own included. */
-export const CAP = 6;
+export const CAP = 30;
 /** Live leads in one repo, and working sessions in one team (its Reviewer included). */
 export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
