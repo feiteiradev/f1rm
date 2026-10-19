@@ -25,7 +25,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     calls.push(`letgo ${id}`);
     if (letGoFails) throw new Error(letGoFails);
   },
-  sessions: async () => sessionList,
+  sessions: async () => (await sessionsGate, sessionList),
   mergedBranch: (_repo: string, branch: string) => mergedBranches.has(branch),
   removeWorktree: (repo: string, task: string) => void calls.push(`remove ${repo} ${task}`),
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
@@ -61,6 +61,7 @@ let letGoFails = "";
 // What `claude agents --json --all` lists, and which branches are merged into the base, for the safety net.
 let sessionList: { id: string; name: string; kind: string; state: string; cwd: string }[] = [];
 let mergedBranches = new Set<string>();
+let sessionsGate: Promise<void> | undefined; // a test sets one that never settles: `claude agents` hanging
 let working: number | null = 0;
 let spawnFails = "";
 let pmFails = "";
@@ -81,6 +82,7 @@ afterEach(() => {
   letGoFails = "";
   sessionList = [];
   mergedBranches = new Set();
+  sessionsGate = undefined;
   working = 0;
   spawnFails = "";
   pmFails = "";
@@ -1330,6 +1332,13 @@ test("the safety net lets go a hire that has been done 15 minutes with its branc
   for (let i = 0; i < 20 && calls.length < 5; i++) await quiet(50);
   await quiet(250); // the unmerged, working, lead, other-name and interactive sessions stay however long it waits
   expect(calls.sort()).toEqual([`letgo d1`, `letgo r1`, `letgo t1`, `remove ${repo} done`, `remove ${repo} teamdone`].sort());
+});
+
+test("the office answers while the safety net's first look at `claude agents` is still hanging", async () => {
+  sessionsGate = new Promise(() => {});
+  start();
+  const answer = await Promise.race([hook({ ...common("s1", "UserPromptSubmit"), prompt: "go" }).then(() => "answered"), Bun.sleep(1500).then(() => "held")]);
+  expect(answer).toBe("answered");
 });
 
 test("the safety net starts the wait over when a hire works again, and keeps what it couldn't let go", async () => {

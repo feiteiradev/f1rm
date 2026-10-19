@@ -536,7 +536,8 @@ export function startServer({
       letting = false;
     }
   }
-  const ready = Promise.all([sweepOnce(), readBoards(), letGoDone()]);
+  const ready = Promise.all([sweepOnce(), readBoards()]);
+  void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
