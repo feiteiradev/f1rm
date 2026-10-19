@@ -93,7 +93,7 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   1. For a bug, run `mattpocock-skills:diagnosing-bugs` to find the cause, then `mattpocock-skills:tdd` to fix it.
   2. For a feature, run `mattpocock-skills:tdd`.
 - **reviewer**
-  1. Load `f1rm:f1rm-guidelines`. The first command, `/code-review <level>` (`code-review`), gives the findings.
+  1. Load `f1rm:f1rm-guidelines`. The first command, `/code-review <level> worktree-<task>` (`code-review`), reviews the branch under review and gives the findings.
   2. Run the gates of the review flow on the base and on the merge.
   3. Run `ponytail:ponytail-review` on a code branch. Its findings never block.
   4. At `--level high`, run `security-review` on the merge before `APPROVED`.

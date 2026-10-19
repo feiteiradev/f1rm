@@ -95,6 +95,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (!task || !brief) throw new Error(USAGE);
   if (!SLUG.test(task)) throw new Error(`${role === "lead" ? "team" : "task"} "${task}" must be lowercase words joined by hyphens`);
   if (team != null && !SLUG.test(team)) throw new Error(`team "${team}" must be lowercase words joined by hyphens`);
+  if (role === "reviewer" && !task.startsWith("review-")) throw new Error(`a Reviewer's task is review-<task>, for the task it reviews, not "${task}"`);
   if (team != null && role === "lead") throw new Error("a lead heads a team and joins none: only the PM hires leads, without --team");
   if (model && !MODELS.includes(model)) throw new Error(`model "${model}" must be one of ${MODELS.join(", ")}`);
   if (level != null && !LEVELS.includes(level)) throw new Error(`level "${level}" must be one of ${LEVELS.join(", ")}`);
@@ -132,7 +133,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slash = added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = slash ? [slash, ...own, ...added.filter((s) => s !== slash)] : [...own, ...added];
-  const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"}` : first;
+  // The branch under review is named, so the review reads it and not the main checkout's working tree.
+  const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
