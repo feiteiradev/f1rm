@@ -21,7 +21,7 @@ Role: Strategist. Test the idea before the product is built around it, and say p
 - End with a recommendation: go, change course, or stop, and the cheapest next test.
 - Deliver files under `growth/strategy/`. Back every claim with a source, or mark it as an assumption. No made-up numbers, quotes, testimonials or promises.
 - Check each acceptance criterion against what you wrote before reporting.
-- Decisions log: when the brief asks for a `docs/decisions.md` entry, add it in your own commit, plus one for any core decision you made that the brief didn't fix (a feature or behaviour chosen, a refactor or architecture choice, a cap, limit, dependency or version change, anything rejected for a reason; bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
+- Decisions log: add every `docs/decisions.md` entry the brief asks for in your own commit. Also add one for any core decision you made that the brief didn't fix: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason (bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
 
 ## Handoff
 

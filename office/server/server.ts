@@ -154,7 +154,7 @@ export function startServer({
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
       const home = process.env.HOME ?? "";
-      const dirs = [boardsDir, join(home, ".f1rm", "milestones"), join(home, ".claude", "agent-memory"), join(home, ".f1rm", "evidence")];
+      const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
       if (!dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
         return refuse("write", "The PM and leads write only boards, milestones, memory, evidence and scratch files. Put this work on the board and hire for it.");

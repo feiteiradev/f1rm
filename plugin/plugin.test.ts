@@ -332,6 +332,8 @@ test("pm.md reads the milestones file at pickup, writes the milestone's section 
   expect(step(4)).toContain("docs/decisions.md has the entry");
   expect(step(7)).toMatch(/delete its section/);
   expect(pm).toContain("Only the PM writes the milestones file");
+  expect(step(7)).toContain("picks up from the board and the milestones file");
+  expect(role("researcher").body).toContain("Change no other files except `docs/decisions.md`");
 });
 
 test("the lead and the Reviewer carry their part of the decisions log", () => {
@@ -341,7 +343,9 @@ test("the lead and the Reviewer carry their part of the decisions log", () => {
 
 test.each(["designer", "frontend-dev", "backend-dev", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"])("%s adds its decisions.md entries in its own commit", (name) => {
   const { body } = role(name);
-  for (const s of ["`docs/decisions.md`", "in your own commit", "`## <YYYY-MM-DD> <title>`", "`- Decision:`, `- Why:`, `- Rejected:`, `- Where:`", "core decision", "`docs/adr/`"]) expect(body, s).toContain(s);
+  const core = "a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason";
+  expect(section("Milestones and decisions")).toContain(core);
+  for (const s of ["add every `docs/decisions.md` entry the brief asks for in your own commit. Also add one for any core decision you made that the brief didn't fix", core, "`## <YYYY-MM-DD> <title>`", "`- Decision:`, `- Why:`, `- Rejected:`, `- Where:`", "`docs/adr/`"]) expect(body, s).toContain(s);
 });
 
 test("docs/decisions.md holds the seeded entries, oldest first, each with its four lines", () => {

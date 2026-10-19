@@ -1178,6 +1178,21 @@ test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, milesto
   for (const id of ["d", "f"]) expect(await write(id, "Write", "/code/shop/src/login.ts")).toBeNull();
 });
 
+test("with no HOME, a PM's or lead's write under .f1rm or .claude relative to the server's folder is refused; the boards folder still works", async () => {
+  await delegationOffice("/home/me/.f1rm/boards");
+  const home = process.env.HOME;
+  delete process.env.HOME;
+  afterEachRestore = () => void (home === undefined ? delete process.env.HOME : (process.env.HOME = home));
+  const write = async (id: string, file_path: string) => held(await hook(preToolUse(id, "Write", { file_path })));
+  for (const id of ["p", "l"]) {
+    for (const file of [".f1rm/milestones/x.md", ".f1rm/evidence/x.md", ".claude/agent-memory/x.md"]) {
+      const out = await write(id, join(process.cwd(), file));
+      expect([id, file, out?.permissionDecision]).toEqual([id, file, "deny"]);
+    }
+    expect(await write(id, "/home/me/.f1rm/boards/shop.md")).toBeNull();
+  }
+});
+
 test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {
   await delegationOffice();
   const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
