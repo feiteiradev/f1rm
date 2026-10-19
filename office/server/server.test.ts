@@ -1157,25 +1157,40 @@ async function delegationOffice(boardsDir?: string) {
   await office((s) => Object.keys(s.employees).length === 4);
 }
 
-test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, memory, evidence and scratch; others write anywhere", async () => {
+test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, milestones, memory, evidence and scratch; others write anywhere", async () => {
   await delegationOffice("/home/me/.f1rm/boards");
   const home = process.env.HOME;
   process.env.HOME = "/home/me";
   afterEachRestore = () => (process.env.HOME = home);
   const write = async (id: string, tool: string, file_path: string) => held(await hook(preToolUse(id, tool, tool === "NotebookEdit" ? { notebook_path: file_path } : { file_path })));
-  const allowed = ["/home/me/.f1rm/boards/shop.md", "/home/me/.claude/agent-memory/pm/notes.md", "/home/me/.f1rm/evidence/a/shot.png", "/private/tmp/claude-501/x/scratchpad/n.md", "/tmp/claude-501/n.md"];
-  const refused = ["/code/shop/src/login.ts", "/home/me/.f1rm/boards/../events.db", "/home/me/.claude/agent-memory-evil/x.md", "src/login.ts"];
+  const allowed = ["/home/me/.f1rm/boards/shop.md", "/home/me/.f1rm/milestones/-code-shop.md", "/home/me/.claude/agent-memory/pm/notes.md", "/home/me/.f1rm/evidence/a/shot.png", "/private/tmp/claude-501/x/scratchpad/n.md", "/tmp/claude-501/n.md"];
+  const refused = ["/code/shop/src/login.ts", "/home/me/.f1rm/boards/../events.db", "/home/me/.f1rm/milestones/../../x", "/home/me/.f1rm/milestones-evil/x.md", "/home/me/.claude/agent-memory-evil/x.md", "src/login.ts"];
   for (const id of ["p", "l"]) {
     for (const tool of ["Write", "Edit", "NotebookEdit"]) {
       for (const file of allowed) expect([id, tool, file, await write(id, tool, file)]).toEqual([id, tool, file, null]);
       for (const file of refused) {
         const out = await write(id, tool, file);
         expect([id, tool, file, out?.permissionDecision]).toEqual([id, tool, file, "deny"]);
-        expect(out.permissionDecisionReason).toBe("The PM and leads write only boards, memory, evidence and scratch files. Put this work on the board and hire for it.");
+        expect(out.permissionDecisionReason).toBe("The PM and leads write only boards, milestones, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
   }
   for (const id of ["d", "f"]) expect(await write(id, "Write", "/code/shop/src/login.ts")).toBeNull();
+});
+
+test("with no HOME, a PM's or lead's write under .f1rm or .claude relative to the server's folder is refused; the boards folder still works", async () => {
+  await delegationOffice("/home/me/.f1rm/boards");
+  const home = process.env.HOME;
+  delete process.env.HOME;
+  afterEachRestore = () => void (home === undefined ? delete process.env.HOME : (process.env.HOME = home));
+  const write = async (id: string, file_path: string) => held(await hook(preToolUse(id, "Write", { file_path })));
+  for (const id of ["p", "l"]) {
+    for (const file of [".f1rm/milestones/x.md", ".f1rm/evidence/x.md", ".claude/agent-memory/x.md"]) {
+      const out = await write(id, join(process.cwd(), file));
+      expect([id, file, out?.permissionDecision]).toEqual([id, file, "deny"]);
+    }
+    expect(await write(id, "/home/me/.f1rm/boards/shop.md")).toBeNull();
+  }
 });
 
 test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {

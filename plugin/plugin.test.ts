@@ -212,7 +212,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
 
 test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
   const gates = section("Gates");
-  for (const s of ["skill gate", "delegation gate", "boards, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
+  for (const s of ["skill gate", "delegation gate", "boards, milestones, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);
@@ -313,4 +313,57 @@ test("the playbook gives the real `f1rm hire` syntax, and the override only afte
   expect(playbook).not.toContain("--help");
   expect(section("Cap rule")).toContain("f1rm hire --override");
   expect(section("Brief format")).not.toMatch(/^Report to:/m);
+});
+
+test("the guidelines state the milestones file and the decisions log, and the places where the rules bite mention them", () => {
+  const md = section("Milestones and decisions");
+  for (const s of ["~/.f1rm/milestones/<repo>.md", "encoded exactly as the board path", "# Milestones: <repo name>", "## <milestone slug>", "Goal", "Settled", "Tasks", "Done when", "Only the PM writes it", "when the user confirms the plan", "at pickup", "deletes the section when the milestone is reached", "Task status stays on the board"]) expect(md, s).toContain(s);
+  for (const s of ["`docs/decisions.md`", "a feature or behaviour the user chose", "a refactor or architecture choice", "a cap, limit, dependency or version change", "anything rejected for a reason", "Bug fixes and wording tweaks get no entry", "append-only, oldest first", "## <YYYY-MM-DD> <title>", "`- Decision:`", "`- Why:`", "`- Rejected:`", "`- Where:`", "docs/decisions.md has the entry <title>", "a missing entry blocks", "`docs/adr/`", "links to the ADR"]) expect(md, s).toContain(s);
+  expect(section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))).toContain("milestones file");
+  expect(section("Brief format")).toContain("docs/decisions.md");
+  expect(section("Review and merge flow")).toContain("docs/decisions.md");
+});
+
+test("pm.md reads the milestones file at pickup, writes the milestone's section with the board, and deletes it at the end of the milestone", () => {
+  const pm = role("pm").body;
+  const step = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(pm)?.[0] ?? "";
+  expect(step(1)).toContain("~/.f1rm/milestones/<repo>.md");
+  expect(step(4)).toContain("milestone's section");
+  expect(step(4)).toContain("docs/decisions.md has the entry");
+  expect(step(7)).toMatch(/delete its section/);
+  expect(pm).toContain("Only the PM writes the milestones file");
+  expect(step(7)).toContain("picks up from the board and the milestones file");
+  expect(role("researcher").body).toContain("Change no other files except `docs/decisions.md`");
+});
+
+test("the lead and the Reviewer carry their part of the decisions log", () => {
+  expect(role("lead").body).toContain("docs/decisions.md has the entry");
+  expect(role("reviewer").body).toMatch(/every `docs\/decisions\.md` entry the brief asks for.*blocks/);
+});
+
+test.each(["designer", "frontend-dev", "backend-dev", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"])("%s adds its decisions.md entries in its own commit", (name) => {
+  const { body } = role(name);
+  const core = "a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason";
+  expect(section("Milestones and decisions")).toContain(core);
+  for (const s of ["add every `docs/decisions.md` entry the brief asks for in your own commit. Also add one for any core decision you made that the brief didn't fix", core, "`## <YYYY-MM-DD> <title>`", "`- Decision:`, `- Why:`, `- Rejected:`, `- Where:`", "`docs/adr/`"]) expect(body, s).toContain(s);
+});
+
+test("docs/decisions.md holds the seeded entries, oldest first, each with its four lines", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  expect(entries.map((e) => e.split("\n")[0])).toEqual([
+    "2026-10-14 Founding decisions",
+    "2026-10-19 Plugin 0.2.0 drops the /f1rm skill from cached installs",
+    "2026-10-19 Machine cap on working background sessions is 30",
+    "2026-10-19 A bare f1rm fails like f1rm start when the office doesn't start",
+    "2026-10-19 Milestones outside the repo, decisions inside it",
+    "2026-10-19 Plugin 0.3.0",
+  ]);
+  for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+});
+
+test("the plugin is 0.3.0, and its README names both documents", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.3.0");
+  const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  expect(readme).toContain("~/.f1rm/milestones/<repo>.md");
+  expect(readme).toContain("docs/decisions.md");
 });

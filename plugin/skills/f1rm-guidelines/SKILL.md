@@ -68,11 +68,12 @@ Playbook:
 Each role's steps, and the skill or command at each step. Every dev and specialist ends with a `DONE` report that has the evidence block (see Handoff) and lists the skills used.
 
 - **pm**
-  1. Pick up: read the board and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, report where things were left.
+  1. Pick up: read the board, the milestones file and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, report where things were left.
   2. Interview with `mattpocock-skills:grilling` until the user confirms.
-  3. Load `f1rm:f1rm-guidelines`, write the board, and collect what the user must provide.
+  3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
   4. Hire with `f1rm hire`. Name stack skills with `--skills` and set `--level`.
   5. Route each `DONE` to a Reviewer, then let the hires go with `f1rm letgo` after `APPROVED`.
+  6. When the milestone is reached, delete its section from the milestones file.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
   1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`.
@@ -171,6 +172,8 @@ Report: when done or blocked, SendMessage to the session named in `Report to`, a
 
 Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. `f1rm hire` fills in `Report to` with it, so pass `--report-to` only if you were started another way. A lead's hires report to `lead-<team>`, which `f1rm hire --team` fills in. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review, and its Inputs hold the dev's `DONE` report.
 
+When a task carries a core decision, its Context states the decision and why, and a criterion reads "docs/decisions.md has the entry <title>" (see Milestones and decisions).
+
 ## Team brief
 
 The PM hires a lead with a team brief in place of a task brief. Write exactly these sections, in this order.
@@ -243,6 +246,24 @@ Each repo has one board file, written only by the PM, and each team has its own,
 - One row per task. Update the row in place. Never delete rows.
 - **Team boards.** A lead's board is `~/.f1rm/boards/<repo>.team.<team>.md`, with `<repo>` encoded as above, titled `# Board: <repo name> / <team>`, in the same table format, one row per task of its slice. On the PM's board a team is one row: owner `lead-<team>`, branch `-`, task the slice's goal.
 
+## Milestones and decisions
+
+Two documents keep the why of the work: a milestones file outside the repo, which the PM writes, and a decisions log inside it, which hires write.
+
+**The milestones file.** Only the PM writes it, and it lives outside the repo, like the board. The office does not display it.
+
+- **Path.** `~/.f1rm/milestones/<repo>.md`, with `<repo>` encoded exactly as the board path is (see Board format). Create the directory if it is missing.
+- **Contents.** A title line `# Milestones: <repo name>`, then one `## <milestone slug>` section per milestone in progress, with four parts: **Goal**, **Settled** (what the interview decided), **Tasks** (the board's `T` ids) and **Done when**. Task status stays on the board only; never copy it here.
+- **Life.** The PM adds a milestone's section when the user confirms the plan, reads the file at pickup alongside the board, and deletes the section when the milestone is reached. By then its core decisions are in `docs/decisions.md`, through the tasks.
+
+**The decisions log.** `docs/decisions.md` in each project repo, created the first time a decision is recorded and committed like code.
+
+- **Core decision.** Any of: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason. Bug fixes and wording tweaks get no entry.
+- **Format.** The log is append-only, oldest first. Each entry is a heading `## <YYYY-MM-DD> <title>` and four lines: `- Decision:`, `- Why:`, `- Rejected:` and `- Where:` (the task id and commit, or the task id alone when the commit doesn't exist yet).
+- **Who writes it.** When a task carries a core decision, the PM (or the lead) puts the decision and its why in the brief's Context, with the criterion "docs/decisions.md has the entry <title>". The hire adds that entry in its own commit, plus an entry for any core design decision it made that the brief didn't fix.
+- **Check.** The Reviewer confirms that every entry the brief asks for is there, and a missing entry blocks.
+- **ADRs.** A repo that has `docs/adr/` keeps its ADRs; an entry links to the ADR rather than copying it.
+
 ## Review and merge flow
 
 The Reviewer is the only role that merges, and it merges locally. Nobody pushes; the user pushes.
@@ -260,6 +281,7 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
    - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
    - In the scratch worktree, `git merge --no-ff <branch>`, where `<branch>` is `worktree-<task>`, and note the merge commit's sha.
    - On the merge, run each criterion's check, which passes, and the repo's full check command.
+   - Every `docs/decisions.md` entry the brief asks for is in the merge. A missing entry blocks.
    - A criterion with no check, a check that passes on the base, and a failure on the merge all block: remove the scratch worktree and send `CHANGES REQUESTED`.
    - At `--level high`, run security-review with the Skill tool from the scratch worktree, with `<base>...<merge sha>` as its args. The office holds your approval until it has run.
 6. Move the base branch to the verified result: in the main working directory, `git merge --ff-only <merge sha>`. If it fails because the base moved, remove the scratch worktree and repeat from step 5.
@@ -289,7 +311,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 The office holds two gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, neither runs.
 
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
-- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
+- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
 ## Use what is installed

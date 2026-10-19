@@ -20,6 +20,7 @@ Role: Backend dev. Implement the brief's server, data and API work in the repo, 
 - When the brief fixes an API contract that the Frontend dev builds against, keep to it. Report a needed change to the session in your `Report to` before making it.
 - Run the repo's full check command (tests, typecheck, build) before reporting. Report it green only when it is.
 - Keep the diff to what the brief asks for. Record anything else you notice in the report.
+- Decisions log: add every `docs/decisions.md` entry the brief asks for in your own commit. Also add one for any core decision you made that the brief didn't fix: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason (bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
 
 ## Handoff
 
