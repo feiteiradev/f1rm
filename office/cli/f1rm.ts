@@ -327,19 +327,26 @@ async function open() {
   }
   let url = await runningOffice();
   if (!url) {
-    url = await startBackgroundOffice();
+    try {
+      url = await startBackgroundOffice();
+    } catch (e) {
+      // What was changed in settings.json is still worth saying when the office then fails to start.
+      if (notes.length) console.error(`f1rm: ${notes.join("; ")}.`);
+      throw e;
+    }
     notes.push("started it in the background");
   }
   // An office page already open moves to this project; only with none open does a new tab open on it.
   const shown = await fetch(new URL("show", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room }) })
     .then(async (r) => r.ok && ((await r.json()) as { pages: number }).pages > 0)
     .catch(() => false);
+  const suffix = notes.length ? ` (${notes.join("; ")})` : "";
   if (shown) {
-    console.log(`Your office tab now shows ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
-    return;
+    console.log(`Your office tab now shows ${name}${suffix}.`);
+  } else {
+    Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
+    console.log(`Opened the f1rm office on ${name}${suffix}.`);
   }
-  Bun.spawn(["open", `${url}#/project/${encodeURIComponent(room)}`]);
-  console.log(`Opened the f1rm office on ${name}${notes.length ? ` (${notes.join("; ")})` : ""}.`);
 }
 
 // The recorded office on its own static build: no hooks, no database, no session of yours involved.

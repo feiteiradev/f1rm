@@ -527,9 +527,10 @@ test("pm asks a repo's edition the first time, saves it, and tells the PM; with 
 });
 
 // A bare `f1rm` in a folder: one line back, and the office's token never in it.
-async function f1rmIn(cwd: string, home: string, bin: string, ...args: string[]) {
+const f1rmIn = (cwd: string, home: string, bin: string, ...args: string[]) => f1rmEnv({}, cwd, home, bin, ...args);
+async function f1rmEnv(env: Record<string, string>, cwd: string, home: string, bin: string, ...args: string[]) {
   // async spawn: a sync one would block this process, and with it the office that has to answer
-  const proc = Bun.spawn(["bun", CLI, ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", CLI, ...args], { cwd, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000", ...env }, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = [await proc.exited, await new Response(proc.stdout).text(), await new Response(proc.stderr).text()];
   return { code, out: out.trim(), err };
 }
@@ -550,15 +551,29 @@ test("a bare f1rm on a fresh machine installs the hooks, starts the background o
   expect(stub.calls().at(-1)).toBe(`open ${url}#/project/${encodeURIComponent(folder)}`);
 });
 
-test("a bare f1rm exits 1 with the message on stderr when the background office does not start, as start does", async () => {
+test("a bare f1rm that installed the hooks and then can't start the office prints those notes and the error to stderr, nothing to stdout, and exits 1, as start does", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("shop"));
   const stub = stubBin(); // its launchctl loads nothing, so no office ever writes its URL
-  const r = await f1rmIn(folder, home, stub.bin);
+  const r = await f1rmEnv({ F1RM_WAIT_MS: "500" }, folder, home, stub.bin);
   expect(r.code).toBe(1);
   expect(r.out).toBe("");
+  expect(r.err).toContain("installed f1rm's hooks after backing up your settings");
+  expect(r.err.indexOf("installed f1rm's hooks")).toBeLessThan(r.err.indexOf("the office didn't start; see"));
   expect(r.err).toContain("the office didn't start; see");
+  expect(stub.calls().some((c) => c.startsWith("launchctl bootstrap"))).toBe(true);
   expect(stub.calls().some((c) => c.startsWith("open "))).toBe(false);
-}, 10_000);
+});
+
+test("start exits 1 with the message on stderr when the background office does not start", async () => {
+  const home = tempHome();
+  const stub = stubBin(); // its launchctl loads nothing, so no office ever writes its URL
+  stub.run(home, "install");
+  const r = await f1rmEnv({ F1RM_WAIT_MS: "500" }, process.cwd(), home, stub.bin, "start");
+  expect(r.code).toBe(1);
+  expect(r.out).toBe("");
+  expect(r.err).toContain(`the office didn't start; see ${join(home, ".f1rm", "office.log")}`);
+  expect(stub.calls().some((c) => c.startsWith("open "))).toBe(false);
+});
 
 test("a bare f1rm with the office running just opens this folder's project, in one line", async () => {
   const home = tempHome(), folder = realpathSync(repoDir("blog"));
