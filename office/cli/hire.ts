@@ -14,7 +14,7 @@ const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
 export const CAP = 6;
 /** Live leads in one repo, and working sessions in one team (its Reviewer included). */
 export const TEAMS = 2, TEAM_CAP = 2;
-const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
 const SLASH_ONLY = ["research"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.

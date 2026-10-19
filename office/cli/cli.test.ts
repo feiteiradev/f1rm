@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { machine } from "../server/machine.ts";
-import { letgo } from "./letgo.ts";
+import { SLUG } from "./hire.ts";
+import { hireTask, letgo } from "./letgo.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -619,7 +620,7 @@ function repoWithHires() {
   git(repo, "merge", "--no-ff", "-m", "merge done", "worktree-done");
   return repo;
 }
-function fakeClaude(sessions: { id: string; name: string; kind?: string; cwd: string }[], failRm = new Set<string>()) {
+function fakeClaude(sessions: { id: string; name: string; kind?: string; state?: string; cwd: string }[], failRm = new Set<string>()) {
   const live = sessions.map((s) => ({ kind: "background", state: "done", ...s }));
   const calls: string[] = [];
   return {
@@ -702,6 +703,25 @@ test("letgo prints a line per name, and fails if a name isn't a background sessi
     "ghost: no background session with this name in this repo",
   ]);
   expect(fake.calls).toEqual(["letgo a1"]);
+});
+
+test("letgo lets every session with a reused name go, a stale stopped one too, and cleans up once", async () => {
+  const repo = repoWithHires();
+  const fake = fakeClaude([
+    { id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done"), state: "stopped" },
+    { id: "a2", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") },
+  ]);
+  const r = await letgo(["frontend-dev-done"], fake, repo);
+  expect(r.ok).toBe(true);
+  expect(r.lines).toEqual(["frontend-dev-done: let go", "frontend-dev-done: let go, removed its worktree and branch worktree-done"]);
+  expect(fake.calls).toEqual(["letgo a1", "letgo a2"]);
+  expect(branches(repo)).toEqual(["main", "worktree-open"]);
+});
+
+test("hireTask takes exactly the task names that hire.ts's SLUG takes", () => {
+  for (const task of ["a", "a-b", "a1-b2-c3", "a--b", "-a", "a-", "A", "a b", "a.b", ""]) {
+    expect([task, hireTask(`frontend-dev-${task}`) !== null]).toEqual([task, SLUG.test(task)]);
+  }
 });
 
 test("letgo lets a Reviewer or a lead go without touching any branch", async () => {
