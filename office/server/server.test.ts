@@ -1135,7 +1135,7 @@ test("only the PM, a lead and the user's own sessions run `f1rm hire`; a special
 test("`f1rm hire` is held only as a command; a command that merely mentions it passes", async () => {
   await delegationOffice();
   const run = async (command: string) => (await held(await hook(preToolUse("d", "Bash", { command }))))?.permissionDecision ?? null;
-  for (const command of ["f1rm hire designer a b c", "cd x && f1rm hire designer a b c", "ls; f1rm hire designer a b c", "true || f1rm hire designer a b c", "echo hi | f1rm hire designer a b c", "(f1rm hire designer a b c)", "echo $(f1rm hire designer a b c)", "echo hi\nf1rm hire designer a b c", "bun office/cli/f1rm.ts hire designer a b c", "F1RM_X=1 /usr/local/bin/f1rm hire designer a b c"]) {
+  for (const command of ["f1rm hire designer a b c", "cd x && f1rm hire designer a b c", "ls; f1rm hire designer a b c", "true || f1rm hire designer a b c", "echo hi | f1rm hire designer a b c", "(f1rm hire designer a b c)", "echo $(f1rm hire designer a b c)", "echo hi\nf1rm hire designer a b c", "bun office/cli/f1rm.ts hire designer a b c", "F1RM_X=1 /usr/local/bin/f1rm hire designer a b c", "bun run office/cli/f1rm.ts hire designer a b c", "npx f1rm hire designer a b c", '"f1rm" hire designer a b c']) {
     expect([command, await run(command)]).toEqual([command, "deny"]);
   }
   for (const command of ['git commit -m "mentions f1rm hire"', 'grep "f1rm hire" README.md', "echo 'ls; f1rm hire designer'", "cat docs/f1rm.ts", "f1rm hired"]) {

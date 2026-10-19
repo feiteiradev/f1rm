@@ -39,7 +39,10 @@ const simpleCommands = (command: string) => {
     return words.slice(i);
   });
 };
-const runsHire = ([program, sub]: string[]) => ["f1rm", "f1rm.ts"].includes(basename(program ?? "")) && sub === "hire";
+// A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
+// ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
+const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
+const runsHire = (words: string[]) => words.some((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
 /** The git subcommand a simple command runs, past global options such as `-C <dir>`. */
 const gitSubcommand = ([program, ...args]: string[]) => {
   if (basename(program ?? "") !== "git") return null;
