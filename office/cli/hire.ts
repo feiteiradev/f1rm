@@ -97,6 +97,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
   const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
   if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
+  // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
+  if (role === "reviewer" && live.some((s) => s.name === name && s.cwd === cwd)) throw new Error(`a session named "${name}" is already running: one Reviewer per task`);
   // One specialist per task, whatever the caps say: a second hire there would work the same branch.
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {
@@ -113,8 +115,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const more = rest.length ? ` Before you start, load these with the Skill tool: ${rest.join(", ")}.` : "";
   const prompt = `/${first}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
-  // A lead writes no code, so it works in the repo itself, where `f1rm hire` runs.
-  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead ? [] : ["--worktree", task]), prompt, ...extra];
+  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself, where `f1rm hire` runs.
+  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...extra];
   if (model) argv.push("--model", model);
   if (role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
   return argv;

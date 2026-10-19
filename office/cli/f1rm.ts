@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -8,6 +8,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
+import { letgo } from "./letgo.ts";
 import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";
 
@@ -401,8 +402,15 @@ const commands: Record<string, () => void | Promise<void>> = {
   "": open,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
+  letgo: async () => {
+    const names = process.argv.slice(3);
+    if (!names.length) throw new Error("usage: f1rm letgo <name>...");
+    const r = await letgo(names, machine, process.cwd());
+    console.log(r.lines.join("\n"));
+    process.exit(r.ok ? 0 : 1);
+  },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief>";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>...";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

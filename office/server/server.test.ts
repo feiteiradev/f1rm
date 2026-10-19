@@ -24,6 +24,9 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     calls.push(`letgo ${id}`);
     if (letGoFails) throw new Error(letGoFails);
   },
+  sessions: async () => sessionList,
+  mergedBranch: (_repo: string, branch: string) => mergedBranches.has(branch),
+  removeWorktree: (repo: string, task: string) => void calls.push(`remove ${repo} ${task}`),
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
   attachInIterm: async (id: string) => void calls.push(`attach ${id}`),
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
@@ -54,6 +57,9 @@ const defaultAnswer = async function* () {
 };
 let tellFails = "";
 let letGoFails = "";
+// What `claude agents --json --all` lists, and which branches are merged into the base, for the safety net.
+let sessionList: { id: string; name: string; kind: string; state: string; cwd: string }[] = [];
+let mergedBranches = new Set<string>();
 let working: number | null = 0;
 let spawnFails = "";
 let pmFails = "";
@@ -69,6 +75,8 @@ afterEach(() => {
   askAnswer = defaultAnswer;
   tellFails = "";
   letGoFails = "";
+  sessionList = [];
+  mergedBranches = new Set();
   working = 0;
   spawnFails = "";
   pmFails = "";
@@ -1201,4 +1209,56 @@ test("show moves the open office pages to a project and says how many there were
   expect(await (await show(ROOM)).json()).toEqual({ pages: 0 });
   expect((await show("/code/nope")).status).toBe(404);
   expect((await show(ROOM, "wrong")).status).toBe(401);
+});
+
+test("the safety net lets go a hire that has been done 15 minutes with its branch merged, and nothing else", async () => {
+  const repo = "/code/shop", tree = (task: string) => `${repo}/.claude/worktrees/${task}`;
+  const s = (id: string, name: string, cwd: string, state = "done", kind = "background") => ({ id, name, kind, state, cwd });
+  sessionList = [
+    s("d1", "designer-done", tree("done")),
+    s("t1", "checkout.backend-dev-teamdone", tree("teamdone")),
+    s("r1", "reviewer-review-done", repo),
+    s("u1", "designer-open", tree("open")),
+    s("w1", "frontend-dev-busy", tree("busy"), "working"),
+    s("l1", "lead-checkout", repo),
+    s("n1", "my-own-task", tree("done")),
+    s("i1", "designer-inter", tree("inter"), "done", "interactive"),
+  ];
+  mergedBranches = new Set(["worktree-done", "worktree-teamdone", "worktree-busy", "worktree-inter"]);
+  let now = 1_000_000;
+  const quiet = (ms: number) => Bun.sleep(ms);
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, clock: () => now, letGoAfterMs: 400 });
+  await quiet(250);
+  expect(calls).toEqual([]); // just seen done
+  now += 399;
+  await quiet(250);
+  expect(calls).toEqual([]); // not yet the whole wait
+  now += 2;
+  for (let i = 0; i < 20 && calls.length < 5; i++) await quiet(50);
+  await quiet(250); // the unmerged, working, lead, other-name and interactive sessions stay however long it waits
+  expect(calls.sort()).toEqual([`letgo d1`, `letgo r1`, `letgo t1`, `remove ${repo} done`, `remove ${repo} teamdone`].sort());
+});
+
+test("the safety net starts the wait over when a hire works again, and keeps what it couldn't let go", async () => {
+  const repo = "/code/shop";
+  const hire = { id: "d1", name: "designer-done", kind: "background", state: "done", cwd: `${repo}/.claude/worktrees/done` };
+  sessionList = [hire];
+  mergedBranches = new Set(["worktree-done"]);
+  let now = 1_000_000;
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, clock: () => now, letGoAfterMs: 400 });
+  await Bun.sleep(250);
+  now += 300;
+  sessionList = [{ ...hire, state: "working" }];
+  await Bun.sleep(250);
+  sessionList = [hire];
+  await Bun.sleep(250); // done again: counted from here
+  now += 300;
+  await Bun.sleep(250);
+  expect(calls).toEqual([]);
+  letGoFails = "rm refused: uncommitted work";
+  now += 200;
+  await Bun.sleep(400);
+  expect(calls).toEqual(["letgo d1"]); // tried once; it threw, so no worktree or branch was removed
+  await Bun.sleep(400);
+  expect(calls).toEqual(["letgo d1"]); // and not again every tick
 });

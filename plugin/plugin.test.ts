@@ -64,6 +64,20 @@ test("the PM interviews before it plans, and only the Reviewer merges and never 
   expect(reviewer.body).toContain("Never push");
 });
 
+test("the Reviewer merges in a scratch worktree, fast-forwards the main checkout, and approves only once main has moved", () => {
+  const flow = section("Review and merge flow");
+  expect(flow).toContain("git worktree add --detach .claude/worktrees/review-<task> <base>");
+  expect(flow).toContain("git merge --no-ff <branch>");
+  expect(flow).toContain("git merge --ff-only <merge sha>");
+  expect(flow).toContain("git worktree remove");
+  expect(flow).not.toContain("reset --hard");
+  expect(role("reviewer").body).not.toContain("reset --hard");
+  expect(flow.indexOf("--ff-only")).toBeLessThan(flow.indexOf("`APPROVED`"));
+  expect(flow).toMatch(/only after main has moved/);
+  expect(role("reviewer").body).toContain("scratch worktree");
+  expect(role("reviewer").body).toContain("--ff-only");
+});
+
 test("the guidelines cover every item the spec lists", () => {
   for (const h of [
     "Roster and hiring playbook",

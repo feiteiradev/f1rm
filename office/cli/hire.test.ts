@@ -72,13 +72,25 @@ test.each([
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
-  expect(stub.argv()![7]).toStartWith(`${commands} Report to: pm-shop\n\n`);
+  expect(stub.argv()!.find((a) => a.startsWith("/"))).toStartWith(`${commands} Report to: pm-shop\n\n`);
+});
+
+test("a reviewer starts with no --worktree, so it runs in the main checkout; every other specialist still gets one", () => {
+  const reviewer = stubClaude([]);
+  hire(reviewer, [...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF]);
+  expect(reviewer.argv()!.slice(0, 5)).toEqual(["--bg", "--agent", "f1rm:reviewer", "--name", "reviewer-review-api"]);
+  expect(reviewer.argv()).not.toContain("--worktree");
+  for (const role of ["designer", "frontend-dev", "backend-dev", "researcher"]) {
+    const stub = stubClaude([]);
+    hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
+    expect(stub.argv()!.slice(4, 7)).toEqual([`${role}-x`, "--worktree", "x"]);
+  }
 });
 
 test("only a reviewer hire carries the no-push deny rule, after the prompt so it cannot swallow it", () => {
   const reviewer = stubClaude([]);
   hire(reviewer, [...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
-  expect(reviewer.argv()!.slice(8)).toEqual(["--disallowedTools", "Bash(git push *)"]);
+  expect(reviewer.argv()!.slice(6)).toEqual(["--disallowedTools", "Bash(git push *)"]);
   const designer = stubClaude([]);
   hire(designer, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(designer.argv()).toHaveLength(8);
@@ -237,4 +249,17 @@ test("a founder role is refused in a Work project, or one with no edition, and h
   expect(founder.argv()![7]).toStartWith("/cro Before you start, load these with the Skill tool: anthropic-skills:content-creator, brandkit. Report to: pm-shop");
   writeEdition(projectFile(join(home, ".f1rm", "projects"), repo), "work");
   expect(hire(stubClaude([]), marketer, repo, { HOME: home }).err).toContain("Founder role");
+});
+
+test("one Reviewer per task: a second live session with the reviewer's name is refused, even with --override", () => {
+  const repo = repoDir();
+  const live = [bg("done", "reviewer-review-api", repo)];
+  for (const flags of [[], ["--override"]]) {
+    const stub = stubClaude(live);
+    const r = hire(stub, [...flags, ...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF], repo);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain('a session named "reviewer-review-api" is already running');
+    expect(stub.argv()).toBeNull();
+  }
+  expect(hire(stubClaude(live), [...pmArgs, "reviewer", "reviewer-review-form", "review-form", BRIEF], repo).code).toBe(0);
 });

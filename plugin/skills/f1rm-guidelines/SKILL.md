@@ -181,13 +181,14 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes.
    - it follows `growth/brand.md`;
    - nothing in it was posted, published, sent or paid for.
 4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself.
-5. Otherwise, in the Reviewer's own worktree:
-   - `git reset --hard <base>` on the Reviewer's throwaway branch, then `git merge --no-ff <branch>`.
-   - Run the repo's full check command on that result. If it fails, send `CHANGES REQUESTED` with the failure.
-6. Move the base branch to the verified result: `git -C <main working directory> merge --ff-only <reviewer branch>`. If it fails because the base moved, repeat from step 5.
-7. Send `APPROVED` with the merged commit to the session in your `Report to`.
+5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
+   - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
+   - In it, `git merge --no-ff <branch>`, where `<branch>` is `worktree-<task>`, and note the merge commit's sha.
+   - Run the repo's full check command there. If it fails, remove the scratch worktree and send `CHANGES REQUESTED` with the failure.
+6. Move the base branch to the verified result: in the main working directory, `git merge --ff-only <merge sha>`. If it fails because the base moved, remove the scratch worktree and repeat from step 5.
+7. Remove the scratch worktree with `git worktree remove .claude/worktrees/review-<task>`. Then send `APPROVED` with the merged commit to the session in your `Report to`, only after main has moved: never for a merge that exists only in the scratch worktree.
 
-Never run `git push`, never force, never rewrite published history, never merge a branch you did not review. Whoever hired the specialists, the PM or the team's lead, lets them go and deletes their finished branches and worktrees, not the Reviewer.
+Never run `git push`, never force, never rewrite published history, never merge a branch you did not review. Whoever hired the specialists, the PM or the team's lead, lets them go with `f1rm letgo <name>...`, which also deletes the finished branches and worktrees that are merged, not the Reviewer.
 
 ## Cap rule
 

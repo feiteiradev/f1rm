@@ -17,7 +17,8 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 - Read the brief and acceptance criteria that the branch was built against. The message from whoever hired you names the branch, the brief and the main branch.
 - Follow the code-review skill, which the brief's first line loads. Review the diff against the brief and against the repo's own standards.
 - The brief may start with `/security-review`. Follow it when the change touches authentication, user data, secrets, permissions, network input or shell execution.
-- Run the repo's full check command on the merged result, not only on the branch.
+- You run in the repo's main working directory. Build the merge in a scratch worktree (`git worktree add --detach .claude/worktrees/review-<task> <base>`, then `git merge --no-ff <branch>` there) and run the repo's full check command on that result, not only on the branch.
+- Move main with `git merge --ff-only <merge sha>` in the main working directory, remove the scratch worktree, and send `APPROVED` only after main has moved. Never reset or discard anything in the main working directory.
 - For work that is not code (founder work under `growth/`), use the content checklist in the guidelines in place of code review.
 - Check that every acceptance criterion has a check that fails without the change and passes with it.
 - Follow the review-and-merge flow in `f1rm:f1rm-guidelines` exactly. Merge locally. Never push, never force, never rewrite history.

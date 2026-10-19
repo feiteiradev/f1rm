@@ -174,6 +174,27 @@ export const machine = {
     return r.success ? r.stdout.toString().trim() : null;
   },
 
+  /** True if `branch` exists and everything on it is already in the branch checked out in the main working directory `repo`. */
+  mergedBranch(repo: string, branch: string): boolean {
+    return Bun.spawnSync(["git", "-C", repo, "merge-base", "--is-ancestor", `refs/heads/${branch}`, "HEAD"], { stdout: "ignore", stderr: "ignore" }).success;
+  },
+
+  /** Removes the hire's worktree `.claude/worktrees/<task>` and its merged branch `worktree-<task>`. Never forced: throws what git said if it refuses (uncommitted files, an unmerged branch). */
+  removeWorktree(repo: string, task: string): void {
+    const git = (...args: string[]) => {
+      const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" });
+      if (!r.success) throw new Error(r.stderr.toString().trim().split("\n").pop() || `git ${args[0]} failed`);
+    };
+    if (statSync(`${repo}/.claude/worktrees/${task}`, { throwIfNoEntry: false })) git("worktree", "remove", `.claude/worktrees/${task}`);
+    git("branch", "-d", `worktree-${task}`);
+  },
+
+  /** Every session Claude Code lists, finished ones too (`claude agents --json --all`); null if it can't say. */
+  async sessions(): Promise<{ id: string; name: string; kind: string; state: string; cwd: string }[] | null> {
+    const list = await agents(true);
+    return list && list.filter((a) => typeof a?.id === "string").map((a) => ({ id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
+  },
+
   /** Ids of the sessions Claude Code lists as live (`claude agents --json`); null if it can't say. */
   async liveSessions(): Promise<Set<string> | null> {
     const list = await agents(false);

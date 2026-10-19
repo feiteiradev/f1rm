@@ -10,6 +10,7 @@ import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, t
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, pmName, planHire, readRoles } from "../cli/hire.ts";
+import { hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -56,6 +57,8 @@ type Options = {
   offlineAfterMs?: number;
   /** Quiet this long and an employee leaves the office. */
   removeAfterMs?: number;
+  /** A background hire done this long, with its branch merged, is let go with its worktree and branch. */
+  letGoAfterMs?: number;
 };
 
 // A stat and never a parse: the transcript format isn't a public contract, and its mtime is all liveness needs.
@@ -83,6 +86,7 @@ export function startServer({
   clock = Date.now,
   offlineAfterMs = 5 * 60_000,
   removeAfterMs = 15 * 60_000,
+  letGoAfterMs = 15 * 60_000,
 }: Options) {
   clientDir = resolve(clientDir);
 
@@ -437,12 +441,42 @@ export function startServer({
       reading = false;
     }
   }
-  const ready = Promise.all([sweepOnce(), readBoards()]);
+  // The safety net for hires nobody let go: a done f1rm hire whose branch is merged goes, with its worktree and branch.
+  // ponytail: idleness is counted from when this office first saw the session done, so a restart waits another stretch; it also asks `claude agents --json --all` every tick.
+  const doneSince = new Map<string, number>();
+  let letting = false;
+  async function letGoDone() {
+    if (letting) return;
+    letting = true;
+    try {
+      const now = clock();
+      const all = (await machine.sessions()) ?? [];
+      const seen = new Set<string>();
+      for (const s of all) {
+        const hire = s.kind === "background" && s.state === "done" ? hireTask(s.name) : null;
+        if (!hire) continue;
+        seen.add(s.id);
+        const since = doneSince.get(s.id) ?? now;
+        doneSince.set(s.id, since);
+        const repo = repoOf(s.cwd);
+        if (now - since < letGoAfterMs || !machine.mergedBranch(repo, `worktree-${hire.task}`)) continue;
+        doneSince.set(s.id, now); // a session that can't be let go (uncommitted work) is tried again a stretch later, not every tick
+        await letGoHire(machine, s, repo).catch(() => {});
+      }
+      for (const id of doneSince.keys()) if (!seen.has(id)) doneSince.delete(id);
+    } catch {} // `claude agents` failing, or a machine without it: try again next tick
+    finally {
+      letting = false;
+    }
+  }
+  const ready = Promise.all([sweepOnce(), readBoards(), letGoDone()]);
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
+  const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     clearInterval(timer);
+    clearInterval(letGoTimer);
     clearInterval(boardTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);
