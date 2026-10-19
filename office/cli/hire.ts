@@ -15,8 +15,11 @@ export const CAP = 6;
 /** Live leads in one repo, and working sessions in one team (its Reviewer included). */
 export const TEAMS = 2, TEAM_CAP = 2;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-// /research and /security-review are slash commands: given in `--skills` one becomes the brief's first command instead of joining the list.
-const SLASH_ONLY = ["research", "security-review"];
+// /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
+const SLASH_ONLY = ["research"];
+// /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
+// The skill gate holds the APPROVED message on this exact sentence.
+const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
 const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
@@ -96,6 +99,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (level != null && !LEVELS.includes(level)) throw new Error(`level "${level}" must be one of ${LEVELS.join(", ")}`);
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
+  if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
     throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` to hire one.`);
@@ -125,11 +129,10 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
   let own = roles.find((r) => r.id === role)!.skills;
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
-  else if (level === "high") own = [...own, "security-review"];
   const slash = added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = slash ? [slash, ...own, ...added.filter((s) => s !== slash)] : [...own, ...added];
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"}` : first;
-  const more = rest.length ? ` Before you start, load these with the Skill tool: ${rest.join(", ")}.` : "";
+  const more = (rest.length ? ` Before you start, load these with the Skill tool: ${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself, where `f1rm hire` runs.

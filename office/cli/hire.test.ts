@@ -84,15 +84,18 @@ test("--skills adds to the list; a slash-only skill becomes the first command an
   const researcher = stubClaude([]);
   hire(researcher, ["--skills", "research,seo-audit", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]);
   expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research, seo-audit. Report to: pm-shop\n\n");
+  // security-review reads the git state where it runs, so it never runs at the start: --level high puts it after the merge.
   const reviewer = stubClaude([]);
-  hire(reviewer, ["--skills", "security-review", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
-  expect(prompt(reviewer)).toStartWith("/security-review Before you start, load these with the Skill tool: code-review, f1rm:f1rm-guidelines, ponytail:ponytail-review. Report to: pm-shop");
+  expect(hire(reviewer, ["--skills", "security-review", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]).err).toContain("--level high");
+  expect(reviewer.argv()).toBeNull();
 });
 
-test("--level sets the reviewer's /code-review level, and high adds security-review to the list; other roles refuse it", () => {
+test("--level sets the reviewer's /code-review level, and high runs security-review on the merge before APPROVED; other roles refuse it", () => {
   const high = stubClaude([]);
   hire(high, ["--level", "high", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
-  expect(prompt(high)).toStartWith("/code-review high Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, security-review. Report to: pm-shop");
+  expect(prompt(high)).toStartWith(
+    "/code-review high Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review. Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args. Report to: pm-shop",
+  );
   const low = stubClaude([]);
   hire(low, ["--level", "low", ...pmArgs, "reviewer", "reviewer-x", "x", BRIEF]);
   expect(prompt(low)).toStartWith("/code-review low Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review. ");
