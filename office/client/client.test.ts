@@ -451,3 +451,9 @@ test("Remove POSTs remove/<encoded id> once confirmed, and a 404, 409 or 401 sho
   expect(await withReply(Response.json({ error: "That door isn't empty." }, { status: 409 }), () => removeDoor("x"))).toBe("That door isn't empty.");
   expect(await withReply(new Response("unauthorized", { status: 401 }), () => removeDoor("x"))).toBe("This link is out of date — open the office with `f1rm`");
 });
+
+test("the page's Elsewhere id is the one the server groups stray sessions under", async () => {
+  const { ELSEWHERE } = await import("../server/office.ts");
+  const { ELSEWHERE_ID } = await import("./lobby.ts");
+  expect(ELSEWHERE_ID).toBe(ELSEWHERE.id);
+});
