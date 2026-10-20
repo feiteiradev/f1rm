@@ -257,8 +257,8 @@ function serve() {
 
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
-  writeFileSync(URL_FILE, url, { mode: 0o600 });
-  chmodSync(URL_FILE, 0o600);
+  writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600 });
+  renameSync(`${URL_FILE}.tmp`, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
   console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${port}`);
   return url;

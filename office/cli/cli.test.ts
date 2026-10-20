@@ -272,6 +272,25 @@ test("serve does not print the link key when its output is not a terminal, so a 
   expect(printed).not.toMatch(/[\w-]{43}/);
 });
 
+test("office-url is replaced in one step, so a reader never sees it empty or half written", async () => {
+  const { home } = await installedOnFreePort();
+  const urlFile = join(home, ".f1rm", "office-url");
+  writeFileSync(urlFile, "http://127.0.0.1:1/stale/");
+  const reader = join(home, ".f1rm", "old-office-url"); // a reader holding the old file: it must be swapped out, not truncated and rewritten
+  linkSync(urlFile, reader);
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore" });
+  try {
+    for (let i = 0; i < 200 && readFileSync(urlFile, "utf8").includes("stale"); i++) await Bun.sleep(25);
+  } finally {
+    proc.kill();
+    await proc.exited;
+  }
+  expect(readFileSync(urlFile, "utf8")).toStartWith("http://127.0.0.1:");
+  expect(readFileSync(urlFile, "utf8")).not.toContain("stale");
+  expect(readFileSync(reader, "utf8")).toBe("http://127.0.0.1:1/stale/");
+  expect(statSync(urlFile).mode & 0o777).toBe(0o600);
+});
+
 test("the new link key is never written into a malformed file that others can read", async () => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), "not a key");
