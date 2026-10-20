@@ -426,11 +426,15 @@ test("only an empty project door offers Remove; Elsewhere never does, nor a door
   expect(doorsOf(office(["elsewhere"], [])).map((d) => [d.room.name, d.count])).toEqual([["elsewhere", 0]]);
 });
 
-test("Remove asks twice: the second click within the window fires, a late or first click only arms", async () => {
-  const { CONFIRM_MS, isConfirm } = await import("./remove.ts");
-  expect(isConfirm(null, 1000)).toBe(false);
-  expect(isConfirm(1000, 1000 + CONFIRM_MS)).toBe(true);
-  expect(isConfirm(1000, 1000 + CONFIRM_MS + 1)).toBe(false);
+test("Remove asks twice: a deliberate second click within the window fires, a first or late click arms, and a double-click's second half is ignored", async () => {
+  const { CONFIRM_MS, SETTLE_MS, clickOn } = await import("./remove.ts");
+  expect(SETTLE_MS).toBe(400);
+  expect(clickOn(null, 1000)).toBe("arm");
+  expect(clickOn(1000, 1000 + 80)).toBe("ignore"); // one double-click
+  expect(clickOn(1000, 1000 + SETTLE_MS - 1)).toBe("ignore");
+  expect(clickOn(1000, 1000 + SETTLE_MS)).toBe("fire");
+  expect(clickOn(1000, 1000 + CONFIRM_MS)).toBe("fire");
+  expect(clickOn(1000, 1000 + CONFIRM_MS + 1)).toBe("arm");
 });
 
 test("Remove POSTs remove/<encoded id> once confirmed, and a 404, 409 or 401 shows through the error path", async () => {

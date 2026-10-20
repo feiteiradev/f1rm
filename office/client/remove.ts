@@ -3,8 +3,13 @@ import { post } from "./post.ts";
 
 /** How long the first click stays armed. */
 export const CONFIRM_MS = 4000;
-/** Whether a click at `now` is the confirming second one, given when the button was armed (null: it wasn't). */
-export const isConfirm = (armedAt: number | null, now: number) => armedAt !== null && now - armedAt <= CONFIRM_MS;
+/** A click this soon after arming is a double-click's second half, not a decision. */
+export const SETTLE_MS = 400;
+/** What a click at `now` does, given when the button was armed (null: it wasn't): arm it, ignore it, or confirm and remove. */
+export const clickOn = (armedAt: number | null, now: number): "arm" | "ignore" | "fire" => {
+  if (armedAt === null || now - armedAt > CONFIRM_MS) return "arm";
+  return now - armedAt < SETTLE_MS ? "ignore" : "fire";
+};
 
 /** How long a refusal stays on the lobby. */
 export const NOTE_MS = 5000;

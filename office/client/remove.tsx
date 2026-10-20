@@ -1,6 +1,6 @@
 // The Remove button on an empty door. The first click arms it, a second within a few seconds removes the door.
 import { useEffect, useState } from "react";
-import { CONFIRM_MS, isConfirm, removeDoor } from "./remove.ts";
+import { CONFIRM_MS, clickOn, removeDoor } from "./remove.ts";
 
 const DEMO = import.meta.env.MODE === "demo";
 
@@ -15,8 +15,10 @@ export function RemoveDoor({ roomId, name, style, onProblem }: { roomId: string;
   }, [armedAt]);
 
   async function click() {
+    const what = clickOn(armedAt, Date.now());
+    if (what === "ignore") return;
     onProblem(null);
-    if (!isConfirm(armedAt, Date.now())) return setArmedAt(Date.now());
+    if (what === "arm") return setArmedAt(Date.now());
     setArmedAt(null);
     if (DEMO) return onProblem("Doors are removed in a live office; this is a recording.");
     setBusy(true);
