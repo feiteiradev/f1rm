@@ -69,3 +69,23 @@
 .bar .crumb { margin: 0; font-weight: 700; color: var(--amber); overflow-wrap: anywhere; }
 
 .note.low { inset: auto 0 24px; margin: 0 auto; }
+
+/* Remove sits over the lower part of an empty door's panel: out of sight until the door is hovered or focused, always there on touch. */
+.remove {
+  position: absolute;
+  height: 20px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+}
+.door:hover + .remove, .door:focus-visible + .remove, .remove:hover, .remove:focus-visible, .remove[data-armed] { opacity: 1; }
+.remove:hover, .remove:focus-visible, .remove[data-armed] { border-color: var(--amber); }
+.remove[data-armed] { color: var(--amber); }
+.remove:disabled { cursor: default; }
+@media (hover: none) { .remove { opacity: 1; } }
