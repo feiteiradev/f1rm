@@ -8,10 +8,10 @@ export const isConfirm = (armedAt: number | null, now: number) => armedAt !== nu
 
 /** How long a refusal stays on the lobby. */
 export const NOTE_MS = 5000;
-/** Runs `clear` after `ms`; returns the cancel. */
-export const clearAfter = (clear: () => void, ms = NOTE_MS, timers = { set: setTimeout, clear: clearTimeout }) => {
-  const t = timers.set(clear, ms);
-  return () => timers.clear(t);
+/** Runs `clear` after `ms`; returns the cancel. The timers are called bare: a browser's throw "Illegal invocation" as methods of another object. */
+export const clearAfter = (clear: () => void, ms = NOTE_MS) => {
+  const t = setTimeout(clear, ms);
+  return () => clearTimeout(t);
 };
 
 /** Asks the office to forget a door. Null when it did, otherwise why it didn't (404 no such door, 409 not empty, 401 out-of-date link). */

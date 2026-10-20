@@ -460,13 +460,27 @@ test("the page's Elsewhere id is the one the server groups stray sessions under"
 
 test("a Remove refusal clears itself after a few seconds, and not if it was replaced first", async () => {
   const { clearAfter, NOTE_MS } = await import("./remove.ts");
+  // A browser's timers throw "Illegal invocation" unless they are called bare, so these fakes do too; Bun's don't check.
   const timers: { ms: number; run: () => void; live: boolean }[] = [];
-  const fake = { set: ((run: () => void, ms: number) => timers.push({ ms, run, live: true }) - 1) as never, clear: ((i: number) => (timers[i].live = false)) as never };
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  globalThis.setTimeout = function (this: unknown, run: () => void, ms: number) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    return timers.push({ ms, run, live: true }) - 1;
+  } as never;
+  globalThis.clearTimeout = function (this: unknown, i: number) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    timers[i].live = false;
+  } as never;
   const cleared: string[] = [];
-  clearAfter(() => cleared.push("a"), NOTE_MS, fake);
-  const cancel = clearAfter(() => cleared.push("b"), NOTE_MS, fake);
-  cancel();
+  try {
+    clearAfter(() => cleared.push("a"));
+    const cancel = clearAfter(() => cleared.push("b"));
+    cancel();
+  } finally {
+    Object.assign(globalThis, real);
+  }
   for (const t of timers) if (t.live) t.run();
-  expect(timers.map((t) => t.ms)).toEqual([5000, 5000]);
+  expect(timers.map((t) => t.ms)).toEqual([NOTE_MS, NOTE_MS]);
+  expect(NOTE_MS).toBe(5000);
   expect(cleared).toEqual(["a"]);
 });
