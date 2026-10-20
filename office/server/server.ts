@@ -112,7 +112,9 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   if ((sub === "branch" && any(/^-[A-Za-z]*[DM]/)) || (sub === "checkout" && any(/^-[A-Za-z]*B/)) || (sub === "switch" && any(/^-[A-Za-z]*C/))) return true;
   // `checkout -- <path>` (nothing but options before the `--`) restores a path from the index; `checkout <branch> -- <files>` is how the red-<task> worktree gets its check files.
   const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
-  if (sub === "stash" || (sub === "commit" && any(/^--am/)) || restoresPath || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  // `--amend` as a word, not as the value of `-m`, `-F`, `-C`, `-c`, `-t` or `--message`.
+  const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[A-Za-z]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
+  if (sub === "stash" || amends || restoresPath || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
   if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
