@@ -588,6 +588,22 @@ test("start opens the office that is already running instead of starting another
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
 
+test("start prints the full link when its output is a terminal", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  const url = `http://127.0.0.1:${office.port}/tok/`;
+  mkdirSync(join(home, ".f1rm"));
+  writeFileSync(join(home, ".f1rm", "office-url"), url);
+  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true
+  const proc = Bun.spawn(["script", "-q", "/dev/null", "bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stdin: "ignore" });
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  office.stop(true);
+  expect(code).toBe(0);
+  expect(out).toContain(`f1rm office: ${url}`); // script adds a stray ^D of its own
+  expect(stub.calls()).toEqual([`open ${url}`]);
+});
+
 test("start with no office running starts the background office, opens it, and exits", async () => {
   const home = tempHome();
   const stub = stubBin();
