@@ -130,9 +130,9 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-20 Remove a door
 
-- Decision: an empty door has a Remove action, POST /<token>/remove/<encoded room id>, which forgets the door and deletes its ~/.f1rm/projects/<enc>.json, never boards, evidence or the repo. The time is kept per room in ~/.f1rm/forgotten-doors.json (0600, written atomically); events older than it build no room, and a new event brings the door back. The Elsewhere door cannot be removed.
-- Why: the lobby filled with junk doors from scratch folders and the user's own tooling; a door should mean a project, and a project no longer worked on would keep its door for good, since the log replays on every start.
-- Rejected: editing or pruning events.db; a manual allowlist; showing strays as separate doors.
+- Decision: an empty door has a Remove action, POST /<token>/remove/<encoded room id>, which forgets the door and deletes its ~/.f1rm/projects/<enc>.json, never boards, evidence or the repo. The time is kept per room in ~/.f1rm/forgotten-doors.json (0600, written atomically); events older than it build no room. For a git repo a new event there brings the door back. A folder with no git repo has a door only because of its projects json, which Remove deletes, so a new plain session there goes behind Elsewhere until `f1rm pm` or `f1rm edition` writes the json again. The Elsewhere door cannot be removed.
+- Why: a project the user no longer works on would keep its door for good, because the log replays on every start and a room never leaves it by itself.
+- Rejected: pruning the room's rows out of events.db (the forget time hides them and leaves the log append-only); deleting its boards or evidence, or any file of the repo (Remove only forgets the door and its edition); removing a door that has someone in it.
 - Where: G4a
 
 ## 2026-10-20 events.db tolerates concurrent readers
