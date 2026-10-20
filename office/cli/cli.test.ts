@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -197,18 +197,19 @@ test("install and uninstall work when there are no settings yet", () => {
   expect(settingsOf(home)).toEqual({});
 });
 
-// Installs into `home` on a free port, runs `serve` once, and returns the URL it printed; the office is stopped before this returns.
-async function serveOnce(home: string, port: number) {
-  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe" });
+// Runs `serve` once and returns the URL it wrote to office-url (it prints the URL only to a terminal); the office is stopped before this returns.
+async function serveOnce(home: string) {
+  const urlFile = join(home, ".f1rm", "office-url");
+  rmSync(urlFile, { force: true });
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore" });
   try {
-    const reader = proc.stdout.getReader();
-    let out = "";
-    while (!/http:\/\/\S+/.test(out)) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error("serve exited: " + out);
-      out += new TextDecoder().decode(value);
+    for (let i = 0; i < 200; i++) {
+      if (proc.exitCode !== null) throw new Error("serve exited");
+      const url = existsSync(urlFile) ? readFileSync(urlFile, "utf8") : "";
+      if (url) return url;
+      await Bun.sleep(25);
     }
-    return out.match(/http:\/\/\S+/)![0];
+    throw new Error("serve wrote no office-url");
   } finally {
     proc.kill();
     await proc.exited;
@@ -226,13 +227,13 @@ const keyFile = (home: string) => join(home, ".f1rm", "link-key");
 
 test("restarting serve keeps the office URL, so an open tab keeps working", async () => {
   const { home, port } = await installedOnFreePort();
-  const first = await serveOnce(home, port);
-  expect(await serveOnce(home, port)).toBe(first);
+  const first = await serveOnce(home);
+  expect(await serveOnce(home)).toBe(first);
 });
 
 test("the link key is kept in a file only the user can read", async () => {
   const { home, port } = await installedOnFreePort();
-  const url = await serveOnce(home, port);
+  const url = await serveOnce(home);
   expect(readFileSync(keyFile(home), "utf8").trim()).toBe(url.split("/")[3]);
   expect(statSync(keyFile(home)).mode & 0o777).toBe(0o600);
 });
@@ -240,23 +241,40 @@ test("the link key is kept in a file only the user can read", async () => {
 test.each([["empty", ""], ["too short", "abc"], ["not a key", "not a key! ".repeat(6)]])("a %s link key file is replaced by a fresh key", async (_, bad) => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), bad);
-  const url = await serveOnce(home, port);
+  const url = await serveOnce(home);
   expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/[\\w-]{43}/$`));
   expect(readFileSync(keyFile(home), "utf8").trim()).toBe(url.split("/")[3]);
-  expect(await serveOnce(home, port)).toBe(url);
+  expect(await serveOnce(home)).toBe(url);
 });
 
 test("a link key file that others can read is made private again, with the same key", async () => {
   const { home, port } = await installedOnFreePort();
-  const url = await serveOnce(home, port);
+  const url = await serveOnce(home);
   chmodSync(keyFile(home), 0o644);
-  expect(await serveOnce(home, port)).toBe(url);
+  expect(await serveOnce(home)).toBe(url);
   expect(statSync(keyFile(home)).mode & 0o777).toBe(0o600);
+});
+
+test("serve does not print the link key when its output is not a terminal, so a launchd log never holds it", async () => {
+  const { home, port } = await installedOnFreePort();
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+  try {
+    const urlFile = join(home, ".f1rm", "office-url");
+    for (let i = 0; i < 100 && !existsSync(urlFile); i++) await Bun.sleep(50);
+    const key = readFileSync(keyFile(home), "utf8").trim();
+    expect(readFileSync(urlFile, "utf8")).toContain(key); // `f1rm` still opens the right link from this file
+    await Bun.sleep(200);
+  } finally {
+    proc.kill();
+    await proc.exited;
+  }
+  const printed = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
+  expect(printed).not.toMatch(/[\w-]{43}/);
 });
 
 test("uninstall removes the link key with the rest of the install state", async () => {
   const { home, port } = await installedOnFreePort();
-  await serveOnce(home, port);
+  await serveOnce(home);
   expect(existsSync(keyFile(home))).toBe(true);
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(existsSync(keyFile(home))).toBe(false);
@@ -270,16 +288,11 @@ test("serve runs the office on loopback with a UI token", async () => {
   Bun.spawnSync(["bun", CLI, "install"], { env: { ...process.env, HOME: home, F1RM_PORT: String(port) } });
   const handlers = f1rmHandlers(settingsOf(home));
 
-  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe" });
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore" });
   try {
-    const reader = proc.stdout.getReader();
-    let out = "";
-    while (!/http:\/\/\S+/.test(out)) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error("serve exited: " + out);
-      out += new TextDecoder().decode(value);
-    }
-    const url = out.match(/http:\/\/\S+/)![0];
+    const urlFile = join(home, ".f1rm", "office-url");
+    for (let i = 0; i < 200 && !existsSync(urlFile); i++) await Bun.sleep(25);
+    const url = readFileSync(urlFile, "utf8");
     expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/[\\w-]{32,}/$`));
 
     // Fire the installed hooks the way Claude Code does, from a session in iTerm2,
