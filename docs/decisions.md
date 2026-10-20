@@ -43,3 +43,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: 0.2.0 was pushed before the cap and document rules changed, so cached installs would keep the old text.
 - Rejected: none.
 - Where: T6
+
+## 2026-10-20 Stable office link key
+
+- Decision: the office's URL token is kept in ~/.f1rm/link-key (mode 0600, like ingest-headers) and reused on every `serve` start, until the user deletes it. A missing or malformed file (not 43 base64url characters) gets a new key; a file others can read is made 0600 again. `f1rm uninstall` deletes it with the other install state (ingest-headers, office-url), so a reinstall starts a new link.
+- Why: a restart made a new token, so an open tab got 401 on every POST until the user opened the new URL.
+- Rejected: a new token on every start; keeping the key through uninstall (the office is gone then, so the tabs are dead anyway, and a leftover key would outlive the install).
+- Where: G1, link-key commit (see `git log -- office/cli/f1rm.ts`)
