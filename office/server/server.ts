@@ -379,7 +379,7 @@ export function startServer({
       }
       // Everything for the browser lives under /<ui token>/, so every request carries the token.
       const [, given, ...rest] = url.pathname.split("/");
-      if (!same(given, token)) return new Response("unauthorized", { status: 401 });
+      if (!same(given, token)) return new Response("<!doctype html><title>f1rm</title><p>Open the office with <code>f1rm</code>.", { status: 401, headers: { "content-type": "text/html; charset=utf-8" } });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
       if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern"].includes(rest[0]) && req.method !== "POST") {

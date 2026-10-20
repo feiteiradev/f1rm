@@ -257,11 +257,12 @@ test("a link key file that others can read is made private again, with the same 
 
 test("serve does not print the link key when its output is not a terminal, so a launchd log never holds it", async () => {
   const { home, port } = await installedOnFreePort();
+  let key = "";
   const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
   try {
     const urlFile = join(home, ".f1rm", "office-url");
     for (let i = 0; i < 100 && !existsSync(urlFile); i++) await Bun.sleep(50);
-    const key = readFileSync(keyFile(home), "utf8").trim();
+    key = readFileSync(keyFile(home), "utf8").trim();
     expect(readFileSync(urlFile, "utf8")).toContain(key); // `f1rm` still opens the right link from this file
     await Bun.sleep(200);
   } finally {
@@ -269,7 +270,26 @@ test("serve does not print the link key when its output is not a terminal, so a 
     await proc.exited;
   }
   const printed = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
-  expect(printed).not.toMatch(/[\w-]{43}/);
+  expect(printed).not.toContain(key);
+});
+
+test("office-url is replaced in one step, so a reader never sees it empty or half written", async () => {
+  const { home } = await installedOnFreePort();
+  const urlFile = join(home, ".f1rm", "office-url");
+  writeFileSync(urlFile, "http://127.0.0.1:1/stale/");
+  const reader = join(home, ".f1rm", "old-office-url"); // a reader holding the old file: it must be swapped out, not truncated and rewritten
+  linkSync(urlFile, reader);
+  const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore" });
+  try {
+    for (let i = 0; i < 200 && readFileSync(urlFile, "utf8").includes("stale"); i++) await Bun.sleep(25);
+  } finally {
+    proc.kill();
+    await proc.exited;
+  }
+  expect(readFileSync(urlFile, "utf8")).toStartWith("http://127.0.0.1:");
+  expect(readFileSync(urlFile, "utf8")).not.toContain("stale");
+  expect(readFileSync(reader, "utf8")).toBe("http://127.0.0.1:1/stale/");
+  expect(statSync(urlFile).mode & 0o777).toBe(0o600);
 });
 
 test("the new link key is never written into a malformed file that others can read", async () => {
@@ -555,7 +575,8 @@ test("start opens the office that is already running instead of starting another
   const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
   office.stop(true);
   expect(code).toBe(0);
-  expect(out.trim()).toBe(`f1rm office: ${url}`);
+  expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
+  expect(out).not.toContain("tok");
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
 
@@ -571,7 +592,8 @@ test("start with no office running starts the background office, opens it, and e
   const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
   office.stop(true);
   expect(code).toBe(0);
-  expect(out.trim()).toBe(`f1rm office: ${url}`);
+  expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
+  expect(out).not.toContain("tok");
   expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(1);
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
