@@ -30,7 +30,7 @@ const fakeMachine = (repos = GIT_REPOS) => ({
     const repo = repos.find((r) => cwd === r || cwd.startsWith(r + "/"));
     return repo ? repo + "/.git" : null;
   },
-  liveSessions: async () => new Map<string, number | undefined>(),
+  liveSessions: async () => new Map<string, { pid?: number }>(),
   backgroundId: async () => null,
   letGo: async () => {},
   sessions: async () => [],

@@ -76,6 +76,8 @@ export type F1rmEvent = {
   title?: string;
   /** On SubagentStart and SubagentStop: the sub-agent. */
   intern?: { id: string; type: string };
+  /** Set when a sub-agent of the session sent this event; its Stop and idle notifications say nothing about the session itself. */
+  inSubagent?: true;
 };
 
 export const emptyOffice = (): OfficeState => ({ rooms: {}, employees: {}, interns: {} });
@@ -121,15 +123,15 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
   const tool = toolName ? clip(describeTool(toolName, payload.tool_input)) : "";
   // [activity, raw tool name] for the kinds that change them; any other kind keeps the previous ones.
-  const [activity, rawTool] = ({
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  // Inside a sub-agent, agent_type is the sub-agent's type, so only an event from the main session names its role.
+  const agentId = str(payload.agent_id);
+  const [activity, rawTool] = (agentId && kind === "Stop" ? undefined : ({
     UserPromptSubmit: ["Thinking", ""],
     PreToolUse: [tool, toolName],
     PermissionRequest: [tool, toolName],
     Stop: ["", ""],
-  } as Record<string, [string, string]>)[kind] ?? [];
-  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
-  // Inside a sub-agent, agent_type is the sub-agent's type, so only an event from the main session names its role.
-  const agentId = str(payload.agent_id);
+  } as Record<string, [string, string]>)[kind]) ?? [];
   const role = agentId ? undefined : roleOfAgentType(payload.agent_type);
   const title = str(payload.session_title);
   const subagent = kind === "SubagentStart" || kind === "SubagentStop";
@@ -151,6 +153,7 @@ export function normalize(payload: any, headers: Headers, roomOf: (cwd: string) 
     ...(role && { role }),
     ...(title && { title }),
     ...(subagent && agentId && { intern: { id: agentId, type: str(payload.agent_type) ?? "" } }),
+    ...(agentId && { inSubagent: true as const }),
   };
 }
 
@@ -201,7 +204,7 @@ function step(state: OfficeState, e: F1rmEvent): OfficeState {
         name: before ? before.name : nameFor(e.sessionId, new Set(Object.values(others).map((o) => o.name))),
         role,
         title: e.title ?? before?.title,
-        status: (strayStop ? undefined : STATUS[e.kind]) ?? (before && before.status !== "offline" ? before.status : "idle"),
+        status: (strayStop || (e.inSubagent && STATUS[e.kind] === "idle") ? undefined : STATUS[e.kind]) ?? (before && before.status !== "offline" ? before.status : "idle"),
         activity: e.activity ?? before?.activity ?? "",
         tool: e.tool ?? before?.tool ?? "",
         cwd: e.cwd,
@@ -215,7 +218,23 @@ function step(state: OfficeState, e: F1rmEvent): OfficeState {
   };
 }
 
-export type Timeouts = { offlineAfter: number; removeAfter: number };
+/**
+ * What `claude agents` says decides working vs idle for the sessions it lists: busy is working, idle is idle, except that a
+ * session with a raised hand (`waiting`) is left as it is. Any other session, or status, keeps what its hooks said.
+ */
+export function applyListing(state: OfficeState, listed: ReadonlyMap<string, { status?: "busy" | "idle" }>, waiting: ReadonlySet<string>): OfficeState {
+  let changed = false;
+  const employees: Record<string, Employee> = {};
+  for (const [id, e] of Object.entries(state.employees)) {
+    const listing = listed.get(id)?.status;
+    const status: Status = !listing || waiting.has(id) ? e.status : listing === "busy" ? "working" : "idle";
+    changed ||= status !== e.status;
+    employees[id] = status === e.status ? e : { ...e, status };
+  }
+  return changed ? { ...state, employees } : state;
+}
+
+export type Timeouts ={ offlineAfter: number; removeAfter: number };
 
 /**
  * Employees quiet for `offlineAfter` ms go offline and for `removeAfter` ms leave, unless `alive`

@@ -27,6 +27,9 @@ const SAFE_ID = /^\w[\w-]*$/;
 /** One shell word that holds `s` literally, in sh, bash, zsh and fish alike. */
 export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** What `claude agents --json` says about one live session. */
+export type LiveSession = { pid?: number; status?: "busy" | "idle" };
+
 /** `claude agents --json`'s sessions, or null if it can't say. `all` adds finished background sessions. */
 export async function agents(all: boolean): Promise<any[] | null> {
   try {
@@ -211,10 +214,13 @@ export const machine = {
     return list && list.filter((a) => typeof a?.id === "string").map((a) => ({ id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
   },
 
-  /** The sessions Claude Code lists as live (`claude agents --json`), by id, each with its process id (undefined if it gives none a signal could use); null if it can't say. */
-  async liveSessions(): Promise<Map<string, number | undefined> | null> {
+  /** The sessions Claude Code lists as live (`claude agents --json`), by id, each with its process id (none if it gives none a signal could use) and its busy/idle status (none for any other); null if it can't say. */
+  async liveSessions(): Promise<Map<string, LiveSession> | null> {
     const list = await agents(false);
-    return list && new Map(list.filter((a) => typeof a?.sessionId === "string").map((a) => [a.sessionId, Number.isInteger(a.pid) && a.pid > 0 ? a.pid : undefined]));
+    return list && new Map(list.filter((a) => typeof a?.sessionId === "string").map((a): [string, LiveSession] => [a.sessionId, {
+      ...(Number.isInteger(a.pid) && a.pid > 0 && { pid: a.pid as number }),
+      ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }),
+    }]));
   },
 
   /** The live background sessions Claude Code lists, with their name, state and folder; null if it can't say. */
