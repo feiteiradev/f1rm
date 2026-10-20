@@ -371,6 +371,14 @@ test("B1: no line says a specialist reports to the PM or that the PM lets specia
   for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Never message the user, the PM, another team or another specialist.");
 });
 
+test("the PM resolves a blocked lead, and its cleanup moves and removes files with Bash only after the user replies", () => {
+  const pm = role("pm").body;
+  expect(pm).toContain("Resolve a blocked lead");
+  expect(pm).not.toContain("blocked specialist");
+  const edit = pm.split("\n").find((l) => l.startsWith("- Edit the board and the milestones file only"))!;
+  for (const s of ["after the user replies", "`~/.f1rm/kept/<repo>/`", "Bash (`mv`, `rm`)"]) expect(edit, s).toContain(s);
+});
+
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
   for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
