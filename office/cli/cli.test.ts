@@ -584,7 +584,6 @@ test("start opens the office that is already running instead of starting another
   office.stop(true);
   expect(code).toBe(0);
   expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
-  expect(out).not.toContain("tok");
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
 
@@ -617,7 +616,6 @@ test("start with no office running starts the background office, opens it, and e
   office.stop(true);
   expect(code).toBe(0);
   expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
-  expect(out).not.toContain("tok");
   expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(1);
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
