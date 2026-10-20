@@ -73,6 +73,8 @@ const SHIRTS: [number, number][] = [[7, 0], [11, 0], [15, 0], [7, 5], [15, 5], [
 const HAIRS: [number, number][] = [[19, 0], [23, 0], [19, 4], [23, 4], [19, 8], [21, 0]];
 
 const CHAR = { x: 15, y: 11 };
+/** Where the LEAD tag's bottom-centre goes, in the desk's own frame: the character's centre (half a 16px tile in) and one pixel over its top. */
+export const leadTagOffset = () => ({ x: CHAR.x + 8, y: CHAR.y - 1 });
 const DESK = { x: 2, y: 24 };
 // Your chair at the PM's table, beside it and facing it; the "?" bubble hangs over it.
 const GUEST = { x: 34, y: 28 };

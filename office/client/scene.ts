@@ -2,7 +2,7 @@
 import { Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
 import { seedFor, seedOf } from "../people.ts";
-import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
+import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, leadTagOffset, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { showsLeadTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
@@ -16,6 +16,7 @@ type Walker = { sprite: Container; parent: string; slot: number; born: number; l
 type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
 
 const LABEL = { fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: "700", fill: 0xe9e4d6 } as const;
+const TAG = { ...LABEL, fontSize: 11, fill: 0xf2c94c, stroke: { color: 0x141b2b, width: 3 } } as const;
 // Art pixels in a desk's own frame: where an intern starts (its parent's seat) and the spots it stands in, in front of the desk.
 const SEAT = { x: 17, y: 14 };
 // ponytail: three standing spots; a fourth intern of one parent stands on the first. Add spots if sub-agent fan-out that wide shows up.
@@ -129,14 +130,11 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         p.name.position.set((d.x + CELL.w / 2) * scale, (d.y + (d.table ? TABLE.h : 57)) * scale);
         names.addChild(p.name);
         if (showsLeadTag(e)) {
-          p.tag ??= new Text({ text: "LEAD", style: { ...LABEL, fontSize: 11, fill: 0xf2c94c, stroke: { color: 0x141b2b, width: 3 } } });
-          // Over the head: the sprite's centre is 23 art pixels into the desk's frame, its top at 11.
+          p.tag ??= new Text({ text: "LEAD", style: TAG });
+          const at = leadTagOffset();
           p.tag.anchor.set(0.5, 1);
-          p.tag.position.set((d.x + 23) * scale, (d.y + 10) * scale);
+          p.tag.position.set((d.x + at.x) * scale, (d.y + at.y) * scale);
           names.addChild(p.tag);
-        } else if (p.tag) {
-          p.tag.destroy();
-          p.tag = undefined;
         }
       }
     }
