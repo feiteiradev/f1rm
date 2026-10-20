@@ -1,5 +1,5 @@
 // The office page, rendered from the server's state alone: a lobby with a door per project, and one project's office full screen at a time.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
@@ -326,12 +326,13 @@ function Office() {
   // A Jump found the session over: the employee leaves now (the office's next push says the same) and a toast says why.
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const onEnded = (id: string) => {
+  // Stable, so the Provider doesn't re-render every Jump consumer on each push.
+  const onEnded = useCallback((id: string) => {
     setState((s) => s && without(s, id));
     setToast(ENDED);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 5000);
-  };
+  }, []);
 
   // A project the office doesn't have (an old link, or everyone left and the server forgot it) shows the lobby with a note.
   const inside = open !== null && state?.rooms[open] ? open : null;
