@@ -257,11 +257,12 @@ test("a link key file that others can read is made private again, with the same 
 
 test("serve does not print the link key when its output is not a terminal, so a launchd log never holds it", async () => {
   const { home, port } = await installedOnFreePort();
+  let key = "";
   const proc = Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
   try {
     const urlFile = join(home, ".f1rm", "office-url");
     for (let i = 0; i < 100 && !existsSync(urlFile); i++) await Bun.sleep(50);
-    const key = readFileSync(keyFile(home), "utf8").trim();
+    key = readFileSync(keyFile(home), "utf8").trim();
     expect(readFileSync(urlFile, "utf8")).toContain(key); // `f1rm` still opens the right link from this file
     await Bun.sleep(200);
   } finally {
@@ -269,7 +270,7 @@ test("serve does not print the link key when its output is not a terminal, so a 
     await proc.exited;
   }
   const printed = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
-  expect(printed).not.toMatch(/[\w-]{43}/);
+  expect(printed).not.toContain(key);
 });
 
 test("office-url is replaced in one step, so a reader never sees it empty or half written", async () => {
