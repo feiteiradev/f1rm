@@ -386,6 +386,18 @@ test("a socket that opens and drops without a message keeps backing off; only a 
   expect(waits.at(-1)).toBe(1000);
 });
 
+test("when the connection drops, one look at the page's own address says why: a 401 is a link that's out of date, anything else an office that's down", async () => {
+  const { whyDown, OFFICE_DOWN } = await import("./live.ts");
+  const calls: string[] = [];
+  const answering = (res: Response | Error) => async (url: string) => { calls.push(url); if (res instanceof Error) throw res; return res; };
+  const why = (res: Response | Error) => whyDown(answering(res) as never, "http://127.0.0.1:4170/tok/#/project/x");
+  expect(await why(new Response("unauthorized", { status: 401 }))).toBe("This link is out of date — open the office with `f1rm`");
+  expect(await why(new TypeError("fetch failed"))).toBe(OFFICE_DOWN);
+  expect(await why(new Response("<html>", { status: 200 }))).toBe(OFFICE_DOWN);
+  expect(await why(new Response("", { status: 502 }))).toBe(OFFICE_DOWN);
+  expect(new Set(calls)).toEqual(new Set(["http://127.0.0.1:4170/tok/#/project/x"]));
+});
+
 test("an Ask answered with a 401 says the link is out of date too", async () => {
   const { readAnswer } = await import("./history.ts");
   expect(await readAnswer(new Response("unauthorized", { status: 401 }), () => {})).toBe("This link is out of date — open the office with `f1rm`");

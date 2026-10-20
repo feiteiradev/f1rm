@@ -12,7 +12,7 @@ import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
 import { JumpButton, OnEnded, Palette } from "./jump.tsx";
 import { ENDED, without } from "./jump.ts";
-import { connectLive, OFFICE_DOWN } from "./live.ts";
+import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
 import { InternBox, TellBox } from "./tell.tsx";
@@ -286,7 +286,8 @@ function useRoute() {
 
 function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
-  const [connected, setConnected] = useState(true);
+  // Why the connection is down, or null while it is up.
+  const [down, setDown] = useState<string | null>(null);
   const [open, go] = useRoute();
   // The socket handler is set up once, so it calls the latest `go` through a ref.
   const goRef = useRef(go);
@@ -303,7 +304,11 @@ function Office() {
     // The office's first message on every connection is the whole state, so coming back reloads it.
     return connectLive({
       url: url.href,
-      onUp: setConnected,
+      onUp: (up) => {
+        setDown(up ? null : OFFICE_DOWN);
+        // One look says whether the office is gone or this link is no longer one it knows; a reply after the office is back changes nothing.
+        if (!up) whyDown().then((why) => setDown((d) => (d === null ? null : why)));
+      },
       onMessage: (message) => {
         // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
         if (typeof message.show === "string") return goRef.current(message.show);
@@ -346,7 +351,7 @@ function Office() {
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {inside && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
-        {!connected && <p className="offline" role="alert">{OFFICE_DOWN.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
+        {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}

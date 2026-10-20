@@ -1,7 +1,15 @@
 // The page's live connection to the office: it keeps trying until the office is back, and the office's first message on each connection is the whole state.
 
+import { OUT_OF_DATE } from "./post.ts";
+
 /** The banner while the connection is down. */
 export const OFFICE_DOWN = "Office is down — run `f1rm`";
+
+/** Why the connection is down, from one look at the page's own address: the office answers a link it doesn't know with 401, and an office that's down answers nothing. */
+export async function whyDown(get: typeof fetch = fetch, href: string = location.href): Promise<string> {
+  const res = await get(href, { cache: "no-store" }).catch(() => null);
+  return res?.status === 401 ? OUT_OF_DATE : OFFICE_DOWN;
+}
 
 type Socket = Pick<WebSocket, "onopen" | "onmessage" | "onclose" | "close">;
 

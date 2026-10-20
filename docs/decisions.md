@@ -95,7 +95,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-20 The page reconnects forever, backing off to every 5 s
 
-- Decision: the page's live connection retries after 1 s, 2 s, 4 s, then every 5 s with no limit, and shows "Office is down — run `f1rm`" while it is down; the office's first message on each connection replaces the state. A 401 from any action says "This link is out of date — open the office with `f1rm`".
+- Decision: the page's live connection retries after 1 s, 2 s, 4 s, then every 5 s with no limit, and shows "Office is down — run `f1rm`" while it is down; the office's first message on each connection replaces the state, and the back-off starts over only on that first message. When the socket drops, one GET of the page's own address tells the two causes apart: a 401 shows "This link is out of date — open the office with `f1rm`" in the banner, anything else keeps "Office is down". A 401 from any action says "This link is out of date — open the office with `f1rm`".
 - Why: an office restart left the page frozen with its ghosts; a cap would leave a long-open tab frozen again, and 5 s is cheap against a local server.
-- Rejected: a retry limit (the tab freezes after a long outage); a page reload on reconnect (loses the open panel and half-typed text); telling a dead office from a rotated token (the browser can't see why a socket upgrade failed, so a tab whose link no longer works shows the same banner; link-key makes the token survive restarts, so a healthy tab reconnects).
+- Rejected: a retry limit (the tab freezes after a long outage); a page reload on reconnect (loses the open panel and half-typed text); reading the socket's close for the cause (the browser hides why an upgrade failed, so the page asks with a GET instead); a limit on the probe (it runs once per drop, so at most every 5 s).
 - Where: office-reconnect
