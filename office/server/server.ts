@@ -77,19 +77,24 @@ const gitCall = ([program, ...words]: string[]) => {
   return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
-// A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or any field or input file, writes to GitHub.
+// A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or a field or input file with no method (gh then POSTs), writes.
 const API_METHOD = /^(?:--method(?:=(.*))?|-[A-Za-z]*X=?(.*))$/;
 const API_FIELD = /^(-[fF]|--(field|raw-field|input))/;
-// ponytail: a graphql query kept in a file (`-F query=@q.graphql`, `--input`) is refused, one in a shell variable is not seen; `-HX-Foo: bar` or a `-fX` field reads as a method.
+// The endpoints that put code on a branch or a remote: merge a pull request or a branch, write refs, commits, trees, blobs or contents.
+const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/merge|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
+const LANDING_MUTATION = /mergePullRequest|mergeBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
+// ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen,
+// and `-HX-Foo: bar` or a `-fX` field reads as a method. Add an endpoint here when GitHub gains another way to land code.
 const writesApi = (args: string[]) => {
-  const readsGraphql = args.includes("graphql") && !args.some((a) => /mutation|=@|^--input/i.test(a));
+  if (args.includes("graphql")) return args.some((a) => LANDING_MUTATION.test(a));
   const methods = args.flatMap((a, j) => {
     const m = API_METHOD.exec(a);
     return m ? [(m[1] ?? m[2]) || (args[j + 1] ?? "")] : [];
   });
-  return !readsGraphql && (methods.some((m) => !/^get$/i.test(m)) || args.some((a) => API_FIELD.test(a)));
+  const writes = methods.length ? methods.some((m) => !/^get$/i.test(m)) : args.some((a) => API_FIELD.test(a));
+  return writes && args.some((a) => LANDING_ENDPOINT.test(a));
 };
-/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or a `gh api` call that writes (see writesApi), which can merge a pull request or a branch. */
+/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or a `gh api` call that writes to a code-landing endpoint (see writesApi). */
 const ghLands = ([program, ...words]: string[]) => {
   if (basename(unquoted(program ?? "")) !== "gh") return false;
   const args = words.map(unquoted);
