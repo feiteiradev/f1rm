@@ -32,7 +32,7 @@ claude plugin marketplace add feiteiradev/f1rm && claude plugin install f1rm@f1r
 
 If `f1rm` isn't found, add `~/.local/bin` to your PATH, or use `bun office/cli/f1rm.ts` in its place. Then run **`f1rm`** in your project folder. It starts the office in the background if it isn't running, and shows that project in your office tab, or opens one. Every Claude Code session you start appears in the office.
 
-The office keeps running after you close Claude Code and starts again at login, so the hooks always reach it. After a `git pull`, run `f1rm service` to restart it on the new code. Its log is `~/.f1rm/office.log`. `f1rm uninstall` removes exactly what `install` added, and keeps your event log, boards and editions.
+The office keeps running after you close Claude Code and starts again at login, so the hooks always reach it. After a `git pull`, run `f1rm service` to restart it on the new code. Its log is `~/.f1rm/office.log`. The office keeps the same link across restarts, in `~/.f1rm/link-key`; if the link leaks, `rm ~/.f1rm/link-key` and run `f1rm service`, and the next `f1rm` opens a new link. `f1rm uninstall` removes exactly what `install` added, and keeps your event log, boards and editions.
 
 ## Commands
 

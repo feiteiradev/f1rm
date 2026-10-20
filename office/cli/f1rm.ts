@@ -247,7 +247,6 @@ function serve() {
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
 
-  mkdirSync(F1RM_DIR, { recursive: true });
   const offlineAfterMs = seconds("F1RM_OFFLINE_AFTER", 5 * 60) * 1000;
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
