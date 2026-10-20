@@ -448,7 +448,7 @@ test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and
 
 test("C2: the gate refuses every push and the Reviewer's history rewrites, and the Reviewer file no longer calls the no-push rule prompt-only", () => {
   const gates = section("Gates");
-  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`", "`gh api` PUT on `pulls/<n>/merge`", "behind `timeout`, `nice` or `stdbuf`", "`git checkout <branch> -- <check files>` stays allowed"]) expect(gates, s).toContain(s);
+  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`", "`gh api` call that writes", "a method other than GET, or any field or input file", "except a graphql query with no mutation", "behind `timeout`, `nice` or `stdbuf`", "`git checkout <branch> -- <check files>` stays allowed"]) expect(gates, s).toContain(s);
   expect(role("pm").body).toContain("Write and Edit work there too");
   const reviewer = readFileSync(join(PLUGIN, "agents", "reviewer.md"), "utf8");
   expect(reviewer).not.toContain("prompt-only");
@@ -502,15 +502,19 @@ test("the Reviewer sends back every /code-review finding and merges only when no
   const flow = section("Review and merge flow");
   const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";
   for (const s of ["every finding, blocking or not", "Merge only when none is left", "a round that holds a blocking finding counts toward `ESCALATE`", "ounds of minor findings alone never escalate"]) expect(step4, s).toContain(s);
+  // The guidelines state each rule once, in the review flow; the other places point to it.
   expect(flow).toContain("its findings go in your report and never block");
-  expect(guidelines).toContain("Its findings go in your report and never block");
+  for (const s of ["never block", "Merge only when none is left", "ounds of minor findings alone never escalate"]) expect(guidelines.split(s).length - 1, s).toBe(1);
+  expect(guidelines).not.toContain("no finding goes to a later branch");
   const handoff = section("Handoff via SendMessage");
-  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then every finding with file and line, marked blocking or not/);
-  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` that holds a blocking finding/);
+  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not/);
+  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` \(see the review flow\)/);
   const reviewer = role("reviewer").body;
-  for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "go in your report and never block", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
+  for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "Its findings go in your report and never block.", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
   expect(reviewer).toContain("`CHANGES REQUESTED` with every finding");
   expect(reviewer).not.toContain("with the blocking findings");
+  expect(reviewer).not.toContain("goes back like a blocking one");
+  expect(reviewer.split("blocking or not").length - 1).toBe(2);
   const lead = role("lead").body;
   for (const s of ["minor findings too", "before the merge", "fixed"]) expect(lead, s).toContain(s);
   expect(section("Teams")).toMatch(/minor findings too[^\n]*before the merge/);

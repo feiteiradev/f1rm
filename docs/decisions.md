@@ -154,4 +154,4 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: the Reviewer sends CHANGES REQUESTED for every /code-review finding, blocking or not, and merges only when none is left. The ponytail-review findings still never block and go in the report. Only a round that holds a blocking finding counts toward ESCALATE after 2 rounds, so rounds of minor findings alone never escalate.
 - Why: the user wants minor findings fixed before the merge, not in follow-up branches (the G1 then G1b pattern).
 - Rejected: merging on APPROVED and filing follow-ups.
-- Where: reviewer-every-finding, b9e722b
+- Where: reviewer-every-finding, a0eac39
