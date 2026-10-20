@@ -29,7 +29,10 @@ const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
 const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]);
 // What can stand in front of a command: shell keywords and wrappers that run the next word.
-const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo"]);
+const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo", "timeout", "nice", "stdbuf"]);
+// The options of those wrappers that take the next word as their value, and `timeout`'s duration word.
+const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", "--kill-after", "--signal"], nice: ["-n", "--adjustment"], stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"] };
+const DURATION = /^\d[\d.]*[smhd]?$/;
 /** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
 // ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
 // so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper's flag value (`sudo -u x git push`) is taken for the command.
@@ -37,8 +40,14 @@ const simpleCommands = (command: string) => {
   const out: string[][] = [[]];
   for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
-    let i = 0;
-    while (i < words.length && (/^\w+=/.test(words[i]) || BEFORE_COMMAND.has(words[i]) || (i > 0 && words[i].startsWith("-")))) i++;
+    let i = 0, wrapper = "";
+    for (; i < words.length; i++) {
+      const w = words[i];
+      if (BEFORE_COMMAND.has(w)) wrapper = w;
+      else if (i > 0 && w.startsWith("-")) i += WRAPPER_VALUE_OPTIONS[wrapper]?.includes(w) ? 1 : 0;
+      else if (wrapper === "timeout" && DURATION.test(w)) wrapper = "";
+      else if (!/^\w+=/.test(w)) break;
+    }
     return words.slice(i);
   });
 };
