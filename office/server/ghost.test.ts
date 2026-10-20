@@ -25,10 +25,20 @@ let gate: Promise<unknown> = Promise.resolve();
 let once: Map<string, number | undefined> | null | undefined;
 // The status `claude agents` gives each listed session, if any.
 let statuses: Record<string, "busy" | "idle"> = {};
+// How many listings were asked for so far, and how many are being answered at this moment (with the most at once).
+let listings = 0;
+let listingNow = 0;
+let listingMost = 0;
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
   liveSessions: async () => {
-    await gate;
+    listings++;
+    listingMost = Math.max(listingMost, ++listingNow);
+    try {
+      await gate;
+    } finally {
+      listingNow--;
+    }
     const answer = once === undefined ? alive : once;
     once = undefined;
     return answer && new Map([...answer].map(([id, pid]) => [id, { ...(pid !== undefined && { pid }), ...(statuses[id] && { status: statuses[id] }) }]));
@@ -62,6 +72,9 @@ afterEach(() => {
   statuses = {};
   dead = new Set();
   asked = [];
+  listings = 0;
+  listingNow = 0;
+  listingMost = 0;
 });
 
 let dbN = 0;
@@ -449,4 +462,23 @@ test("a listed idle session with a raised hand stays waiting; once the hand is g
   const res = await fetch(`http://127.0.0.1:${server.port}/${TOKEN}/approve/${waiting.approvals![0].id}`, { method: "POST" });
   expect(res.status).toBe(200);
   await office(server, (s) => s.employees.asking?.status === "idle");
+});
+
+test("a listing begun before a hook leaves that session as the hook made it, and still updates the others", async () => {
+  now = 1_000_000;
+  alive = new Map([["hooked", undefined], ["other", undefined]]);
+  statuses = { hooked: "idle", other: "busy" };
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  await hook(server, "hooked", "Stop");
+  await hook(server, "other", "Stop");
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a check now waits on claude agents
+
+  await hook(server, "hooked", "SessionStart", { source: "clear" });
+  await hook(server, "hooked", "PreToolUse", bash("make build"));
+  gate = new Promise(() => {}); // later listings never answer: only the one begun above is applied
+  release();
+  const state = await office(server, (s) => s.employees.other?.status === "working");
+  expect(state.employees.hooked.status).toBe("working");
 });

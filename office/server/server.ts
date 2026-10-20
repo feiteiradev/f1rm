@@ -306,20 +306,20 @@ export function startServer({
   // The process id of each session `claude agents --json` has listed, so a dead process can be told from a quiet session without spawning `claude` every few seconds.
   const pids = new Map<string, number>();
   let listedAt = -Infinity;
-  // Counts SessionStarts, so a listing begun before one is not kept: its pids may be the ones a resumed session just left.
-  let starts = 0;
+  // Counts each session's events, so a listing begun before one of them does not decide that session: its pid may be the one a resumed session just left, its status older than the hook.
+  // ponytail: never pruned (a number per session id); drop it in endSession if that ever matters.
+  const eventCounts = new Map<string, number>();
   /** Asks `claude agents --json` for the live sessions, keeps their pids and lets their status decide working vs idle; null if it can't say. */
   async function listSessions() {
-    const before = starts;
+    const before = new Map(eventCounts);
     const listed = await machine.liveSessions();
-    if (before === starts) {
-      listedAt = clock();
-      for (const [id, { pid }] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
-      const next = listed ? applyListing(state, listed, new Set(approvals.list().map((a) => a.sessionId))) : state;
-      if (next !== state) {
-        state = next;
-        push();
-      }
+    const fresh = new Map([...(listed ?? [])].filter(([id]) => eventCounts.get(id) === before.get(id)));
+    if (fresh.size === (listed?.size ?? 0)) listedAt = clock();
+    for (const [id, { pid }] of fresh) if (typeof pid === "number") pids.set(id, pid);
+    const next = listed ? applyListing(state, fresh, new Set(approvals.list().map((a) => a.sessionId))) : state;
+    if (next !== state) {
+      state = next;
+      push();
     }
     return listed;
   }
@@ -367,8 +367,8 @@ export function startServer({
           if (event.kind === "SessionStart") {
             pids.delete(event.sessionId);
             listedAt = -Infinity;
-            starts++;
           }
+          eventCounts.set(event.sessionId, (eventCounts.get(event.sessionId) ?? 0) + 1);
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
