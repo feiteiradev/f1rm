@@ -120,3 +120,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the key is permanent, so an address anyone on the machine can fetch must not hand it out; `f1rm` already opens the right link.
 - Rejected: redirecting the bare address to the key link (it gives the key to every local process), and the plain text "unauthorized" (it tells a person nothing).
 - Where: G1c
+
+## 2026-10-20 Doors only for projects
+
+- Decision: the lobby gets a door only for a git repo's main working directory (its worktrees roll up) or a folder with ~/.f1rm/projects/<enc>.json, and never for anything under ~/.f1rm, ~/.claude, /tmp, /private/tmp or $TMPDIR, symlinks resolved. Sessions in any other folder sit behind one "Elsewhere" door (room id `elsewhere`) that exists only while one of them is alive; they keep their own cwd and terminal, so Jump works. The rule is applied when the office builds its rooms, replaying events.db again each start.
+- Why: the lobby filled with junk doors from scratch folders and the user's own tooling; a door should mean a project.
+- Rejected: editing or pruning events.db; a manual allowlist; showing strays as separate doors.
+- Where: G4a
+
+## 2026-10-20 Remove a door
+
+- Decision: an empty door has a Remove action, POST /<token>/remove/<encoded room id>, which forgets the door and deletes its ~/.f1rm/projects/<enc>.json, never boards, evidence or the repo. The time is kept per room in ~/.f1rm/forgotten-doors.json (0600, written atomically); events older than it build no room, and a new event brings the door back. The Elsewhere door cannot be removed.
+- Why: the lobby filled with junk doors from scratch folders and the user's own tooling; a door should mean a project, and a project no longer worked on would keep its door for good, since the log replays on every start.
+- Rejected: editing or pruning events.db; a manual allowlist; showing strays as separate doors.
+- Where: G4a

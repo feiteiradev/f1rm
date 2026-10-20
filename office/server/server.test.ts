@@ -250,7 +250,7 @@ test("an employee carries its terminal locator from the hook headers", async () 
   expect(employees.bg.terminal).toEqual({});
 });
 
-test("a session in a worktree sits in its main repo's room; a non-git folder is its own room", async () => {
+test("a session in a worktree sits in its main repo's room; a non-git folder with no settings is behind Elsewhere", async () => {
   start({
     "/code/shop": "/code/shop/.git",
     "/code/shop/.claude/worktrees/ticket-3": "/code/shop/.git",
@@ -264,7 +264,8 @@ test("a session in a worktree sits in its main repo's room; a non-git folder is 
   const state = await office((s) => Object.keys(s.employees).length === 4);
   expect(state.employees.wt.room).toBe(state.employees.main.room);
   expect(state.employees.other.room).not.toBe(state.employees.main.room);
-  expect(Object.values(state.rooms).map((r) => r.name).sort()).toEqual(["Downloads", "blog", "shop"]);
+  expect(Object.values(state.rooms).map((r) => r.name).sort()).toEqual(["Elsewhere", "blog", "shop"]);
+  expect(state.employees.loose).toMatchObject({ room: "elsewhere", cwd: "/Users/me/Downloads" });
 });
 
 test("the real machine resolves a worktree to its main repo's git common dir", () => {
