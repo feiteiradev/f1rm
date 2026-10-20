@@ -113,3 +113,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: under launchd stdout is ~/.f1rm/office.log, created 0644, and the link key is now permanent, so printing it put a lasting secret in a file that is not private.
 - Rejected: making office.log 0600 (launchd creates the file, so f1rm would have to pre-create and chmod it, and no test can run launchd without touching the user's live service; the key would still sit in a log meant to be read and shared).
 - Where: link-key-followups
+
+## 2026-10-20 The bare address never shows or redirects to the key
+
+- Decision: the office's bare address `http://127.0.0.1:<port>/`, and any path without the right key, answers 401 with a short page saying "Open the office with `f1rm`". It never contains the key and never redirects to it.
+- Why: the key is permanent, so an address anyone on the machine can fetch must not hand it out; `f1rm` already opens the right link.
+- Rejected: redirecting the bare address to the key link (it gives the key to every local process), and the plain text "unauthorized" (it tells a person nothing).
+- Where: G1c

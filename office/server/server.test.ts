@@ -310,6 +310,18 @@ test("the page and the WebSocket need the per-launch UI token", async () => {
   expect(outcome).toBe("rejected");
 });
 
+test("the bare address and a wrong key say how to open the office, never show or redirect to the key", async () => {
+  start();
+  for (const path of ["/", "/wrong/", "/wrong"]) {
+    const res = await fetch(base() + path, { redirect: "manual" });
+    const body = await res.text();
+    expect([path, res.status, res.headers.get("content-type"), res.headers.get("location")]).toEqual([path, 401, "text/html; charset=utf-8", null]);
+    expect(body).toContain("Open the office with");
+    expect(body).not.toContain(TOKEN);
+  }
+  expect((await fetch(`${base()}/${TOKEN}/`)).status).toBe(200);
+});
+
 test("the page without its trailing slash redirects, so its assets resolve under the token", async () => {
   start();
   const res = await fetch(`${base()}/${TOKEN}`, { redirect: "manual" });
