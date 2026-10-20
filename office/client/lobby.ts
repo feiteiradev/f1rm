@@ -2,6 +2,13 @@
 import type { OfficeState, Room } from "../server/office.ts";
 
 export type Door = { room: Room; count: number; waiting: boolean };
+
+// ponytail: the server's ELSEWHERE.id, repeated because importing office.ts as a value would bundle its node imports into the page.
+/** The one door for sessions that are in no project. It has no edition, board, PM or Hire, and cannot be removed. */
+export const ELSEWHERE_ID = "elsewhere";
+export const isProject = (roomId: string) => roomId !== ELSEWHERE_ID;
+/** Remove is offered on a project's door that nobody is in. */
+export const canRemove = (d: Door) => d.count === 0 && isProject(d.room.id);
 export type DoorSlot = Door & { x: number; y: number };
 
 /** Units are art pixels. A cell is one door and the plaque under it; the wall runs the full width above the floor. */

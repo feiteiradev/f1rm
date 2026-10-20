@@ -22,7 +22,7 @@ const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string, team?: string) => void, onHire: () => void, onStartPm: () => void): Promise<Scene> {
+export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string, team?: string) => void, onHire?: () => void, onStartPm?: () => void): Promise<Scene> {
   await loadArt();
   const app = await newApp(host);
 
@@ -80,7 +80,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         note.position.set((table.x + CELL.w / 2) * scale, (table.y + TABLE.h) * scale + 14);
         roomLabels.addChild(note);
       }
-      if (!table.employee) {
+      if (!table.employee && onStartPm) {
         const invite = new Text({ text: "Start PM", style: LABEL });
         invite.anchor.set(0.5, 0);
         invite.alpha = 0.7;

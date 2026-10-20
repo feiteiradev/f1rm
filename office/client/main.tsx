@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
-import { DOOR, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
+import { canRemove, DOOR, hashFor, isProject, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
@@ -15,6 +15,7 @@ import { ENDED, without } from "./jump.ts";
 import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
+import { RemoveDoor } from "./remove.tsx";
 import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle, teamOf } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
@@ -157,7 +158,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
 
   useEffect(() => {
     let dead = false;
-    createScene(host.current!, select, openBoard, onHire, startPm).then((s) => {
+    createScene(host.current!, select, openBoard, isProject(room) ? onHire : undefined, isProject(room) ? startPm : undefined).then((s) => {
       if (dead) return s.destroy();
       scene.current = s;
       s.update(latest.current.state, latest.current.selected);
@@ -188,8 +189,8 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     <>
       <div className="scene" ref={host} />
       {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
-      {board && state.rooms[board.id] && <BoardPanel key={`${board.id}/${board.team ?? ""}`} state={state} id={board.id} team={board.team} onClose={() => setBoard(null)} />}
-      <BoardList state={state} onOpen={openBoard} />
+      {board && isProject(board.id) && state.rooms[board.id] && <BoardPanel key={`${board.id}/${board.team ?? ""}`} state={state} id={board.id} team={board.team} onClose={() => setBoard(null)} />}
+      {isProject(room) && <BoardList state={state} onOpen={openBoard} />}
       {pmNote && <p className="note low pm-note" role="status">{pmNote}</p>}
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
       <ul className="roster">
@@ -216,6 +217,8 @@ function Lobby({ state, onOpen }: { state: OfficeState; onOpen: (roomId: string)
   const latest = useRef(state);
   latest.current = state;
   const [size, setSize] = useState({ w: 0, h: 0 });
+  // Why the office refused a Remove, until the next try.
+  const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     let dead = false;
@@ -266,10 +269,14 @@ function Lobby({ state, onOpen }: { state: OfficeState; onOpen: (roomId: string)
                   </span>
                 </span>
               </button>
+              {canRemove(d) && (
+                <RemoveDoor roomId={d.room.id} name={d.room.name} onProblem={setProblem} style={{ left: (d.x + 12) * scale, top: (d.y + 40) * scale, width: (DOOR.w - 24) * scale }} />
+              )}
             </li>
           ))}
         </ul>
       </div>
+      {problem && <p className="note low pm-note" role="alert">{problem}</p>}
     </div>
   );
 }
@@ -356,8 +363,8 @@ function Office() {
           </button>
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
-        {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
-        {inside && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
+        {inside && isProject(inside) && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
+        {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
@@ -369,11 +376,11 @@ function Office() {
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
-      {inside && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
+      {inside && isProject(inside) && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
       {toast && <p className="note low pm-note toast" role="status">{toast}</p>}
-      {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
+      {hiring && inside && isProject(inside) && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </OnEnded.Provider>
   );
 }

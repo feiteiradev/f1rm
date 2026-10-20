@@ -413,3 +413,41 @@ test("an Ask answered with a 401 says the link is out of date too", async () => 
   expect(await readAnswer(new Response("unauthorized", { status: 401 }), () => {})).toBe("This link is out of date — open the office with `f1rm`");
   expect(await readAnswer(new Response("boom", { status: 500 }), () => {})).toBe("Ask failed (500).");
 });
+
+test("only an empty project door offers Remove; Elsewhere never does, nor a door with anyone inside", async () => {
+  const { canRemove, isProject } = await import("./lobby.ts");
+  const state = office(["shop", "blog", "elsewhere", "docs"], [employee("a", "shop"), employee("s", "elsewhere")]);
+  expect(doorsOf(state).map((d) => [d.room.id, canRemove(d)])).toEqual([["blog", true], ["docs", true], ["elsewhere", false], ["shop", false]]);
+  // Elsewhere is a door like the others but no project: it has no edition, board, PM or Hire.
+  expect(isProject("elsewhere")).toBe(false);
+  expect(isProject("/Users/me/shop/.git")).toBe(true);
+  // Its stray sessions fill its slice like any door's, so opening it lists them.
+  expect(Object.keys(projectState(state, "elsewhere").employees)).toEqual(["s"]);
+  expect(doorsOf(office(["elsewhere"], [])).map((d) => [d.room.name, d.count])).toEqual([["elsewhere", 0]]);
+});
+
+test("Remove asks twice: the second click within the window fires, a late or first click only arms", async () => {
+  const { CONFIRM_MS, isConfirm } = await import("./remove.ts");
+  expect(isConfirm(null, 1000)).toBe(false);
+  expect(isConfirm(1000, 1000 + CONFIRM_MS)).toBe(true);
+  expect(isConfirm(1000, 1000 + CONFIRM_MS + 1)).toBe(false);
+});
+
+test("Remove POSTs remove/<encoded id> once confirmed, and a 404, 409 or 401 shows through the error path", async () => {
+  const { removeDoor } = await import("./remove.ts");
+  const sent: { url: string; method: string }[] = [];
+  const real = globalThis.fetch;
+  try {
+    const ok = await withReply(Response.json({ ok: true }), async () => {
+      globalThis.fetch = (async (url: URL, init: RequestInit) => (sent.push({ url: String(url), method: init.method! }), Response.json({ ok: true }))) as unknown as typeof fetch;
+      return removeDoor("/Users/me/my shop/.git");
+    });
+    expect(ok).toBeNull();
+    expect(sent).toEqual([{ url: "http://127.0.0.1:4170/tok/remove/%2FUsers%2Fme%2Fmy%20shop%2F.git", method: "POST" }]);
+  } finally {
+    globalThis.fetch = real;
+  }
+  expect(await withReply(Response.json({ error: "No such door." }, { status: 404 }), () => removeDoor("x"))).toBe("No such door.");
+  expect(await withReply(Response.json({ error: "That door isn't empty." }, { status: 409 }), () => removeDoor("x"))).toBe("That door isn't empty.");
+  expect(await withReply(new Response("unauthorized", { status: 401 }), () => removeDoor("x"))).toBe("This link is out of date — open the office with `f1rm`");
+});
