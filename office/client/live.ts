@@ -19,11 +19,12 @@ export function connectLive({ url, onMessage, onUp, open = (u) => new WebSocket(
   let stopped = false;
   const connect = () => {
     const ws = (socket = open(url));
-    ws.onopen = () => {
+    ws.onopen = () => onUp(true);
+    // Only the office's first message proves the connection works, so a socket that opens and drops again keeps backing off.
+    ws.onmessage = (m) => {
       failures = 0;
-      onUp(true);
+      onMessage(JSON.parse(m.data));
     };
-    ws.onmessage = (m) => onMessage(JSON.parse(m.data));
     ws.onclose = () => {
       if (stopped) return;
       onUp(false);

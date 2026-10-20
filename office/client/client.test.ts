@@ -362,6 +362,30 @@ test("the live connection reconnects by itself, backs off up to 5 s, reloads sta
   expect(Fake.all.length).toBe(sockets);
 });
 
+test("a socket that opens and drops without a message keeps backing off; only a message starts the back-off over", async () => {
+  const { connectLive } = await import("./live.ts");
+  const sockets: { onopen: (() => void) | null; onmessage: ((m: { data: string }) => void) | null; onclose: (() => void) | null; close(): void }[] = [];
+  const waits: number[] = [];
+  let run = () => {};
+  connectLive({
+    url: "ws://x/tok/ws",
+    open: () => { const s = { onopen: null, onmessage: null, onclose: null, close() {} }; sockets.push(s); return s as never; },
+    after: (fn, ms) => { run = fn; waits.push(ms); return () => {}; },
+    onMessage: () => {},
+    onUp: () => {},
+  });
+  for (let i = 0; i < 4; i++) {
+    sockets.at(-1)!.onopen!();
+    sockets.at(-1)!.onclose!();
+    run();
+  }
+  expect(waits).toEqual([1000, 2000, 4000, 5000]);
+  sockets.at(-1)!.onopen!();
+  sockets.at(-1)!.onmessage!({ data: "{}" });
+  sockets.at(-1)!.onclose!();
+  expect(waits.at(-1)).toBe(1000);
+});
+
 test("an Ask answered with a 401 says the link is out of date too", async () => {
   const { readAnswer } = await import("./history.ts");
   expect(await readAnswer(new Response("unauthorized", { status: 401 }), () => {})).toBe("This link is out of date — open the office with `f1rm`");
