@@ -103,6 +103,7 @@ const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am"
 const FORCE_SHORT = new Set(["checkout", "switch", "branch", "worktree", "tag", "merge", "clean", "push", "fetch", "reset", "add", "update-ref"]);
 const RED_WORKTREE = /^\.claude\/worktrees\/red-[^/]+\/?$/;
 // ponytail: a dev task whose slug starts `red-` has its worktree removable by a Reviewer too; tighten it if that ever matters.
+// `git checkout <path>` and `git checkout <ref> -- <path>` are not refused: a path and a ref look alike, and the Reviewer needs `checkout main`, `checkout -b x` and `checkout <branch> -- <files>`.
 /** Whether a git call is one a Reviewer may not run. The one force it needs is removing its red-<task> scratch worktree. */
 const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   if (!call) return false;
@@ -114,7 +115,9 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
   // `--amend` as a word, not as the value of `-m`, `-F`, `-C`, `-c`, `-t` or `--message`.
   const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[A-Za-z]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
-  if (sub === "stash" || amends || restoresPath || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  // `restore` may only unstage; `checkout --ours|--theirs` overwrites a path.
+  const discards = (sub === "restore" && !["--staged", "-S"].includes(rest.filter((a) => a.startsWith("-") && a !== "--").join())) || (sub === "checkout" && any(/^--(ours|theirs)$/));
+  if (sub === "stash" || amends || restoresPath || discards ||((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
   if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
