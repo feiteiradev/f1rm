@@ -212,7 +212,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
 
 test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
   const gates = section("Gates");
-  for (const s of ["skill gate", "delegation gate", "boards, milestones, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
+  for (const s of ["skill gate", "delegation gate", "boards, milestones, kept files, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);
@@ -448,7 +448,8 @@ test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and
 
 test("C2: the gate refuses every push and the Reviewer's history rewrites, and the Reviewer file no longer calls the no-push rule prompt-only", () => {
   const gates = section("Gates");
-  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`"]) expect(gates, s).toContain(s);
+  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`", "`gh api` PUT on `pulls/<n>/merge`", "behind `timeout`, `nice` or `stdbuf`", "`git checkout <branch> -- <check files>` stays allowed"]) expect(gates, s).toContain(s);
+  expect(role("pm").body).toContain("Write and Edit work there too");
   const reviewer = readFileSync(join(PLUGIN, "agents", "reviewer.md"), "utf8");
   expect(reviewer).not.toContain("prompt-only");
   expect(reviewer).toMatch(/gate refuses/i);
