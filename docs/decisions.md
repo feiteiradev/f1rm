@@ -141,3 +141,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: with another process reading events.db, the insert hit SQLITE_BUSY, POST /ingest failed and the event was lost (4 times in ~/.f1rm/office.log in one day).
 - Rejected: WAL (it adds -wal and -shm files beside ~/.f1rm/events.db that would need the same private mode, and a bounded wait already stops the loss); a 5 s wait, as long as the hook's curl -m 5, because the reply would land too late.
 - Where: G4a
+
+## 2026-10-20 claude agents status decides working vs idle
+
+- Decision: on the office's ~5 s liveness check, each session `claude agents --json` lists is drawn by its status: busy is working, never on a coffee break; idle is idle unless a permission is pending, and a raised hand stays waiting. A session `claude agents` does not list, or lists with another status, keeps what its hooks said. Hooks still choose the pose detail (typing, reading, running from the last tool, waiting for a permission). A Stop or Notification event carrying `agent_id` (a sub-agent's) never changes the parent's status or activity. The check now runs `claude agents --json` on every tick while anyone is in the office (about 0.25 s per spawn under a load average near 400), with the existing no-overlap guard.
+- Why: hooks alone mis-draw sessions: a sub-agent's Stop flipped its parent to idle, and a lost event left a stale status (feit's 7 busy hires all sat on coffee). The listing is Claude Code's own truth.
+- Rejected: hooks as the only source; a greyed state for sessions the listing cannot place; keeping the listing to every 30 s (a busy session would sit on coffee for up to 30 s).
+- Where: G5a

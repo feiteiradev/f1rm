@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
-import { ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
@@ -308,13 +308,18 @@ export function startServer({
   let listedAt = -Infinity;
   // Counts SessionStarts, so a listing begun before one is not kept: its pids may be the ones a resumed session just left.
   let starts = 0;
-  /** Asks `claude agents --json` for the live sessions and keeps their pids; null if it can't say. */
+  /** Asks `claude agents --json` for the live sessions, keeps their pids and lets their status decide working vs idle; null if it can't say. */
   async function listSessions() {
     const before = starts;
     const listed = await machine.liveSessions();
     if (before === starts) {
       listedAt = clock();
-      for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+      for (const [id, { pid }] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+      const next = listed ? applyListing(state, listed, new Set(approvals.list().map((a) => a.sessionId))) : state;
+      if (next !== state) {
+        state = next;
+        push();
+      }
     }
     return listed;
   }
@@ -626,8 +631,8 @@ export function startServer({
     if (checking) return;
     checking = true;
     try {
-      const employees = Object.values(state.employees);
-      if (employees.some((e) => !pids.has(e.sessionId)) && clock() - listedAt >= PID_REFRESH_MS) await listSessions();
+      // One `claude agents --json` per tick (about 0.25 s of CPU, measured under load), as the listing's status decides working vs idle; `checking` stops ticks from piling up behind a slow one.
+      if (Object.keys(state.employees).length) await listSessions();
       const ended = Object.values(state.employees).filter(processEnded);
       ended.forEach(endSession);
       if (ended.length) push();

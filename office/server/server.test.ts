@@ -22,7 +22,7 @@ let deadPids = new Set<number>();
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
-  liveSessions: async () => listing,
+  liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
   letGo: async (id: string) => {
     calls.push(`letgo ${id}`);
@@ -571,6 +571,20 @@ test("a sub-agent is an intern of its parent from its start to its stop, and nev
   const after = await office(() => true);
   expect(after.employees.parent.status).toBe("idle");
   expect(Object.keys(after.interns)).toEqual(["agent-2"]);
+});
+
+test("a Stop or idle notification from inside a sub-agent leaves its parent's status and activity as they were", async () => {
+  start();
+  await hook(sessionStart("parent", "/code/shop"));
+  await hook(preToolUse("parent", "Bash", { command: "make build" }));
+  const inside = { agent_id: "agent-1", agent_type: "Explore" };
+  await hook({ ...common("parent", "Stop"), ...inside });
+  await hook({ ...common("parent", "Notification"), notification_type: "idle_prompt", ...inside });
+  expect((await office(() => true)).employees.parent).toMatchObject({ status: "working", activity: "Bash: make build", tool: "Bash" });
+
+  // The parent's own Stop still ends its work.
+  await hook({ ...common("parent", "Stop") });
+  expect((await office((s) => s.employees.parent?.status === "idle")).employees.parent.activity).toBe("");
 });
 
 test("a parent's interns leave with it", async () => {

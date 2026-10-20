@@ -23,13 +23,15 @@ let asked: number[] = [];
 let gate: Promise<unknown> = Promise.resolve();
 // What the next listing answers instead of `alive`, once.
 let once: Map<string, number | undefined> | null | undefined;
+// The status `claude agents` gives each listed session, if any.
+let statuses: Record<string, "busy" | "idle"> = {};
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
   liveSessions: async () => {
     await gate;
     const answer = once === undefined ? alive : once;
     once = undefined;
-    return answer;
+    return answer && new Map([...answer].map(([id, pid]) => [id, { ...(pid !== undefined && { pid }), ...(statuses[id] && { status: statuses[id] }) }]));
   },
   backgroundId: async () => null,
   letGo: async () => {},
@@ -57,6 +59,7 @@ afterEach(() => {
   gate = Promise.resolve();
   once = undefined;
   alive = new Map();
+  statuses = {};
   dead = new Set();
   asked = [];
 });
@@ -405,4 +408,45 @@ test("an event is stored, and answered 200, while another process is reading the
   await reader.exited;
   const rows = new Database(dbPath, { readonly: true }).query("SELECT json_extract(event, '$.sessionId') AS id FROM events").all();
   expect(rows).toEqual([{ id: "busy" }]);
+});
+
+test("on the check, a listed session's claude agents status decides working or idle, whatever its last hook was; an unlisted one keeps its hook status", async () => {
+  now = 1_000_000;
+  alive = new Map([["busy", undefined], ["resting", undefined]]);
+  statuses = { busy: "busy", resting: "idle" };
+  const { server } = start();
+  await hook(server, "busy", "PreToolUse", bash("make build"));
+  await hook(server, "busy", "Stop");
+  await hook(server, "resting", "PreToolUse", bash("make build"));
+  await hook(server, "unlisted", "PreToolUse", bash("make build"));
+  await hook(server, "unlisted", "Stop");
+  await hook(server, "unlisted2", "PreToolUse", bash("make build"));
+
+  const state = await office(server, (s) => s.employees.busy?.status === "working" && s.employees.resting?.status === "idle");
+  expect(state.employees.unlisted.status).toBe("idle");
+  expect(state.employees.unlisted2.status).toBe("working");
+  // The hooks still choose the pose: the last tool stays.
+  expect(state.employees.resting).toMatchObject({ activity: "Bash: make build", tool: "Bash" });
+
+  // The listing keeps deciding: a Stop does not make a busy session idle, and an idle one works again only when the listing says busy.
+  await hook(server, "resting", "PostToolUse", bash("make build"));
+  statuses = { busy: "idle", resting: "busy" };
+  await office(server, (s) => s.employees.busy?.status === "idle" && s.employees.resting?.status === "working");
+});
+
+test("a listed idle session with a raised hand stays waiting; once the hand is gone it is idle", async () => {
+  now = 1_000_000;
+  alive = new Map([["asking", undefined]]);
+  statuses = { asking: "idle" };
+  const { server } = start();
+  await hook(server, "asking", "PreToolUse", bash("ls"));
+  void hook(server, "asking", "PermissionRequest", bash("rm -rf build")); // held until decided
+  await office(server, (s) => (s.approvals ?? []).length === 1);
+  await new Promise((r) => setTimeout(r, 700)); // several checks
+  const waiting = await office(server, () => true);
+  expect(waiting.employees.asking.status).toBe("waiting");
+
+  const res = await fetch(`http://127.0.0.1:${server.port}/${TOKEN}/approve/${waiting.approvals![0].id}`, { method: "POST" });
+  expect(res.status).toBe(200);
+  await office(server, (s) => s.employees.asking?.status === "idle");
 });
