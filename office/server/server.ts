@@ -573,6 +573,7 @@ export function startServer({
           if (next.employees[e.sessionId]) continue;
           const gone = departure(e);
           append.run(gone.at, JSON.stringify(gone));
+          approvals.release(e.sessionId);
         }
         state = next;
         push();

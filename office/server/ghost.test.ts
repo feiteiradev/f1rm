@@ -376,3 +376,18 @@ test("a listing already under way when a session resumes does not give it back t
   expect(asked).toContain(20);
   expect(asked).not.toContain(11);
 });
+
+test("a swept employee takes its pending hand with it", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  const held = hook(server, "swept", "PermissionRequest", bash("rm -rf build"));
+  await office(server, (s) => (s.approvals ?? []).length === 1);
+
+  now += 1500;
+  await office(server, (s) => s.employees.swept?.status === "offline");
+  now += 2000;
+  await office(server, (s) => ids(s).length === 0);
+  const answer = await held;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+  expect((await office(server, () => true)).approvals).toEqual([]);
+});
