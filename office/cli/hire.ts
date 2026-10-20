@@ -147,8 +147,9 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   return argv;
 }
 
-/** Runs `f1rm hire` and returns the exit code. */
-export async function hire(args: string[]): Promise<number> {
+/** The flags `f1rm hire` takes before the role, and the words after them. The delegation gate reads a hire with this too, so the two can't drift. */
+export function parseHireFlags(words: string[]) {
+  const args = [...words];
   let override = false;
   let reportTo: string | undefined, team: string | undefined, level: string | undefined, content = false, skills: string[] = [];
   for (;;) {
@@ -160,6 +161,12 @@ export async function hire(args: string[]): Promise<number> {
     else if (args[0] === "--content") content = !!args.shift();
     else break;
   }
+  return { override, reportTo, team, level, content, skills, args };
+}
+
+/** Runs `f1rm hire` and returns the exit code. */
+export async function hire(words: string[]): Promise<number> {
+  const { override, reportTo, team, level, content, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);

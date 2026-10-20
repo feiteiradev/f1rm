@@ -9,7 +9,7 @@ import { isEdition, projectFile, readEdition, writeEdition, type Edition } from 
 import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
-import { CAP, HireRefused, LOAD_FIRST, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
+import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
 import { hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
@@ -26,15 +26,18 @@ const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMes
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
-const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
-/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes and `bun`. */
-// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen.
+const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]);
+// What can stand in front of a command: shell keywords and wrappers that run the next word.
+const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo"]);
+/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
+// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
+// so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper's flag value (`sudo -u x git push`) is taken for the command.
 const simpleCommands = (command: string) => {
   const out: string[][] = [[]];
   for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
     let i = 0;
-    while (i < words.length && (/^\w+=/.test(words[i]) || words[i] === "bun")) i++;
+    while (i < words.length && (/^\w+=/.test(words[i]) || BEFORE_COMMAND.has(words[i]) || (i > 0 && words[i].startsWith("-")))) i++;
     return words.slice(i);
   });
 };
@@ -46,40 +49,50 @@ const hireArgs = (words: string[]) => {
   const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
-const runsHire = (words: string[]) => hireArgs(words) !== null;
-// The flags `f1rm hire` takes before the role (cli/hire.ts); the first other word is the role. `--help` hires nobody.
-const HIRE_FLAGS_WITH_VALUE = new Set(["--report-to", "--team", "--skills", "--level"]);
-const HIRE_FLAGS = new Set([...HIRE_FLAGS_WITH_VALUE, "--override", "--content"]);
+/** The role and `--team` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
 const hireOf = (args: string[] | null) => {
   if (!args) return null;
-  let i = 0, team: string | undefined;
-  while (HIRE_FLAGS.has(args[i])) {
-    if (args[i] === "--team") team = args[i + 1];
-    i += HIRE_FLAGS_WITH_VALUE.has(args[i]) ? 2 : 1;
-  }
-  return args[i] === "--help" || args[i] === "-h" ? null : { role: args[i], team };
+  const { team, args: [role] } = parseHireFlags(args);
+  return role === "--help" || role === "-h" ? null : { role, team };
 };
-/** The git subcommand a simple command runs, past global options such as `-C <dir>`, and the words after it. */
+/** Where the words after the options start: a flag that takes a value takes the next word with it. */
+const skipOptions = (args: string[], i: number, withValue: Set<string>) => {
+  while (args[i]?.startsWith("-")) i += withValue.has(args[i]) ? 2 : 1;
+  return i;
+};
+/** The git subcommand a simple command runs, past global options such as `-C <dir>`, with the words after it and the options before it. */
 const gitCall = ([program, ...words]: string[]) => {
   if (basename(unquoted(program ?? "")) !== "git") return null;
   const args = words.map(unquoted);
-  let i = 0;
-  while (i < args.length && args[i].startsWith("-")) i += GIT_OPTIONS_WITH_VALUE.has(args[i]) ? 2 : 1;
-  return { sub: args[i] ?? "", rest: args.slice(i + 1) };
+  const i = skipOptions(args, 0, GIT_OPTIONS_WITH_VALUE);
+  return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
-const ghMerge = (w: string[]) => basename(w[0] ?? "") === "gh" && w[1] === "pr" && w[2] === "merge";
+const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
+/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`. */
+const ghMerge = ([program, ...words]: string[]) => {
+  if (basename(unquoted(program ?? "")) !== "gh") return false;
+  const args = words.map(unquoted);
+  const i = skipOptions(args, 0, GH_OPTIONS_WITH_VALUE);
+  return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
+};
 // What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
-const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am", "pull", "clean"]);
-const FORCE = /^(--force.*|-[A-Za-z]*f[A-Za-z]*)$/;
-const RED_WORKTREE = /(^|\/)\.claude\/worktrees\/red-[^/]+\/?$/;
+const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am", "pull", "clean", "update-ref"]);
+// A short-flag cluster with `f` is a force only for these; `git log -Sfoo` and `git diff -Uf` are not. A bare `-f` and `--force*` are refused everywhere.
+const FORCE_SHORT = new Set(["checkout", "switch", "branch", "worktree", "tag", "merge", "clean", "push", "fetch", "reset", "add", "update-ref"]);
+const RED_WORKTREE = /^\.claude\/worktrees\/red-[^/]+\/?$/;
+// ponytail: a dev task whose slug starts `red-` has its worktree removable by a Reviewer too; tighten it if that ever matters.
 /** Whether a git call is one a Reviewer may not run. The one force it needs is removing its red-<task> scratch worktree. */
 const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   if (!call) return false;
-  const { sub, rest } = call;
-  if (REVIEWER_NEVER.has(sub) || (sub === "branch" && rest.some((a) => /^-[A-Za-z]*D/.test(a)))) return true;
-  if (!rest.some((a) => FORCE.test(a))) return false;
+  const { sub, rest, options } = call;
+  const any = (re: RegExp) => rest.some((a) => re.test(a));
+  if (REVIEWER_NEVER.has(sub)) return true;
+  if ((sub === "branch" && any(/^-[A-Za-z]*[DM]/)) || (sub === "checkout" && any(/^-[A-Za-z]*B/)) || (sub === "switch" && any(/^-[A-Za-z]*C/))) return true;
+  if ((sub === "stash" && ["drop", "clear"].includes(rest[0])) || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
-  return !(sub === "worktree" && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]) && !paths[1].includes(".."));
+  const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
+  return !(sub === "worktree" && here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
@@ -182,7 +195,7 @@ export function startServer({
     }
     const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
-    if (SPECIALISTS.has(role) && commands.some(runsHire)) {
+    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
     }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
