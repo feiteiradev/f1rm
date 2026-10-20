@@ -134,9 +134,6 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
           p.tag.anchor.set(0.5, 1);
           p.tag.position.set((d.x + 23) * scale, (d.y + 10) * scale);
           names.addChild(p.tag);
-        } else if (p.tag) {
-          p.tag.destroy();
-          p.tag = undefined;
         }
       }
     }
