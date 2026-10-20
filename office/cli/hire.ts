@@ -24,7 +24,8 @@ export const SECURITY = " Before you send APPROVED, run security-review with the
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
 const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
-// ponytail: a deny rule only slows an honest model down; `git -C . push` gets past it. A real block needs a hook.
+// The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
+// ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
 /** The PM session name `f1rm pm` gives this repo; a hire reports to it. */

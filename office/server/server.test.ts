@@ -1123,11 +1123,12 @@ async function held(r: Response) {
 
 test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's is denied, and so is its intern's", async () => {
   start();
-  const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(agent_type && { agent_type }) });
+  const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(id === "l" && { session_title: "lead-checkout" }), ...(agent_type && { agent_type }) });
   for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
   await office((s) => Object.keys(s.employees).length === 5);
   const run = (id: string, command: string, extra = {}) => hook({ ...preToolUse(id, "Bash", { command }), ...extra });
-  for (const id of ["p", "l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
+  expect(await held(await run("p", "f1rm hire lead lead-checkout checkout 'Task: a'"))).toBeNull();
+  for (const id of ["l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
   for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
     const out = await held(await run("d", command));
     expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
@@ -1206,7 +1207,9 @@ test("a PM's or lead's landing git commands are refused, past global options; re
     }
     for (const command of readOnly) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
-  for (const id of ["d", "f"]) for (const command of landing) expect(await bash(id, command)).toBeNull();
+  // A specialist lands on its own branch, but never pushes (see the push test); a freelancer is held by nothing.
+  for (const command of landing) expect(await bash("f", command)).toBeNull();
+  for (const command of landing.filter((c) => !/push|pr merge/.test(c))) expect(await bash("d", command)).toBeNull();
 });
 
 test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordinary intern, and a specialist's call, are not", async () => {
@@ -1222,6 +1225,93 @@ test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordina
   expect(await call("p", "Agent", "Explore")).toBeNull();
   expect(await call("l", "Task", "general-purpose")).toBeNull();
   expect(await call("d", "Agent", "f1rm:backend-dev")).toBeNull();
+});
+
+// A PM, the checkout lead, a designer, a Reviewer and a freelancer, for the hire and push rules.
+async function gateOffice() {
+  start();
+  for (const [id, type, title] of [["p", "f1rm:pm", "p-title"], ["l", "f1rm:lead", "lead-checkout"], ["d", "f1rm:designer", "d-title"], ["v", "f1rm:reviewer", "v-title"], ["f", undefined, "f-title"]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), prompt: "go", session_title: title, ...(type && { agent_type: type }) });
+  }
+  await office((s) => Object.keys(s.employees).length === 5);
+  return async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
+}
+
+test("a PM hires only leads, with any flags before the role; a specialist hire, or a lead hire named only in the brief, is refused", async () => {
+  const bash = await gateOffice();
+  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --override lead lead-checkout checkout b", "f1rm hire --override --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
+  for (const command of allowed) expect([command, await bash("p", command)]).toEqual([command, null]);
+  const refused = ["f1rm hire backend-dev backend-dev-a a brief", "f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --override --skills x designer designer-a a b", "cd x && f1rm hire reviewer reviewer-a review-a b", "f1rm hire backend-dev backend-dev-a a lead", "echo hi | f1rm hire --report-to lead designer designer-a a b"];
+  for (const command of refused) {
+    const out = await bash("p", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("PMs hire leads; send this to a lead");
+  }
+});
+
+test("a lead hires only into its own team: not a lead, not without --team, not into another team", async () => {
+  const bash = await gateOffice();
+  const allowed = ["f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --report-to x --override --skills s --team checkout reviewer checkout.reviewer-a review-a b", 'f1rm hire --team "checkout" designer checkout.designer-a a b', "f1rm hire --level high --team checkout reviewer checkout.reviewer-a review-a b", "f1rm hire --help"];
+  for (const command of allowed) expect([command, await bash("l", command)]).toEqual([command, null]);
+  const refused = ["f1rm hire lead lead-other other b", "f1rm hire --team checkout lead lead-other other b", "f1rm hire backend-dev backend-dev-a a b", "f1rm hire --team other backend-dev other.backend-dev-a a b", "f1rm hire backend-dev backend-dev-a a '--team checkout'", "f1rm hire --team check backend-dev check.backend-dev-a a b", "f1rm hire --team checkout-2 backend-dev a a b"];
+  for (const command of refused) {
+    const out = await bash("l", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain(command.includes("hire lead") || command.includes("hire --team checkout lead") ? "never another lead" : "add --team checkout");
+  }
+});
+
+test("a lead whose name carries no team can hire into none", async () => {
+  start();
+  await hook({ ...common("l", "UserPromptSubmit"), prompt: "go", session_title: "plain", agent_type: "f1rm:lead" });
+  await office((s) => Object.keys(s.employees).length === 1);
+  expect((await held(await hook(preToolUse("l", "Bash", { command: "f1rm hire --team plain backend-dev plain.backend-dev-a a b" }))))?.permissionDecision).toBe("deny");
+});
+
+const PUSHES = ["git push", "git push origin main", "git -C . push", "git -C '/my repo' -c core.editor=true push --tags", "cd x && git push", "FOO=1 git push | cat", "git 'push'", "gh pr merge 3", "gh pr merge 3 --squash", "cd x && gh pr merge 3"];
+
+test("nobody pushes or merges a PR: a specialist's and a Reviewer's git push and gh pr merge are refused, every form", async () => {
+  const bash = await gateOffice();
+  for (const id of ["d", "v"]) {
+    for (const command of PUSHES) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the user pushes");
+    }
+    for (const command of ["git log --oneline", "git status", "echo git push", "git log --grep 'git push'", "gh pr view 3", "git commit -m 'git push later'"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  }
+  for (const command of PUSHES) expect([command, await bash("f", command)]).toEqual([command, null]);
+});
+
+test("a Reviewer's history-rewriting and forcing git commands are refused; its merge, worktree add and worktree remove are not", async () => {
+  const bash = await gateOffice();
+  const refused = ["git reset --hard HEAD~1", "git -C x rebase main", "git cherry-pick abc", "git revert abc", "git am fix.patch", "git pull origin main", "git clean -fd", "git branch -D worktree-a", "git branch -Df worktree-a", "git merge --force x", "git checkout -f main", "git worktree remove --force .claude/worktrees/review-a", "git worktree remove -f ../x", "git worktree remove --force .claude/worktrees/red-a ../x", "git worktree remove --force .claude/worktrees/red-a/../../..", "git worktree add -f x", "git commit -fm x", "git fetch origin -f", "cd x && git reset --hard"];
+  for (const command of refused) {
+    const out = await bash("v", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Reviewer");
+  }
+  const allowed = ["git worktree remove --force .claude/worktrees/red-a", "git -C /code/shop worktree remove --force .claude/worktrees/red-add-login", "git worktree remove -f /code/shop/.claude/worktrees/red-a/", "git worktree add .claude/worktrees/red-a -b red-a main", "git merge --no-ff worktree-a -m 'Merge a'", "git merge --ff-only main", "git merge --abort", "git worktree remove .claude/worktrees/review-a", "git branch -d worktree-a", "git log --oneline", "git diff main...worktree-a", "git status", "git commit -m 'conflict fix'", "git -C x worktree list", "git log --format=%h", "git log --grep 'git reset'"];
+  for (const command of allowed) expect([command, await bash("v", command)]).toEqual([command, null]);
+  // Only the Reviewer's: a specialist rebases its own branch.
+  for (const command of ["git rebase main", "git reset --hard", "git pull", "git clean -fd", "git branch -D x", "git checkout -f main"]) expect([command, await bash("d", command)]).toEqual([command, null]);
+});
+
+test("the hire and push refusals are logged with the rule and never the command", async () => {
+  const bash = await gateOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await bash("d", "git push SECRET-REMOTE");
+    await bash("v", "git reset --hard SECRET-REF");
+    await bash("p", "f1rm hire designer SECRET-NAME a b");
+    await bash("l", "f1rm hire lead SECRET-LEAD a b");
+    await bash("v", "git merge --ff-only SECRET-BRANCH");
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual(["refused designer d-title Bash push", "refused reviewer v-title Bash history", "refused pm p-title Bash hire", "refused lead lead-checkout Bash hire"]);
 });
 
 test("a refusal is logged with the role, title, tool and rule, and never the command or the file", async () => {

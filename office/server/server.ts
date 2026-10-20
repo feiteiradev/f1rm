@@ -41,13 +41,45 @@ const simpleCommands = (command: string) => {
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
 // ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
 const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
-const runsHire = (words: string[]) => words.some((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
-/** The git subcommand a simple command runs, past global options such as `-C <dir>`. */
-const gitSubcommand = ([program, ...args]: string[]) => {
-  if (basename(program ?? "") !== "git") return null;
+/** The words after `hire` of a simple command that runs `f1rm hire`, unquoted, or null. */
+const hireArgs = (words: string[]) => {
+  const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
+  return i < 0 ? null : words.slice(i + 2).map(unquoted);
+};
+const runsHire = (words: string[]) => hireArgs(words) !== null;
+// The flags `f1rm hire` takes before the role (cli/hire.ts); the first other word is the role. `--help` hires nobody.
+const HIRE_FLAGS_WITH_VALUE = new Set(["--report-to", "--team", "--skills", "--level"]);
+const HIRE_FLAGS = new Set([...HIRE_FLAGS_WITH_VALUE, "--override", "--content"]);
+const hireOf = (args: string[] | null) => {
+  if (!args) return null;
+  let i = 0, team: string | undefined;
+  while (HIRE_FLAGS.has(args[i])) {
+    if (args[i] === "--team") team = args[i + 1];
+    i += HIRE_FLAGS_WITH_VALUE.has(args[i]) ? 2 : 1;
+  }
+  return args[i] === "--help" || args[i] === "-h" ? null : { role: args[i], team };
+};
+/** The git subcommand a simple command runs, past global options such as `-C <dir>`, and the words after it. */
+const gitCall = ([program, ...words]: string[]) => {
+  if (basename(unquoted(program ?? "")) !== "git") return null;
+  const args = words.map(unquoted);
   let i = 0;
   while (i < args.length && args[i].startsWith("-")) i += GIT_OPTIONS_WITH_VALUE.has(args[i]) ? 2 : 1;
-  return args[i] ?? null;
+  return { sub: args[i] ?? "", rest: args.slice(i + 1) };
+};
+const ghMerge = (w: string[]) => basename(w[0] ?? "") === "gh" && w[1] === "pr" && w[2] === "merge";
+// What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
+const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am", "pull", "clean"]);
+const FORCE = /^(--force.*|-[A-Za-z]*f[A-Za-z]*)$/;
+const RED_WORKTREE = /(^|\/)\.claude\/worktrees\/red-[^/]+\/?$/;
+/** Whether a git call is one a Reviewer may not run. The one force it needs is removing its red-<task> scratch worktree. */
+const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
+  if (!call) return false;
+  const { sub, rest } = call;
+  if (REVIEWER_NEVER.has(sub) || (sub === "branch" && rest.some((a) => /^-[A-Za-z]*D/.test(a)))) return true;
+  if (!rest.some((a) => FORCE.test(a))) return false;
+  const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
+  return !(sub === "worktree" && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]) && !paths[1].includes(".."));
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
@@ -148,8 +180,16 @@ export function startServer({
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }
-    if (tool === "Bash" && SPECIALISTS.has(role) && simpleCommands(String(input.command ?? "")).some(runsHire)) {
+    const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
+    const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
+    if (SPECIALISTS.has(role) && commands.some(runsHire)) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
+    }
+    if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
+    if (role === "lead") {
+      const team = teamOf(state.employees[sessionId]);
+      if (hires.some((h) => h.role === "lead")) return refuse("hire", "A lead hires specialists for its own team, never another lead. Ask the PM for a new team.");
+      if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
     }
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
@@ -160,8 +200,12 @@ export function startServer({
         return refuse("write", "The PM and leads write only boards, milestones, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    if (COORDINATORS.has(role) && tool === "Bash" && simpleCommands(String(input.command ?? "")).some((w) => LANDING.has(gitSubcommand(w) ?? "") || (basename(w[0] ?? "") === "gh" && w[1] === "pr" && w[2] === "merge"))) {
+    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghMerge(w))) {
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
+    }
+    if (commands.some((w) => gitCall(w)?.sub === "push" || ghMerge(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
+      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
