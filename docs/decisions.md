@@ -109,7 +109,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-20 Serve prints the link only to a terminal
 
-- Decision: `f1rm serve` prints the full office URL only when stdout is a terminal; otherwise it prints `f1rm office: running on port <port>`. The link is always written to ~/.f1rm/office-url (0600), which `f1rm` reads. `f1rm start` does the same, and still opens the link. The two proof scripts and the CLI tests read the link from that file.
+- Decision: `f1rm serve` prints the full office URL only when stdout is a terminal; otherwise it prints `f1rm office: running on port <port>`. The link is always written to ~/.f1rm/office-url (0600), which `f1rm` reads. `f1rm start` does the same, and still opens the link. The seven proof scripts and the CLI tests read the link from that file.
 - Why: under launchd stdout is ~/.f1rm/office.log, created 0644, and the link key is now permanent, so printing it put a lasting secret in a file that is not private.
 - Rejected: making office.log 0600 (launchd creates the file, so f1rm would have to pre-create and chmod it, and no test can run launchd without touching the user's live service; the key would still sit in a log meant to be read and shared).
 - Where: link-key-followups
