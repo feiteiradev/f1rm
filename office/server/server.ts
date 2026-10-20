@@ -187,7 +187,7 @@ export function startServer({
 
   const db = new Database(dbPath, { create: true });
   // Another process reading the log (a backup, `sqlite3`) holds a lock; an insert waits for it instead of failing and losing the event.
-  db.run("PRAGMA busy_timeout = 5000");
+  db.run("PRAGMA busy_timeout = 2000");
   db.run("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, event TEXT NOT NULL)");
   const append = db.prepare("INSERT INTO events (at, event) VALUES (?, ?)");
 

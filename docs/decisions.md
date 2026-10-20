@@ -137,7 +137,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-20 events.db tolerates concurrent readers
 
-- Decision: the office sets `PRAGMA busy_timeout = 5000` on its events.db connection, so an insert waits up to 5 s for another process's read lock instead of failing.
+- Decision: the office sets `PRAGMA busy_timeout = 2000` on its events.db connection, so an insert waits up to 2 s, inside the hook's 5 s limit, for another process's read lock instead of failing.
 - Why: with another process reading events.db, the insert hit SQLITE_BUSY, POST /ingest failed and the event was lost (4 times in ~/.f1rm/office.log in one day).
-- Rejected: WAL (it adds -wal and -shm files beside ~/.f1rm/events.db that would need the same private mode, and a bounded wait already stops the loss).
+- Rejected: WAL (it adds -wal and -shm files beside ~/.f1rm/events.db that would need the same private mode, and a bounded wait already stops the loss); a 5 s wait, as long as the hook's curl -m 5, because the reply would land too late.
 - Where: G4a
