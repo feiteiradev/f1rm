@@ -4,10 +4,10 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
+import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
 import { ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
-import { isJunk, junkRoots as defaultJunkRoots, readForgotten, writeForgotten } from "./doors.ts";
+import { isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
@@ -184,6 +184,7 @@ export function startServer({
   isAlive = processRuns,
 }: Options) {
   clientDir = resolve(clientDir);
+  const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
 
   const db = new Database(dbPath, { create: true });
   // Another process reading the log (a backup, `sqlite3`) holds a lock; an insert waits for it instead of failing and losing the event.
@@ -258,7 +259,7 @@ export function startServer({
   }
   // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
   // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
-  const folderOf = (room: string) => (basename(room) === ".git" ? dirname(room) : room);
+  const folderOf = repoDir;
   // A door is a git repo's main working directory or a folder with a settings file, and never a junk folder; any other cwd is Elsewhere.
   // ponytail: cached per cwd for the server's lifetime; a folder that later gets `git init` or a settings file needs a restart.
   const rooms = new Map<string, Room>();
@@ -268,9 +269,9 @@ export function startServer({
       const common = machine.gitCommonDir(cwd);
       // A repo's room is its git common dir, so worktrees share it; a non-git folder is its own room.
       room = common
-        ? { id: common, name: basename(basename(common) === ".git" ? dirname(common) : common).replace(/\.git$/, "") }
+        ? { id: common, name: roomName(common) }
         : { id: cwd, name: basename(cwd) || cwd };
-      if (isJunk(folderOf(room.id), junkRoots) || isJunk(cwd, junkRoots) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
+      if (isJunk(folderOf(room.id), junk) || isJunk(cwd, junk) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
       rooms.set(cwd, room);
     }
     return room;

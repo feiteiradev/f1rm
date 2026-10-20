@@ -21,9 +21,10 @@ export function realPath(p: string): string {
 export const junkRoots = (home = process.env.HOME, tmp = process.env.TMPDIR) =>
   [home && join(home, ".f1rm"), home && join(home, ".claude"), "/tmp", "/private/tmp", tmp].filter((p): p is string => !!p).map(realPath);
 
+/** `roots` are already resolved with realPath. */
 export function isJunk(folder: string, roots: string[]): boolean {
   const f = realPath(folder);
-  return roots.map(realPath).some((r) => f === r || f.startsWith(r + "/"));
+  return roots.some((r) => f === r || f.startsWith(r + "/"));
 }
 
 /** The doors the user removed, room id -> when (ms). Events older than that no longer build the room. */
