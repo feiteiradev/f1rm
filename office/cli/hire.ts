@@ -24,7 +24,8 @@ export const SECURITY = " Before you send APPROVED, run security-review with the
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
 const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
-// ponytail: a deny rule only slows an honest model down; `git -C . push` gets past it. A real block needs a hook.
+// The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
+// ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
 /** The PM session name `f1rm pm` gives this repo; a hire reports to it. */
@@ -146,8 +147,9 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   return argv;
 }
 
-/** Runs `f1rm hire` and returns the exit code. */
-export async function hire(args: string[]): Promise<number> {
+/** The flags `f1rm hire` takes before the role, and the words after them. The delegation gate reads a hire with this too, so the two can't drift. */
+export function parseHireFlags(words: string[]) {
+  const args = [...words];
   let override = false;
   let reportTo: string | undefined, team: string | undefined, level: string | undefined, content = false, skills: string[] = [];
   for (;;) {
@@ -159,6 +161,12 @@ export async function hire(args: string[]): Promise<number> {
     else if (args[0] === "--content") content = !!args.shift();
     else break;
   }
+  return { override, reportTo, team, level, content, skills, args };
+}
+
+/** Runs `f1rm hire` and returns the exit code. */
+export async function hire(words: string[]): Promise<number> {
+  const { override, reportTo, team, level, content, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
