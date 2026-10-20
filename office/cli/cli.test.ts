@@ -283,6 +283,18 @@ test("the new link key is never written into a malformed file that others can re
   expect(readFileSync(stillReadable, "utf8")).toBe("not a key");
 });
 
+test("serves started together with no link key end with one key, the one the running office uses", async () => {
+  for (let round = 0; round < 12; round++) {
+    const { home } = await installedOnFreePort();
+    const procs = Array.from({ length: 16 }, () => Bun.spawn(["bun", CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" }));
+    for (let i = 0; i < 400 && procs.filter((p) => p.exitCode !== null).length < procs.length - 1; i++) await Bun.sleep(25); // the losers fail on the port
+    const url = readFileSync(join(home, ".f1rm", "office-url"), "utf8");
+    procs.forEach((p) => p.kill());
+    await Promise.all(procs.map((p) => p.exited));
+    expect(readFileSync(keyFile(home), "utf8").trim()).toBe(url.split("/")[3]);
+  }
+}, 60_000);
+
 test("uninstall removes the link key with the rest of the install state", async () => {
   const { home, port } = await installedOnFreePort();
   await serveOnce(home);

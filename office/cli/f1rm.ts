@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -223,8 +223,19 @@ function linkKey(): string {
   const key = randomBytes(32).toString("base64url");
   const tmp = `${LINK_KEY_FILE}.${process.pid}`;
   writeFileSync(tmp, key + "\n", { mode: 0o600 });
-  renameSync(tmp, LINK_KEY_FILE);
-  return key;
+  try {
+    linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
+    return key;
+  } catch (e: any) {
+    if (e.code !== "EEXIST") throw e;
+    // ponytail: two starts that both find a malformed file may each replace it; only a missing file is raced safely
+    const other = saved();
+    if (other) return other;
+    renameSync(tmp, LINK_KEY_FILE);
+    return key;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 }
 
 function serve() {
@@ -236,6 +247,7 @@ function serve() {
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
 
+  mkdirSync(F1RM_DIR, { recursive: true });
   const offlineAfterMs = seconds("F1RM_OFFLINE_AFTER", 5 * 60) * 1000;
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
