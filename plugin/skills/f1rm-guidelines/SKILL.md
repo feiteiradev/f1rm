@@ -200,7 +200,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - one end-of-milestone report: what landed, how to try it, what is open, ending with the `git push` line (see Milestones and decisions for its cleanup lists).
 
   Everything else stays between agents: `PLAN` and `GO`, `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
-- A specialist reports only to the session in its `Report to`: its lead in a team, otherwise the PM. It never messages the user, the PM (unless that is its `Report to`), another team or another specialist.
+- A specialist reports only to the session in its `Report to`, its team's lead. It never messages the user, the PM, another team or another specialist.
 - **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports. It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
 - **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead passes it to the PM the same way. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
@@ -208,7 +208,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 ## Handoff via SendMessage
 
 - A deliverable is commits on the hire's worktree branch. Messages carry status and pointers, never the work itself.
-- A hire reports with the SendMessage tool to the session named in `Report to` (the PM, or its team's lead), once when done and once if blocked. Use one of these first lines:
+- A hire reports with the SendMessage tool to the session named in `Report to` (its team's lead), once when done and once if blocked. Use one of these first lines:
   - `DONE <slug> branch=<branch> commit=<sha>` then a short summary and the evidence block below.
   - `BLOCKED <slug>` then the question or the missing input. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
   - `BLOCKED <slug> permission` then the exact command that auto mode blocked. Wait for the answer; do not work around it.
@@ -302,7 +302,7 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
 6. Move the base branch to the verified result: in the main working directory, `git merge --ff-only <merge sha>`. If it fails because the base moved, remove the scratch worktree and repeat from step 5. If a git command fails on an `index.lock`, retry it after a few seconds.
 7. Remove the scratch worktree with `git worktree remove .claude/worktrees/review-<task>`. Then send `APPROVED` with the merged commit to the session in your `Report to`, only after main has moved: never for a merge that exists only in the scratch worktree.
 
-Never run `git push`, never force, never rewrite published history, never merge a branch you did not review; the gate refuses these (see Gates). Whoever hired the specialists, the PM or the team's lead, lets them go with `f1rm letgo <name>...` after `APPROVED`, the Reviewer included. It also deletes the finished branches and worktrees that are merged.
+Never run `git push`, never force, never rewrite published history, never merge a branch you did not review; the gate refuses these (see Gates). The team's lead lets them go with `f1rm letgo <name>...` after `APPROVED`, the Reviewer included. It also deletes the finished branches and worktrees that are merged.
 
 ## Cap rule
 

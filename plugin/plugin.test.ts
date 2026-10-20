@@ -361,6 +361,16 @@ test("B1: every milestone runs through one or two leads, and the PM hires only l
   expect(pmPromptText()).toContain("Hire only leads");
 });
 
+test("B1: no line says a specialist reports to the PM or that the PM lets specialists go", () => {
+  const stale = [/otherwise the PM/, /the PM or the team's lead/, /the PM or your team's lead/, /your team's lead, or the PM/, /the PM, or its team's lead/, /the specialists, the PM or/];
+  const texts = [guidelines, readFileSync(join(PLUGIN, "README.md"), "utf8"), readFileSync(join(REPO, "README.md"), "utf8"), ...Object.keys(ROLES).filter((r) => r !== "pm" && r !== "lead").map((r) => role(r).body)];
+  for (const t of texts) for (const re of stale) expect(t).not.toMatch(re);
+  expect(section("Who talks to whom")).toContain("A specialist reports only to the session in its `Report to`, its team's lead.");
+  expect(section("Who talks to whom")).toContain("never messages the user, the PM, another team or another specialist");
+  expect(section("Review and merge flow")).toContain("The team's lead lets them go with `f1rm letgo <name>...`");
+  for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Never message the user, the PM, another team or another specialist.");
+});
+
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
   for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
