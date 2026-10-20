@@ -20,6 +20,8 @@ const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 const CREATED_FILE = join(F1RM_DIR, "created.json");
 // The running office's tokenized URL, so `f1rm start` can open an office that is already up.
 const URL_FILE = join(F1RM_DIR, "office-url");
+// The token in that URL, kept across restarts until uninstall (or the user) deletes it.
+const LINK_KEY_FILE = join(F1RM_DIR, "link-key");
 // The `f1rm` command `install` puts on PATH, so a terminal finds this clone.
 const BIN = join(process.env.HOME!, ".local", "bin", "f1rm");
 const CLI_FILE = join(import.meta.dir, "f1rm.ts");
@@ -194,7 +196,7 @@ function uninstall() {
   writeSettings(after);
   if (existsSync(PLIST)) stopService();
   // The event log, the boards and the editions stay: they are the user's history, not install state.
-  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE]) rmSync(f, { force: true });
+  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
   if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
@@ -205,12 +207,22 @@ function seconds(name: string, fallback: number): number {
   return n;
 }
 
+/** The office's UI token. It lives in a private file, so a restart keeps the URL and open tabs keep working; a missing or malformed file gets a new key. */
+function linkKey(): string {
+  const saved = existsSync(LINK_KEY_FILE) ? readFileSync(LINK_KEY_FILE, "utf8").trim() : "";
+  const key = /^[\w-]{43}$/.test(saved) ? saved : randomBytes(32).toString("base64url");
+  mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
+  if (key !== saved) writeFileSync(LINK_KEY_FILE, key + "\n", { mode: 0o600 });
+  chmodSync(LINK_KEY_FILE, 0o600); // mode only applies to a file being created
+  return key;
+}
+
 function serve() {
   const settings = readSettings();
   const hook = installed(settings);
   if (!hook) throw new Error("hooks not installed: run `f1rm install` first");
   const port = Number(new URL(hook.url).port);
-  const token = randomBytes(32).toString("base64url");
+  const token = linkKey();
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
 

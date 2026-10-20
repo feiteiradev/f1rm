@@ -350,7 +350,8 @@ test.each(["designer", "frontend-dev", "backend-dev", "researcher", "marketer", 
 
 test("docs/decisions.md holds the seeded entries, oldest first, each with its four lines", () => {
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
-  expect(entries.map((e) => e.split("\n")[0])).toEqual([
+  // The log grows: later entries follow the seeded ones, and get the same four-line check below.
+  expect(entries.slice(0, 6).map((e) => e.split("\n")[0])).toEqual([
     "2026-10-14 Founding decisions",
     "2026-10-19 Plugin 0.2.0 drops the /f1rm skill from cached installs",
     "2026-10-19 Machine cap on working background sessions is 30",
