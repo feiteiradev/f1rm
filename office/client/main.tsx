@@ -10,7 +10,9 @@ import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
-import { JumpButton, Palette } from "./jump.tsx";
+import { JumpButton, OnEnded, Palette } from "./jump.tsx";
+import { ENDED, without } from "./jump.ts";
+import { connectLive, OFFICE_DOWN } from "./live.ts";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
 import { InternBox, TellBox } from "./tell.tsx";
@@ -298,16 +300,27 @@ function Office() {
     // The page lives under /<ui token>/, so the socket path inherits the token.
     const url = new URL("ws", location.href);
     url.protocol = "ws:";
-    const ws = new WebSocket(url);
-    ws.onmessage = (m) => {
-      const message = JSON.parse(m.data);
-      // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
-      if (typeof message.show === "string") return goRef.current(message.show);
-      setState(message);
-    };
-    ws.onclose = () => setConnected(false);
-    return () => ws.close();
+    // The office's first message on every connection is the whole state, so coming back reloads it.
+    return connectLive({
+      url: url.href,
+      onUp: setConnected,
+      onMessage: (message) => {
+        // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
+        if (typeof message.show === "string") return goRef.current(message.show);
+        setState(message);
+      },
+    });
   }, []);
+
+  // A Jump found the session over: the employee leaves now (the office's next push says the same) and a toast says why.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const onEnded = (id: string) => {
+    setState((s) => s && without(s, id));
+    setToast(ENDED);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
+  };
 
   // A project the office doesn't have (an old link, or everyone left and the server forgot it) shows the lobby with a note.
   const inside = open !== null && state?.rooms[open] ? open : null;
@@ -322,7 +335,7 @@ function Office() {
 
   const empty = state && Object.keys(state.rooms).length === 0;
   return (
-    <>
+    <OnEnded.Provider value={onEnded}>
       <header className="bar">
         <h1>f1rm</h1>
         {open !== null && (
@@ -333,7 +346,7 @@ function Office() {
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {inside && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
-        {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
+        {!connected && <p className="offline" role="alert">{OFFICE_DOWN.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}
@@ -347,8 +360,9 @@ function Office() {
       {inside && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
+      {toast && <p className="note low pm-note" role="status">{toast}</p>}
       {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
-    </>
+    </OnEnded.Provider>
   );
 }
 

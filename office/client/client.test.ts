@@ -269,3 +269,101 @@ test("a Founder project's room is marked founder, and its board counts what wait
   expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tasks done, 2 to publish");
   expect(boardSummary([row("done")])).toBe("1 of 1 task done");
 });
+
+/** Runs `fn` with a page at /tok/ whose every fetch answers with `res`. */
+async function withReply<T>(res: Response, fn: () => Promise<T>): Promise<T> {
+  const real = { fetch: globalThis.fetch, location: (globalThis as any).location };
+  (globalThis as any).location = { href: "http://127.0.0.1:4170/tok/" };
+  globalThis.fetch = (async () => res) as unknown as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = real.fetch;
+    (globalThis as any).location = real.location;
+  }
+}
+
+test("a 401 from an old link says the link is out of date, never a bare status", async () => {
+  const { send } = await import("./post.ts");
+  const { error } = await withReply(new Response("unauthorized", { status: 401 }), () => send("jump/a"));
+  expect(error).toBe("This link is out of date — open the office with `f1rm`");
+  // Even when the 401 carries a JSON error of its own.
+  const json = await withReply(Response.json({ ok: false, error: "nope" }, { status: 401 }), () => send("tell/a", { message: "hi" }));
+  expect(json.error).toBe("This link is out of date — open the office with `f1rm`");
+  // Other statuses keep their own wording.
+  expect((await withReply(new Response("boom", { status: 500 }), () => send("jump/a"))).error).toBe("Failed (500).");
+});
+
+test("a Jump on a session that just ended (410) says so, drops the employee and opens nothing", async () => {
+  const { jumpTo, ENDED, without } = await import("./jump.ts");
+  const ended: string[] = [];
+  const gone = Response.json({ ok: false, ended: true, error: "This session has ended" }, { status: 410 });
+  expect(ENDED).toBe("This session has ended");
+  expect(await withReply(gone, () => jumpTo("a", (id) => ended.push(id)))).toBeNull();
+  expect(ended).toEqual(["a"]);
+  // A plain failure is still a failure, and drops no one.
+  expect(await withReply(Response.json({ ok: false, error: "No terminal" }, { status: 409 }), () => jumpTo("b", (id) => ended.push(id)))).toBe("No terminal");
+  expect(await withReply(Response.json({ ok: true }), () => jumpTo("b", (id) => ended.push(id)))).toBeNull();
+  expect(ended).toEqual(["a"]);
+  // The employee walks out at once: gone from the state with their interns, the rest stay.
+  const state = office(["r"], [employee("a", "r"), employee("b", "r")]);
+  state.interns = { i: { id: "i", parent: "a", type: "x", activity: "" } as never, j: { id: "j", parent: "b", type: "x", activity: "" } as never };
+  const left = without(state, "a");
+  expect(Object.keys(left.employees)).toEqual(["b"]);
+  expect(Object.keys(left.interns)).toEqual(["j"]);
+  expect(without(state, "nobody")).toBe(state);
+});
+
+test("the live connection reconnects by itself, backs off up to 5 s, reloads state from the office's first message, and stops when the page does", async () => {
+  const { connectLive, OFFICE_DOWN } = await import("./live.ts");
+  expect(OFFICE_DOWN).toBe("Office is down — run `f1rm`");
+  class Fake {
+    static all: Fake[] = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((m: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    closed = false;
+    constructor(public url: string) { Fake.all.push(this); }
+    close() { this.closed = true; this.onclose?.(); }
+  }
+  const timers: { ms: number; run: () => void; live: boolean }[] = [];
+  const log: string[] = [];
+  const stop = connectLive({
+    url: "ws://x/tok/ws",
+    open: (url) => new Fake(url),
+    after: (run, ms) => { const t = { ms, run, live: true }; timers.push(t); return () => { t.live = false; }; },
+    onMessage: (m) => log.push(`message ${JSON.stringify(m)}`),
+    onUp: (up) => log.push(up ? "up" : "down"),
+  });
+  const tick = () => { const t = timers.find((t) => t.live)!; t.live = false; t.run(); };
+  // Up with a first state, then the office goes away.
+  Fake.all[0].onopen!();
+  Fake.all[0].onmessage!({ data: '{"employees":1}' });
+  Fake.all[0].onclose!();
+  expect(log).toEqual(["up", 'message {"employees":1}', "down"]);
+  // It keeps trying, a little slower each time, and no faster than every 5 s.
+  const waits: number[] = [];
+  for (let i = 0; i < 6; i++) { waits.push(timers.find((t) => t.live)!.ms); tick(); Fake.all.at(-1)!.onclose!(); }
+  expect(waits).toEqual([1000, 2000, 4000, 5000, 5000, 5000]);
+  expect(Fake.all.length).toBe(7);
+  expect(new Set(Fake.all.map((f) => f.url))).toEqual(new Set(["ws://x/tok/ws"]));
+  // The office is back: its first message replaces the old state, and the banner goes.
+  tick();
+  Fake.all.at(-1)!.onopen!();
+  Fake.all.at(-1)!.onmessage!({ data: '{"employees":0}' });
+  expect(log.slice(-2)).toEqual(["up", 'message {"employees":0}']);
+  // A drop after that starts the back-off over.
+  Fake.all.at(-1)!.onclose!();
+  expect(timers.find((t) => t.live)!.ms).toBe(1000);
+  // Leaving the page closes the socket and cancels the pending retry; nothing reconnects.
+  const sockets = Fake.all.length;
+  stop();
+  expect(timers.some((t) => t.live)).toBe(false);
+  expect(Fake.all.length).toBe(sockets);
+});
+
+test("an Ask answered with a 401 says the link is out of date too", async () => {
+  const { readAnswer } = await import("./history.ts");
+  expect(await readAnswer(new Response("unauthorized", { status: 401 }), () => {})).toBe("This link is out of date — open the office with `f1rm`");
+  expect(await readAnswer(new Response("boom", { status: 500 }), () => {})).toBe("Ask failed (500).");
+});

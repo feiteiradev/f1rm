@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MODELS } from "../people.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
 import { JumpButton } from "./jump.tsx";
-import { send } from "./post.ts";
+import { failure, send } from "./post.ts";
 import "./hire.css";
 
 /** The working hires against the cap; `working` is null when the office couldn't count them. */
@@ -21,7 +21,7 @@ function useRoles(room: string) {
     if (DEMO) return;
     let dead = false;
     fetch(new URL(`roles?room=${encodeURIComponent(room)}`, location.href))
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed (${res.status}).`))))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(failure(res.status, undefined)))))
       .then((reply: { roles: Role[]; hires: Hires }) => !dead && (setRoles(reply.roles), setHires(reply.hires)))
       .catch((err: Error) => !dead && setError(`Couldn't read the roles. ${err.message}`));
     return () => {
