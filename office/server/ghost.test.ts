@@ -505,3 +505,17 @@ test("a sweep that releases a held hand pushes one snapshot: the employee and it
   expect(afterHand.filter((s) => !s.employees.swept && (s.approvals ?? []).length)).toEqual([]);
   expect(afterHand.filter((s) => !s.employees.swept)).toHaveLength(1); // and the sweep pushed once
 });
+
+test("the sweep and the process check share one claude agents run: two never overlap", async () => {
+  now = 1_000_000;
+  alive = new Map([["quiet", 4242]]);
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  await hook(server, "quiet", "PreToolUse", bash("sleep 99"));
+  now += 1500; // quiet, so the sweep wants a listing too
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a listing is under way and not answered
+  await new Promise((r) => setTimeout(r, 700)); // several ticks of both timers
+  expect(listingMost).toBe(1);
+  release();
+});

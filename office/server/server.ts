@@ -309,8 +309,11 @@ export function startServer({
   // Counts each session's events, so a listing begun before one of them does not decide that session: its pid may be the one a resumed session just left, its status older than the hook.
   // ponytail: never pruned (a number per session id); drop it in endSession if that ever matters.
   const eventCounts = new Map<string, number>();
+  // The run under way, shared: the sweep and the process check are given the same listing, never two `claude agents` at once.
+  let listing: ReturnType<typeof listOnce> | undefined;
   /** Asks `claude agents --json` for the live sessions, keeps their pids and lets their status decide working vs idle; null if it can't say. */
-  async function listSessions() {
+  const listSessions = () => (listing ??= listOnce().finally(() => (listing = undefined)));
+  async function listOnce() {
     const before = new Map(eventCounts);
     const listed = await machine.liveSessions();
     const fresh = new Map([...(listed ?? [])].filter(([id]) => eventCounts.get(id) === before.get(id)));
