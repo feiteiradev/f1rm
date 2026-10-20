@@ -196,7 +196,7 @@ function uninstall() {
   writeSettings(after);
   if (existsSync(PLIST)) stopService();
   // The event log, the boards and the editions stay: they are the user's history, not install state.
-  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
+  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, `${URL_FILE}.tmp`, LINK_KEY_FILE]) rmSync(f, { force: true });
   if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
@@ -335,6 +335,7 @@ function stopService() {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
   rmSync(URL_FILE, { force: true });
+  rmSync(`${URL_FILE}.tmp`, { force: true });
 }
 
 /** The running office's URL, once it answers, or null after `ms`. */

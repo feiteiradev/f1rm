@@ -606,6 +606,17 @@ test("start with no office running starts the background office, opens it, and e
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
 
+test("service off, and uninstall, remove an office-url.tmp left by a serve that died before its rename", () => {
+  for (const off of [["service", "off"], ["uninstall"]]) {
+    const home = tempHome();
+    const stub = stubBin();
+    stub.run(home, "install"); // no login agent, so uninstall's own cleanup has to do it, not stopService
+    writeFileSync(join(home, ".f1rm", "office-url.tmp"), "http://127.0.0.1:1/key/");
+    expect(stub.run(home, ...off).code).toBe(0);
+    expect(existsSync(join(home, ".f1rm", "office-url.tmp"))).toBe(false);
+  }
+});
+
 test("uninstall keeps the event log and the PM's boards", () => {
   const home = tempHome();
   const stub = stubBin();
