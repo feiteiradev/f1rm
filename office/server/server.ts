@@ -133,7 +133,21 @@ type Options = {
   removeAfterMs?: number;
   /** A background hire done this long, with its branch merged, is let go with its worktree and branch. */
   letGoAfterMs?: number;
+  /** True while the process with this id runs; tests swap it. Default: a signal-0 call. */
+  isAlive?: (pid: number) => boolean;
 };
+
+// ESRCH: no such process. EPERM: it exists and belongs to someone else, so it is alive.
+// ponytail: a pid the system has handed to another program since reads as alive, so that ghost waits for the quiet path; compare process start times if that is felt.
+const processRuns = (pid: number) => {
+  try {
+    return process.kill(pid, 0);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+// How often `claude agents --json` is asked for the pids of employees whose pid is not known yet.
+const PID_REFRESH_MS = 30_000;
 
 // A stat and never a parse: the transcript format isn't a public contract, and its mtime is all liveness needs.
 const transcriptMtime = (path?: string) => {
@@ -161,6 +175,7 @@ export function startServer({
   offlineAfterMs = 5 * 60_000,
   removeAfterMs = 15 * 60_000,
   letGoAfterMs = 15 * 60_000,
+  isAlive = processRuns,
 }: Options) {
   clientDir = resolve(clientDir);
 
@@ -271,6 +286,26 @@ export function startServer({
   // What the office records when a session is gone, so a replay shows the same departure.
   const departure = (e: Employee): F1rmEvent => ({ sessionId: e.sessionId, kind: "SessionEnd", cwd: e.cwd, room: state.rooms[e.room], terminal: e.terminal, at: clock() });
 
+  // The process id of each session `claude agents --json` has listed, so a dead process can be told from a quiet session without spawning `claude` every few seconds.
+  const pids = new Map<string, number>();
+  let listedAt = -Infinity;
+  /** Asks `claude agents --json` for the live sessions and keeps their pids; null if it can't say. */
+  async function listSessions() {
+    const listed = await machine.liveSessions();
+    listedAt = clock();
+    for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+    return listed;
+  }
+  /** The employee leaves as if its SessionEnd had come: logged, so a replay shows it, and its interns go too. The caller pushes. */
+  function endSession(e: Employee) {
+    if (!employeeOf(e.sessionId)) return;
+    const gone = departure(e);
+    append.run(gone.at, JSON.stringify(gone));
+    state = reduce(state, gone);
+    pids.delete(e.sessionId);
+  }
+  const processEnded = (e: Employee) => pids.has(e.sessionId) && !isAlive(pids.get(e.sessionId)!);
+
   let boards: Record<string, BoardRow[]> = {};
   let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
   let editions: Record<string, Edition> = {};
@@ -300,6 +335,11 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
+          // A new process (a resumed session keeps its id) has no known pid: ask `claude agents` for it at the next check.
+          if (event.kind === "SessionStart") {
+            pids.delete(event.sessionId);
+            listedAt = -Infinity;
+          }
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
@@ -339,6 +379,12 @@ export function startServer({
       if (rest[0] === "jump" && rest.length === 2) {
         const employee = employeeOf(rest[1]);
         if (!employee) return Response.json({ ok: false, error: "No such employee." }, { status: 404 });
+        if (!pids.has(employee.sessionId) && clock() - listedAt >= PID_REFRESH_MS) await listSessions();
+        if (processEnded(employee)) {
+          endSession(employee);
+          push();
+          return Response.json({ ok: false, ended: true, error: "This session has ended" }, { status: 410 });
+        }
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
       }
@@ -511,9 +557,9 @@ export function startServer({
       const now = clock();
       // ponytail: asks `claude agents --json` on every tick while anyone is quiet; cache it if that gets heavy.
       const quiet = Object.values(state.employees).some((e) => now - lastActive(e) >= offlineAfterMs);
-      const alive = quiet ? await machine.liveSessions() : new Set<string>();
-      if (!alive) return;
-      const next = sweep(state, clock(), timeouts, lastActive, alive);
+      const listed = quiet ? await listSessions() : new Map();
+      if (!listed) return;
+      const next = sweep(state, clock(), timeouts, lastActive, new Set(listed.keys()));
       if (next !== state) {
         // Replay must see the same departures, or a dead session keeps its name and the next arrival is renamed.
         for (const e of Object.values(state.employees)) {
@@ -526,6 +572,22 @@ export function startServer({
       }
     } finally {
       sweeping = false;
+    }
+  }
+  // Every few seconds: sessions whose process has ended leave, whether or not their SessionEnd came (a closed terminal, `claude stop`, a crash).
+  // A session claude agents never listed has no pid and keeps the quiet path of sweep().
+  let checking = false;
+  async function checkProcesses() {
+    if (checking) return;
+    checking = true;
+    try {
+      const employees = Object.values(state.employees);
+      if (employees.some((e) => !pids.has(e.sessionId)) && clock() - listedAt >= PID_REFRESH_MS) await listSessions();
+      const ended = Object.values(state.employees).filter(processEnded);
+      ended.forEach(endSession);
+      if (ended.length) push();
+    } finally {
+      checking = false;
     }
   }
   // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
@@ -596,11 +658,13 @@ export function startServer({
   const ready = Promise.all([sweepOnce(), readBoards()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
+  const processTimer = setInterval(checkProcesses, Math.min(5_000, offlineAfterMs / 4));
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     clearInterval(timer);
+    clearInterval(processTimer);
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
     approvals.releaseAll();

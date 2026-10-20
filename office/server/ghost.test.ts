@@ -16,7 +16,10 @@ const dir = mkdtempSync(join(tmpdir(), "f1rm-ghost-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 let now = 0;
-let alive: Set<string> | null = new Set();
+let alive: Map<string, number | undefined> | null = new Map();
+// The pids that no longer run, and the pids the check asked about.
+let dead = new Set<number>();
+let asked: number[] = [];
 let gate: Promise<unknown> = Promise.resolve();
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
@@ -48,7 +51,9 @@ afterEach(() => {
   servers.forEach((s) => s.stop(true));
   servers = [];
   gate = Promise.resolve();
-  alive = new Set();
+  alive = new Map();
+  dead = new Set();
+  asked = [];
 });
 
 let dbN = 0;
@@ -57,6 +62,7 @@ function start(dbPath = join(dir, `events-${dbN++}.db`)) {
   const server = startServer({
     port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir: dir,
     dbPath, clock: () => now, offlineAfterMs: OFFLINE_AFTER, removeAfterMs: REMOVE_AFTER,
+    isAlive: (pid) => (asked.push(pid), !dead.has(pid)),
   });
   servers.push(server);
   return { server, dbPath };
@@ -109,7 +115,7 @@ test("every event is appended to a SQLite log, in order", async () => {
 
 test("an employee goes offline, then leaves, after the timeouts; a transcript change defers it", async () => {
   now = 1_000_000;
-  alive = new Set();
+  alive = new Map();
   const { server } = start();
   await hook(server, "quiet", "PreToolUse", bash("sleep 99"));
   await hook(server, "writing", "PreToolUse", bash("sleep 99"));
@@ -133,7 +139,7 @@ test("an employee goes offline, then leaves, after the timeouts; a transcript ch
 
 test("a killed terminal and a claude -p run leave no ghost; a session claude still lists stays", async () => {
   now = 1_000_000;
-  alive = new Set(["listed"]);
+  alive = new Map([["listed", undefined]]);
   const { server } = start();
   await hook(server, "killed", "SessionStart");
   await hook(server, "killed", "PreToolUse", bash("npm test"));
@@ -152,7 +158,7 @@ test("a killed terminal and a claude -p run leave no ghost; a session claude sti
 
 test("a restarted server restores the sessions that are still running", async () => {
   now = 1_000_000;
-  alive = new Set(["running"]);
+  alive = new Map([["running", undefined]]);
   const first = start();
   await hook(first.server, "running", "PreToolUse", bash("make build"));
   await hook(first.server, "recent", "PreToolUse", { tool_name: "Edit", tool_input: { file_path: "/code/shop/a.ts" } });
@@ -185,7 +191,7 @@ test("a failing claude agents skips the sweep: quiet sessions stay until it answ
   const kept = await office(server, (s) => ids(s).length > 0);
   expect(kept.employees.quiet.status).toBe("working");
 
-  alive = new Set();
+  alive = new Map();
   await office(server, (s) => ids(s).length === 0);
 });
 
@@ -197,7 +203,7 @@ test("an offline employee that claude agents lists again is idle, not offline", 
   now += 1500;
   await office(server, (s) => s.employees.back?.status === "offline");
 
-  alive = new Set(["back"]);
+  alive = new Map([["back", undefined]]);
   const state = await office(server, (s) => s.employees.back?.status === "idle");
   expect(state.employees.back.status).toBe("idle");
 });
@@ -270,4 +276,64 @@ test("a restarted server answers nothing until its first sweep has dropped the g
   release();
   await new Promise((r) => (ws.onmessage = (m) => { states.push(JSON.parse(String(m.data))); r(null); }));
   expect(states[0].employees.ghost.status).toBe("offline");
+});
+
+test("a session whose process died without SessionEnd leaves within a tick, long before it is quiet; the others stay", async () => {
+  now = 1_000_000;
+  alive = new Map([["dead", 4242], ["running", 4243]]);
+  dead = new Set([4242]);
+  const first = start();
+  await hook(first.server, "dead", "PreToolUse", bash("npm test"));
+  await hook(first.server, "running", "PreToolUse", bash("npm test"));
+  const state = await office(first.server, (s) => ids(s).join() === "running");
+  expect(state.employees.running.status).toBe("working");
+  first.server.stop(true);
+
+  // The departure is in the log, so a restart does not bring the ghost back or hand its name to another.
+  const second = start(first.dbPath);
+  await office(second.server, (s) => ids(s).join() === "running");
+});
+
+test("a session claude agents never listed keeps the quiet path: offline after the first timeout, gone after the second, and no process is asked", async () => {
+  now = 1_000_000;
+  dead = new Set([1]);
+  const { server } = start();
+  await hook(server, "unlisted", "PreToolUse", bash("sleep 99"));
+
+  await new Promise((r) => setTimeout(r, 700));
+  expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["unlisted"]);
+
+  now += 1500;
+  await office(server, (s) => s.employees.unlisted?.status === "offline");
+  now += 2000;
+  await office(server, (s) => ids(s).length === 0);
+  expect(asked).toEqual([]);
+});
+
+test("a session that is listed and quiet is not taken for gone while its process runs", async () => {
+  now = 1_000_000;
+  alive = new Map([["quiet", 4242]]);
+  const { server } = start();
+  await hook(server, "quiet", "PreToolUse", bash("sleep 99"));
+  await new Promise((r) => setTimeout(r, 700));
+
+  now += 5000;
+  await new Promise((r) => setTimeout(r, 700));
+  expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["quiet"]);
+  expect(asked).toContain(4242);
+});
+
+test("a session resumed under its old id is not removed for the pid its dead process had", async () => {
+  now = 1_000_000;
+  alive = new Map([["resumed", 11]]);
+  const { server } = start();
+  await hook(server, "resumed", "PreToolUse", bash("ls"));
+  while (!asked.includes(11)) await new Promise((r) => setTimeout(r, 50));
+
+  await hook(server, "resumed", "SessionStart", { source: "resume" });
+  dead = new Set([11]);
+  alive = new Map([["resumed", 20]]);
+  await new Promise((r) => setTimeout(r, 700));
+  expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
+  expect(asked).toContain(20);
 });

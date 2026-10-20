@@ -40,16 +40,19 @@ async function run(expr: string, out = "", exit: Record<string, number> = {}) {
 
 const claudeAgents = async (out: string, exit = 0) => {
   const { value } = await run("machine.liveSessions().then((s) => s && [...s])", out, { all: exit });
-  return value && new Set<string>(value);
+  return value && new Map<string, number | undefined>(value.map(([id, pid]: [string, number | null]) => [id, pid ?? undefined])); // JSON turns undefined into null
 };
 
-test("liveSessions lists the session ids of `claude agents --json`", async () => {
+test("liveSessions lists the session ids of `claude agents --json` with their pids, and no pid where it gives none you can signal", async () => {
   const out = JSON.stringify([
     { pid: 1, cwd: "/code/shop", kind: "interactive", startedAt: 0, sessionId: "a", name: "x", status: "busy" },
     { pid: 2, cwd: "/code/shop", kind: "background", startedAt: 0, sessionId: "b", name: "y", status: "waiting", waitingFor: "approval" },
   ]);
-  expect(await claudeAgents(out)).toEqual(new Set(["a", "b"]));
-  expect(await claudeAgents("[]")).toEqual(new Set());
+  expect(await claudeAgents(out)).toEqual(new Map([["a", 1], ["b", 2]]));
+  expect(await claudeAgents("[]")).toEqual(new Map());
+  // pid 0, a negative pid or "1" would make process.kill signal a group or nothing real.
+  const odd = JSON.stringify([{ pid: 0, sessionId: "z" }, { pid: -1, sessionId: "n" }, { pid: "1", sessionId: "s" }, { sessionId: "m" }]);
+  expect(await claudeAgents(odd)).toEqual(new Map([["z", undefined], ["n", undefined], ["s", undefined], ["m", undefined]]));
 });
 
 test("liveSessions is null when claude agents fails, so nobody is mistaken for gone", async () => {

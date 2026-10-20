@@ -211,10 +211,10 @@ export const machine = {
     return list && list.filter((a) => typeof a?.id === "string").map((a) => ({ id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
   },
 
-  /** Ids of the sessions Claude Code lists as live (`claude agents --json`); null if it can't say. */
-  async liveSessions(): Promise<Set<string> | null> {
+  /** The sessions Claude Code lists as live (`claude agents --json`), by id, each with its process id (undefined if it gives none a signal could use); null if it can't say. */
+  async liveSessions(): Promise<Map<string, number | undefined> | null> {
     const list = await agents(false);
-    return list && new Set(list.map((a) => a?.sessionId).filter((id): id is string => typeof id === "string"));
+    return list && new Map(list.filter((a) => typeof a?.sessionId === "string").map((a) => [a.sessionId, Number.isInteger(a.pid) && a.pid > 0 ? a.pid : undefined]));
   },
 
   /** The live background sessions Claude Code lists, with their name, state and folder; null if it can't say. */
