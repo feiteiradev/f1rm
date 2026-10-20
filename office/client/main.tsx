@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
-import { rosterOf, scaleFor } from "./layout.ts";
+import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
 import { DOOR, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
@@ -151,7 +151,8 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     const open = latest.current.selected;
     if (id && !open) opener.current = document.activeElement;
     setSelected(id);
-    if (!id && open) (opener.current as HTMLElement | null)?.focus?.();
+    // The opener can be the roster button of the very employee who just left; focus then goes to the next one rather than to the page.
+    if (!id && open) ((opener.current?.isConnected ? opener.current : document.querySelector(".roster button") ?? document.querySelector(".back")) as HTMLElement | null)?.focus?.();
   };
 
   useEffect(() => {
@@ -170,6 +171,11 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
 
   useEffect(() => {
     scene.current?.update(state, selected);
+  }, [state, selected]);
+
+  // The employee left (an ended session, or the office's next push): the panel closes and focus goes back.
+  useEffect(() => {
+    if (selected && selectionIn(state, selected) === null) select(null);
   }, [state, selected]);
 
   useEffect(() => {

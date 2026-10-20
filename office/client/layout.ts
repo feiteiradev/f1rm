@@ -86,3 +86,6 @@ export function layoutOffice(state: OfficeState, width: number, fill: number | n
 /** Employees in the order the office lays them out, so keyboard order does not change as events arrive. */
 export const rosterOf = (state: OfficeState): Employee[] =>
   layoutOffice(state, 0).rooms.flatMap((r) => r.desks.flatMap((d) => d.employee ?? []));
+
+/** The open panel's employee while they are still in the office, otherwise nobody: the panel closes when they leave. */
+export const selectionIn = (state: OfficeState, id: string | null): string | null => (id !== null && state.employees[id] ? id : null);

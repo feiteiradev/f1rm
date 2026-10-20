@@ -398,6 +398,16 @@ test("when the connection drops, one look at the page's own address says why: a 
   expect(new Set(calls)).toEqual(new Set(["http://127.0.0.1:4170/tok/#/project/x"]));
 });
 
+test("an open panel closes when its employee leaves the office, and stays for one who is still there", async () => {
+  const { selectionIn } = await import("./layout.ts");
+  const { without } = await import("./jump.ts");
+  const state = office(["r"], [employee("a", "r"), employee("b", "r")]);
+  expect(selectionIn(state, "a")).toBe("a");
+  expect(selectionIn(without(state, "a"), "a")).toBeNull();
+  expect(selectionIn(without(state, "a"), "b")).toBe("b");
+  expect(selectionIn(state, null)).toBeNull();
+});
+
 test("an Ask answered with a 401 says the link is out of date too", async () => {
   const { readAnswer } = await import("./history.ts");
   expect(await readAnswer(new Response("unauthorized", { status: 401 }), () => {})).toBe("This link is out of date — open the office with `f1rm`");
