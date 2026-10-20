@@ -7,14 +7,14 @@ description: How the f1rm company works. Roster and hiring, each role's workflow
 
 These rules bind every f1rm role. Nothing here needs the office app. The office only displays the sessions and the board.
 
-Hierarchy: the user, then one PM per repo. In a milestone without teams the PM hires specialists per task. In a milestone with teams the PM hires one Team lead per team, and each lead hires its own specialists. Nobody else hires, and there is no layer below a lead.
+Hierarchy: the user, then one PM per repo. The PM hires only leads, one or two per milestone, and each lead hires its own specialists. Nobody else hires, and there is no layer below a lead.
 
 ## Roster and hiring playbook
 
 | Role | Hire for | Slash commands `f1rm hire` starts the brief with |
 | :- | :- | :- |
 | `pm` | Started by the user with `f1rm pm`. Never hired. | `mattpocock-skills:grilling` |
-| `lead` | One slice of a milestone that runs in parallel with others. Hired only by the PM | `f1rm:f1rm-guidelines`, `f1rm:hire` |
+| `lead` | One slice of a milestone, one or two leads per milestone. Hired only by the PM | `f1rm:f1rm-guidelines`, `f1rm:hire` |
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
 | `frontend-dev` | UI implementation | `mattpocock-skills:tdd` |
 | `backend-dev` | Server, data, API implementation | `mattpocock-skills:tdd` |
@@ -36,17 +36,16 @@ Playbook:
    - Backend dev and Frontend dev in parallel only when the brief fixes the API contract between them.
    - Reviewer after every finished branch, and for every branch.
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
-   - The PM collects what the user must provide (accounts, keys, copy, decisions) while it plans, and hires only once those inputs exist.
+   - The PM collects what the user must provide (accounts, keys, copy, decisions) while it plans, and hires its leads only once those inputs exist.
    - The same task goes to the same session: `CHANGES REQUESTED` goes back to its dev, and a re-review to the same Reviewer. A new task gets a fresh hire, with the previous `DONE` report in its Inputs. Hires are not reused across tasks.
-5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the caps live in `f1rm hire`. Only the PM and leads hire; the office blocks `f1rm hire` for every specialist.
+5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the caps live in `f1rm hire`. Only the PM and leads hire, and the PM hires only leads; the office blocks `f1rm hire` for every specialist.
 
    ```
-   f1rm hire <role> <name> <task> "<brief>"                      # the PM, no teams
-   f1rm hire lead lead-<team> <team> "<team brief>"             # the PM, a team milestone
+   f1rm hire lead lead-<team> <team> "<team brief>"             # the PM
    f1rm hire --team <team> <role> <team>.<role>-<task> <task> "<brief>"  # a lead, into its team
    ```
 
-   - `<role>` is `designer`, `frontend-dev`, `backend-dev`, `reviewer` or `researcher`, or `lead` for the PM.
+   - `<role>` is `designer`, `frontend-dev`, `backend-dev`, `reviewer` or `researcher` for a lead's hire, and `lead` for the PM's.
    - `<name>` and `<task>` follow rule 6. The task slug becomes the worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`.
    - `<brief>` is one quoted argument in the brief format below, without the `Report to` line. `f1rm hire` adds it.
    - Flags after the brief go to `claude`, for example `--model haiku`.
@@ -56,7 +55,7 @@ Playbook:
    - `--report-to <session>` before the role overrides the PM session name. It defaults to `pm-<repo basename>`.
    - Run it in the repo's main working directory. Background sessions run only in folders the user has trusted.
    - It prints `backgrounded · <id>` and exits 0 on success, and exits non-zero with a message when it refuses.
-6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`; a team member `<team>.<role>-<task slug>`, for example `checkout.designer-landing`; a lead `lead-<team>`. `f1rm hire` refuses any other name. Team and task slugs are lowercase words joined by hyphens, unique on their board. A Reviewer's task slug is `review-<task>`, for the task it reviews, so its name is `reviewer-review-<task>`; the PM pastes the dev's `DONE` report into its Inputs.
+6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`; a team member `<team>.<role>-<task slug>`, for example `checkout.designer-landing`; a lead `lead-<team>`. `f1rm hire` refuses any other name. Team and task slugs are lowercase words joined by hyphens, unique on their board. A Reviewer's task slug is `review-<task>`, for the task it reviews, so its name is `reviewer-review-<task>`; its lead pastes the dev's `DONE` report into its Inputs.
 7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline`. Only the first slash command in a prompt expands, so `f1rm hire` names the other skills in the brief and the hire loads them with the Skill tool before starting.
    - `/research` is a command, not a Skill-tool skill. `--skills research` makes it the first command; the Researcher's own skill is `mattpocock-skills:research`.
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the Reviewer runs it with the Skill tool from its scratch worktree on the merge, with `<base>...<merge sha>` as its args, before `APPROVED`.
@@ -71,16 +70,16 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   1. Pick up: read the board, the milestones file and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, report where things were left.
   2. Interview with `mattpocock-skills:grilling` until the user confirms.
   3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
-  4. Hire with `f1rm hire`. Name stack skills with `--skills` and set `--level`.
-  5. Route each `DONE` to a Reviewer, then let the hires go with `f1rm letgo` after `APPROVED`.
-  6. When the milestone is reached, delete its section from the milestones file.
+  4. Hire one or two leads with `f1rm hire lead`, and answer each `PLAN <team>` with `GO <team>`.
+  5. Wait. Tell the user only what the Who talks to whom rules allow. After `DONE <team>`, let the lead go with `f1rm letgo`.
+  6. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
   1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`.
   2. Write the team board and send `PLAN <team>`.
   3. After `GO <team>`, hire into the team with `f1rm hire --team`.
-  4. Hire a Reviewer for each finished branch.
-  5. Close with `f1rm letgo`, then send `DONE <team>`.
+  4. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
+  5. Write the findings file, let the team go with `f1rm letgo`, then send `DONE <team>`.
 - **designer**
   1. Read the existing UI and tokens.
   2. Run `design-pipeline` to the spec.
@@ -147,13 +146,14 @@ In a Founder project the PM follows this on top of everything else here.
 
 ## Teams
 
-1. **When.** The PM forms teams only for a milestone with two or more slices that can run in parallel. Smaller work keeps the PM hiring specialists directly, because a lead costs a session and a hop.
+1. **Every milestone runs through one or two teams**, even a milestone of one task. The PM hires only leads, so hire traffic stays out of its chat with the user. Its own Haiku Explore interns are the one exception.
 2. **What a team owns.** One vertical slice of the milestone, end to end (design, frontend, backend), with its own acceptance criteria. Name the team after its slice, for example `checkout`.
-3. **At most 2 teams** work in a project at once. In a milestone with teams, the PM hires only leads; every task of that milestone goes through a team.
+3. **At most 2 teams** work in a project at once. Every task of a milestone goes through a team.
 4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists, only into its own team.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
-6. **PLAN before hiring.** A lead writes its team board, then sends the PM `PLAN <team>` with its tasks and the hires it intends. The PM checks the plan against the milestone and the caps and answers `GO <team>`, or the changes it wants. The lead hires nothing before `GO`. The PM asks the user only if the plan needs a decision.
-7. **Closing.** When every task of the team is approved and merged, the lead lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM `DONE <team>` with the merged commits. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
+6. **PLAN before hiring.** A lead writes its team board, then sends the PM `PLAN <team>` with its tasks and the hires it intends. The PM checks the plan against the milestone and the caps and answers `GO <team>` without telling the user, unless the plan changes agreed scope or a decision; then it asks the user first. If the plan needs changes, the PM answers with them. The lead hires nothing before `GO`.
+7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges.
+8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each finding left unfixed) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
 
 ## Brief format
 
@@ -187,17 +187,22 @@ Contracts: <the contracts already fixed between teams, or "none">
 Acceptance criteria:
 - <criterion> (proved by: <the check>)
 Out of scope: <what to leave to other teams or later>
-Report: PLAN before hiring, a status report on each merged task, BLOCKED when stuck, DONE when the slice is merged
+Report: PLAN before hiring, BLOCKED for what needs the user, DONE when the slice is merged. Nothing else goes to the PM.
 ```
 
 A lead writes its specialists' briefs in the task brief format above. Every brief's Context names the installed skills, slash commands and plugins that fit the task, beyond the role's own skills that `f1rm hire` adds.
 
 ## Who talks to whom
 
-- **Only the PM talks to the user** and asks the user for decisions. Everything reaches the user through the PM.
+- **Only the PM talks to the user** and asks the user for decisions. Everything reaches the user through the PM, and unprompted the PM tells the user only:
+  - questions that need the user's decision;
+  - things only the user can do: a permission on a hire's desk, spend, credentials or inputs, a `git push`, a dirty main checkout;
+  - one end-of-milestone report: what landed, how to try it, what is open, ending with the `git push` line (see Milestones and decisions for its cleanup lists).
+
+  Everything else stays between agents: `PLAN` and `GO`, `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
 - A specialist reports only to the session in its `Report to`: its lead in a team, otherwise the PM. It never messages the user, the PM (unless that is its `Report to`), another team or another specialist.
-- A lead reports to the PM, and messages the other leads directly about contracts, shared files and the order of handoffs. It puts each agreement in its next status report to the PM, rather than copying the PM on every message. Anything that needs the user (scope, a cap override, a product choice) goes to the PM.
-- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the PM may pass `--allowedTools "<that command>"` after the brief, and only then.
+- **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports. It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
+- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead passes it to the PM the same way. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
 
 ## Handoff via SendMessage
@@ -209,17 +214,20 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - `BLOCKED <slug> permission` then the exact command that auto mode blocked. Wait for the answer; do not work around it.
   - `APPROVED <slug> merged=<sha>` from the Reviewer, after the merge.
   - `CHANGES REQUESTED <slug>` from the Reviewer, then the blocking findings with file and line.
-  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` on one branch. The PM decides with the user.
+  - `CHANGES REQUESTED <slug> conflict` from the Reviewer when the scratch merge conflicts. The dev rebases its unpushed branch onto the current main (see the review flow) and sends a new `DONE`.
+  - `BLOCKED <slug> tip moved` from the Reviewer when the branch tip is not the commit in the dev's `DONE`.
+  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` on one branch. The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
 - **The evidence block** of a `DONE` report holds:
   - each acceptance criterion's check command, with its result on the base (it fails) and on the branch (it passes);
   - the full check command and its exit code;
   - a screenshot for a visible change, from `run` or `claude-in-chrome`;
   - the skills used.
 
-  Evidence files go in `~/.f1rm/evidence/<repo>/<task>/`, and the report points to them. The PM pastes the report into the Reviewer's Inputs.
+  Evidence files go in `~/.f1rm/evidence/<repo>/<task>/`, and the report points to them. The lead pastes the report into the Reviewer's Inputs.
+- **Working files never enter the repo.** Research notes, plans, proofs and findings live in `~/.f1rm/evidence/<repo>/`. A `DONE` report adds `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. The lead passes those lines on in `DONE <team>`.
 - A hire never messages the user or another hire. It answers the session in its `Report to`, which relays. The one exception is leads, who message each other (see Who talks to whom).
-- The PM or the lead answers a `BLOCKED` message with the missing input or a re-scoped task, then updates its board. A lead sends what needs the user to the PM; only the PM asks the user.
-- Messages arrive between tool calls, and a session whose turn has ended wakes when one arrives. A PM or lead waiting on hires stops instead of polling; the PM also tells the user it is waiting.
+- The PM or the lead answers a `BLOCKED` message with the missing input or a re-scoped task, then updates its board. A lead sends what needs the user to the PM as `BLOCKED`; only the PM asks the user.
+- Messages arrive between tool calls, and a session whose turn has ended wakes when one arrives. A PM or lead waiting on hires stops instead of polling.
 
 ## Board format
 
@@ -243,7 +251,7 @@ Each repo has one board file, written only by the PM, and each team has its own,
 - **status.** One of `todo`, `doing`, `review`, `publish`, `done`, `blocked`. `doing` means a hire is working. `review` means the branch awaits the Reviewer. `publish` means approved founder work waiting for the user to put it out. `done` follows Reviewer sign-off only, and for work meant to go out, the user saying it is out.
 - **branch.** `worktree-<task slug>`, or `-` before hiring.
 - **task.** One line, without `|`.
-- One row per task. Update the row in place. Never delete rows.
+- One row per task. Update the row in place. Rows stay until the milestone cleanup removes the done ones (see Milestones and decisions).
 - **Team boards.** A lead's board is `~/.f1rm/boards/<repo>.team.<team>.md`, with `<repo>` encoded as above, titled `# Board: <repo name> / <team>`, in the same table format, one row per task of its slice. On the PM's board a team is one row: owner `lead-<team>`, branch `-`, task the slice's goal.
 
 ## Milestones and decisions
@@ -254,7 +262,12 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
 
 - **Path.** `~/.f1rm/milestones/<repo>.md`, with `<repo>` encoded exactly as the board path is (see Board format). Create the directory if it is missing.
 - **Contents.** A title line `# Milestones: <repo name>`, then one `## <milestone slug>` section per milestone in progress, with four parts: **Goal**, **Settled** (what the interview decided), **Tasks** (the board's `T` ids) and **Done when**. Task status stays on the board only; never copy it here.
-- **Life.** The PM adds a milestone's section when the user confirms the plan, reads the file at pickup alongside the board, and deletes the section when the milestone is reached. By then its core decisions are in `docs/decisions.md`, through the tasks.
+- **Life.** The PM adds a milestone's section when the user confirms the plan, reads the file at pickup alongside the board, and, once the milestone cleanup is done, replaces the section with a 5-line record. By then its core decisions are in `docs/decisions.md`, through the tasks.
+- **Milestone cleanup.** When the milestone is reached, the PM's one end-of-milestone report also lists two groups:
+  - **Persist**: what the hires' `keep:` lines named, and anything else a later milestone will need. It moves to `~/.f1rm/kept/<repo>/` (with `mv`) and is never deleted automatically.
+  - **Delete**: the milestone's evidence folders, briefs, findings file, research, plans and done board rows.
+
+  The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (findings left unfixed). `docs/decisions.md` and git history stay.
 
 **The decisions log.** `docs/decisions.md` in each project repo, created the first time a decision is recorded and committed like code.
 
@@ -268,26 +281,28 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
 
 The Reviewer is the only role that merges, and it merges locally. Nobody pushes; the user pushes.
 
-1. Receive from whoever hired you, the PM or your team's lead, the branch, its brief (the dev's `DONE` report is in its Inputs) and the base branch. The base branch defaults to the branch checked out in the main working directory. The main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`.
+1. Receive from your team's lead the branch, its brief (the dev's `DONE` report is in its Inputs) and the base branch. The base branch defaults to the branch checked out in the main working directory. The main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`.
 2. Stop and report to the session in your `Report to` if the main working directory has uncommitted changes. Never stash or discard them.
+   - Land nothing unless the branch tip equals the commit in the dev's `DONE`. Otherwise send `BLOCKED <slug> tip moved` and stop.
 3. Take the findings from the `/code-review <level>` that started your session. The review is that one; your own work is the gates below. On a code branch, also run `ponytail:ponytail-review`: its findings go in your report and never block. For work that is not code (founder work under `growth/`, and `docs/research/`), skip both and check the **content checklist** instead:
    - every acceptance criterion is met;
    - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
    - it follows `growth/brand.md`;
    - nothing in it was posted, published, sent or paid for.
-4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself. After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third; the PM decides with the user.
+4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself. After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third; the lead decides.
 5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
    - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
    - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
    - In the scratch worktree, `git merge --no-ff <branch>`, where `<branch>` is `worktree-<task>`, and note the merge commit's sha.
+   - If the merge conflicts, run `git merge --abort`, remove the scratch worktree and send `CHANGES REQUESTED <slug> conflict`. The Reviewer never resolves a conflict itself: the dev rebases its unpushed branch onto the current main, resolves the conflict, reruns its checks and sends a new `DONE`.
    - On the merge, run each criterion's check, which passes, and the repo's full check command.
    - Every `docs/decisions.md` entry the brief asks for is in the merge. A missing entry blocks.
    - A criterion with no check, a check that passes on the base, and a failure on the merge all block: remove the scratch worktree and send `CHANGES REQUESTED`.
    - At `--level high`, run security-review with the Skill tool from the scratch worktree, with `<base>...<merge sha>` as its args. The office holds your approval until it has run.
-6. Move the base branch to the verified result: in the main working directory, `git merge --ff-only <merge sha>`. If it fails because the base moved, remove the scratch worktree and repeat from step 5.
+6. Move the base branch to the verified result: in the main working directory, `git merge --ff-only <merge sha>`. If it fails because the base moved, remove the scratch worktree and repeat from step 5. If a git command fails on an `index.lock`, retry it after a few seconds.
 7. Remove the scratch worktree with `git worktree remove .claude/worktrees/review-<task>`. Then send `APPROVED` with the merged commit to the session in your `Report to`, only after main has moved: never for a merge that exists only in the scratch worktree.
 
-Never run `git push`, never force, never rewrite published history, never merge a branch you did not review. Whoever hired the specialists, the PM or the team's lead, lets them go with `f1rm letgo <name>...` after `APPROVED`, the Reviewer included. It also deletes the finished branches and worktrees that are merged.
+Never run `git push`, never force, never rewrite published history, never merge a branch you did not review; the gate refuses these (see Gates). Whoever hired the specialists, the PM or the team's lead, lets them go with `f1rm letgo <name>...` after `APPROVED`, the Reviewer included. It also deletes the finished branches and worktrees that are merged.
 
 ## Cap rule
 
@@ -298,7 +313,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 - At most **2 working in a team**, its Reviewer included. A finished member frees its slot.
 - **One specialist per task**, which no override skips. Split a task only into tasks that each have their own acceptance criteria and their own files.
 - When it refuses a lead, the lead does not retry or override: it tells the PM and waits. The PM does not retry either.
-- When it refuses the PM, or a lead tells the PM of a refusal, the PM leaves the task `todo`, tells the user why, and asks whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
+- When it refuses the PM, or a lead tells the PM of a refusal, the PM leaves the team's row `todo`, tells the user why, and asks whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
 - Use the override flag of `f1rm hire` (`f1rm hire --override <role> <name> <task> "<brief>"`) only after the user has approved exceeding the cap in this conversation, for this hire. An earlier approval or your own judgment is not approval. Ask again for each later hire.
 
 ## Interns
@@ -308,10 +323,11 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 ## Gates
 
-The office holds two gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, neither runs.
+The office holds three gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, neither runs.
 
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
-- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
+- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
+- The **push gate** holds every hire. It refuses `git push` in any form and `gh pr merge`, so only the user pushes and lands on a remote. For the Reviewer it also refuses `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`. Way out: ask the user to run it with `!`, or leave it undone.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
 ## Use what is installed
@@ -327,4 +343,4 @@ A task is done when all of these hold, and not before.
 3. The Reviewer has signed off with `APPROVED` and merged the branch locally into the base branch.
 4. The board row says `done`. Founder work meant to go out passes through `publish` first, and is done when the user says it is out.
 
-The PM reports a task to the user as done only on this basis. A hire's own `DONE` means ready for review. A team is done when every task on its board is done and its lead has sent `DONE <team>`.
+The PM and its leads mark a task done only on this basis. A hire's own `DONE` means ready for review. A team is done when every task on its board is done and its lead has sent `DONE <team>`.

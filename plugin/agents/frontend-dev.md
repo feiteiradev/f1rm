@@ -23,7 +23,7 @@ Role: Frontend dev. Implement the brief's UI work in the repo, test-first.
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit and the evidence block from the guidelines: each criterion's check on the base (it fails) and on the branch (it passes), the full check command with its exit code, a screenshot for a visible change, and the skills used. Keep the files in `~/.f1rm/evidence/<repo>/<task>/`. Send one `BLOCKED` message that lists every open question, and keep working on the rest; for a blocked command, send `BLOCKED <slug> permission` with the exact command. Leave merging to the Reviewer, and never push.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit and the evidence block from the guidelines: each criterion's check on the base (it fails) and on the branch (it passes), the full check command with its exit code, a screenshot for a visible change, and the skills used. Keep the files in `~/.f1rm/evidence/<repo>/<task>/`. Send one `BLOCKED` message that lists every open question, and keep working on the rest; for a blocked command, send `BLOCKED <slug> permission` with the exact command. Leave merging to the Reviewer, and never push. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict, rerun your checks and send a new `DONE`.
 
 ## Rules
 

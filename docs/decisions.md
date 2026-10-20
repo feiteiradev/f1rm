@@ -50,3 +50,45 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a restart made a new token, so an open tab got 401 on every POST until the user opened the new URL.
 - Rejected: a new token on every start; keeping the key through uninstall (the office is gone then, so the tabs are dead anyway, and a leftover key would outlive the install).
 - Where: G1, link-key commit (see `git log -- office/cli/f1rm.ts`)
+
+## 2026-10-20 PM hires only leads
+
+- Decision: every milestone runs through one or two Team leads, even a one-task milestone. The PM hires only leads; its own Haiku Explore interns are the one exception. This replaces "teams only for 2+ slices" and the PM-without-teams hiring form.
+- Why: the PM's chat with the user stays free of hire traffic.
+- Rejected: the PM hiring specialists directly for small work.
+- Where: rules-prose (the gate that enforces it is gate-hire-push)
+
+## 2026-10-20 Leads filter team traffic
+
+- Decision: a lead receives all of its team's messages, checks each specialist's DONE against its brief, reruns the checks before it hires the Reviewer, and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and one `DONE <team>` (a 5-line summary and a link to `~/.f1rm/evidence/<repo>/findings.md`). The PM answers PLAN with GO without telling the user, unless the plan changes agreed scope or a decision. Unprompted, the PM tells the user only a decision it needs, something only the user can do (a permission, spend, credentials or inputs, a git push, a dirty main checkout), and one end-of-milestone report ending with the `git push` line. The Reviewer still signs off and is the only role that merges.
+- Why: research, PRs and reports from hires arrived in the middle of the PM chat and made it confusing. The board and the findings file hold the rest, and the user asks "status?" for more.
+- Rejected: per-task status reports from leads to the PM.
+- Where: rules-prose
+
+## 2026-10-20 Reviewer conflict and tip rules
+
+- Decision: if the scratch merge conflicts, the Reviewer runs `git merge --abort`, removes the scratch worktree and sends `CHANGES REQUESTED <slug> conflict`; the dev rebases its unpushed branch onto the current main, resolves it, reruns its checks and sends a new DONE. The Reviewer never resolves conflicts and lands only when the branch tip equals the commit in the dev's DONE, else `BLOCKED <slug> tip moved`. On an `index.lock` error it retries after a few seconds. The merge flow is otherwise unchanged.
+- Why: the Reviewer stays a checker, and what lands is what the dev reported.
+- Rejected: a landing lock (`--ff-only` already refuses a base that moved); rebasing or squashing on landing; a new `f1rm land` command.
+- Where: rules-prose
+
+## 2026-10-20 Only the user pushes
+
+- Decision: the gate refuses `git push` in any form and `gh pr merge` for every hire, and the Reviewer's `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`. The guidelines' Gates section and the Reviewer file say so.
+- Why: the no-push rule was prompt-only, and a prompt can be got around.
+- Rejected: `disallowedTools: Bash(git push *)`, which removes the whole Bash tool.
+- Where: rules-prose (the gate is gate-hire-push)
+
+## 2026-10-20 Milestone cleanup
+
+- Decision: working files never enter the repo; research notes, plans, proofs and findings live in `~/.f1rm/evidence/<repo>/`. Hires add `keep: <path> — <why>` to their DONE for anything a later milestone needs, and leads pass those on. At milestone end the PM's report lists Persist (moves to `~/.f1rm/kept/<repo>/`, never deleted automatically) and Delete (the milestone's evidence folders, briefs, findings file, research, plans and done board rows). The user may move items between the groups, and the PM acts only after the user replies. The milestone's section in the milestones file becomes a 5-line record: what shipped (task ids and landing commits), how to try it, what is open. `docs/decisions.md` and git history stay. This replaces "Never delete rows" and "deletes the section when the milestone is reached".
+- Why: boards, briefs and research pile up after a milestone, and the user decides what is worth keeping.
+- Rejected: deleting on its own at the end of the milestone.
+- Where: rules-prose
+
+## 2026-10-20 Plugin 0.4.0
+
+- Decision: bump to 0.4.0.
+- Why: the working rules changed, so cached installs would keep the old text.
+- Rejected: none.
+- Where: rules-prose

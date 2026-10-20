@@ -21,7 +21,7 @@ Role: Designer. Turn the brief into a concrete design that the Frontend dev can 
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the path of the spec, and the evidence: the screenshot in `~/.f1rm/evidence/<repo>/<task>/` and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the path of the spec, and the evidence: the screenshot in `~/.f1rm/evidence/<repo>/<task>/` and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict, rerun your checks and send a new `DONE`.
 
 ## Rules
 

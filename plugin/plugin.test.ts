@@ -101,7 +101,7 @@ test("the guidelines cover every item the spec lists", () => {
 test("the guidelines run teams: when to form them, the team brief, PLAN/GO/DONE, who talks to whom, the caps, interns, team boards and installed skills", () => {
   for (const h of ["Teams", "Team brief", "Who talks to whom", "Interns", "Use what is installed"]) expect(section(h).trim().length).toBeGreaterThan(100);
   const teams = section("Teams");
-  for (const s of ["two or more slices that can run in parallel", "At most 2 teams", "hires only leads", "No nested teams", "`PLAN <team>`", "`GO <team>`", "`DONE <team>`"]) expect(teams).toContain(s);
+  for (const s of ["Every milestone runs through one or two teams", "At most 2 teams", "hires only leads", "No nested teams", "`PLAN <team>`", "`GO <team>`", "`DONE <team>`"]) expect(teams).toContain(s);
   expect(section("Who talks to whom")).toContain("Only the PM talks to the user");
   expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
   const caps = section("Cap rule");
@@ -111,7 +111,7 @@ test("the guidelines run teams: when to form them, the team brief, PLAN/GO/DONE,
   expect(section("Use what is installed")).toContain("skills, slash commands and plugins");
 });
 
-test("specialists never hire and answer only their Report to; the PM hires only leads in a team milestone and lets a lead go after DONE", () => {
+test("specialists never hire and answer only their Report to; the PM hires only leads and lets a lead go after DONE", () => {
   for (const name of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher"]) {
     const { body } = role(name);
     expect(body).toContain("Never hire or start a session");
@@ -119,7 +119,7 @@ test("specialists never hire and answer only their Report to; the PM hires only 
     expect(body).toMatch(/at most 2 interns/i);
   }
   const pm = role("pm").body;
-  expect(pm).toContain("In a milestone with teams, hire only leads");
+  expect(pm).toContain("Hire only leads");
   expect(pm).toContain("After `DONE <team>`, let the lead go");
   const lead = role("lead").body;
   for (const s of ["`PLAN <team>`", "`GO <team>`", "`DONE <team>`", "f1rm hire --team <team>", "Only the PM talks to the user"]) expect(lead).toContain(s);
@@ -309,7 +309,8 @@ test.skipIf(!hasClaude)("the PM's session can list its hires", () => {
 
 test("the playbook gives the real `f1rm hire` syntax, and the override only after user approval", () => {
   const playbook = section("Roster and hiring playbook");
-  expect(playbook).toContain('f1rm hire <role> <name> <task> "<brief>"');
+  expect(playbook).toContain('f1rm hire lead lead-<team> <team> "<team brief>"');
+  expect(playbook).toContain('f1rm hire --team <team> <role> <team>.<role>-<task> <task> "<brief>"');
   expect(playbook).not.toContain("--help");
   expect(section("Cap rule")).toContain("f1rm hire --override");
   expect(section("Brief format")).not.toMatch(/^Report to:/m);
@@ -317,20 +318,20 @@ test("the playbook gives the real `f1rm hire` syntax, and the override only afte
 
 test("the guidelines state the milestones file and the decisions log, and the places where the rules bite mention them", () => {
   const md = section("Milestones and decisions");
-  for (const s of ["~/.f1rm/milestones/<repo>.md", "encoded exactly as the board path", "# Milestones: <repo name>", "## <milestone slug>", "Goal", "Settled", "Tasks", "Done when", "Only the PM writes it", "when the user confirms the plan", "at pickup", "deletes the section when the milestone is reached", "Task status stays on the board"]) expect(md, s).toContain(s);
+  for (const s of ["~/.f1rm/milestones/<repo>.md", "encoded exactly as the board path", "# Milestones: <repo name>", "## <milestone slug>", "Goal", "Settled", "Tasks", "Done when", "Only the PM writes it", "when the user confirms the plan", "at pickup", "replaces the section with a 5-line record", "Task status stays on the board"]) expect(md, s).toContain(s);
   for (const s of ["`docs/decisions.md`", "a feature or behaviour the user chose", "a refactor or architecture choice", "a cap, limit, dependency or version change", "anything rejected for a reason", "Bug fixes and wording tweaks get no entry", "append-only, oldest first", "## <YYYY-MM-DD> <title>", "`- Decision:`", "`- Why:`", "`- Rejected:`", "`- Where:`", "docs/decisions.md has the entry <title>", "a missing entry blocks", "`docs/adr/`", "links to the ADR"]) expect(md, s).toContain(s);
   expect(section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))).toContain("milestones file");
   expect(section("Brief format")).toContain("docs/decisions.md");
   expect(section("Review and merge flow")).toContain("docs/decisions.md");
 });
 
-test("pm.md reads the milestones file at pickup, writes the milestone's section with the board, and deletes it at the end of the milestone", () => {
+test("pm.md reads the milestones file at pickup, writes the milestone's section with the board, and replaces it with a record at the end of the milestone", () => {
   const pm = role("pm").body;
   const step = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(pm)?.[0] ?? "";
   expect(step(1)).toContain("~/.f1rm/milestones/<repo>.md");
   expect(step(4)).toContain("milestone's section");
   expect(step(4)).toContain("docs/decisions.md has the entry");
-  expect(step(7)).toMatch(/delete its section/);
+  expect(step(7)).toMatch(/replace the milestone's section/);
   expect(pm).toContain("Only the PM writes the milestones file");
   expect(step(7)).toContain("picks up from the board and the milestones file");
   expect(role("researcher").body).toContain("Change no other files except `docs/decisions.md`");
@@ -339,6 +340,78 @@ test("pm.md reads the milestones file at pickup, writes the milestone's section 
 test("the lead and the Reviewer carry their part of the decisions log", () => {
   expect(role("lead").body).toContain("docs/decisions.md has the entry");
   expect(role("reviewer").body).toMatch(/every `docs\/decisions\.md` entry the brief asks for.*blocks/);
+});
+
+const SPECIALISTS = ["designer", "frontend-dev", "backend-dev", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"];
+const pmStep = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(role("pm").body)?.[0] ?? "";
+const cliSource = () => readFileSync(join(REPO, "office", "cli", "f1rm.ts"), "utf8");
+const pmPromptText = () => /const pmPrompt[\s\S]*?`;/.exec(cliSource())![0];
+
+test("B1: every milestone runs through one or two leads, and the PM hires only leads", () => {
+  const stale = [/the PM, no teams/, /forms teams only/, /hire specialists directly/, /hiring specialists directly/, /In a milestone without teams/];
+  for (const text of [guidelines, role("pm").body, role("lead").body, readFileSync(join(PLUGIN, "README.md"), "utf8"), readFileSync(join(REPO, "README.md"), "utf8"), pmPromptText()]) for (const re of stale) expect(text).not.toMatch(re);
+  expect(section("Teams")).toContain("even a milestone of one task");
+  expect(section("Teams")).toContain("Haiku Explore interns");
+  expect(guidelines.split("\n").find((l) => l.startsWith("Hierarchy:"))).toContain("hires only leads");
+  const forms = section("Roster and hiring playbook").split("```")[1];
+  expect(forms).not.toContain("the PM, no teams");
+  expect(forms).toContain('f1rm hire lead lead-<team> <team> "<team brief>"');
+  expect(role("pm").body).toContain("Hire only leads");
+  expect(String(role("pm").fm.description)).not.toContain("hires specialists");
+  expect(pmPromptText()).toContain("Hire only leads");
+});
+
+test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
+  const talk = section("Who talks to whom");
+  for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
+  expect(talk).toMatch(/lead receives all of its team's messages/);
+  expect(talk).toMatch(/sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`/);
+  expect(section("Team brief")).toMatch(/Report: PLAN before hiring, BLOCKED[^\n]*DONE/);
+  for (const text of [guidelines, role("lead").body]) expect(text).not.toMatch(/status report/i);
+  const teams = section("Teams");
+  expect(teams).toMatch(/`GO <team>` without telling the user, unless the plan changes agreed scope or a decision/);
+  for (const s of ["checks each specialist's `DONE` against its brief", "reruns its checks before it hires the Reviewer", "sends the work back", "~/.f1rm/evidence/<repo>/findings.md", "5-line summary", "only role that merges"]) expect(teams, s).toContain(s);
+  const lead = role("lead").body;
+  for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`"]) expect(lead, s).toContain(s);
+  const pm = role("pm").body;
+  expect(pm).toContain("`GO <team>` without telling the user");
+  for (const s of ["questions that need the user's decision", "git push"]) expect(pm, s).toContain(s);
+  expect(pmPromptText()).toContain("GO <team>");
+});
+
+test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and retries an index.lock", () => {
+  const flow = section("Review and merge flow");
+  for (const s of ["git merge --abort", "`CHANGES REQUESTED <slug> conflict`", "never resolves a conflict itself", "rebases its unpushed branch onto the current main", "equals the commit in the dev's `DONE`", "`BLOCKED <slug> tip moved`", "index.lock", "after a few seconds"]) expect(flow, s).toContain(s);
+  const reviewer = role("reviewer").body;
+  for (const s of ["git merge --abort", "`CHANGES REQUESTED <slug> conflict`", "`BLOCKED <slug> tip moved`", "index.lock"]) expect(reviewer, s).toContain(s);
+  expect(section("Handoff via SendMessage")).toContain("`CHANGES REQUESTED <slug> conflict`");
+  expect(section("Handoff via SendMessage")).toContain("`BLOCKED <slug> tip moved`");
+  for (const name of SPECIALISTS) expect(role(name).body, name).toContain("`CHANGES REQUESTED <slug> conflict`");
+});
+
+test("C2: the gate refuses every push and the Reviewer's history rewrites, and the Reviewer file no longer calls the no-push rule prompt-only", () => {
+  const gates = section("Gates");
+  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`"]) expect(gates, s).toContain(s);
+  const reviewer = readFileSync(join(PLUGIN, "agents", "reviewer.md"), "utf8");
+  expect(reviewer).not.toContain("prompt-only");
+  expect(reviewer).toMatch(/gate refuses/i);
+});
+
+test("D1: a milestone ends with a cleanup the user answers, and working files stay out of the repo", () => {
+  const md = section("Milestones and decisions");
+  for (const s of ["Milestone cleanup", "**Persist**", "~/.f1rm/kept/<repo>/", "never deleted automatically", "**Delete**", "done board rows", "move items between the groups", "only after the user replies", "5-line record", "task ids and landing commits", "how to try it", "what is open", "`docs/decisions.md` and git history stay"]) expect(md, s).toContain(s);
+  expect(md).not.toContain("deletes the section");
+  expect(section("Board format")).not.toContain("Never delete rows");
+  expect(section("Board format")).toContain("milestone cleanup");
+  const handoff = section("Handoff via SendMessage");
+  for (const s of ["Working files never enter the repo", "`keep: <path> — <why>`"]) expect(handoff, s).toContain(s);
+  expect(section("Teams")).toContain("`keep:` lines");
+  for (const name of SPECIALISTS) expect(role(name).body, name).toContain("`keep: <path> — <why>`");
+  expect(role("lead").body).toContain("`keep:` lines");
+  for (const s of ["Persist", "Delete", "the `git push` line", "only after the user replies"]) expect(pmStep(7), s).toContain(s);
+  expect(role("researcher").body).toContain("~/.f1rm/evidence/<repo>/<task>/");
+  expect(role("pm").body).not.toContain("delete its section");
+  expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).not.toContain("deleted when a milestone is reached");
 });
 
 test.each(["designer", "frontend-dev", "backend-dev", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"])("%s adds its decisions.md entries in its own commit", (name) => {
@@ -351,7 +424,8 @@ test.each(["designer", "frontend-dev", "backend-dev", "researcher", "marketer", 
 test("docs/decisions.md holds the seeded entries, oldest first, each with its four lines", () => {
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   // The log grows: later entries follow the seeded ones, and get the same four-line check below.
-  expect(entries.slice(0, 6).map((e) => e.split("\n")[0])).toEqual([
+  const titles = entries.map((e) => e.split("\n")[0]);
+  expect(titles.slice(0, 6)).toEqual([
     "2026-10-14 Founding decisions",
     "2026-10-19 Plugin 0.2.0 drops the /f1rm skill from cached installs",
     "2026-10-19 Machine cap on working background sessions is 30",
@@ -359,11 +433,15 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
     "2026-10-19 Milestones outside the repo, decisions inside it",
     "2026-10-19 Plugin 0.3.0",
   ]);
+  // The rules-prose entries, in order, wherever other tasks' entries sit between them.
+  const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
+  expect(mine.every((i) => i >= 6)).toBe(true);
+  expect(mine).toEqual([...mine].sort((x, y) => x - y));
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
-test("the plugin is 0.3.0, and its README names both documents", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.3.0");
+test("the plugin is 0.4.0, and its README names both documents", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.4.0");
   const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
   expect(readme).toContain("~/.f1rm/milestones/<repo>.md");
   expect(readme).toContain("docs/decisions.md");

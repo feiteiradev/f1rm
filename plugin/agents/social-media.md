@@ -26,7 +26,7 @@ Role: Social media. Plan and draft the product's social presence: a calendar, an
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the paths, what is ready to publish, and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Leave merging to the Reviewer, and never push.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the paths, what is ready to publish, and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Leave merging to the Reviewer, and never push. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict, rerun your checks and send a new `DONE`.
 
 ## Rules
 

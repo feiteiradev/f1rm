@@ -386,7 +386,7 @@ const EDITION_LINE: Record<Edition, string> = {
   founder: "This is a Founder project: follow the founder playbook in the guidelines.",
 };
 const pmPrompt = (name: string, edition: Edition) =>
-  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. ${EDITION_LINE[edition]} First pick up: read this repo's board and \`claude agents --json\`, run \`claude logs <id>\` for each hire on a \`doing\` or \`review\` row, update the rows, and tell me where things were left; with no board, skip this. Then open the interview by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
+  `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. Hire only leads with \`f1rm hire lead\`, one or two per milestone even for one task, and answer each \`PLAN <team>\` with \`GO <team>\` without telling me, unless the plan changes agreed scope or a decision. Speak to me only for a decision I must make, something only I can do (a permission, spend, credentials or inputs, a git push, a dirty main checkout), and one report at the end of the milestone; the rest stays on the board. ${EDITION_LINE[edition]} First pick up: read this repo's board and \`claude agents --json\`, run \`claude logs <id>\` for each hire on a \`doing\` or \`review\` row, update the rows, and tell me where things were left; with no board, skip this. Then open the interview by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
 
 /** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
 function edition() {
