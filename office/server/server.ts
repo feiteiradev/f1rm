@@ -449,9 +449,7 @@ export function startServer({
           return Response.json({ error: `Let go failed: ${(err as Error).message}` }, { status: 502 });
         }
         // The session may never send its own SessionEnd, so the office records the departure itself.
-        const gone = departure(employee);
-        append.run(gone.at, JSON.stringify(gone));
-        state = reduce(state, gone);
+        endSession(employee);
         push();
         return Response.json({ ok: true });
       }
