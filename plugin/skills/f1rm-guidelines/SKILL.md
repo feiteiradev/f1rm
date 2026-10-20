@@ -284,7 +284,7 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
 1. Receive from your team's lead the branch, its brief (the dev's `DONE` report is in its Inputs) and the base branch. The base branch defaults to the branch checked out in the main working directory. The main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`.
 2. Stop and report to the session in your `Report to` if the main working directory has uncommitted changes. Never stash or discard them.
    - Land nothing unless the branch tip equals the commit in the dev's `DONE`. Otherwise send `BLOCKED <slug> tip moved` and stop.
-3. Take the findings from the `/code-review <level>` that started your session. The review is that one; your own work is the gates below. On a code branch, also run `ponytail:ponytail-review`: its findings go in your report and never block. For work that is not code (founder work under `growth/`, and `docs/research/`), skip both and check the **content checklist** instead:
+3. Take the findings from the `/code-review <level>` that started your session. The review is that one; your own work is the gates below. On a code branch, also run `ponytail:ponytail-review`: its findings go in your report and never block. For work that is not code (founder work under `growth/`, and research a brief puts in the repo), skip both and check the **content checklist** instead:
    - every acceptance criterion is met;
    - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
    - it follows `growth/brand.md`;
@@ -323,7 +323,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 ## Gates
 
-The office holds three gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, neither runs.
+The office holds three gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, none runs.
 
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
 - The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.

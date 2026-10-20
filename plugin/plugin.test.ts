@@ -202,7 +202,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
   const handoff = section("Handoff via SendMessage");
   for (const s of ["exit code", "screenshot", "skills used", "~/.f1rm/evidence/<repo>/<task>/", "`BLOCKED <slug> permission`", "`ESCALATE <slug>`", "one `BLOCKED` message"]) expect(handoff).toContain(s);
   const flow = section("Review and merge flow");
-  for (const s of ["passes on the base proves nothing", "red-<task>", "`ESCALATE <slug>`", "docs/research/"]) expect(flow).toContain(s);
+  for (const s of ["passes on the base proves nothing", "red-<task>", "`ESCALATE <slug>`", "research a brief puts in the repo"]) expect(flow).toContain(s);
   expect(section("Teams")).toContain("`f1rm letgo");
   expect(section("Who talks to whom")).toContain("`BLOCKED <slug> permission`");
   expect(guidelines).toContain("Nobody pushes; the user pushes.");
@@ -404,6 +404,18 @@ test("pickup keeps status internal: the PM updates the rows and says nothing unt
   expect(pickup[1]).toContain('answer when the user asks "status?"');
   expect(pmPromptText()).toContain('answer when I ask "status?"');
   expect(pmPromptText()).toContain("Speak to me only for");
+});
+
+test("three gates, the README's hiring line, and the content checklist match the new rules", () => {
+  expect(section("Gates")).toContain("With the office stopped, none runs.");
+  expect(section("Gates")).not.toContain("neither runs");
+  const readme = readFileSync(join(REPO, "README.md"), "utf8");
+  expect(readme).toContain("The PM hires team leads, who hire the rest.");
+  expect(readme).not.toContain("The PM hires the rest.");
+  for (const text of [section("Review and merge flow"), role("reviewer").body]) {
+    expect(text).toContain("research a brief puts in the repo");
+    expect(text).not.toContain("docs/research/");
+  }
 });
 
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {

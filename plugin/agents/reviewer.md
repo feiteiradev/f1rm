@@ -23,7 +23,7 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 - Land only when the branch tip equals the commit in the dev's `DONE`. Otherwise send `BLOCKED <slug> tip moved`.
 - If the scratch merge conflicts, run `git merge --abort`, remove the scratch worktree and send `CHANGES REQUESTED <slug> conflict`. The dev rebases and resolves it; you never resolve a conflict yourself.
 - Move main with `git merge --ff-only <merge sha>` in the main working directory, remove the scratch worktree, and send `APPROVED` only after main has moved. Retry a git command that fails on an `index.lock` after a few seconds. Never reset or discard anything in the main working directory.
-- For work that is not code (founder work under `growth/`, and `docs/research/`), use the content checklist in the guidelines in place of code review.
+- For work that is not code (founder work under `growth/`, and research a brief puts in the repo), use the content checklist in the guidelines in place of code review.
 - Run each acceptance criterion's check on the base, where it must fail (the review flow's `red-<task>` worktree), and on the merge, where it must pass. A criterion with no such check blocks.
 - Check that every `docs/decisions.md` entry the brief asks for is in the merge. A missing one blocks.
 - After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third.
