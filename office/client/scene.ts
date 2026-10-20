@@ -2,7 +2,7 @@
 import { Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
 import { seedFor, seedOf } from "../people.ts";
-import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
+import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, leadTagOffset, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { showsLeadTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
@@ -130,9 +130,9 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         names.addChild(p.name);
         if (showsLeadTag(e)) {
           p.tag ??= new Text({ text: "LEAD", style: { ...LABEL, fontSize: 11, fill: 0xf2c94c, stroke: { color: 0x141b2b, width: 3 } } });
-          // Over the head: the sprite's centre is 23 art pixels into the desk's frame, its top at 11.
+          const at = leadTagOffset();
           p.tag.anchor.set(0.5, 1);
-          p.tag.position.set((d.x + 23) * scale, (d.y + 10) * scale);
+          p.tag.position.set((d.x + at.x) * scale, (d.y + at.y) * scale);
           names.addChild(p.tag);
         }
       }
