@@ -2,7 +2,7 @@
 
 A pixel-art office for your Claude Code sessions. Every session on your Mac is an employee at a desk, in the office of the project it works on. You see who is working, reading, running a command, waiting for permission or on a coffee break. Click someone to jump to their terminal, ask them a question without interrupting them, or tell them something they read at their next step.
 
-f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead, Designer, Frontend dev, Backend dev, Reviewer, Researcher and five Founder roles) and the guidelines they work by. You talk to the PM. The PM hires the rest.
+f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead, Designer, Frontend dev, Backend dev, Reviewer, Researcher and five Founder roles) and the guidelines they work by. You talk to the PM. The PM hires team leads, who hire the rest.
 
 ![The f1rm lobby, a Work project with its PM waiting for you at the table, the PM's panel, and a Founder project's launch team](docs/f1rm.gif)
 
@@ -57,7 +57,7 @@ The office keeps running after you close Claude Code and starts again at login, 
 
 Start a PM in the repo you want to work on: run `f1rm pm` in a terminal in that folder.
 
-The PM interviews you, writes the task board, and hires specialists with `f1rm hire`. Each hire runs as a background session in its own git worktree. At most 30 background sessions work at once unless you approve more. For a milestone with slices that can run in parallel, the PM forms up to two teams, each run by a Team lead that hires its own specialists, at most two working at a time. The Reviewer runs in the repo itself, checks every change on a scratch copy, and is the only one who merges, locally, never pushing. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow, including each role's [Workflows](plugin/skills/f1rm-guidelines/SKILL.md#workflows).
+The PM interviews you, writes the task board, and hires only team leads with `f1rm hire`: every milestone runs through one or two teams, even a one-task milestone. Each lead hires its own specialists, at most two working at a time, checks their work and sends the PM only `PLAN`, `BLOCKED` and `DONE`. Each hire runs as a background session in its own git worktree. At most 30 background sessions work at once unless you approve more. The PM speaks up only for a decision you must make, something only you can do (a permission, spend, credentials, a `git push`), and one report at the end of the milestone; ask "status?" for more. The Reviewer runs in the repo itself, checks every change on a scratch copy, and is the only one who merges, locally. Only you push. [`plugin/README.md`](plugin/README.md) has the details, and the `f1rm-guidelines` skill holds the rules the roles follow, including each role's [Workflows](plugin/skills/f1rm-guidelines/SKILL.md#workflows).
 
 You can also hire from the office: the Hire button in a project, or a click on an empty desk, opens a dialog with the plugin's roles. Pick one, write a brief, and it starts the same way `f1rm hire` does. In a project with a PM, "Let the PM decide" sends your brief to them as a message instead. In one without, "Start PM" opens an iTerm tab in the repo running `f1rm pm`.
 

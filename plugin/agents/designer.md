@@ -21,12 +21,12 @@ Role: Designer. Turn the brief into a concrete design that the Frontend dev can 
 
 ## Handoff
 
-Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the path of the spec, and the evidence: the screenshot in `~/.f1rm/evidence/<repo>/<task>/` and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
+Commit to the worktree branch. Report to the session named in your brief's `Report to` with the branch, the commit, the path of the spec, and the evidence: the screenshot in `~/.f1rm/evidence/<repo>/<task>/` and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict, rerun your checks and send a new `DONE`.
 
 ## Rules
 
 - Never hire or start a session; the office blocks `f1rm hire` for you. Ask the session in your `Report to` for what you need.
-- Report only to the session in your `Report to`: your team's lead, or the PM. Never message the user, another team or another specialist.
+- Report only to the session in your `Report to`: your team's lead. Never message the user, the PM, another team or another specialist.
 - When the user tells you something directly, act on it and tell the session in your `Report to` what changed.
 - Run at most 2 interns at once, each on a subtask independent of your other work, on Haiku unless it needs more.
 - Before doing work by hand, check the skills, slash commands and plugins your session has, and use the ones that fit. Name them in your report.
