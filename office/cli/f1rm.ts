@@ -261,9 +261,12 @@ function serve() {
   writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600 });
   renameSync(`${URL_FILE}.tmp`, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
-  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${port}`);
+  announce(url);
   return url;
 }
+
+/** Prints the link to a terminal, else only the port: under launchd stdout is a log. */
+const announce = (url: string) => console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
 
 async function runningOffice(): Promise<string | null> {
   const url = existsSync(URL_FILE) ? readFileSync(URL_FILE, "utf8").trim() : "";
@@ -275,7 +278,7 @@ async function runningOffice(): Promise<string | null> {
 /** Opens the running office, starting the background one first when none is up, and exits. `f1rm serve` runs one in this terminal. */
 async function start() {
   const url = (await runningOffice()) ?? (await startBackgroundOffice());
-  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
+  announce(url);
   Bun.spawn(["open", url]);
 }
 
