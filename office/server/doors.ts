@@ -29,7 +29,9 @@ export function isJunk(folder: string, roots: string[]): boolean {
 /** The doors the user removed, room id -> when (ms). Events older than that no longer build the room. */
 export function readForgotten(file?: string): Record<string, number> {
   try {
-    return file ? JSON.parse(readFileSync(file, "utf8")) : {};
+    const parsed = file ? JSON.parse(readFileSync(file, "utf8")) : {};
+    // The file is the user's to edit: anything but an object of numbers is dropped, not trusted.
+    return Object.fromEntries(Object.entries(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}).filter(([, at]) => Number.isFinite(at)) as [string, number][]);
   } catch {
     return {};
   }

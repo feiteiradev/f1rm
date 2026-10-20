@@ -204,6 +204,19 @@ test("an empty door can be removed: its edition goes, boards, evidence and the r
   expect(Object.keys((await office(third.server)).rooms)).toContain(room);
 });
 
+test("a forgotten-doors file of the wrong shape counts as empty and is mended by the next removal", async () => {
+  for (const bad of ["null", "[1]", '"x"', '{"/code/feit/.git":"later","/code/shop/.git":null}', "{"]) {
+    const files = { dbPath: join(dir, `bad-${n}.db`), root: join(dir, `bad-office-${n++}`) };
+    mkdirSync(files.root);
+    writeFileSync(join(files.root, "forgotten-doors.json"), bad);
+    const { server, forgotten } = start(files);
+    await settle(server, "gone", "/code/feit");
+    expect(Object.keys((await office(server)).rooms), bad).toEqual(["/code/feit/.git"]);
+    expect((await remove(server, "/code/feit/.git")).status, bad).toBe(200);
+    expect(JSON.parse(readFileSync(forgotten, "utf8")), bad).toEqual({ "/code/feit/.git": now });
+  }
+});
+
 test("a door with someone in it, an unknown door and Elsewhere are not removed", async () => {
   const { server, forgotten } = start();
   await hook(server, "in", "/code/feit");
