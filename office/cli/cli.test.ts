@@ -292,6 +292,14 @@ test("office-url is replaced in one step, so a reader never sees it empty or hal
   expect(statSync(urlFile).mode & 0o777).toBe(0o600);
 });
 
+test("office-url is private even when a stale office-url.tmp with open permissions is left behind", async () => {
+  const { home } = await installedOnFreePort();
+  writeFileSync(join(home, ".f1rm", "office-url.tmp"), "stale");
+  chmodSync(join(home, ".f1rm", "office-url.tmp"), 0o644);
+  await serveOnce(home);
+  expect(statSync(join(home, ".f1rm", "office-url")).mode & 0o777).toBe(0o600);
+});
+
 test("the new link key is never written into a malformed file that others can read", async () => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), "not a key");
