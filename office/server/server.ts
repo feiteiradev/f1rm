@@ -305,6 +305,7 @@ export function startServer({
     append.run(gone.at, JSON.stringify(gone));
     state = reduce(state, gone);
     pids.delete(e.sessionId);
+    approvals.release(e.sessionId);
   }
   const processEnded = (e: Employee) => pids.has(e.sessionId) && !isAlive(pids.get(e.sessionId)!);
 

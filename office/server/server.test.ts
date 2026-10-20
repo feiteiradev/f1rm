@@ -1098,6 +1098,19 @@ test("a later event for the session drops its pending hand and answers the hook 
   expect(await settled(other.held)).toBe(false);
 });
 
+test("an employee removed because its process ended takes its pending hand with it", async () => {
+  start();
+  await hook(sessionStart("gone", "/code/shop"));
+  const { held, approval } = await raiseHand("gone");
+  listing = new Map([["gone", 4242]]);
+  deadPids = new Set([4242]);
+  expect((await jumpTo("gone")).status).toBe(410);
+  const answer = await held;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+  expect((await office(() => true)).approvals).toEqual([]);
+  expect((await decide("approve", approval.id)).status).toBe(404);
+});
+
 test("a permission_prompt notification for the held prompt does not drop it", async () => {
   start();
   await hook(sessionStart("s1", "/code/shop"));
