@@ -1262,7 +1262,7 @@ test("with no HOME, a PM's or lead's write under .f1rm or .claude relative to th
 test("a PM's or lead's landing git commands are refused, past global options; read-only git and everyone else's are not", async () => {
   await delegationOffice();
   const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
-  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)", "git pull origin main", "git -C x am fix.patch", "git revert abc", "gh pr merge 3 --squash", "cd x && gh pr merge 3", "if true; then git merge x; fi", "time git commit -am x", "! git revert abc", "env gh pr merge 3"];
+  const landing = ["git merge agent-comms", "git -C x push", "git commit -m 'a; b'", "cd x && git -C '/my repo' -c core.editor=true rebase main", "git --no-pager reset --hard", "git cherry-pick abc", "FOO=1 git push origin main | cat", "echo $(git commit -am x)", "git pull origin main", "git -C x am fix.patch", "git revert abc", "gh pr merge 3 --squash", "cd x && gh pr merge 3", "if true; then git merge x; fi", "time git commit -am x", "! git revert abc", "env gh pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge", "timeout 5 git commit -am x"];
   const readOnly = ["git log --oneline", "git status", "git diff HEAD", "git show abc", "git rev-parse HEAD", "git worktree list", "git -C x log", "git log --grep 'git push; git merge'", "echo git push", "gh pr view 3"];
   for (const id of ["p", "l"]) {
     for (const command of landing) {
@@ -1274,7 +1274,7 @@ test("a PM's or lead's landing git commands are refused, past global options; re
   }
   // A specialist lands on its own branch, but never pushes (see the push test); a freelancer is held by nothing.
   for (const command of landing) expect(await bash("f", command)).toBeNull();
-  for (const command of landing.filter((c) => !/push|pr merge/.test(c))) expect(await bash("d", command)).toBeNull();
+  for (const command of landing.filter((c) => !/push|pr merge|gh api/.test(c))) expect(await bash("d", command)).toBeNull();
 });
 
 test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordinary intern, and a specialist's call, are not", async () => {
@@ -1333,7 +1333,7 @@ test("a lead whose name carries no team can hire into none", async () => {
   expect((await held(await hook(preToolUse("l", "Bash", { command: "f1rm hire --team plain backend-dev plain.backend-dev-a a b" }))))?.permissionDecision).toBe("deny");
 });
 
-const PUSHES = ["git push", "git push origin main", "git -C . push", "git -C '/my repo' -c core.editor=true push --tags", "cd x && git push", "FOO=1 git push | cat", "git 'push'", "gh pr merge 3", "gh pr merge 3 --squash", "cd x && gh pr merge 3", "if git diff --quiet; then echo ok; else git push; fi", "then git push", "! git push", "{ git push; }", "env git push", "env -i FOO=1 git push", "command git push", "exec git push", "time git push", "nohup git push &", "xargs git push", "sudo git push", "while true; do git push; done", "git --config-env x=Y push", "'gh' pr merge 3", "gh pr -R o/r merge 3", "gh --repo o/r pr merge 3", "gh -R o/r pr merge 3", "timeout 60 git push", "timeout -k 5 60 git push", "timeout --signal KILL 1.5m git push", "timeout 60 gh pr merge 3", "nice git push", "nice -n 10 git push", "nice -10 git push", "stdbuf -oL git push", "stdbuf -o L -e0 git push", "nohup timeout 60 nice -n 5 git push", "timeout 60 sudo git push"];
+const PUSHES = ["git push", "git push origin main", "git -C . push", "git -C '/my repo' -c core.editor=true push --tags", "cd x && git push", "FOO=1 git push | cat", "git 'push'", "gh pr merge 3", "gh pr merge 3 --squash", "cd x && gh pr merge 3", "if git diff --quiet; then echo ok; else git push; fi", "then git push", "! git push", "{ git push; }", "env git push", "env -i FOO=1 git push", "command git push", "exec git push", "time git push", "nohup git push &", "xargs git push", "sudo git push", "while true; do git push; done", "git --config-env x=Y push", "'gh' pr merge 3", "gh pr -R o/r merge 3", "gh --repo o/r pr merge 3", "gh -R o/r pr merge 3", "timeout 60 git push", "timeout -k 5 60 git push", "timeout --signal KILL 1.5m git push", "timeout 60 gh pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge", "gh api --method PUT repos/o/r/pulls/3/merge", "gh api -XPUT repos/o/r/pulls/3/merge", "gh api --method=PUT repos/o/r/pulls/3/merge", "gh api repos/o/r/pulls/3/merge -X put -f merge_method=squash", "gh api -H 'Accept: x' --method PUT /repos/o/r/pulls/12/merge", "gh -R o/r api -X PUT repos/o/r/pulls/3/merge", "gh api -X PUT https://api.github.com/repos/o/r/pulls/3/merge", "timeout 5 gh api -X PUT repos/o/r/pulls/3/merge", "nice git push", "nice -n 10 git push", "nice -10 git push", "stdbuf -oL git push", "stdbuf -o L -e0 git push", "nohup timeout 60 nice -n 5 git push", "timeout 60 sudo git push"];
 
 test("nobody pushes or merges a PR: a specialist's and a Reviewer's git push and gh pr merge are refused, every form", async () => {
   const bash = await gateOffice();
@@ -1343,7 +1343,7 @@ test("nobody pushes or merges a PR: a specialist's and a Reviewer's git push and
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
       expect(out.permissionDecisionReason).toContain("Only the user pushes");
     }
-    for (const command of ["git log --oneline", "git status", "echo git push", "git log --grep 'git push'", "gh pr view 3", "gh pr list", "gh pr checkout 3", "timeout 60 git log --oneline", "nice -n 10 git status", "stdbuf -oL git diff", "echo timeout 60 git push", "gh -R o/r pr view 3", "git commit -m 'git push later'", "if git diff --quiet; then echo ok; fi"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+    for (const command of ["git log --oneline", "git status", "echo git push", "git log --grep 'git push'", "gh pr view 3", "gh pr list", "gh pr checkout 3", "gh api repos/o/r/pulls/3/merge", "gh api -X GET repos/o/r/pulls/3/merge", "gh api --method GET repos/o/r/pulls/3/merge", "gh api -X PUT repos/o/r/issues/3/lock", "gh api -X PUT repos/o/r/pulls/3/update-branch", "gh api repos/o/r/pulls/3", "timeout 60 git log --oneline", "nice -n 10 git status", "stdbuf -oL git diff", "echo timeout 60 git push", "gh -R o/r pr view 3", "git commit -m 'git push later'", "if git diff --quiet; then echo ok; fi"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
   for (const command of PUSHES) expect([command, await bash("f", command)]).toEqual([command, null]);
 });

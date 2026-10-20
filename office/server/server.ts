@@ -78,11 +78,15 @@ const gitCall = ([program, ...words]: string[]) => {
   return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
-/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`. */
+// The merge endpoint, as a path or a URL; GitHub merges a pull request only with PUT.
+const MERGE_ENDPOINT = /(^|\/)pulls\/\d+\/merge\/?(\?.*)?$/;
+const PUT_METHOD = /^(-X|--method=)put$/i;
+/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or `gh api` with PUT on `pulls/<n>/merge` (`-X PUT`, `-XPUT`, `--method PUT`, `--method=PUT`). */
 const ghMerge = ([program, ...words]: string[]) => {
   if (basename(unquoted(program ?? "")) !== "gh") return false;
   const args = words.map(unquoted);
   const i = skipOptions(args, 0, GH_OPTIONS_WITH_VALUE);
+  if (args[i] === "api") return args.some((a) => MERGE_ENDPOINT.test(a)) && args.some((a, j) => PUT_METHOD.test(a) || (/^(-X|--method)$/.test(a) && /^put$/i.test(args[j + 1] ?? "")));
   return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
 };
 // What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
