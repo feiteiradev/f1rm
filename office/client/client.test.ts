@@ -456,6 +456,22 @@ test("Remove POSTs remove/<encoded id> once confirmed, and a 404, 409 or 401 sho
   expect(await withReply(new Response("unauthorized", { status: 401 }), () => removeDoor("x"))).toBe("This link is out of date — open the office with `f1rm`");
 });
 
+test("in the demo recording Remove says so and asks the office nothing", async () => {
+  const { removeDoor } = await import("./remove.ts");
+  let asked = 0;
+  const real = { fetch: globalThis.fetch, mode: process.env.MODE };
+  globalThis.fetch = (async () => (asked++, Response.json({ ok: true }))) as unknown as typeof fetch;
+  process.env.MODE = "demo";
+  try {
+    expect(await removeDoor("x")).toBe("Doors are removed in a live office; this is a recording.");
+    expect(asked).toBe(0);
+  } finally {
+    globalThis.fetch = real.fetch;
+    if (real.mode === undefined) delete process.env.MODE;
+    else process.env.MODE = real.mode;
+  }
+});
+
 test("the page's Elsewhere id is the one the server groups stray sessions under", async () => {
   const { ELSEWHERE } = await import("../server/office.ts");
   const { ELSEWHERE_ID } = await import("./lobby.ts");

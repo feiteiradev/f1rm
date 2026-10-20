@@ -2,8 +2,6 @@
 import { useEffect, useState } from "react";
 import { CONFIRM_MS, clickOn, removeDoor } from "./remove.ts";
 
-const DEMO = import.meta.env.MODE === "demo";
-
 /** `onProblem` gets why the office refused. On success the office's next push drops the door and this button with it. */
 export function RemoveDoor({ roomId, name, style, onProblem }: { roomId: string; name: string; style: React.CSSProperties; onProblem: (problem: string | null) => void }) {
   const [armedAt, setArmedAt] = useState<number | null>(null);
@@ -20,7 +18,6 @@ export function RemoveDoor({ roomId, name, style, onProblem }: { roomId: string;
     onProblem(null);
     if (what === "arm") return setArmedAt(Date.now());
     setArmedAt(null);
-    if (DEMO) return onProblem("Doors are removed in a live office; this is a recording.");
     setBusy(true);
     const error = await removeDoor(roomId);
     setBusy(false);

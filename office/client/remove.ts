@@ -20,4 +20,5 @@ export const clearAfter = (clear: () => void, ms = NOTE_MS) => {
 };
 
 /** Asks the office to forget a door. Null when it did, otherwise why it didn't (404 no such door, 409 not empty, 401 out-of-date link). */
-export const removeDoor = (roomId: string) => post(`remove/${encodeURIComponent(roomId)}`);
+export const removeDoor = async (roomId: string) =>
+  import.meta.env?.MODE === "demo" ? "Doors are removed in a live office; this is a recording." : post(`remove/${encodeURIComponent(roomId)}`);
