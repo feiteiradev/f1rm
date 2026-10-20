@@ -137,13 +137,15 @@ type Options = {
   isAlive?: (pid: number) => boolean;
 };
 
-// ESRCH: no such process. EPERM: it exists and belongs to someone else, so it is alive.
+// Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
 // ponytail: a pid the system has handed to another program since reads as alive, so that ghost waits for the quiet path; compare process start times if that is felt.
-const processRuns = (pid: number) => {
+export const processRuns = (pid: number) => {
+  // 0 and -1 would signal a whole process group.
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     return process.kill(pid, 0);
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
   }
 };
 // How often `claude agents --json` is asked for the pids of employees whose pid is not known yet.
@@ -289,11 +291,16 @@ export function startServer({
   // The process id of each session `claude agents --json` has listed, so a dead process can be told from a quiet session without spawning `claude` every few seconds.
   const pids = new Map<string, number>();
   let listedAt = -Infinity;
+  // Counts SessionStarts, so a listing begun before one is not kept: its pids may be the ones a resumed session just left.
+  let starts = 0;
   /** Asks `claude agents --json` for the live sessions and keeps their pids; null if it can't say. */
   async function listSessions() {
+    const before = starts;
     const listed = await machine.liveSessions();
-    listedAt = clock();
-    for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+    if (before === starts) {
+      listedAt = clock();
+      for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+    }
     return listed;
   }
   /** The employee leaves as if its SessionEnd had come: logged, so a replay shows it, and its interns go too. The caller pushes. */
@@ -303,6 +310,7 @@ export function startServer({
     append.run(gone.at, JSON.stringify(gone));
     state = reduce(state, gone);
     pids.delete(e.sessionId);
+    approvals.release(e.sessionId);
   }
   const processEnded = (e: Employee) => pids.has(e.sessionId) && !isAlive(pids.get(e.sessionId)!);
 
@@ -339,6 +347,7 @@ export function startServer({
           if (event.kind === "SessionStart") {
             pids.delete(event.sessionId);
             listedAt = -Infinity;
+            starts++;
           }
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
           // The exception is the notification about the very prompt being held.
@@ -440,9 +449,7 @@ export function startServer({
           return Response.json({ error: `Let go failed: ${(err as Error).message}` }, { status: 502 });
         }
         // The session may never send its own SessionEnd, so the office records the departure itself.
-        const gone = departure(employee);
-        append.run(gone.at, JSON.stringify(gone));
-        state = reduce(state, gone);
+        endSession(employee);
         push();
         return Response.json({ ok: true });
       }
@@ -566,6 +573,7 @@ export function startServer({
           if (next.employees[e.sessionId]) continue;
           const gone = departure(e);
           append.run(gone.at, JSON.stringify(gone));
+          approvals.release(e.sessionId);
         }
         state = next;
         push();

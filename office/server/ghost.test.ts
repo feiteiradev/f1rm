@@ -1,10 +1,10 @@
 // Seam 1: the event log, the ghost sweep and restart recovery, on a controllable clock.
 import { Database } from "bun:sqlite";
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startServer } from "./server.ts";
+import { processRuns, startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
 const SECRET = "ingest-secret";
@@ -21,11 +21,15 @@ let alive: Map<string, number | undefined> | null = new Map();
 let dead = new Set<number>();
 let asked: number[] = [];
 let gate: Promise<unknown> = Promise.resolve();
+// What the next listing answers instead of `alive`, once.
+let once: Map<string, number | undefined> | null | undefined;
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
   liveSessions: async () => {
     await gate;
-    return alive;
+    const answer = once === undefined ? alive : once;
+    once = undefined;
+    return answer;
   },
   backgroundId: async () => null,
   letGo: async () => {},
@@ -51,6 +55,7 @@ afterEach(() => {
   servers.forEach((s) => s.stop(true));
   servers = [];
   gate = Promise.resolve();
+  once = undefined;
   alive = new Map();
   dead = new Set();
   asked = [];
@@ -336,4 +341,53 @@ test("a session resumed under its old id is not removed for the pid its dead pro
   await new Promise((r) => setTimeout(r, 700));
   expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
   expect(asked).toContain(20);
+});
+
+test("a process that cannot be asked about is not taken for dead: only ESRCH ends a session", () => {
+  // Bun throws ERR_INVALID_ARG_TYPE, not ESRCH, for a pid beyond 2^31.
+  expect(processRuns(2 ** 31)).toBe(true);
+});
+
+test("pid 0 and -1 are no process: they would signal whole groups, so they are never signalled", () => {
+  const kill = spyOn(process, "kill");
+  try {
+    expect([0, -1, 1.5, NaN].map(processRuns)).toEqual([false, false, false, false]);
+    expect(kill).not.toHaveBeenCalled();
+  } finally {
+    kill.mockRestore();
+  }
+});
+
+test("a listing already under way when a session resumes does not give it back the pid its dead process had", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  once = new Map([["resumed", 11]]);
+  alive = new Map([["resumed", 20]]);
+  dead = new Set([11]);
+  await hook(server, "resumed", "PreToolUse", bash("ls"));
+  await new Promise((r) => setTimeout(r, 400)); // a check is now waiting on claude agents
+
+  await hook(server, "resumed", "SessionStart", { source: "resume" });
+  release();
+  await new Promise((r) => setTimeout(r, 700));
+  expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
+  expect(asked).toContain(20);
+  expect(asked).not.toContain(11);
+});
+
+test("a swept employee takes its pending hand with it", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  const held = hook(server, "swept", "PermissionRequest", bash("rm -rf build"));
+  await office(server, (s) => (s.approvals ?? []).length === 1);
+
+  now += 1500;
+  await office(server, (s) => s.employees.swept?.status === "offline");
+  now += 2000;
+  await office(server, (s) => ids(s).length === 0);
+  const answer = await held;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+  expect((await office(server, () => true)).approvals).toEqual([]);
 });
