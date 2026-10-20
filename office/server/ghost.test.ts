@@ -1,6 +1,6 @@
 // Seam 1: the event log, the ghost sweep and restart recovery, on a controllable clock.
 import { Database } from "bun:sqlite";
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -341,4 +341,14 @@ test("a session resumed under its old id is not removed for the pid its dead pro
 test("a process that cannot be asked about is not taken for dead: only ESRCH ends a session", () => {
   // Bun throws ERR_INVALID_ARG_TYPE, not ESRCH, for a pid beyond 2^31.
   expect(processRuns(2 ** 31)).toBe(true);
+});
+
+test("pid 0 and -1 are no process: they would signal whole groups, so they are never signalled", () => {
+  const kill = spyOn(process, "kill");
+  try {
+    expect([0, -1, 1.5, NaN].map(processRuns)).toEqual([false, false, false, false]);
+    expect(kill).not.toHaveBeenCalled();
+  } finally {
+    kill.mockRestore();
+  }
 });

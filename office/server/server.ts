@@ -140,6 +140,8 @@ type Options = {
 // Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
 // ponytail: a pid the system has handed to another program since reads as alive, so that ghost waits for the quiet path; compare process start times if that is felt.
 export const processRuns = (pid: number) => {
+  // 0 and -1 would signal a whole process group.
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     return process.kill(pid, 0);
   } catch (err) {
