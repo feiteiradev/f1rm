@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -270,6 +270,17 @@ test("serve does not print the link key when its output is not a terminal, so a 
   }
   const printed = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
   expect(printed).not.toMatch(/[\w-]{43}/);
+});
+
+test("the new link key is never written into a malformed file that others can read", async () => {
+  const { home, port } = await installedOnFreePort();
+  writeFileSync(keyFile(home), "not a key");
+  chmodSync(keyFile(home), 0o644);
+  const stillReadable = join(home, ".f1rm", "old-link-key"); // whoever had that file open or linked keeps reading the same file
+  linkSync(keyFile(home), stillReadable);
+  const url = await serveOnce(home);
+  expect(readFileSync(keyFile(home), "utf8").trim()).toBe(url.split("/")[3]);
+  expect(readFileSync(stillReadable, "utf8")).toBe("not a key");
 });
 
 test("uninstall removes the link key with the rest of the install state", async () => {
