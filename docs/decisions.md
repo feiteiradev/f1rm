@@ -99,3 +99,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: an office restart left the page frozen with its ghosts; a cap would leave a long-open tab frozen again, and 5 s is cheap against a local server.
 - Rejected: a retry limit (the tab freezes after a long outage); a page reload on reconnect (loses the open panel and half-typed text); reading the socket's close for the cause (the browser hides why an upgrade failed, so the page asks with a GET instead); a limit on the probe (it runs once per drop, so at most every 5 s).
 - Where: office-reconnect
+
+## 2026-10-20 Ended sessions leave within seconds
+
+- Decision: an ended session, interactive or background, whether it ended by a closed terminal, stop, letgo or a crash, leaves the office within ~5 s. When its SessionEnd is missed, a process check every 5 s removes it: the pids come from `claude agents --json` (kept in a map, refreshed when an employee has no known pid and on the slower sweep) and are tried with `process.kill(pid, 0)` (ESRCH is dead, EPERM is alive). A session `claude agents` never listed keeps the 15-minute quiet path. A session `claude agents` lists that goes quiet keeps its status, as before (a long tool call is quiet but working); "offline" only appears on the unlisted quiet path. Jump on a session that just ended replies HTTP 410 `{ok:false, ended:true, error:"This session has ended"}`, removes the employee at once through the same departure event as the sweep, and opens nothing.
+- Why: closing an iTerm2 terminal left its employee in the office for 15 minutes, and Jump on it said only "Its terminal tab is closed."
+- Rejected: a greyed "off shift" state for ended sessions; spawning `claude agents` every 5 s.
+- Where: G2

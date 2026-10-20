@@ -16,10 +16,13 @@ const TOKEN = "ui-token";
 const calls: string[] = [];
 let openTabs = new Set<string>();
 let backgroundIds: Record<string, string> = {};
+// What `claude agents --json` lists (session id -> pid), and the pids whose process has ended.
+let listing = new Map<string, number | undefined>();
+let deadPids = new Set<number>();
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
-  liveSessions: async () => new Set<string>(),
+  liveSessions: async () => listing,
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
   letGo: async (id: string) => {
     calls.push(`letgo ${id}`);
@@ -77,6 +80,8 @@ afterEach(() => {
   calls.length = 0;
   openTabs = new Set();
   backgroundIds = {};
+  listing = new Map();
+  deadPids = new Set();
   askAnswer = defaultAnswer;
   tellFails = "";
   letGoFails = "";
@@ -97,7 +102,7 @@ const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
 function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")) });
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")), isAlive: (pid) => !deadPids.has(pid) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -395,6 +400,26 @@ test("Jump says so when the employee's tab is closed, and does not guess another
   const res = await jumpTo("s1");
   expect([res.status, await res.json()]).toEqual([409, { ok: false, error: "Its terminal tab is closed." }]);
   expect(calls).toEqual([`iterm ${ITERM_ID(1)}`]);
+});
+
+test("Jump on a session that has ended says 410, removes the employee at once and opens nothing", async () => {
+  start();
+  await hook(sessionStart("gone", "/a"), { "x-f1rm-iterm-session": ITERM_ID(1) });
+  await hook(sessionStart("here", "/b"), { "x-f1rm-iterm-session": ITERM_ID(2) });
+  openTabs.add(ITERM_ID(2));
+  listing = new Map([["gone", 4242], ["here", 4243]]);
+  deadPids = new Set([4242]);
+  const watching = office((s) => !("gone" in s.employees) && "here" in s.employees);
+
+  const res = await jumpTo("gone");
+  expect([res.status, await res.json()]).toEqual([410, { ok: false, ended: true, error: "This session has ended" }]);
+  expect(Object.keys((await watching).employees)).toEqual(["here"]);
+  expect(calls).toEqual([]);
+  expect((await jumpTo("gone")).status).toBe(404);
+
+  // A session whose process runs jumps as before.
+  expect((await jumpTo("here")).status).toBe(200);
+  expect(calls).toEqual([`iterm ${ITERM_ID(2)}`]);
 });
 
 test("a background employee with no tab gets a new tab running claude attach", async () => {
