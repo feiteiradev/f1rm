@@ -78,15 +78,24 @@ const gitCall = ([program, ...words]: string[]) => {
   return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
-// The merge endpoint, as a path or a URL; GitHub merges a pull request only with PUT.
-const MERGE_ENDPOINT = /(^|\/)pulls\/\d+\/merge\/?(\?.*)?$/;
-const PUT_METHOD = /^(-X|--method=)put$/i;
-/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or `gh api` with PUT on `pulls/<n>/merge` (`-X PUT`, `-XPUT`, `--method PUT`, `--method=PUT`). */
-const ghMerge = ([program, ...words]: string[]) => {
+// A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or any field or input file, writes to GitHub.
+const API_METHOD = /^(?:--method(?:=(.*))?|-[A-Za-z]*X=?(.*))$/;
+const API_FIELD = /^(-[fF]|--(field|raw-field|input))/;
+// ponytail: a graphql query kept in a file (`-F query=@q.graphql`, `--input`) is refused, one in a shell variable is not seen; `-HX-Foo: bar` or a `-fX` field reads as a method.
+const writesApi = (args: string[]) => {
+  const readsGraphql = args.includes("graphql") && !args.some((a) => /mutation|=@|^--input/i.test(a));
+  const methods = args.flatMap((a, j) => {
+    const m = API_METHOD.exec(a);
+    return m ? [(m[1] ?? m[2]) || (args[j + 1] ?? "")] : [];
+  });
+  return !readsGraphql && (methods.some((m) => !/^get$/i.test(m)) || args.some((a) => API_FIELD.test(a)));
+};
+/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or a `gh api` call that writes (see writesApi), which can merge a pull request or a branch. */
+const ghLands = ([program, ...words]: string[]) => {
   if (basename(unquoted(program ?? "")) !== "gh") return false;
   const args = words.map(unquoted);
   const i = skipOptions(args, 0, GH_OPTIONS_WITH_VALUE);
-  if (args[i] === "api") return args.some((a) => MERGE_ENDPOINT.test(a)) && args.some((a, j) => PUT_METHOD.test(a) || (/^(-X|--method)$/.test(a) && /^put$/i.test(args[j + 1] ?? "")));
+  if (args[i] === "api") return writesApi(args.slice(i + 1));
   return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
 };
 // What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
@@ -252,10 +261,10 @@ export function startServer({
         return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghMerge(w))) {
+    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghLands(w))) {
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
-    if (commands.some((w) => gitCall(w)?.sub === "push" || ghMerge(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
       return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
