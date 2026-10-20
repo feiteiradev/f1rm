@@ -371,7 +371,7 @@ function Office() {
       {inside && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
-      {toast && <p className="note low pm-note" role="status">{toast}</p>}
+      {toast && <p className="note low pm-note toast" role="status">{toast}</p>}
       {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </OnEnded.Provider>
   );

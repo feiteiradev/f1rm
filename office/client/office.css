@@ -127,3 +127,5 @@ code { font: inherit; color: var(--text); }
 }
 
 .pm-note { padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); color: var(--text); }
+/* The ended-session toast stacks above the PM note, which keeps the bottom spot. */
+.note.low.toast { inset-block-end: 72px; }
