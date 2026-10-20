@@ -291,11 +291,16 @@ export function startServer({
   // The process id of each session `claude agents --json` has listed, so a dead process can be told from a quiet session without spawning `claude` every few seconds.
   const pids = new Map<string, number>();
   let listedAt = -Infinity;
+  // Counts SessionStarts, so a listing begun before one is not kept: its pids may be the ones a resumed session just left.
+  let starts = 0;
   /** Asks `claude agents --json` for the live sessions and keeps their pids; null if it can't say. */
   async function listSessions() {
+    const before = starts;
     const listed = await machine.liveSessions();
-    listedAt = clock();
-    for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+    if (before === starts) {
+      listedAt = clock();
+      for (const [id, pid] of listed ?? []) if (typeof pid === "number") pids.set(id, pid);
+    }
     return listed;
   }
   /** The employee leaves as if its SessionEnd had come: logged, so a replay shows it, and its interns go too. The caller pushes. */
@@ -342,6 +347,7 @@ export function startServer({
           if (event.kind === "SessionStart") {
             pids.delete(event.sessionId);
             listedAt = -Infinity;
+            starts++;
           }
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
           // The exception is the notification about the very prompt being held.

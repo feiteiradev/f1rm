@@ -21,11 +21,15 @@ let alive: Map<string, number | undefined> | null = new Map();
 let dead = new Set<number>();
 let asked: number[] = [];
 let gate: Promise<unknown> = Promise.resolve();
+// What the next listing answers instead of `alive`, once.
+let once: Map<string, number | undefined> | null | undefined;
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
   liveSessions: async () => {
     await gate;
-    return alive;
+    const answer = once === undefined ? alive : once;
+    once = undefined;
+    return answer;
   },
   backgroundId: async () => null,
   letGo: async () => {},
@@ -51,6 +55,7 @@ afterEach(() => {
   servers.forEach((s) => s.stop(true));
   servers = [];
   gate = Promise.resolve();
+  once = undefined;
   alive = new Map();
   dead = new Set();
   asked = [];
@@ -351,4 +356,23 @@ test("pid 0 and -1 are no process: they would signal whole groups, so they are n
   } finally {
     kill.mockRestore();
   }
+});
+
+test("a listing already under way when a session resumes does not give it back the pid its dead process had", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  once = new Map([["resumed", 11]]);
+  alive = new Map([["resumed", 20]]);
+  dead = new Set([11]);
+  await hook(server, "resumed", "PreToolUse", bash("ls"));
+  await new Promise((r) => setTimeout(r, 400)); // a check is now waiting on claude agents
+
+  await hook(server, "resumed", "SessionStart", { source: "resume" });
+  release();
+  await new Promise((r) => setTimeout(r, 700));
+  expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
+  expect(asked).toContain(20);
+  expect(asked).not.toContain(11);
 });
