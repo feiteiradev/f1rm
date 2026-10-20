@@ -274,7 +274,7 @@ async function runningOffice(): Promise<string | null> {
 /** Opens the running office, starting the background one first when none is up, and exits. `f1rm serve` runs one in this terminal. */
 async function start() {
   const url = (await runningOffice()) ?? (await startBackgroundOffice());
-  console.log(`f1rm office: ${url}`);
+  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
   Bun.spawn(["open", url]);
 }
 
