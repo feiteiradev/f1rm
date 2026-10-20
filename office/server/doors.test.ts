@@ -130,6 +130,16 @@ test("nothing under ~/.f1rm, ~/.claude or a temp folder gets a door, even a git 
   expect(state.employees.s0.room).toBe("elsewhere");
 });
 
+test("a session inside a junk folder gets no door even when its git repo is the home folder", async () => {
+  const { server } = start(undefined, { machine: fakeMachine([HOME]) });
+  await hook(server, "in-junk", `${HOME}/.f1rm/evidence/out`);
+  await hook(server, "at-home", `${HOME}/Documents`);
+
+  const state = await office(server);
+  expect(state.employees["in-junk"].room).toBe("elsewhere");
+  expect(state.employees["at-home"].room).toBe(HOME + "/.git");
+});
+
 test("the folders never given a door are the temp folders and the office's own, past symlinks", () => {
   const roots = junkRoots("/Users/me", "/Users/me/Library/Caches/T/");
   expect(roots).toEqual(expect.arrayContaining(["/Users/me/.f1rm", "/Users/me/.claude", "/Users/me/Library/Caches/T", realpathSync("/tmp"), "/private/tmp"]));

@@ -270,7 +270,7 @@ export function startServer({
       room = common
         ? { id: common, name: basename(basename(common) === ".git" ? dirname(common) : common).replace(/\.git$/, "") }
         : { id: cwd, name: basename(cwd) || cwd };
-      if (isJunk(folderOf(room.id), junkRoots) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
+      if (isJunk(folderOf(room.id), junkRoots) || isJunk(cwd, junkRoots) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
       rooms.set(cwd, room);
     }
     return room;
