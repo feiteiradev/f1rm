@@ -9,6 +9,7 @@ import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from 
 import { argsText } from "./approvals.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
+import { showsLeadTag } from "./lead.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
   sessionId, name: sessionId, role: null, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
@@ -503,4 +504,11 @@ test("a Remove refusal clears itself after a few seconds, and not if it was repl
   expect(timers.map((t) => t.ms)).toEqual([NOTE_MS, NOTE_MS]);
   expect(NOTE_MS).toBe(5000);
   expect(cleared).toEqual(["a"]);
+});
+
+test("only a team lead gets the LEAD tag, not a specialist or a freelancer", () => {
+  expect(showsLeadTag(employee("l", "r", { role: "lead" }))).toBe(true);
+  expect(showsLeadTag(employee("b", "r", { role: "backend" }))).toBe(false);
+  expect(showsLeadTag(employee("p", "r", { role: "pm" }))).toBe(false);
+  expect(showsLeadTag(employee("f", "r"))).toBe(false);
 });

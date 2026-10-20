@@ -4,12 +4,13 @@ import type { OfficeState } from "../server/office.ts";
 import { seedFor, seedOf } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
+import { showsLeadTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
 import { buildTeamSign, buildWhiteboard, teamSignLabel, whiteboardCount } from "./whiteboard.ts";
 
 export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
 
-type Person = { art: DeskArt; name: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
+type Person = { art: DeskArt; name: Text; tag?: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
 /** An intern walking out from its parent's seat (`born`), or back to it once stopped (`left`); times are performance.now() ms. */
 type Walker = { sprite: Container; parent: string; slot: number; born: number; left?: number };
 type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
@@ -127,6 +128,16 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         p.name.anchor.set(0.5, 0);
         p.name.position.set((d.x + CELL.w / 2) * scale, (d.y + (d.table ? TABLE.h : 57)) * scale);
         names.addChild(p.name);
+        if (showsLeadTag(e)) {
+          p.tag ??= new Text({ text: "LEAD", style: { ...LABEL, fontSize: 11, fill: 0xf2c94c, stroke: { color: 0x141b2b, width: 3 } } });
+          // Over the head: the sprite's centre is 23 art pixels into the desk's frame, its top at 11.
+          p.tag.anchor.set(0.5, 1);
+          p.tag.position.set((d.x + 23) * scale, (d.y + 10) * scale);
+          names.addChild(p.tag);
+        } else if (p.tag) {
+          p.tag.destroy();
+          p.tag = undefined;
+        }
       }
     }
     for (const [id, p] of people) if (!seen.has(id)) removePerson(id, p);
@@ -158,6 +169,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
   function removePerson(id: string, p: Person) {
     p.art.root.destroy({ children: true });
     p.name.destroy();
+    p.tag?.destroy();
     people.delete(id);
   }
   function removeWalker(id: string, w: Walker) {
@@ -186,6 +198,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       p.drawn = key;
       p.art.person.y = bob(pose, f);
       p.art.person.alpha = p.name.alpha = pose === "off" ? 0.4 : 1;
+      if (p.tag) p.tag.alpha = p.name.alpha;
       drawDesk(p.art.fx, pose, f, p.art.skin, id === selected, p.hot, p.table);
     }
     for (const d of dimmers.values()) {
