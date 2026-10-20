@@ -25,10 +25,20 @@ let gate: Promise<unknown> = Promise.resolve();
 let once: Map<string, number | undefined> | null | undefined;
 // The status `claude agents` gives each listed session, if any.
 let statuses: Record<string, "busy" | "idle"> = {};
+// How many listings were asked for so far, and how many are being answered at this moment (with the most at once).
+let listings = 0;
+let listingNow = 0;
+let listingMost = 0;
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
   liveSessions: async () => {
-    await gate;
+    listings++;
+    listingMost = Math.max(listingMost, ++listingNow);
+    try {
+      await gate;
+    } finally {
+      listingNow--;
+    }
     const answer = once === undefined ? alive : once;
     once = undefined;
     return answer && new Map([...answer].map(([id, pid]) => [id, { ...(pid !== undefined && { pid }), ...(statuses[id] && { status: statuses[id] }) }]));
@@ -62,6 +72,9 @@ afterEach(() => {
   statuses = {};
   dead = new Set();
   asked = [];
+  listings = 0;
+  listingNow = 0;
+  listingMost = 0;
 });
 
 let dbN = 0;
@@ -370,11 +383,11 @@ test("a listing already under way when a session resumes does not give it back t
   alive = new Map([["resumed", 20]]);
   dead = new Set([11]);
   await hook(server, "resumed", "PreToolUse", bash("ls"));
-  await new Promise((r) => setTimeout(r, 400)); // a check is now waiting on claude agents
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a check is now waiting on claude agents
 
   await hook(server, "resumed", "SessionStart", { source: "resume" });
   release();
-  await new Promise((r) => setTimeout(r, 700));
+  while (!asked.includes(20)) await new Promise((r) => setTimeout(r, 20)); // the next listing's pid is the one asked about
   expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
   expect(asked).toContain(20);
   expect(asked).not.toContain(11);
@@ -449,4 +462,60 @@ test("a listed idle session with a raised hand stays waiting; once the hand is g
   const res = await fetch(`http://127.0.0.1:${server.port}/${TOKEN}/approve/${waiting.approvals![0].id}`, { method: "POST" });
   expect(res.status).toBe(200);
   await office(server, (s) => s.employees.asking?.status === "idle");
+});
+
+test("a listing begun before a hook leaves that session as the hook made it, and still updates the others", async () => {
+  now = 1_000_000;
+  alive = new Map([["hooked", undefined], ["other", undefined]]);
+  statuses = { hooked: "idle", other: "busy" };
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  await hook(server, "hooked", "Stop");
+  await hook(server, "other", "Stop");
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a check now waits on claude agents
+
+  await hook(server, "hooked", "SessionStart", { source: "clear" });
+  await hook(server, "hooked", "PreToolUse", bash("make build"));
+  gate = new Promise(() => {}); // later listings never answer: only the one begun above is applied
+  release();
+  const state = await office(server, (s) => s.employees.other?.status === "working");
+  expect(state.employees.hooked.status).toBe("working");
+});
+
+test("a sweep that releases a held hand pushes one snapshot: the employee and its hand go together", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  const seen: OfficeState[] = [];
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: `http://127.0.0.1:${server.port}` } } as any);
+  sockets.push(ws);
+  ws.onmessage = (m) => seen.push(JSON.parse(String(m.data)));
+  const held = hook(server, "swept", "PermissionRequest", bash("rm -rf build"));
+  await office(server, (s) => (s.approvals ?? []).length === 1);
+
+  now += 1500;
+  await office(server, (s) => s.employees.swept?.status === "offline");
+  now += 2000;
+  await office(server, (s) => ids(s).length === 0);
+  await held;
+  await new Promise((r) => setTimeout(r, 50)); // a second push, if any, has arrived
+
+  const afterHand = seen.slice(seen.findIndex((s) => (s.approvals ?? []).length === 1));
+  expect(afterHand.filter((s) => s.employees.swept && !(s.approvals ?? []).length)).toEqual([]); // the employee never shows without its hand
+  expect(afterHand.filter((s) => !s.employees.swept && (s.approvals ?? []).length)).toEqual([]);
+  expect(afterHand.filter((s) => !s.employees.swept)).toHaveLength(1); // and the sweep pushed once
+});
+
+test("the sweep and the process check share one claude agents run: two never overlap", async () => {
+  now = 1_000_000;
+  alive = new Map([["quiet", 4242]]);
+  const { server } = start();
+  let release!: () => void;
+  gate = new Promise((r) => (release = () => r(null)));
+  await hook(server, "quiet", "PreToolUse", bash("sleep 99"));
+  now += 1500; // quiet, so the sweep wants a listing too
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a listing is under way and not answered
+  await new Promise((r) => setTimeout(r, 700)); // several ticks of both timers
+  expect(listingMost).toBe(1);
+  release();
 });
