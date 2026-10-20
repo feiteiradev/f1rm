@@ -102,7 +102,9 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const any = (re: RegExp) => rest.some((a) => re.test(a));
   if (REVIEWER_NEVER.has(sub)) return true;
   if ((sub === "branch" && any(/^-[A-Za-z]*[DM]/)) || (sub === "checkout" && any(/^-[A-Za-z]*B/)) || (sub === "switch" && any(/^-[A-Za-z]*C/))) return true;
-  if ((sub === "stash" && ["drop", "clear"].includes(rest[0])) || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  // `checkout -- <path>` (nothing but options before the `--`) restores a path from the index; `checkout <branch> -- <files>` is how the red-<task> worktree gets its check files.
+  const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
+  if (sub === "stash" || (sub === "commit" && any(/^--am/)) || restoresPath || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
   if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
@@ -255,7 +257,7 @@ export function startServer({
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghMerge(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
-      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
+      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
