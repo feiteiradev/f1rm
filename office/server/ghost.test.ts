@@ -383,11 +383,11 @@ test("a listing already under way when a session resumes does not give it back t
   alive = new Map([["resumed", 20]]);
   dead = new Set([11]);
   await hook(server, "resumed", "PreToolUse", bash("ls"));
-  await new Promise((r) => setTimeout(r, 400)); // a check is now waiting on claude agents
+  while (listings === 0) await new Promise((r) => setTimeout(r, 20)); // a check is now waiting on claude agents
 
   await hook(server, "resumed", "SessionStart", { source: "resume" });
   release();
-  await new Promise((r) => setTimeout(r, 700));
+  while (!asked.includes(20)) await new Promise((r) => setTimeout(r, 20)); // the next listing's pid is the one asked about
   expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
   expect(asked).toContain(20);
   expect(asked).not.toContain(11);
