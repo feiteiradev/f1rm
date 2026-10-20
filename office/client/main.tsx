@@ -15,6 +15,7 @@ import { ENDED, without } from "./jump.ts";
 import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
+import { clearAfter } from "./remove.ts";
 import { RemoveDoor } from "./remove.tsx";
 import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle, teamOf } from "../people.ts";
@@ -219,6 +220,7 @@ function Lobby({ state, onOpen }: { state: OfficeState; onOpen: (roomId: string)
   const [size, setSize] = useState({ w: 0, h: 0 });
   // Why the office refused a Remove, until the next try.
   const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => (problem ? clearAfter(() => setProblem(null)) : undefined), [problem]);
 
   useEffect(() => {
     let dead = false;

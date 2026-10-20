@@ -457,3 +457,16 @@ test("the page's Elsewhere id is the one the server groups stray sessions under"
   const { ELSEWHERE_ID } = await import("./lobby.ts");
   expect(ELSEWHERE_ID).toBe(ELSEWHERE.id);
 });
+
+test("a Remove refusal clears itself after a few seconds, and not if it was replaced first", async () => {
+  const { clearAfter, NOTE_MS } = await import("./remove.ts");
+  const timers: { ms: number; run: () => void; live: boolean }[] = [];
+  const fake = { set: ((run: () => void, ms: number) => timers.push({ ms, run, live: true }) - 1) as never, clear: ((i: number) => (timers[i].live = false)) as never };
+  const cleared: string[] = [];
+  clearAfter(() => cleared.push("a"), NOTE_MS, fake);
+  const cancel = clearAfter(() => cleared.push("b"), NOTE_MS, fake);
+  cancel();
+  for (const t of timers) if (t.live) t.run();
+  expect(timers.map((t) => t.ms)).toEqual([5000, 5000]);
+  expect(cleared).toEqual(["a"]);
+});
