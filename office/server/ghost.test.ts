@@ -391,3 +391,18 @@ test("a swept employee takes its pending hand with it", async () => {
   expect([answer.status, await answer.text()]).toEqual([200, ""]);
   expect((await office(server, () => true)).approvals).toEqual([]);
 });
+
+test("an event is stored, and answered 200, while another process is reading the log", async () => {
+  now = 1_000_000;
+  const { server, dbPath } = start();
+  // Another process: a read transaction that stays open for a while, as `sqlite3 events.db` or a backup does.
+  const reader = Bun.spawn(["bun", "-e", `const { Database } = require("bun:sqlite"); const db = new Database(process.argv[1], { readonly: true });
+    db.run("BEGIN"); db.query("SELECT count(*) FROM events").all(); console.log("locked"); await Bun.sleep(700); db.run("COMMIT");`, dbPath], { stdout: "pipe" });
+  await reader.stdout.getReader().read(); // "locked"
+
+  const res = await hook(server, "busy", "SessionStart");
+  expect(res.status).toBe(200);
+  await reader.exited;
+  const rows = new Database(dbPath, { readonly: true }).query("SELECT json_extract(event, '$.sessionId') AS id FROM events").all();
+  expect(rows).toEqual([{ id: "busy" }]);
+});

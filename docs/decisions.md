@@ -134,3 +134,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the lobby filled with junk doors from scratch folders and the user's own tooling; a door should mean a project, and a project no longer worked on would keep its door for good, since the log replays on every start.
 - Rejected: editing or pruning events.db; a manual allowlist; showing strays as separate doors.
 - Where: G4a
+
+## 2026-10-20 events.db tolerates concurrent readers
+
+- Decision: the office sets `PRAGMA busy_timeout = 5000` on its events.db connection, so an insert waits up to 5 s for another process's read lock instead of failing.
+- Why: with another process reading events.db, the insert hit SQLITE_BUSY, POST /ingest failed and the event was lost (4 times in ~/.f1rm/office.log in one day).
+- Rejected: WAL (it adds -wal and -shm files beside ~/.f1rm/events.db that would need the same private mode, and a bounded wait already stops the loss).
+- Where: G4a
