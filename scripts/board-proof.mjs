@@ -17,7 +17,7 @@ const bin = join(home, "bin");
 mkdirSync(bin);
 writeFileSync(join(bin, "open"), "#!/bin/sh\nexit 0\n");
 chmodSync(join(bin, "open"), 0o755);
-const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` };
+const env = { ...process.env, TMPDIR: "", HOME: home, PATH: `${bin}:${process.env.PATH}` };
 
 const free = Bun.serve({ port: 0, fetch: () => new Response() });
 const port = free.port;

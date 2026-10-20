@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync }
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { machine } from "../office/server/machine.ts";
+import { junkRoots } from "../office/server/doors.ts";
 import { startServer } from "../office/server/server.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
@@ -82,7 +83,7 @@ for (const cmd of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "seed
 assert.ok(existsSync(join(repo, ".git")), "the throwaway repo exists");
 
 const SECRET = "live-secret", TOKEN = "live-token";
-const server = startServer({ port: 41900 + Math.floor(Math.random() * 100), secret: SECRET, token: TOKEN, machine, clientDir: resolve(import.meta.dir, "../office/client/dist") });
+const server = startServer({ port: 41900 + Math.floor(Math.random() * 100), secret: SECRET, token: TOKEN, machine, clientDir: resolve(import.meta.dir, "../office/client/dist"), junkRoots: junkRoots(process.env.HOME, "") }); // the repo is under tmpdir(), which is no door otherwise
 const base = `http://127.0.0.1:${server.port}`;
 const browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
 try {

@@ -40,7 +40,7 @@ const probe = Bun.serve({ port: 0, fetch: () => new Response() });
 const port = probe.port!;
 await probe.stop(true);
 
-const env = { ...process.env, HOME: home, F1RM_PORT: String(port) };
+const env = { ...process.env, TMPDIR: "", HOME: home, F1RM_PORT: String(port) };
 const install = Bun.spawnSync(["bun", CLI, "install"], { env });
 if (!install.success) throw new Error(`install failed: ${install.stderr}`);
 const server = Bun.spawn(["bun", CLI, "serve"], { env, stdout: "pipe", stderr: "inherit" });

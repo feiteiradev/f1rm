@@ -42,7 +42,7 @@ chmodSync(join(bin, "open"), 0o755);
 chmodSync(join(bin, "claude"), 0o755);
 
 const port = 41900 + Math.floor(Math.random() * 100);
-const f1rmEnv = { ...process.env, HOME: home, F1RM_PORT: String(port), PATH: `${bin}:${process.env.PATH}` };
+const f1rmEnv = { ...process.env, TMPDIR: "", HOME: home, F1RM_PORT: String(port), PATH: `${bin}:${process.env.PATH}` };
 const cli = (...args) => Bun.spawn(["bun", join(ROOT, "office/cli/f1rm.ts"), ...args], { env: f1rmEnv, cwd: ROOT, stdout: "pipe", stderr: "inherit" });
 await cli("install").exited;
 const f1rmHooks = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).hooks;

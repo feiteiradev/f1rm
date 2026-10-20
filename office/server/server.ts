@@ -1,12 +1,13 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, teamBoardFile, type BoardRow } from "./board.ts";
+import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
-import { emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
+import { isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
@@ -121,6 +122,8 @@ type Options = {
   boardsDir?: string;
   /** Where each project's edition file lives (`~/.f1rm/projects`). */
   projectsDir?: string;
+  /** The folders that never get a door: the office's own, Claude's and temp folders. Tests inject them. */
+  junkRoots?: string[];
   /** How often the board files are checked for edits. */
   boardPollMs?: number;
   /** How long a PermissionRequest hook is held for the browser before the terminal prompt decides. */
@@ -171,6 +174,7 @@ export function startServer({
   dbPath = ":memory:",
   boardsDir,
   projectsDir,
+  junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
   approvalTimeoutMs = DEFAULT_TIMEOUT_S * 1000,
   clock = Date.now,
@@ -180,8 +184,11 @@ export function startServer({
   isAlive = processRuns,
 }: Options) {
   clientDir = resolve(clientDir);
+  const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
 
   const db = new Database(dbPath, { create: true });
+  // Another process reading the log (a backup, `sqlite3`) holds a lock; an insert waits for it instead of failing and losing the event.
+  db.run("PRAGMA busy_timeout = 2000");
   db.run("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, event TEXT NOT NULL)");
   const append = db.prepare("INSERT INTO events (at, event) VALUES (?, ?)");
 
@@ -250,13 +257,11 @@ export function startServer({
     }
     return null;
   }
-  for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
-    try {
-      state = reduce(state, JSON.parse(row.event));
-    } catch {} // a row this build can't read must not stop the office from starting
-  }
-
-  // ponytail: cached per cwd for the server's lifetime; a folder that later gets `git init` needs a restart.
+  // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
+  // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
+  const folderOf = repoDir;
+  // A door is a git repo's main working directory or a folder with a settings file, and never a junk folder; any other cwd is Elsewhere.
+  // ponytail: cached per cwd for the server's lifetime; a folder that later gets `git init` or a settings file needs a restart.
   const rooms = new Map<string, Room>();
   const roomOf = (cwd: string): Room => {
     let room = rooms.get(cwd);
@@ -264,17 +269,27 @@ export function startServer({
       const common = machine.gitCommonDir(cwd);
       // A repo's room is its git common dir, so worktrees share it; a non-git folder is its own room.
       room = common
-        ? { id: common, name: basename(basename(common) === ".git" ? dirname(common) : common).replace(/\.git$/, "") }
+        ? { id: common, name: roomName(common) }
         : { id: cwd, name: basename(cwd) || cwd };
+      if (isJunk(folderOf(room.id), junk) || isJunk(cwd, junk) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
       rooms.set(cwd, room);
     }
     return room;
   };
 
+  // The doors the user removed, by when: the events before that no longer build the room.
+  const forgottenFile = projectsDir && join(dirname(projectsDir), "forgotten-doors.json");
+  const forgotten = readForgotten(forgottenFile);
+  // The log keeps the rooms it was written with; they are decided again here, so a rule change reaches the old events.
+  for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
+    try {
+      const e: F1rmEvent = JSON.parse(row.event);
+      e.room = roomOf(e.cwd);
+      if (e.at >= (forgotten[e.room.id] ?? 0)) state = reduce(state, e);
+    } catch {} // a row this build can't read must not stop the office from starting
+  }
+
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
-  // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
-  // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
-  const folderOf = (room: string) => (basename(room) === ".git" ? dirname(room) : room);
   const pmOf = (room: string) => Object.values(state.employees).find((e) => e.room === room && e.role === "pm");
   const tellEmployee = (employee: Employee, message: string) => {
     // No socket header yet: messaging is off for the session, or it has not reported since f1rm started.
@@ -382,7 +397,7 @@ export function startServer({
       if (!same(given, token)) return new Response("<!doctype html><title>f1rm</title><p>Open the office with <code>f1rm</code>.", { status: 401, headers: { "content-type": "text/html; charset=utf-8" } });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern", "remove"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       }
       if (rest[0] === "jump" && rest.length === 2) {
@@ -429,6 +444,28 @@ export function startServer({
           return Response.json({ ok: false, error: `Name a subtask of 1 to ${MAX_MESSAGE} characters.` }, { status: 400 });
         }
         return tellEmployee(employee, INTERN + subtask.trim());
+      }
+      if (rest[0] === "remove" && rest.length === 2) {
+        // Forgets an empty door and its edition; boards, evidence and the repo are never touched. A new session there brings the door back.
+        let room = "";
+        try {
+          room = decodeURIComponent(rest[1]);
+        } catch {} // a malformed escape names no door
+        if (room === ELSEWHERE.id) return Response.json({ error: "The Elsewhere door can't be removed." }, { status: 409 });
+        if (!Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such door." }, { status: 404 });
+        if (Object.values(state.employees).some((e) => e.room === room)) return Response.json({ error: "That door isn't empty." }, { status: 409 });
+        forgotten[room] = clock();
+        if (forgottenFile) writeForgotten(forgottenFile, forgotten);
+        if (projectsDir) rmSync(projectFile(projectsDir, room), { force: true });
+        for (const [cwd, r] of rooms) if (r.id === room) rooms.delete(cwd); // a folder with no settings file is Elsewhere from now on
+        const { [room]: _, ...kept } = state.rooms;
+        state = { ...state, rooms: kept };
+        const { [room]: _e, ...left } = editions;
+        editions = left;
+        delete boards[room];
+        delete teamBoards[room];
+        push();
+        return Response.json({ ok: true });
       }
       if (rest[0] === "background" && rest.length === 2) {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
@@ -489,7 +526,7 @@ export function startServer({
       if (rest[0] === "edition" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const { room, edition } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
-        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
         if (!isEdition(edition)) return Response.json({ error: "The edition is work or founder." }, { status: 400 });
         if (!projectsDir) return Response.json({ error: "This office keeps no project settings." }, { status: 500 });
         writeEdition(projectFile(projectsDir, room), edition);
@@ -501,7 +538,7 @@ export function startServer({
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
         const { room, role, task, team, brief, model, override } = body ?? {};
-        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
         if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (team != null && typeof team !== "string") || (override != null && typeof override !== "boolean")) {
           return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
@@ -523,7 +560,7 @@ export function startServer({
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
         const { room, need } = body ?? {};
-        if (typeof room !== "string" || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
         const pm = pmOf(room);
         if (rest[0] === "start-pm") {
           if (pm) return Response.json({ error: "This project already has a PM." }, { status: 409 });
@@ -605,7 +642,8 @@ export function startServer({
     reading = true;
     try {
       const nextEditions: Record<string, Edition> = {};
-      for (const id of projectsDir ? Object.keys(state.rooms) : []) {
+      const projects = Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id); // Elsewhere has no edition and no board
+      for (const id of projectsDir ? projects : []) {
         const edition = readEdition(projectFile(projectsDir!, id));
         if (edition) nextEditions[id] = edition;
       }
@@ -616,7 +654,7 @@ export function startServer({
       if (!boardsDir) return;
       const next: Record<string, BoardRow[]> = {};
       const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
-      for (const id of Object.keys(state.rooms)) {
+      for (const id of projects) {
         const rows = await readBoard(boardFile(boardsDir, id));
         if (rows.length) next[id] = rows;
         // Only the boards of teams someone in the room works in.

@@ -6,6 +6,8 @@ import type { BoardRow } from "./board.ts";
 
 export type Status = "working" | "waiting" | "idle" | "offline";
 export type Room = { id: string; name: string };
+/** The one door for sessions that are in no project; real rooms' ids are absolute paths, so it can't collide. It exists only while someone is in it. */
+export const ELSEWHERE: Room = { id: "elsewhere", name: "Elsewhere" };
 /** Where the session's terminal is, for Jump. Background sessions have neither. */
 export type TerminalLocator = { itermSessionId?: string; termProgram?: string };
 export type Employee = {
@@ -168,7 +170,15 @@ const STATUS: Record<string, Status> = {
 const internsWhere = (interns: OfficeState["interns"], keep: (i: Intern) => boolean) =>
   Object.fromEntries(Object.entries(interns).filter(([, i]) => keep(i)));
 
-export function reduce(state: OfficeState, e: F1rmEvent): OfficeState {
+const tidy = (s: OfficeState): OfficeState => {
+  if (!(ELSEWHERE.id in s.rooms) || Object.values(s.employees).some((e) => e.room === ELSEWHERE.id)) return s;
+  const { [ELSEWHERE.id]: _, ...rooms } = s.rooms;
+  return { ...s, rooms };
+};
+
+export const reduce = (state: OfficeState, e: F1rmEvent) => tidy(step(state, e));
+
+function step(state: OfficeState, e: F1rmEvent): OfficeState {
   const { [e.sessionId]: before, ...others } = state.employees;
   if (e.kind === "SessionEnd") return { ...state, employees: others, interns: internsWhere(state.interns, (i) => i.parent !== e.sessionId) };
   const role = e.role ?? before?.role ?? null;
@@ -236,5 +246,5 @@ export function sweep(
   // A lost SubagentStop must not leave an intern walking after its parent has gone quiet or left.
   const interns = internsWhere(state.interns, (i) => !!employees[i.parent] && employees[i.parent].status !== "offline");
   changed ||= Object.keys(interns).length !== Object.keys(state.interns).length;
-  return changed ? { ...state, employees, interns } : state;
+  return changed ? tidy({ ...state, employees, interns }) : state;
 }

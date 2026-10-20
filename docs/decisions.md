@@ -120,3 +120,24 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the key is permanent, so an address anyone on the machine can fetch must not hand it out; `f1rm` already opens the right link.
 - Rejected: redirecting the bare address to the key link (it gives the key to every local process), and the plain text "unauthorized" (it tells a person nothing).
 - Where: G1c
+
+## 2026-10-20 Doors only for projects
+
+- Decision: the lobby gets a door only for a git repo's main working directory (its worktrees roll up) or a folder with ~/.f1rm/projects/<enc>.json, and never for anything under ~/.f1rm, ~/.claude, /tmp, /private/tmp or $TMPDIR, symlinks resolved. Sessions in any other folder sit behind one "Elsewhere" door (room id `elsewhere`) that exists only while one of them is alive; they keep their own cwd and terminal, so Jump works. The rule is applied when the office builds its rooms, replaying events.db again each start.
+- Why: the lobby filled with junk doors from scratch folders and the user's own tooling; a door should mean a project.
+- Rejected: editing or pruning events.db; a manual allowlist; showing strays as separate doors.
+- Where: G4a
+
+## 2026-10-20 Remove a door
+
+- Decision: an empty door has a Remove action, POST /<token>/remove/<encoded room id>, which forgets the door and deletes its ~/.f1rm/projects/<enc>.json, never boards, evidence or the repo. The time is kept per room in ~/.f1rm/forgotten-doors.json (0600, written atomically); events older than it build no room. For a git repo a new event there brings the door back. A folder with no git repo has a door only because of its projects json, which Remove deletes, so a new plain session there goes behind Elsewhere until `f1rm pm` or `f1rm edition` writes the json again. The Elsewhere door cannot be removed.
+- Why: a project the user no longer works on would keep its door for good, because the log replays on every start and a room never leaves it by itself.
+- Rejected: pruning the room's rows out of events.db (the forget time hides them and leaves the log append-only); deleting its boards or evidence, or any file of the repo (Remove only forgets the door and its edition); removing a door that has someone in it.
+- Where: G4a
+
+## 2026-10-20 events.db tolerates concurrent readers
+
+- Decision: the office sets `PRAGMA busy_timeout = 2000` on its events.db connection, so an insert waits up to 2 s, inside the hook's 5 s limit, for another process's read lock instead of failing.
+- Why: with another process reading events.db, the insert hit SQLITE_BUSY, POST /ingest failed and the event was lost (4 times in ~/.f1rm/office.log in one day).
+- Rejected: WAL (it adds -wal and -shm files beside ~/.f1rm/events.db that would need the same private mode, and a bounded wait already stops the loss); a 5 s wait, as long as the hook's curl -m 5, because the reply would land too late.
+- Where: G4a
