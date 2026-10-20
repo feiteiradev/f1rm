@@ -1,8 +1,8 @@
 // The office page, rendered from the server's state alone: a lobby with a door per project, and one project's office full screen at a time.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
-import { rosterOf, scaleFor } from "./layout.ts";
+import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
 import { DOOR, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { Tray } from "./approvals.tsx";
@@ -10,7 +10,9 @@ import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
-import { JumpButton, Palette } from "./jump.tsx";
+import { JumpButton, OnEnded, Palette } from "./jump.tsx";
+import { ENDED, without } from "./jump.ts";
+import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
 import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
 import { InternBox, TellBox } from "./tell.tsx";
@@ -149,7 +151,8 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     const open = latest.current.selected;
     if (id && !open) opener.current = document.activeElement;
     setSelected(id);
-    if (!id && open) (opener.current as HTMLElement | null)?.focus?.();
+    // The opener can be the roster button of the very employee who just left; focus then goes to the next one rather than to the page.
+    if (!id && open) ((opener.current?.isConnected ? opener.current : document.querySelector(".roster button") ?? document.querySelector(".back")) as HTMLElement | null)?.focus?.();
   };
 
   useEffect(() => {
@@ -168,6 +171,11 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
 
   useEffect(() => {
     scene.current?.update(state, selected);
+  }, [state, selected]);
+
+  // The employee left (an ended session, or the office's next push): the panel closes and focus goes back.
+  useEffect(() => {
+    if (selected && selectionIn(state, selected) === null) select(null);
   }, [state, selected]);
 
   useEffect(() => {
@@ -284,7 +292,8 @@ function useRoute() {
 
 function Office() {
   const [state, setState] = useState<OfficeState | null>(null);
-  const [connected, setConnected] = useState(true);
+  // Why the connection is down, or null while it is up.
+  const [down, setDown] = useState<string | null>(null);
   const [open, go] = useRoute();
   // The socket handler is set up once, so it calls the latest `go` through a ref.
   const goRef = useRef(go);
@@ -298,15 +307,31 @@ function Office() {
     // The page lives under /<ui token>/, so the socket path inherits the token.
     const url = new URL("ws", location.href);
     url.protocol = "ws:";
-    const ws = new WebSocket(url);
-    ws.onmessage = (m) => {
-      const message = JSON.parse(m.data);
-      // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
-      if (typeof message.show === "string") return goRef.current(message.show);
-      setState(message);
-    };
-    ws.onclose = () => setConnected(false);
-    return () => ws.close();
+    // The office's first message on every connection is the whole state, so coming back reloads it.
+    return connectLive({
+      url: url.href,
+      onUp: (up) => {
+        setDown(up ? null : OFFICE_DOWN);
+        // One look says whether the office is gone or this link is no longer one it knows; a reply after the office is back changes nothing.
+        if (!up) whyDown().then((why) => setDown((d) => (d === null ? null : why)));
+      },
+      onMessage: (message) => {
+        // `f1rm` in a project's folder: this page shows that project, as if its door was clicked.
+        if (typeof message.show === "string") return goRef.current(message.show);
+        setState(message);
+      },
+    });
+  }, []);
+
+  // A Jump found the session over: the employee leaves now (the office's next push says the same) and a toast says why.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Stable, so the Provider doesn't re-render every Jump consumer on each push.
+  const onEnded = useCallback((id: string) => {
+    setState((s) => s && without(s, id));
+    setToast(ENDED);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
 
   // A project the office doesn't have (an old link, or everyone left and the server forgot it) shows the lobby with a note.
@@ -322,7 +347,7 @@ function Office() {
 
   const empty = state && Object.keys(state.rooms).length === 0;
   return (
-    <>
+    <OnEnded.Provider value={onEnded}>
       <header className="bar">
         <h1>f1rm</h1>
         {open !== null && (
@@ -333,7 +358,7 @@ function Office() {
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {inside && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {inside && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
-        {!connected && <p className="offline" role="alert">Disconnected. Run <code>f1rm start</code> again and use the new URL.</p>}
+        {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}
@@ -347,8 +372,9 @@ function Office() {
       {inside && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
+      {toast && <p className="note low pm-note toast" role="status">{toast}</p>}
       {hiring && inside && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
-    </>
+    </OnEnded.Provider>
   );
 }
 

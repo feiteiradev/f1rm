@@ -1,26 +1,24 @@
 // Jump: the panel's button and the ⌘K palette. Both ask the server to bring an employee's terminal forward.
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { OfficeState } from "../server/office.ts";
 import { rosterOf } from "./layout.ts";
 import { roleTitle } from "../people.ts";
-import { post } from "./post.ts";
+import { jumpTo } from "./jump.ts";
 import { search, type Entry } from "./search.ts";
 import "./jump.css";
 
-/** Null when the terminal came forward, otherwise why it didn't. */
-async function jumpTo(id: string): Promise<string | null> {
-  if (import.meta.env.MODE === "demo") return "Jump needs a live office; this is a recording.";
-  return post(`jump/${encodeURIComponent(id)}`);
-}
+/** Told when a Jump finds its employee's session over, so the page can drop them and say so. */
+export const OnEnded = createContext<(id: string) => void>(() => {});
 
 /** Runs a jump and tracks its outcome, for a button or the palette. */
 function useJump() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const onEnded = useContext(OnEnded);
   async function jump(id: string) {
     setBusy(true);
     setError(null);
-    const failure = await jumpTo(id);
+    const failure = await jumpTo(id, onEnded);
     setBusy(false);
     setError(failure);
     return failure === null;

@@ -1,5 +1,6 @@
 // The panel's history of a shift: what was asked and what was told.
 import type { AskLine } from "../server/ask.ts";
+import { failure } from "./post.ts";
 
 export type AskEntry = {
   kind: "ask";
@@ -38,7 +39,7 @@ export function patchEntry<K extends HistoryEntry["kind"]>(
 
 /** Feeds each piece of the answer to `onText` as it arrives. Null when the answer is complete, otherwise why it isn't. */
 export async function readAnswer(res: Response, onText: (text: string) => void): Promise<string | null> {
-  if (!res.ok) return (await res.json().catch(() => null))?.error ?? `Ask failed (${res.status}).`;
+  if (!res.ok) return failure(res.status, (await res.json().catch(() => null))?.error, `Ask failed (${res.status}).`);
   const dec = new TextDecoder();
   let buf = "";
   const take = (raw: string): string | null => {
