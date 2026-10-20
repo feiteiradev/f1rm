@@ -398,7 +398,7 @@ test("an event is stored, and answered 200, while another process is reading the
   // Another process: a read transaction that stays open for a while, as `sqlite3 events.db` or a backup does.
   const reader = Bun.spawn(["bun", "-e", `const { Database } = require("bun:sqlite"); const db = new Database(process.argv[1], { readonly: true });
     db.run("BEGIN"); db.query("SELECT count(*) FROM events").all(); console.log("locked"); await Bun.sleep(700); db.run("COMMIT");`, dbPath], { stdout: "pipe" });
-  await reader.stdout.getReader().read(); // "locked"
+  expect(new TextDecoder().decode((await reader.stdout.getReader().read()).value)).toBe("locked\n"); // the lock is held before the event is posted
 
   const res = await hook(server, "busy", "SessionStart");
   expect(res.status).toBe(200);
