@@ -234,7 +234,7 @@ export function applyListing(state: OfficeState, listed: ReadonlyMap<string, { s
   return changed ? { ...state, employees } : state;
 }
 
-export type Timeouts ={ offlineAfter: number; removeAfter: number };
+export type Timeouts = {offlineAfter: number; removeAfter: number };
 
 /**
  * Employees quiet for `offlineAfter` ms go offline and for `removeAfter` ms leave, unless `alive`
