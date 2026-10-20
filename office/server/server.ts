@@ -137,13 +137,13 @@ type Options = {
   isAlive?: (pid: number) => boolean;
 };
 
-// ESRCH: no such process. EPERM: it exists and belongs to someone else, so it is alive.
+// Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
 // ponytail: a pid the system has handed to another program since reads as alive, so that ghost waits for the quiet path; compare process start times if that is felt.
-const processRuns = (pid: number) => {
+export const processRuns = (pid: number) => {
   try {
     return process.kill(pid, 0);
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
   }
 };
 // How often `claude agents --json` is asked for the pids of employees whose pid is not known yet.

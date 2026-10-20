@@ -4,7 +4,7 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startServer } from "./server.ts";
+import { processRuns, startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
 const SECRET = "ingest-secret";
@@ -336,4 +336,9 @@ test("a session resumed under its old id is not removed for the pid its dead pro
   await new Promise((r) => setTimeout(r, 700));
   expect(ids(await office(server, (s) => ids(s).length > 0))).toEqual(["resumed"]);
   expect(asked).toContain(20);
+});
+
+test("a process that cannot be asked about is not taken for dead: only ESRCH ends a session", () => {
+  // Bun throws ERR_INVALID_ARG_TYPE, not ESRCH, for a pid beyond 2^31.
+  expect(processRuns(2 ** 31)).toBe(true);
 });
