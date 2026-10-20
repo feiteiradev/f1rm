@@ -379,6 +379,21 @@ test("the PM resolves a blocked lead, and its cleanup moves and removes files wi
   for (const s of ["after the user replies", "`~/.f1rm/kept/<repo>/`", "Bash (`mv`, `rm`)"]) expect(edit, s).toContain(s);
 });
 
+test("founder work meant to go out is marked publish on the lead's team board, and the lead tells the PM, who tells the user", () => {
+  const drafts = section("Drafts only");
+  for (const s of ["the lead marks its team-board row `publish`", "`BLOCKED <team> publish`", "The PM tells the user", "the PM tells the lead, who marks the row `done`"]) expect(drafts, s).toContain(s);
+  expect(drafts).not.toContain("the PM marks its board row");
+  expect(section("Board format")).toContain("On a team board the lead sets `publish` and `done`");
+  const pm = role("pm").body, lead = role("lead").body;
+  expect(pm).toContain("keep the `publish` list");
+  expect(pm).toContain("`BLOCKED <team> publish`");
+  expect(pm).toContain("tell the lead");
+  expect(pm).not.toContain("mark approved founder work");
+  expect(lead).toContain("`BLOCKED <team> publish`");
+  expect(lead).toContain("mark its row `publish`");
+  expect(lead).toContain("mark the row `done`");
+});
+
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
   for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);

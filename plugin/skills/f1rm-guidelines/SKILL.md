@@ -142,7 +142,7 @@ In a Founder project the PM follows this on top of everything else here.
 - Founder roles draft. They never post, publish, send, schedule or spend. The user puts everything out.
 - Connectors are fine for drafts, for example a Canva design or a Gmail draft. The office's hook blocks a Founder role's connector tools whose names say send, publish, post or schedule.
 - Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the PM asks the user for each spend and passes the answer down.
-- When the Reviewer approves founder work that is meant to go out, the PM marks its board row `publish` and tells the user. When the user says it is out, the PM marks the row `done`.
+- When the Reviewer approves founder work that is meant to go out, the lead marks its team-board row `publish` and sends the PM `BLOCKED <team> publish`, because only the user can put it out. The PM tells the user. When the user says it is out, the PM tells the lead, who marks the row `done`.
 
 ## Teams
 
@@ -251,7 +251,7 @@ Each repo has one board file, written only by the PM, and each team has its own,
 - **status.** One of `todo`, `doing`, `review`, `publish`, `done`, `blocked`. `doing` means a hire is working. `review` means the branch awaits the Reviewer. `publish` means approved founder work waiting for the user to put it out. `done` follows Reviewer sign-off only, and for work meant to go out, the user saying it is out.
 - **branch.** `worktree-<task slug>`, or `-` before hiring.
 - **task.** One line, without `|`.
-- One row per task. Update the row in place. Rows stay until the milestone cleanup removes the done ones (see Milestones and decisions).
+- One row per task. Update the row in place. Rows stay until the milestone cleanup removes the done ones (see Milestones and decisions). On a team board the lead sets `publish` and `done`.
 - **Team boards.** A lead's board is `~/.f1rm/boards/<repo>.team.<team>.md`, with `<repo>` encoded as above, titled `# Board: <repo name> / <team>`, in the same table format, one row per task of its slice. On the PM's board a team is one row: owner `lead-<team>`, branch `-`, task the slice's goal.
 
 ## Milestones and decisions
