@@ -491,10 +491,32 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
     "2026-10-19 Plugin 0.3.0",
   ]);
   // The rules-prose entries, in order, wherever other tasks' entries sit between them.
-  const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
+  const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0", "Reviewer sends back every finding"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
   expect(mine.every((i) => i >= 6)).toBe(true);
   expect(mine).toEqual([...mine].sort((x, y) => x - y));
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+});
+
+test("the Reviewer sends back every /code-review finding and merges only when none is left; ponytail-review never blocks; only a blocking round counts toward ESCALATE", () => {
+  const flow = section("Review and merge flow");
+  const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";
+  for (const s of ["every finding, blocking or not", "Merge only when none is left", "a round that holds a blocking finding counts toward `ESCALATE`", "ounds of minor findings alone never escalate"]) expect(step4, s).toContain(s);
+  expect(flow).toContain("its findings go in your report and never block");
+  expect(guidelines).toContain("Its findings go in your report and never block");
+  const handoff = section("Handoff via SendMessage");
+  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then every finding with file and line, marked blocking or not/);
+  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` that holds a blocking finding/);
+  const reviewer = role("reviewer").body;
+  for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "go in your report and never block", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
+  expect(reviewer).toContain("`CHANGES REQUESTED` with every finding");
+  expect(reviewer).not.toContain("with the blocking findings");
+  const lead = role("lead").body;
+  for (const s of ["minor findings too", "before the merge", "fixed"]) expect(lead, s).toContain(s);
+  expect(section("Teams")).toMatch(/minor findings too[^\n]*before the merge/);
+  expect(section("Teams")).not.toContain("left unfixed");
+  expect(role("pm").body).toContain("before the merge");
+  expect(guidelines).not.toContain("findings left unfixed");
+  for (const text of [guidelines, role("reviewer").body, lead, role("pm").body]) expect(text).not.toMatch(/follow-up branch|merge first|fix(ed)? (them )?later/i);
 });
 
 test("the plugin is 0.4.0, and its README names both documents", () => {

@@ -148,3 +148,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: hooks alone mis-draw sessions: a sub-agent's Stop flipped its parent to idle, and a lost event left a stale status (feit's 7 busy hires all sat on coffee). The listing is Claude Code's own truth.
 - Rejected: hooks as the only source; a greyed state for sessions the listing cannot place; keeping the listing to every 30 s (a busy session would sit on coffee for up to 30 s).
 - Where: G5a
+
+## 2026-10-20 Reviewer sends back every finding
+
+- Decision: the Reviewer sends CHANGES REQUESTED for every /code-review finding, blocking or not, and merges only when none is left. The ponytail-review findings still never block and go in the report. Only a round that holds a blocking finding counts toward ESCALATE after 2 rounds, so rounds of minor findings alone never escalate.
+- Why: the user wants minor findings fixed before the merge, not in follow-up branches (the G1 then G1b pattern).
+- Rejected: merging on APPROVED and filing follow-ups.
+- Where: reviewer-every-finding

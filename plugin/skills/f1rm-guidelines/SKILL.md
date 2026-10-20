@@ -95,7 +95,7 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
 - **reviewer**
   1. Load `f1rm:f1rm-guidelines`. The first command, `/code-review <level> worktree-<task>` (`code-review`), reviews the branch under review and gives the findings.
   2. Run the gates of the review flow on the base and on the merge.
-  3. Run `ponytail:ponytail-review` on a code branch. Its findings never block.
+  3. Run `ponytail:ponytail-review` on a code branch. Its findings go in your report and never block.
   4. At `--level high`, run `security-review` on the merge before `APPROVED`.
   - With `--content`, use the content checklist only.
 - **researcher**
@@ -152,8 +152,8 @@ In a Founder project the PM follows this on top of everything else here.
 4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists, only into its own team.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
 6. **PLAN before hiring.** A lead writes its team board, then sends the PM `PLAN <team>` with its tasks and the hires it intends. The PM checks the plan against the milestone and the caps and answers `GO <team>` without telling the user, unless the plan changes agreed scope or a decision; then it asks the user first. If the plan needs changes, the PM answers with them. The lead hires nothing before `GO`.
-7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges.
-8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each finding left unfixed) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
+7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges. It sends back every `/code-review` finding, so the lead returns a `CHANGES REQUESTED` to the dev, minor findings too, before the merge; no finding goes to a later branch.
+8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
 
 ## Brief format
 
@@ -213,10 +213,10 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - `BLOCKED <slug>` then the question or the missing input. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
   - `BLOCKED <slug> permission` then the exact command that auto mode blocked. Wait for the answer; do not work around it.
   - `APPROVED <slug> merged=<sha>` from the Reviewer, after the merge.
-  - `CHANGES REQUESTED <slug>` from the Reviewer, then the blocking findings with file and line.
+  - `CHANGES REQUESTED <slug>` from the Reviewer, then every finding with file and line, marked blocking or not.
   - `CHANGES REQUESTED <slug> conflict` from the Reviewer when the scratch merge conflicts. The dev rebases its unpushed branch onto the current main (see the review flow) and sends a new `DONE`.
   - `BLOCKED <slug> tip moved` from the Reviewer when the branch tip is not the commit in the dev's `DONE`.
-  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` on one branch. The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
+  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` that holds a blocking finding on one branch. The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
 - **The evidence block** of a `DONE` report holds:
   - each acceptance criterion's check command, with its result on the base (it fails) and on the branch (it passes);
   - the full check command and its exit code;
@@ -267,7 +267,7 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
   - **Persist**: what the hires' `keep:` lines named, and anything else a later milestone will need. It moves to `~/.f1rm/kept/<repo>/` (with `mv`) and is never deleted automatically.
   - **Delete**: the milestone's evidence folders, briefs, findings file, research, plans and done board rows.
 
-  The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (findings left unfixed). `docs/decisions.md` and git history stay.
+  The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (ponytail-review findings and anything the user must decide). `docs/decisions.md` and git history stay.
 
 **The decisions log.** `docs/decisions.md` in each project repo, created the first time a decision is recorded and committed like code.
 
@@ -284,12 +284,12 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
 1. Receive from your team's lead the branch, its brief (the dev's `DONE` report is in its Inputs) and the base branch. The base branch defaults to the branch checked out in the main working directory. The main working directory is the parent of `git rev-parse --path-format=absolute --git-common-dir`.
 2. Stop and report to the session in your `Report to` if the main working directory has uncommitted changes. Never stash or discard them.
    - Land nothing unless the branch tip equals the commit in the dev's `DONE`. Otherwise send `BLOCKED <slug> tip moved` and stop.
-3. Take the findings from the `/code-review <level>` that started your session. The review is that one; your own work is the gates below. On a code branch, also run `ponytail:ponytail-review`: its findings go in your report and never block. For work that is not code (founder work under `growth/`, and research a brief puts in the repo), skip both and check the **content checklist** instead:
+3. Take the findings from the `/code-review <level>` that started your session. The review is that one; your own work is the gates below. On a code branch, also run `ponytail:ponytail-review`: its findings go in your report and never block (they are not `/code-review` findings). For work that is not code (founder work under `growth/`, and research a brief puts in the repo), skip both and check the **content checklist** instead:
    - every acceptance criterion is met;
    - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
    - it follows `growth/brand.md`;
    - nothing in it was posted, published, sent or paid for.
-4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself. After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third; the lead decides.
+4. If any `/code-review` finding is left, send `CHANGES REQUESTED` with every finding, blocking or not, and stop. Merge only when none is left. Do not fix the code yourself. Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third `CHANGES REQUESTED`; the lead decides. Rounds of minor findings alone never escalate.
 5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
    - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
    - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
