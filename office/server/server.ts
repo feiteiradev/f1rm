@@ -21,7 +21,7 @@ const MAX_MESSAGE = 4000;
 // in the plugin are what is left.
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 // `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
-// The PM and the leads coordinate: they write boards, milestones, memory, evidence and scratch files, and leave code and landing to others.
+// The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
 const COORDINATORS = new Set(["pm", "lead"]);
@@ -246,10 +246,10 @@ export function startServer({
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
       const home = process.env.HOME ?? "";
-      const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
+      const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".f1rm", "kept"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
       if (!dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
-        return refuse("write", "The PM and leads write only boards, milestones, memory, evidence and scratch files. Put this work on the board and hire for it.");
+        return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
     if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghMerge(w))) {
