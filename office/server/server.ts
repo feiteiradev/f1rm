@@ -611,14 +611,16 @@ export function startServer({
       const next = sweep(state, clock(), timeouts, lastActive, new Set(listed.keys()));
       if (next !== state) {
         // Replay must see the same departures, or a dead session keeps its name and the next arrival is renamed.
-        for (const e of Object.values(state.employees)) {
-          if (next.employees[e.sessionId]) continue;
+        const swept = Object.values(state.employees).filter((e) => !next.employees[e.sessionId]);
+        for (const e of swept) {
           const gone = departure(e);
           append.run(gone.at, JSON.stringify(gone));
-          approvals.release(e.sessionId);
         }
+        // A release pushes by itself: after the state changes, so the one snapshot shows neither the employee nor its hand; push here only if nothing was held.
+        const held = approvals.list().length;
         state = next;
-        push();
+        swept.forEach((e) => approvals.release(e.sessionId));
+        if (approvals.list().length === held) push();
       }
     } finally {
       sweeping = false;

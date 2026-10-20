@@ -482,3 +482,26 @@ test("a listing begun before a hook leaves that session as the hook made it, and
   const state = await office(server, (s) => s.employees.other?.status === "working");
   expect(state.employees.hooked.status).toBe("working");
 });
+
+test("a sweep that releases a held hand pushes one snapshot: the employee and its hand go together", async () => {
+  now = 1_000_000;
+  const { server } = start();
+  const seen: OfficeState[] = [];
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: `http://127.0.0.1:${server.port}` } } as any);
+  sockets.push(ws);
+  ws.onmessage = (m) => seen.push(JSON.parse(String(m.data)));
+  const held = hook(server, "swept", "PermissionRequest", bash("rm -rf build"));
+  await office(server, (s) => (s.approvals ?? []).length === 1);
+
+  now += 1500;
+  await office(server, (s) => s.employees.swept?.status === "offline");
+  now += 2000;
+  await office(server, (s) => ids(s).length === 0);
+  await held;
+  await new Promise((r) => setTimeout(r, 50)); // a second push, if any, has arrived
+
+  const afterHand = seen.slice(seen.findIndex((s) => (s.approvals ?? []).length === 1));
+  expect(afterHand.filter((s) => s.employees.swept && !(s.approvals ?? []).length)).toEqual([]); // the employee never shows without its hand
+  expect(afterHand.filter((s) => !s.employees.swept && (s.approvals ?? []).length)).toEqual([]);
+  expect(afterHand.filter((s) => !s.employees.swept)).toHaveLength(1); // and the sweep pushed once
+});
