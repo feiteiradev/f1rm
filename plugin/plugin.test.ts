@@ -394,6 +394,18 @@ test("founder work meant to go out is marked publish on the lead's team board, a
   expect(lead).toContain("mark the row `done`");
 });
 
+test("pickup keeps status internal: the PM updates the rows and says nothing until the user asks \"status?\"", () => {
+  const pickup = [pmStep(1), section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))!.split("\n").find((l) => l.includes("Pick up"))!, pmPromptText()];
+  for (const t of pickup) {
+    expect(t).not.toMatch(/where things were left/);
+    expect(t).toMatch(/says? nothing|say nothing|answer[^.]* "status\?"/i);
+  }
+  expect(pmStep(1)).toContain('answer when the user asks "status?"');
+  expect(pickup[1]).toContain('answer when the user asks "status?"');
+  expect(pmPromptText()).toContain('answer when I ask "status?"');
+  expect(pmPromptText()).toContain("Speak to me only for");
+});
+
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
   for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);

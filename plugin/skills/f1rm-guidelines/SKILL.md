@@ -67,7 +67,7 @@ Playbook:
 Each role's steps, and the skill or command at each step. Every dev and specialist ends with a `DONE` report that has the evidence block (see Handoff) and lists the skills used.
 
 - **pm**
-  1. Pick up: read the board, the milestones file and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, report where things were left.
+  1. Pick up: read the board, the milestones file and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
   2. Interview with `mattpocock-skills:grilling` until the user confirms.
   3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
   4. Hire one or two leads with `f1rm hire lead`, and answer each `PLAN <team>` with `GO <team>`.
