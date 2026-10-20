@@ -59,13 +59,11 @@ process.on("SIGINT", () => (cleanup(), process.exit(130)));
 
 try {
   const decoder = new TextDecoder();
-  let seen = "";
-  for await (const chunk of server.stdout) {
-    seen += decoder.decode(chunk);
-    url = /f1rm office: (\S+)/.exec(seen)?.[1];
-    if (url) break;
-  }
-  assert.ok(url, "f1rm serve printed the office URL");
+  // serve prints the link only to a terminal; it also writes it to office-url
+  const urlFile = join(home, ".f1rm/office-url");
+  for (let i = 0; i < 400 && !existsSync(urlFile); i++) await Bun.sleep(25);
+  url = existsSync(urlFile) ? readFileSync(urlFile, "utf8") : undefined;
+  assert.ok(url, "f1rm serve wrote the office URL");
 
   const word = `MANGO-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const sid = randomUUID();

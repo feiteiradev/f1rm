@@ -3,7 +3,7 @@
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/lobby-proof.mjs
 // playwright-core is deliberately not a dependency of the repo.
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { scaleFor } from "../office/client/layout.ts";
@@ -33,9 +33,11 @@ const shop = repo("my shop"), blog = repo("blog"), docs = repo("docs"), atlas = 
 const cli = join(import.meta.dir, "../office/cli/f1rm.ts");
 assert.equal(Bun.spawnSync(["bun", cli, "install"], { env }).exitCode, 0);
 const office = Bun.spawn(["bun", cli, "serve"], { env, stdout: "pipe", stderr: "pipe" });
-const stdout = office.stdout.getReader();
-let url = "";
-while (!url) url = /f1rm office: (\S+)/.exec(new TextDecoder().decode((await stdout.read()).value))?.[1] ?? "";
+// serve prints the link only to a terminal; it also writes it to office-url
+const urlFile = join(home, ".f1rm", "office-url");
+for (let i = 0; i < 400 && !existsSync(urlFile); i++) await Bun.sleep(25);
+const url = existsSync(urlFile) ? readFileSync(urlFile, "utf8") : "";
+assert.ok(url, "f1rm serve wrote the office URL");
 
 const secret = /: (\S+)/.exec(readFileSync(join(home, ".f1rm", "ingest-headers"), "utf8"))[1];
 const send = (id, cwd, hook_event_name = "SessionStart", extra = {}) =>

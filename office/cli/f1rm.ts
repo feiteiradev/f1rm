@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -209,12 +209,33 @@ function seconds(name: string, fallback: number): number {
 
 /** The office's UI token. It lives in a private file, so a restart keeps the URL and open tabs keep working; a missing or malformed file gets a new key. */
 function linkKey(): string {
-  const saved = existsSync(LINK_KEY_FILE) ? readFileSync(LINK_KEY_FILE, "utf8").trim() : "";
-  const key = /^[\w-]{43}$/.test(saved) ? saved : randomBytes(32).toString("base64url");
   mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
-  if (key !== saved) writeFileSync(LINK_KEY_FILE, key + "\n", { mode: 0o600 });
-  chmodSync(LINK_KEY_FILE, 0o600); // mode only applies to a file being created
-  return key;
+  const saved = () => {
+    const key = existsSync(LINK_KEY_FILE) ? readFileSync(LINK_KEY_FILE, "utf8").trim() : "";
+    return /^[\w-]{43}$/.test(key) ? key : "";
+  };
+  const kept = saved();
+  if (kept) {
+    chmodSync(LINK_KEY_FILE, 0o600); // a file others could read is made private again
+    return kept;
+  }
+  // The new key goes into a private temp file first, so it is never in a file others can read, then is put in place whole.
+  const key = randomBytes(32).toString("base64url");
+  const tmp = `${LINK_KEY_FILE}.${process.pid}`;
+  writeFileSync(tmp, key + "\n", { mode: 0o600 });
+  try {
+    linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
+    return key;
+  } catch (e: any) {
+    if (e.code !== "EEXIST") throw e;
+    // ponytail: two starts that both find a malformed file may each replace it; only a missing file is raced safely
+    const other = saved();
+    if (other) return other;
+    renameSync(tmp, LINK_KEY_FILE);
+    return key;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 }
 
 function serve() {
@@ -226,7 +247,6 @@ function serve() {
   const clientDir = join(import.meta.dir, "..", "client", "dist");
   if (!existsSync(clientDir)) console.error("f1rm: client not built, run `bun run build`");
 
-  mkdirSync(F1RM_DIR, { recursive: true });
   const offlineAfterMs = seconds("F1RM_OFFLINE_AFTER", 5 * 60) * 1000;
   const removeAfterMs = seconds("F1RM_REMOVE_AFTER", 15 * 60) * 1000;
   if (removeAfterMs <= offlineAfterMs) throw new Error("F1RM_REMOVE_AFTER must be longer than F1RM_OFFLINE_AFTER");
@@ -239,7 +259,8 @@ function serve() {
   const url = `http://127.0.0.1:${port}/${token}/`;
   writeFileSync(URL_FILE, url, { mode: 0o600 });
   chmodSync(URL_FILE, 0o600);
-  console.log(`f1rm office: ${url}`);
+  // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
+  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${port}`);
   return url;
 }
 
