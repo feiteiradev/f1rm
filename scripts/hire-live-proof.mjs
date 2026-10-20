@@ -81,14 +81,12 @@ process.on("SIGINT", async () => (await cleanup(), process.exit(130)));
 
 try {
   const decoder = new TextDecoder();
-  let out = "";
   let url;
-  for await (const chunk of server.stdout) {
-    out += decoder.decode(chunk);
-    url = /f1rm office: (\S+)/.exec(out)?.[1];
-    if (url) break;
-  }
-  assert.ok(url, "f1rm serve printed the office URL");
+  // serve prints the link only to a terminal; it also writes it to office-url
+  const urlFile = join(home, ".f1rm/office-url");
+  for (let i = 0; i < 400 && !existsSync(urlFile); i++) await Bun.sleep(25);
+  url = existsSync(urlFile) ? readFileSync(urlFile, "utf8") : undefined;
+  assert.ok(url, "f1rm serve wrote the office URL");
   const base = new URL(url).origin;
 
   // A hook event with the repo as its cwd makes the repo's room, the way any session in it would.

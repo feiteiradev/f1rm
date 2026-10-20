@@ -58,6 +58,7 @@ const cleanup = () => {
 process.on("SIGINT", () => (cleanup(), process.exit(130)));
 
 try {
+  const decoder = new TextDecoder();
   // serve prints the link only to a terminal; it also writes it to office-url
   const urlFile = join(home, ".f1rm/office-url");
   for (let i = 0; i < 400 && !existsSync(urlFile); i++) await Bun.sleep(25);
