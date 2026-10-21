@@ -647,6 +647,7 @@ test("S2c: a lead counts as stalled only when it and every hire of its team have
   expect(watch([{ ...lead, idleMinutes: 5, ended: true }, member(3)], "lead-t").woke).toBe(true);
   expect(watch([{ ...lead, idleMinutes: 5, limitUntil: "20:40" }, member(3)], "lead-t").woke).toBe(true);
   expect(watch([{ ...lead, idleMinutes: 5 }, member(40)], "lead-t").woke).toBe(false);
+  expect(watch([lead, member(5, { ended: true })], "lead-t").woke).toBe(true); // a hire let go a moment ago is not an active one
 }, 30_000);
 
 test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role file carries the checkpoint line", () => {
@@ -660,6 +661,7 @@ test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role
   expect(role("pm").body).toMatch(/watch your leads/i);
   expect(role("pm").body).toContain("together with every hire of its team");
   expect(section("Watching and waking")).toContain("only when it and every hire of its team");
+  expect(section("Watching and waking")).toContain("an ended hire, one let go a moment ago too, does not count as active");
   expect(role("lead").body).toMatch(/watch your own hires/i);
   for (const name of Object.keys(ROLES)) {
     const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
