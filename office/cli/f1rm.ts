@@ -348,7 +348,7 @@ function stopService() {
 /** What a serve leaves behind: its URL, the temp it writes the URL to, and a link-key.<pid> temp, which is a hard link to the live key when serve was killed mid-write. */
 function removeOfficeFiles() {
   for (const f of [URL_FILE, URL_TMP]) rmSync(f, { force: true });
-  if (existsSync(F1RM_DIR)) for (const f of readdirSync(F1RM_DIR)) if (f.startsWith("link-key.")) rmSync(join(F1RM_DIR, f), { force: true });
+  if (existsSync(F1RM_DIR)) for (const f of readdirSync(F1RM_DIR)) if (/^link-key\.\d+$/.test(f)) rmSync(join(F1RM_DIR, f), { force: true });
 }
 
 /** The running office's URL, once it answers, or null after `ms`. */

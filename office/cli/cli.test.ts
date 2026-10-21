@@ -358,8 +358,11 @@ test("uninstall removes a link-key.<pid> temp file left by a serve that was kill
   await serveOnce(home);
   const leftover = join(home, ".f1rm", "link-key.12345");
   linkSync(keyFile(home), leftover);
+  const backup = join(home, ".f1rm", "link-key.bak"); // the user's own file, not a temp of serve
+  writeFileSync(backup, "mine");
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(existsSync(leftover)).toBe(false);
+  expect(existsSync(backup)).toBe(true);
 });
 
 test("serve runs the office on loopback with a UI token", async () => {
