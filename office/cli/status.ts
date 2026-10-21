@@ -2,6 +2,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, machine } from "../server/machine.ts";
+import { pathTooLong, projectFolder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
 
 export type Hire = {
@@ -41,8 +42,7 @@ const HEAD = 64 * 1024;
 /** Whether a recorded `cwd` is the repo's main working directory or under it (a worktree, a subfolder). */
 const inRepo = (cwd: string, repo: string) => cwd === repo || cwd.startsWith(`${repo}/`);
 
-/** Claude Code's folder name for a working directory: every character that is not a letter or digit becomes `-`. */
-const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+const folder = projectFolder;
 
 function read(path: string, from: number, length: number): string {
   const fd = openSync(path, "r");
@@ -192,6 +192,23 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
 
 const usage = "usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...";
 type Result = { out: string; err: string; code: number };
+const NO_NAMES: Result = { out: "no names\n", err: "", code: 0 };
+
+const WAITING = ":waiting";
+export type WatchName = { name: string; waiting: boolean };
+/** What the arguments of `f1rm status` ask for: a usage error, a listing, or a watch of some names (empty ones dropped, a `:waiting` suffix read once). */
+export type Args = { error: string } | { watch: false; json: boolean } | { watch: true; names: WatchName[] };
+
+/** Reads the arguments once, for `statusIn`, before it looks at the repo. */
+export function parseArgs(argv: string[]): Args {
+  if (argv[0] === "--watch") {
+    const given = argv.slice(1);
+    if (given.some((n) => n.startsWith("-"))) return { error: usage };
+    const names = given.filter(Boolean).map((n) => (n.endsWith(WAITING) ? { name: n.slice(0, -WAITING.length), waiting: true } : { name: n, waiting: false }));
+    return { watch: true, names: names.filter((n) => n.name) };
+  }
+  return argv.every((a) => a === "--json") ? { watch: false, json: argv.includes("--json") } : { error: usage };
+}
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
 const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : ""].filter(Boolean).join(", ");
@@ -208,17 +225,15 @@ function table(list: Hire[], now: number): string {
   return rows.map((r) => r.map((c, i) => c.padEnd(width[i])).join("  ").trimEnd()).join("\n") + "\n";
 }
 
-/** Runs `f1rm status`: `argv` is what follows the command. Prints nothing itself; exit code 1 when `claude agents --json` can't be read. */
-export async function status(argv: string[], deps: Omit<HiresDeps, "agents"> & { loadAgents: () => Promise<any[] | null> }): Promise<Result> {
-  if (argv.some((a) => a !== "--json")) return { out: "", err: usage, code: 1 };
+/** Runs `f1rm status` (the listing). Prints nothing itself; exit code 1 when `claude agents --json` can't be read. */
+export async function status(args: { json: boolean }, deps: Omit<HiresDeps, "agents"> & { loadAgents: () => Promise<any[] | null> }): Promise<Result> {
   const listed = await deps.loadAgents();
   if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so there is nothing to report", code: 1 };
   const list = hires({ ...deps, agents: listed });
-  return { out: argv.includes("--json") ? JSON.stringify(list, null, 2) + "\n" : table(list, deps.now), err: "", code: 0 };
+  return { out: args.json ? JSON.stringify(list, null, 2) + "\n" : table(list, deps.now), err: "", code: 0 };
 }
 
 const POLL_MS = 60_000;
-const WAITING = ":waiting";
 const QUIET_MIN = 20;
 /** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
 const LIMITED_MIN = 360;
@@ -261,9 +276,8 @@ export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
  * with no transcript yet), so what it wrote in that first minute (a wrap-up after its report) does not count; any later write ends the wait, including a message sent to it. That is how
  * an approval at the hire's desk (no message reaches anyone) puts it back, while a Reviewer waiting after CHANGES REQUESTED, which writes nothing, stays waiting.
  */
-export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
-  const names = given.filter(Boolean).map((n) => (n.endsWith(WAITING) ? { name: n.slice(0, -WAITING.length), waiting: true } : { name: n, waiting: false })).filter((n) => n.name);
-  if (!names.length) return { out: "no names\n", err: "", code: 0 };
+export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result> {
+  if (!names.length) return NO_NAMES;
   const seen = new Map<string, number | null>();
   const plain = new Set<string>();
   for (;;) {
@@ -282,36 +296,21 @@ export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
   }
 }
 
-/**
- * Claude Code cuts a project folder name at 200 characters (and adds a hash). A worktree's folder is the repo's plus `--claude-worktrees-<task>`, found by that prefix, so a cut name
- * still matches while the cut keeps the whole prefix. 150 leaves room for it with a margin; a task slug has no cap, but the prefix stays whole whatever its length.
- */
-const MAX_FOLDER = 150;
-
 /** `f1rm status` run in `cwd`, against the real Claude Code, git and clock. */
 export async function statusIn(argv: string[], cwd: string): Promise<Result> {
   // A usage mistake, or a watch with no names, is answered before the repo is looked at.
-  const watching = argv[0] === "--watch";
-  if (watching ? argv.slice(1).some((n) => n.startsWith("-")) : argv.some((a) => a !== "--json")) return { out: "", err: usage, code: 1 };
-  if (watching && !argv.slice(1).some(Boolean)) return { out: "no names\n", err: "", code: 0 };
+  const args = parseArgs(argv);
+  if ("error" in args) return { out: "", err: args.error, code: 1 };
+  if (args.watch && !args.names.length) return NO_NAMES;
   const common = machine.gitCommonDir(cwd);
   if (!common) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const repo = dirname(common);
-  if (folder(repo).length > MAX_FOLDER) {
-    return { out: "", err: `f1rm: this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`, code: 1 };
-  }
+  const tooLong = pathTooLong(repo);
+  if (tooLong) return { out: "", err: `f1rm: ${tooLong}`, code: 1 };
   const commitTime = (branch: string) => {
     const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
     return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
   };
-  if (watching) {
-    return watch(argv.slice(1), { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
-  }
-  return status(argv, {
-    repo,
-    home: process.env.HOME!,
-    now: Date.now(),
-    loadAgents: () => agents(false),
-    commitTime,
-  });
+  if (args.watch) return watch(args.names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
+  return status(args, { repo, home: process.env.HOME!, now: Date.now(), loadAgents: () => agents(false), commitTime });
 }

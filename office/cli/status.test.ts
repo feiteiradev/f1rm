@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { hireName } from "./letgo.ts";
-import { head, hires, ls, status, tail, watch, type Hire } from "./status.ts";
+import { head, hires, ls, parseArgs, status, tail, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -239,10 +239,10 @@ test("status --json prints one array of hires and exits 0; the plain output is a
   transcript(h, cwd, "cccc3333", [limitStop()], 3);
   transcript(h, REPO, "ffff7777", [...named("ffff7777", "lead-shop")], 30);
   const deps = { ...base(h, []), loadAgents: async () => [live("shop.backend-dev-checkout", "cccc3333", cwd)] };
-  const json = await status(["--json"], deps);
+  const json = await status({ json: true }, deps);
   expect(json.code).toBe(0);
   expect((JSON.parse(json.out) as Hire[]).map((x) => x.name)).toEqual(["shop.backend-dev-checkout", "lead-shop"]);
-  const plain = await status([], deps);
+  const plain = await status({ json: false }, deps);
   expect(plain.code).toBe(0);
   expect(plain.out).toContain("shop.backend-dev-checkout");
   expect(plain.out).toContain("limit until 8:40pm (Europe/Lisbon)");
@@ -250,16 +250,19 @@ test("status --json prints one array of hires and exits 0; the plain output is a
 });
 
 test("status says so on stderr and exits 1 when claude agents can't be read", async () => {
-  const r = await status([], { ...base(home(), []), loadAgents: async () => null });
+  const r = await status({ json: false }, { ...base(home(), []), loadAgents: async () => null });
   expect(r.code).toBe(1);
   expect(r.out).toBe("");
   expect(r.err).toContain("claude agents --json");
 });
 
-test("status rejects an unknown flag", async () => {
-  const r = await status(["--bogus"], { ...base(home(), []), loadAgents: async () => [] });
-  expect(r.code).toBe(1);
-  expect(r.err).toContain("usage: f1rm status [--json]");
+test("the arguments are parsed once: usage errors, no names, and the names with their :waiting suffix, empty ones dropped", () => {
+  expect(parseArgs([])).toEqual({ watch: false, json: false });
+  expect(parseArgs(["--json"])).toEqual({ watch: false, json: true });
+  for (const bad of [["--bogus"], ["--json", "x"], ["--watch", "--json"], ["--watch", "a", "-x"], ["x", "--watch"]]) expect([bad, parseArgs(bad)]).toEqual([bad, { error: expect.stringContaining("usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...") }]);
+  expect(parseArgs(["--watch", "a:waiting", "b", "", "c:waiting"])).toEqual({ watch: true, names: [{ name: "a", waiting: true }, { name: "b", waiting: false }, { name: "c", waiting: true }] });
+  expect(parseArgs(["--watch", ":waiting", ""])).toEqual({ watch: true, names: [] }); // a bare suffix is no name
+  expect(parseArgs(["--watch"])).toEqual({ watch: true, names: [] });
 });
 
 // f1rm status --watch <name>...: the stall rule the PM's and the leads' background watcher runs. The clock and the sleep are injected, so nothing here waits.
@@ -278,13 +281,20 @@ function fleet(h: string, members: Member[]) {
   return listed;
 }
 
+/** The names of a `--watch` call, parsed as the command parses them. */
+const namesOf = (names: string[]) => {
+  const parsed = parseArgs(["--watch", ...names]);
+  if (!("names" in parsed)) throw new Error("not a watch");
+  return parsed.names;
+};
+
 /** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
 async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => void = () => {}) {
   const h = home();
   const listed = fleet(h, members);
   let clock = NOW, sleeps = 0, loads = 0;
   try {
-    const r = await watch(names, {
+    const r = await watch(namesOf(names), {
       repo: REPO, home: h, now: () => clock,
       loadAgents: async () => { if (++loads > 100) throw new Error("runaway"); return listed; },
       sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; onSleep(sleeps, h, clock); },
@@ -354,7 +364,7 @@ test("watch exits 1 with the reason on stderr when claude agents can't be read, 
   for (const readable of [0, 3]) {
     polls = 0;
     sleeps = 0;
-    const r = await watch(["lead-a"], deps(readable));
+    const r = await watch(namesOf(["lead-a"]), deps(readable));
     expect([r.code, r.out, r.err]).toEqual([1, "", expect.stringContaining("claude agents --json")]);
     expect(polls).toBe(readable + 1);
   }
@@ -488,6 +498,7 @@ test("a sibling project's folder is never read, and the worktree folder of the l
   const cwd = `${repo}/.claude/worktrees/${task}`;
   expect(folder(cwd).length).toBeGreaterThan(200);
   const h = home();
+  // The hash suffix here is a guess; the match does not depend on it, only on the 200 characters that keep the whole prefix.
   transcript(h, cwd, "long0001", [talk("x")], 6, cwd, `${folder(cwd).slice(0, 200)}-9f8e7d`);
-  expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name.length > 0, x.idleMinutes])).toEqual([[true, 6]]);
+  expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([[`shop.backend-dev-${task}`, 6]]);
 });

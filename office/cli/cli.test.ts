@@ -942,13 +942,16 @@ test("status refuses, in every form, a repo whose encoded project folder is over
   const home = tempHome();
   const stub = stubClaude(0, []);
   // A character of the path is a character of the folder name, so the repo's path length is the folder's.
+  const made: string[] = [];
   const repoOfLength = (length: number) => {
     const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-")); // a short fixed root, whatever TMPDIR is
+    made.push(parent);
     const repo = join(parent, "r".repeat(length - parent.length - 1));
     mkdirSync(repo);
     Bun.spawnSync(["git", "init", "-q", repo]);
     return repo;
   };
+  try {
   const long = repoOfLength(151), fine = repoOfLength(150);
   expect([long.length, fine.length]).toEqual([151, 150]);
   for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
@@ -966,6 +969,34 @@ test("status refuses, in every form, a repo whose encoded project folder is over
   expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
   const none = await f1rmIn(long, home, stub.bin, "status", "--watch");
   expect([none.code, none.out, none.err]).toEqual([0, "no names", ""]);
+  const bare = await f1rmIn(long, home, stub.bin, "status", "--watch", ":waiting");
+  expect([bare.code, bare.out, bare.err]).toEqual([0, "no names", ""]);
+  // At 150 a named watch gets past the length check: it is still running (asleep for its first minute) after a moment, with nothing on stderr.
+  const proc = Bun.spawn(["bun", CLI, "status", "--watch", "lead-a"], { cwd: fine, env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
+  await Promise.race([proc.exited, Bun.sleep(1500)]);
+  const refused = proc.exitCode !== null;
+  proc.kill();
+  expect(refused).toBe(false);
+  } finally {
+    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("f1rm pm refuses, before it starts anything, a repo whose encoded project folder is over 150 characters", () => {
+  const made = mkdtempSync("/tmp/f1rm-long-");
+  try {
+    const parent = realpathSync(made);
+    const repo = join(parent, "r".repeat(151 - parent.length - 1));
+    mkdirSync(repo);
+    Bun.spawnSync(["git", "init", "-q", repo]);
+    const stub = stubClaude();
+    const r = pmIn(repo, { stdin: "w\n" }, stub);
+    expect([r.code, r.out]).toEqual([1, expect.not.stringContaining("Work or a Founder")]);
+    expect(r.err).toContain("this repo's path is too long for f1rm status");
+    expect(stub.args()).toEqual([]); // no claude session was started
+  } finally {
+    rmSync(made, { recursive: true, force: true });
+  }
 });
 
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {

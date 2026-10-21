@@ -28,6 +28,21 @@ const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
+/** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
+export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+
+/**
+ * Claude Code cuts a project folder name at 200 characters (and adds a hash). A worktree's folder is the repo's plus `--claude-worktrees-<task>`, found by that prefix, so a cut name
+ * still matches while the cut keeps the whole prefix. 150 leaves room for it with a margin; a task slug has no cap, but the prefix stays whole whatever its length.
+ */
+export const MAX_FOLDER = 150;
+
+/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm pm`, `f1rm hire` and `f1rm status`. */
+export const pathTooLong = (repo: string): string | null =>
+  projectFolder(repo).length > MAX_FOLDER
+    ? `this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`
+    : null;
+
 /** The PM session name `f1rm pm` gives this repo; a hire reports to it. */
 export function pmName(cwd: string, m: Pick<typeof machine, "gitCommonDir"> = machine): string {
   const common = m.gitCommonDir(cwd);
@@ -111,6 +126,9 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const name = lead ? `lead-${task}` : team ? `${team}.${role}-${task}` : `${role}-${task}`;
   if (req.name && req.name !== name) throw new Error(`this hire's name must be "${name}"`);
   const reportTo = team ? `lead-${team}` : req.reportTo;
+
+  const tooLong = pathTooLong(cwd);
+  if (tooLong) throw new HireRefused(tooLong, null);
 
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);

@@ -1,6 +1,6 @@
 // Seam 2: the real `f1rm hire`, run against a stub `claude` first on PATH.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,6 +38,28 @@ function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process
 }
 
 const pmArgs = ["--report-to", "pm-shop"];
+
+test("f1rm hire refuses, before it starts anything, a repo whose encoded project folder is over 150 characters, and hires at 150", () => {
+  const made: string[] = [];
+  const repoOfLength = (length: number) => {
+    const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-"));
+    made.push(parent);
+    const repo = join(parent, "r".repeat(length - parent.length - 1));
+    mkdirSync(repo);
+    return repo;
+  };
+  try {
+    const stub = stubClaude([]);
+    const long = hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoOfLength(151));
+    expect(long.code).not.toBe(0);
+    expect(long.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters");
+    expect(stub.argv()).toBeNull(); // nothing was started
+    const fine = hire(stubClaude([]), [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoOfLength(150));
+    expect(fine.code).toBe(0);
+  } finally {
+    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("hire runs exactly claude --bg --agent --name --worktree with the slash command and report-to ahead of the brief", () => {
   const stub = stubClaude([]);
