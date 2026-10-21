@@ -293,7 +293,7 @@ test("an idle member frees its team slot though its state still says working; bu
   expect(hire(stubClaude(idle), designer, repo).code).toBe(0);
   expect(hire(stubClaude([...idle, form]), designer, repo).code).toBe(0);
   // A busy member, a blocked one (no status) and one whose status is unreadable all count as working.
-  for (const other of [at("working", "backend-dev-api", "api", "busy"), at("blocked", "backend-dev-api", "api"), at("blocked", "backend-dev-api", "api", "idle"), at("working", "backend-dev-api", "api"),at("working", "backend-dev-api", "api", 7), at("working", "backend-dev-api", "api", "IDLE")]) {
+  for (const other of [at("working", "backend-dev-api", "api", "busy"), at("blocked", "backend-dev-api", "api"), at("blocked", "backend-dev-api", "api", "idle"), at("working", "backend-dev-api", "api"), at("working", "backend-dev-api", "api", 7), at("working", "backend-dev-api", "api", "IDLE")]) {
     const r = hire(stubClaude([lead, form, other]), designer, repo);
     expect(r.err).toContain("team checkout already has 2 working (the cap is 2 per team)");
   }
