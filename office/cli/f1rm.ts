@@ -20,6 +20,7 @@ const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 const CREATED_FILE = join(F1RM_DIR, "created.json");
 // The running office's tokenized URL, so `f1rm start` can open an office that is already up.
 const URL_FILE = join(F1RM_DIR, "office-url");
+const URL_TMP = `${URL_FILE}.tmp`; // serve writes here, then renames over URL_FILE
 // The token in that URL, kept across restarts until uninstall (or the user) deletes it.
 const LINK_KEY_FILE = join(F1RM_DIR, "link-key");
 // The `f1rm` command `install` puts on PATH, so a terminal finds this clone.
@@ -196,7 +197,7 @@ function uninstall() {
   writeSettings(after);
   if (existsSync(PLIST)) stopService();
   // The event log, the boards and the editions stay: they are the user's history, not install state.
-  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, `${URL_FILE}.tmp`, LINK_KEY_FILE]) rmSync(f, { force: true });
+  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, URL_TMP, LINK_KEY_FILE]) rmSync(f, { force: true });
   if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
@@ -257,9 +258,9 @@ function serve() {
 
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
-  rmSync(`${URL_FILE}.tmp`, { force: true }); // a stale one would keep its old mode
-  writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
-  renameSync(`${URL_FILE}.tmp`, URL_FILE); // one step, so a reader never sees the file empty
+  rmSync(URL_TMP, { force: true }); // a stale one would keep its old mode
+  writeFileSync(URL_TMP, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
   announce(url);
   return url;
@@ -338,7 +339,7 @@ function stopService() {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
   rmSync(URL_FILE, { force: true });
-  rmSync(`${URL_FILE}.tmp`, { force: true });
+  rmSync(URL_TMP, { force: true });
 }
 
 /** The running office's URL, once it answers, or null after `ms`. */
