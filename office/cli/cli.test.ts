@@ -7,6 +7,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { machine } from "../server/machine.ts";
 import { SLUG } from "./hire.ts";
 import { hireName, hireTask, letgo } from "./letgo.ts";
+import { longRepos } from "./long-repo.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -938,64 +939,55 @@ test("status --watch with no name left prints no names and exits 0 at once; a fl
   expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>[:waiting]...");
 });
 
-test("status refuses, in every form, a repo whose encoded project folder is over 150 characters, and works at 150", async () => {
+test("status refuses, in every form, a git repo whose encoded project folder is over 150 characters, and works at 150", async () => {
   const home = tempHome();
   const stub = stubClaude(0, []);
-  // A character of the path is a character of the folder name, so the repo's path length is the folder's.
-  const made: string[] = [];
-  const repoOfLength = (length: number) => {
-    const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-")); // a short fixed root, whatever TMPDIR is
-    made.push(parent);
-    const repo = join(parent, "r".repeat(length - parent.length - 1));
-    mkdirSync(repo);
-    Bun.spawnSync(["git", "init", "-q", repo]);
-    return repo;
-  };
+  const repos = longRepos();
   try {
-  const long = repoOfLength(151), fine = repoOfLength(150);
-  expect([long.length, fine.length]).toEqual([151, 150]);
-  for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
-    const r = await f1rmIn(long, home, stub.bin, "status", ...args);
-    expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
-    expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
-  }
-  expect((await f1rmIn(fine, home, stub.bin, "status", "--json")).code).toBe(0);
-  expect((await f1rmIn(fine, home, stub.bin, "status", "--watch", "")).out).toBe("no names");
-  // A usage mistake or no names at all is answered before the length is looked at.
-  const bogus = await f1rmIn(long, home, stub.bin, "status", "--bogus");
-  expect([bogus.code, bogus.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
-  expect(bogus.err).not.toContain("too long");
-  const flag = await f1rmIn(long, home, stub.bin, "status", "--watch", "--json");
-  expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
-  const none = await f1rmIn(long, home, stub.bin, "status", "--watch");
-  expect([none.code, none.out, none.err]).toEqual([0, "no names", ""]);
-  const bare = await f1rmIn(long, home, stub.bin, "status", "--watch", ":waiting");
-  expect([bare.code, bare.out, bare.err]).toEqual([0, "no names", ""]);
-  // At 150 a named watch gets past the length check: it is still running (asleep for its first minute) after a moment, with nothing on stderr.
-  const proc = Bun.spawn(["bun", CLI, "status", "--watch", "lead-a"], { cwd: fine, env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
-  await Promise.race([proc.exited, Bun.sleep(1500)]);
-  const refused = proc.exitCode !== null;
-  proc.kill();
-  expect(refused).toBe(false);
+    const long = repos.repo(151), fine = repos.repo(150);
+    expect([long.length, fine.length]).toEqual([151, 150]);
+    for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
+      const r = await f1rmIn(long, home, stub.bin, "status", ...args);
+      expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
+      expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
+    }
+    expect((await f1rmIn(fine, home, stub.bin, "status", "--json")).code).toBe(0);
+    // A usage mistake or no names at all is answered before the length is looked at.
+    const bogus = await f1rmIn(long, home, stub.bin, "status", "--bogus");
+    expect([bogus.code, bogus.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+    expect(bogus.err).not.toContain("too long");
+    const flag = await f1rmIn(long, home, stub.bin, "status", "--watch", "--json");
+    expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+    for (const names of [[], [":waiting"], [""]]) {
+      const r = await f1rmIn(long, home, stub.bin, "status", "--watch", ...names);
+      expect([names.join(","), r.code, r.out, r.err]).toEqual([names.join(","), 0, "no names", ""]);
+    }
   } finally {
-    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+    repos.cleanup();
   }
 });
 
-test("f1rm pm refuses, before it starts anything, a repo whose encoded project folder is over 150 characters", () => {
-  const made = mkdtempSync("/tmp/f1rm-long-");
+test("f1rm pm checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder start a PM, a long repo or a subfolder of one is refused", () => {
+  const repos = longRepos();
   try {
-    const parent = realpathSync(made);
-    const repo = join(parent, "r".repeat(151 - parent.length - 1));
-    mkdirSync(repo);
-    Bun.spawnSync(["git", "init", "-q", repo]);
-    const stub = stubClaude();
-    const r = pmIn(repo, { stdin: "w\n" }, stub);
-    expect([r.code, r.out]).toEqual([1, expect.not.stringContaining("Work or a Founder")]);
-    expect(r.err).toContain("this repo's path is too long for f1rm status");
-    expect(stub.args()).toEqual([]); // no claude session was started
+    const short = repos.repo(100), long = repos.repo(151), plain = repos.repo(151, { git: false });
+    const pmStarts = (cwd: string) => {
+      const stub = stubClaude();
+      const r = pmIn(cwd, { stdin: "w\n" }, stub);
+      return { ...r, started: stub.args().length > 0 };
+    };
+    for (const cwd of [short, repos.inside(short, 170), plain]) {
+      const r = pmStarts(cwd);
+      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
+    }
+    for (const cwd of [long, repos.inside(long, 170)]) {
+      const r = pmStarts(cwd);
+      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 1, false]); // refused before anything starts, and before the edition is asked
+      expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
+      expect(r.out).not.toContain("Work or a Founder");
+    }
   } finally {
-    rmSync(made, { recursive: true, force: true });
+    repos.cleanup();
   }
 });
 

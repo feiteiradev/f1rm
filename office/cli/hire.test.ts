@@ -1,8 +1,9 @@
 // Seam 2: the real `f1rm hire`, run against a stub `claude` first on PATH.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { longRepos } from "./long-repo.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
@@ -39,25 +40,27 @@ function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process
 
 const pmArgs = ["--report-to", "pm-shop"];
 
-test("f1rm hire refuses, before it starts anything, a repo whose encoded project folder is over 150 characters, and hires at 150", () => {
-  const made: string[] = [];
-  const repoOfLength = (length: number) => {
-    const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-"));
-    made.push(parent);
-    const repo = join(parent, "r".repeat(length - parent.length - 1));
-    mkdirSync(repo);
-    return repo;
-  };
+test("f1rm hire checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder hire, a long repo or a subfolder of one is refused with nothing started", () => {
+  const repos = longRepos();
   try {
-    const stub = stubClaude([]);
-    const long = hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoOfLength(151));
-    expect(long.code).not.toBe(0);
-    expect(long.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters");
-    expect(stub.argv()).toBeNull(); // nothing was started
-    const fine = hire(stubClaude([]), [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoOfLength(150));
-    expect(fine.code).toBe(0);
+    const short = repos.repo(100), long = repos.repo(151), plain = repos.repo(151, { git: false });
+    const lead = (cwd: string) => {
+      const stub = stubClaude([]);
+      return { ...hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], cwd), started: stub.argv() !== null };
+    };
+    for (const cwd of [short, repos.inside(short, 170), plain]) {
+      const r = lead(cwd);
+      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
+    }
+    for (const cwd of [long, repos.inside(long, 170)]) {
+      const r = lead(cwd);
+      expect([cwd.length, r.code === 0, r.started]).toEqual([cwd.length, false, false]);
+      expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
+      // Not a cap refusal: the message stands alone, without the advice to leave the task todo.
+      expect(r.err).not.toContain("Do not hire");
+    }
   } finally {
-    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+    repos.cleanup();
   }
 });
 

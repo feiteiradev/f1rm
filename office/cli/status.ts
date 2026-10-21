@@ -2,7 +2,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, machine } from "../server/machine.ts";
-import { pathTooLong, projectFolder } from "./hire.ts";
+import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
 
 export type Hire = {
@@ -42,7 +42,6 @@ const HEAD = 64 * 1024;
 /** Whether a recorded `cwd` is the repo's main working directory or under it (a worktree, a subfolder). */
 const inRepo = (cwd: string, repo: string) => cwd === repo || cwd.startsWith(`${repo}/`);
 
-const folder = projectFolder;
 
 function read(path: string, from: number, length: number): string {
   const fd = openSync(path, "r");
@@ -296,21 +295,35 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
   }
 }
 
-/** `f1rm status` run in `cwd`, against the real Claude Code, git and clock. */
+export type RunDeps = { home: string; now: () => number; loadAgents: () => Promise<any[] | null>; sleep: (ms: number) => Promise<void>; commitTime: (branch: string) => number | null };
+
+/** `f1rm status` for `repo`: refuses a path Claude Code would cut, else runs what `args` asks for. `deps` default to the real Claude Code, git and clock; a test injects them. */
+export async function statusFor(args: Args, repo: string, deps: Partial<RunDeps> = {}): Promise<Result> {
+  if ("error" in args) return { out: "", err: args.error, code: 1 };
+  const tooLong = pathTooLong(repo);
+  if (tooLong) return { out: "", err: `f1rm: ${tooLong}`, code: 1 };
+  const d: RunDeps = {
+    home: process.env.HOME!,
+    now: Date.now,
+    loadAgents: () => agents(false),
+    sleep: (ms) => Bun.sleep(ms),
+    commitTime: (branch) => {
+      const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
+      return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
+    },
+    ...deps,
+  };
+  if (args.watch) return watch(args.names, { repo, home: d.home, now: d.now, loadAgents: d.loadAgents, sleep: d.sleep });
+  return status(args, { repo, home: d.home, now: d.now(), loadAgents: d.loadAgents, commitTime: d.commitTime });
+}
+
+/** `f1rm status` run in `cwd`. */
 export async function statusIn(argv: string[], cwd: string): Promise<Result> {
   // A usage mistake, or a watch with no names, is answered before the repo is looked at.
   const args = parseArgs(argv);
-  if ("error" in args) return { out: "", err: args.error, code: 1 };
+  if ("error" in args) return statusFor(args, cwd);
   if (args.watch && !args.names.length) return NO_NAMES;
   const common = machine.gitCommonDir(cwd);
   if (!common) return { out: "", err: "f1rm: not in a git repo", code: 1 };
-  const repo = dirname(common);
-  const tooLong = pathTooLong(repo);
-  if (tooLong) return { out: "", err: `f1rm: ${tooLong}`, code: 1 };
-  const commitTime = (branch: string) => {
-    const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
-    return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
-  };
-  if (args.watch) return watch(args.names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
-  return status(args, { repo, home: process.env.HOME!, now: Date.now(), loadAgents: () => agents(false), commitTime });
+  return statusFor(args, dirname(common));
 }

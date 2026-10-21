@@ -37,11 +37,14 @@ export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
  */
 export const MAX_FOLDER = 150;
 
-/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm pm`, `f1rm hire` and `f1rm status`. */
+/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm status` on the repo it runs in, and by `f1rm pm` and `f1rm hire` on the root of a git repo (see `rootTooLong`). */
 export const pathTooLong = (repo: string): string | null =>
   projectFolder(repo).length > MAX_FOLDER
     ? `this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`
     : null;
+
+/** `pathTooLong` for the repo a command runs in, given its git common dir: the root of a git repo (not the subfolder it ran from), and nothing outside git, where `f1rm pm` and `f1rm hire` still work. */
+export const rootTooLong = (common: string | null): string | null => (common ? pathTooLong(dirname(common)) : null);
 
 /** The PM session name `f1rm pm` gives this repo; a hire reports to it. */
 export function pmName(cwd: string, m: Pick<typeof machine, "gitCommonDir"> = machine): string {
@@ -63,7 +66,10 @@ export function readRoles(): Role[] {
     });
 }
 
-/** The cap, or a count that can't be made, stopped a hire. `working` is null when it couldn't count. */
+/**
+ * A hire was refused. `working` is the number of working hires when a cap refused it: the caller then adds the advice to leave the task todo and tell the session to report to.
+ * It is null for any other refusal (the hires couldn't be counted, the repo's path is too long): the message then stands alone.
+ */
 export class HireRefused extends Error {
   constructor(message: string, readonly working: number | null) {
     super(message);
@@ -100,9 +106,9 @@ export type HireRequest = {
 
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
- * and a HireRefused when the cap is full or the working hires can't be counted. The caller spawns it.
+ * and a HireRefused when the cap is full, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
  */
-export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions"> = machine): Promise<string[]> {
+export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions" | "gitCommonDir"> = machine): Promise<string[]> {
   const { role, task, team, cwd, brief, model, override, level, content, skills: added = [], extra = [] } = req;
   const roles = readRoles();
   if (!roles.some((r) => r.id === role)) {
@@ -127,7 +133,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (req.name && req.name !== name) throw new Error(`this hire's name must be "${name}"`);
   const reportTo = team ? `lead-${team}` : req.reportTo;
 
-  const tooLong = pathTooLong(cwd);
+  const tooLong = rootTooLong(m.gitCommonDir(cwd));
   if (tooLong) throw new HireRefused(tooLong, null);
 
   const live = await m.backgroundSessions();

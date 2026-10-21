@@ -8,7 +8,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
-import { hire, pathTooLong, pmName } from "./hire.ts";
+import { hire, pmName, rootTooLong } from "./hire.ts";
 import { letgo } from "./letgo.ts";
 import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
@@ -460,9 +460,9 @@ function edition() {
 async function pm() {
   // The PM and its leads watch with f1rm status, which can't serve a repo whose project folder name Claude Code cuts: refuse before anything starts.
   const common = machine.gitCommonDir(process.cwd());
-  const tooLong = pathTooLong(common ? dirname(common) : process.cwd());
+  const tooLong = rootTooLong(common);
   if (tooLong) throw new Error(tooLong);
-  const name = pmName(process.cwd());
+  const name = pmName(process.cwd(), { gitCommonDir: () => common });
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.

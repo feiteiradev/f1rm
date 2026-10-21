@@ -3,16 +3,16 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
-import { head, hires, ls, parseArgs, status, tail, watch, type Hire } from "./status.ts";
+import { longRepos } from "./long-repo.ts";
+import { head, hires, ls, parseArgs, status, statusFor, tail, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const MIN = 60_000;
 
 const home = () => mkdtempSync(join(tmpdir(), "f1rm-status-"));
-/** Claude Code's folder for a working directory: every character that is not a letter or digit becomes `-`. */
-const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
 
 /**
  * Writes `lines` as the session's transcript under the encoded `cwd` folder, last written `agoMin` minutes before NOW. The last line is the system line Claude Code
@@ -501,4 +501,20 @@ test("a sibling project's folder is never read, and the worktree folder of the l
   // The hash suffix here is a guess; the match does not depend on it, only on the 200 characters that keep the whole prefix.
   transcript(h, cwd, "long0001", [talk("x")], 6, cwd, `${folder(cwd).slice(0, 200)}-9f8e7d`);
   expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([[`shop.backend-dev-${task}`, 6]]);
+});
+
+test("a named watch gets past the length check at 150 characters, and is refused at 151, with the work injected", async () => {
+  const repos = longRepos();
+  try {
+    const deps = { home: home(), now: () => NOW, loadAgents: async () => null, sleep: async () => {}, commitTime: () => null };
+    const args = parseArgs(["--watch", "lead-a"]);
+    // At 150 it goes on to poll (and here finds claude agents unreadable): the error is that, not the path.
+    const fine = await statusFor(args, repos.repo(150, { git: false }), deps);
+    expect([fine.code, fine.err]).toEqual([1, expect.stringContaining("claude agents --json")]);
+    expect(fine.err).not.toContain("too long");
+    const long = await statusFor(args, repos.repo(151, { git: false }), deps);
+    expect([long.code, long.err]).toEqual([1, expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)")]);
+  } finally {
+    repos.cleanup();
+  }
 });
