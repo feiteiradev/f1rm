@@ -676,7 +676,11 @@ test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.
   for (const s of [
     "**Ask the user only for big decisions.**", "business, product scope (what the software does), design direction, strategy", "irreversible or external actions (push, deploy, spend, data deletion, messaging people)",
     "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", "logged in `docs/decisions.md` with their why", "Decisions taken without you",
+    // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say.
+    "irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
   ]) expect(who, s).toContain(s);
+  expect(who).toMatch(/a cap override[^\n]*goes to the PM as `BLOCKED`/);
+  expect(section("Cap rule")).toContain("only after the user has approved exceeding the cap");
   expect(guidelines.split("product scope (what the software does)")).toHaveLength(2);
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("Ask the user only for big decisions");
