@@ -608,11 +608,10 @@ test("service restarts a running office: it retries the load while launchd is st
   expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(2);
 });
 
-test("service off, and uninstall, unload the login agent and remove it", () => {
+test("service off, and uninstall, unload the login agent and remove it", async () => {
   for (const off of [["service", "off"], ["uninstall"]]) {
-    const home = tempHome();
+    const { home } = await installedOnFreePort(); // not port 4170: the user's own office may be listening there, and service off waits for it to stop
     const stub = stubBin();
-    stub.run(home, "install");
     stub.run(home, "service");
     expect(stub.run(home, ...off).code).toBe(0);
     expect(existsSync(join(home, "Library", "LaunchAgents", "dev.f1rm.office.plist"))).toBe(false);
@@ -683,11 +682,10 @@ test("start with no office running starts the background office, opens it, and e
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
 
-test("service off, and uninstall, remove an office-url.tmp and a link-key.<pid> left by a serve that died mid-write", () => {
+test("service off, and uninstall, remove an office-url.tmp and a link-key.<pid> left by a serve that died mid-write", async () => {
   for (const off of [["service", "off"], ["uninstall"]]) {
-    const home = tempHome();
-    const stub = stubBin();
-    stub.run(home, "install"); // no login agent: removeOfficeFiles does the cleaning for both commands
+    const { home } = await installedOnFreePort();
+    const stub = stubBin(); // installed, but no login agent: removeOfficeFiles does the cleaning for both commands
     writeFileSync(join(home, ".f1rm", "office-url.tmp"), "http://127.0.0.1:1/key/");
     writeFileSync(join(home, ".f1rm", "link-key.12345"), "a key's temp file");
     expect(stub.run(home, ...off).code).toBe(0);
@@ -695,6 +693,30 @@ test("service off, and uninstall, remove an office-url.tmp and a link-key.<pid> 
     expect(existsSync(join(home, ".f1rm", "link-key.12345"))).toBe(false);
   }
 });
+
+test("service off, and uninstall, wait for an office that is still stopping, so what it writes late is removed too", async () => {
+  for (const off of [["service", "off"], ["uninstall"]]) {
+    const { home, port } = await installedOnFreePort();
+    const stub = stubBin();
+    writeFileSync(join(stub.bin, "launchctl"), `#!/bin/sh\necho "launchctl $@" >> "${stub.bin}/calls.log"\n[ "$1" = bootout ] && touch "${stub.bin}/booted"\nexit 0\n`, { mode: 0o755 });
+    stub.run(home, "service");
+    // A fake office on the hook's port. launchctl bootout returns at once, as the real one does; the office takes a while to stop,
+    // and writes its files on the way out.
+    const office = Bun.serve({ port, fetch: () => new Response("office") });
+    const stopped = (async () => {
+      while (!existsSync(join(stub.bin, "booted"))) await Bun.sleep(10);
+      await Bun.sleep(600);
+      writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${port}/key/`);
+      writeFileSync(join(home, ".f1rm", "office-url.tmp"), "x");
+      writeFileSync(join(home, ".f1rm", "link-key.12345"), "x");
+      office.stop(true);
+    })();
+    const proc = Bun.spawn(["bun", CLI, ...off], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "ignore", stderr: "ignore" });
+    expect(await proc.exited).toBe(0);
+    await stopped;
+    expect(readdirSync(join(home, ".f1rm")).filter((f) => /^(office-url|link-key\.)/.test(f))).toEqual([]);
+  }
+}, 20_000);
 
 test("uninstall keeps the event log and the PM's boards", () => {
   const home = tempHome();

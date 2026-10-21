@@ -187,7 +187,7 @@ function installBin(): string {
   return onPath ? `f1rm command installed in ${BIN}.` : `f1rm command installed in ${BIN}. Add ${dirname(BIN)} to your PATH to run it from anywhere.`;
 }
 
-function uninstall() {
+async function uninstall() {
   const before = readSettings();
   if (!installed(before)) return console.log("f1rm hooks are not installed.");
   const after = withoutF1rm(before);
@@ -195,7 +195,7 @@ function uninstall() {
   for (const event of created.events) if (after.hooks![event]?.length === 0) delete after.hooks![event];
   if (created.hooks && Object.keys(after.hooks!).length === 0) delete after.hooks;
   writeSettings(after);
-  if (existsSync(PLIST)) stopService();
+  if (existsSync(PLIST)) await stopService(installed(before));
   // The event log, the boards and the editions stay: they are the user's history, not install state.
   for (const f of [HEADERS_FILE, CREATED_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
   removeOfficeFiles();
@@ -299,7 +299,7 @@ const launchctl = (...args: string[]) => Bun.spawnSync(["launchctl", ...args], {
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Runs the office at login and keeps it running, so the hooks always reach it. Running it again restarts it. */
-function service() {
+async function service() {
   if (process.argv[3] === "off") return serviceOff();
   startService();
   console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
@@ -334,15 +334,22 @@ function startService() {
   }
 }
 
-function serviceOff() {
-  stopService();
+async function serviceOff() {
+  await stopService(installed(readSettings()));
   removeOfficeFiles();
   console.log("f1rm background office stopped and removed.");
 }
 
-function stopService() {
+async function stopService(hook: { url: string } | null) {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
+  // bootout returns before the office has stopped, and an office that is still stopping writes its files late: wait until its
+  // port refuses connections. ponytail: 5 s cap, then clean up anyway; an office that hasn't bound its port yet is not seen.
+  if (!hook) return;
+  const url = `http://127.0.0.1:${new URL(hook.url).port}/`;
+  for (const end = Date.now() + 5000; Date.now() < end; await Bun.sleep(100)) {
+    if (await fetch(url, { signal: AbortSignal.timeout(500) }).then(() => false, (e) => e.name !== "TimeoutError")) return;
+  }
 }
 
 /** What a serve leaves behind: its URL, the temp it writes the URL to, and a link-key.<pid> temp, which is a hard link to the live key when serve was killed mid-write. */
