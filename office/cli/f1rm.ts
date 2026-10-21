@@ -500,7 +500,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const r = await statusIn(process.argv.slice(3), process.cwd());
     process.stdout.write(r.out);
     if (r.err) console.error(r.err);
-    process.exit(r.code);
+    process.exitCode = r.code; // not process.exit: on a pipe it cuts the output at 64 KB
   },
 };
 const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json]";

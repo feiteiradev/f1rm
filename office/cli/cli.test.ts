@@ -909,6 +909,23 @@ test("help prints the usage line and exits 0; an unknown command, here included,
   }
 });
 
+test("status prints all of a large list into a pipe, not the first 64 KB", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const projects = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(projects, { recursive: true });
+  const count = 400;
+  for (let i = 0; i < count; i++) {
+    writeFileSync(join(projects, `s${i}.jsonl`), JSON.stringify({ type: "agent-name", agentName: `shop.backend-dev-task-${i}`, sessionId: `s${i}` }) + "\n");
+  }
+  // A reader that is slow to start, as a pipe to `jq` or a watcher can be.
+  const proc = Bun.spawn(["sh", "-c", `bun "${CLI}" status --json | (sleep 1; cat)`], { cwd: repo, env: { ...process.env, HOME: home, PATH: `${stubClaude(0, []).bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  expect(out.length).toBeGreaterThan(65536);
+  expect(JSON.parse(out)).toHaveLength(count);
+});
+
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
   const home = tempHome(), repo = realpathSync(repoDir("shop"));
   Bun.spawnSync(["git", "init", "-q", repo]);
