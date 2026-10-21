@@ -279,15 +279,15 @@ function fleet(h: string, members: Member[]) {
 }
 
 /** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
-async function watchFleet(names: string[], members: Member[], cap = 30) {
+async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => void = () => {}) {
   const h = home();
   const listed = fleet(h, members);
   let clock = NOW, sleeps = 0, loads = 0;
   try {
     const r = await watch(names, {
-      repo: REPO, home: h, now: () => clock, commitTime: () => { throw new Error("watch reads no commits"); },
+      repo: REPO, home: h, now: () => clock,
       loadAgents: async () => { if (++loads > 100) throw new Error("runaway"); return listed; },
-      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; },
+      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; onSleep(sleeps, h, clock); },
     });
     return { ...r, sleeps, woke: true };
   } catch (e) {
@@ -310,8 +310,8 @@ test("a name given as name:waiting is judged only for ended, missing and a limit
   expect(await watchFleet(["lead-a:waiting", "lead-b"], [a({ ago: 600 }), a({ name: "lead-b", ago: 19 })])).toMatchObject({ sleeps: 1, out: "lead-b: idle 20 minutes\n" });
 });
 
-test("a watch with the runaway budget: a poll before the first sleep, or a failure that is read as fine, can't hang the suite", async () => {
-  // watchFleet throws "runaway" after 100 polls, so a watcher that never sleeps fails the test instead of hanging; this one sleeps first and polls once a minute.
+test("a quiet fleet is polled once a minute after a first sleep: 17 sleeps to reach 20 minutes idle; the fake loader's budget makes a watcher that never sleeps fail", async () => {
+  // watchFleet throws "runaway" after 100 polls, so a watcher that never sleeps fails the test instead of hanging.
   const r = await watchFleet(["lead-a"], [a()]);
   expect(r.sleeps).toBe(17);
 });
@@ -350,7 +350,7 @@ test("watch exits 1 with the reason on stderr when claude agents can't be read, 
   const h = home();
   const listed = fleet(h, [a()]);
   let clock = NOW, polls = 0, sleeps = 0;
-  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, commitTime: () => null, sleep: async (ms: number) => { if (++sleeps > 100) throw new Error("runaway"); clock += ms; }, loadAgents: async () => (++polls > readable ? null : listed) });
+  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, sleep: async (ms: number) => { if (++sleeps > 100) throw new Error("runaway"); clock += ms; }, loadAgents: async () => (++polls > readable ? null : listed) });
   for (const readable of [0, 3]) {
     polls = 0;
     sleeps = 0;
@@ -427,4 +427,56 @@ test("a transcript is found by its session id in a project folder Claude Code tr
   transcript(h, "/code/other", "long0003", [...named("long0003", "lead-other")], 6, "/code/other");
   const list = hires({ ...base(h, [live("shop.backend-dev-checkout", "long0001", cwd)]), repo });
   expect(list.map((x) => [x.name, x.idleMinutes])).toEqual([["shop.backend-dev-checkout", 5], ["lead-long", 6]]);
+});
+
+test("a waiting name is watched as a plain one as soon as it writes again: an approved hire that then goes idle wakes, one that never writes stays waiting", async () => {
+  const touch = (at: number) => (n: number, h: string, clock: number) => {
+    if (n !== at) return;
+    const cwd = `${REPO}/.claude/worktrees/x`;
+    const file = join(h, ".claude", "projects", folder(cwd), "w0aaaaaa.jsonl");
+    utimesSync(file, new Date(clock), new Date(clock));
+  };
+  const hire: Member = { name: "shop.backend-dev-x", ago: 3 };
+  // It writes at the 5th minute, so it is plain from the 5th poll, and idle for 20 minutes at the 25th.
+  const approved = await watchFleet(["shop.backend-dev-x:waiting"], [hire], 100, touch(5));
+  expect([approved.woke, approved.sleeps, approved.out]).toEqual([true, 25, "shop.backend-dev-x: idle 20 minutes\n"]);
+  // One that never writes (a Reviewer waiting after CHANGES REQUESTED, one waiting for letgo) is never woken for being quiet.
+  expect((await watchFleet(["shop.backend-dev-x:waiting"], [hire], 100)).woke).toBe(false);
+  // A waiting name with no transcript yet that starts writing is plain from then on too.
+  const late = await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: null }], 100, (n, h, clock) => {
+    if (n === 2) transcript(h, `${REPO}/.claude/worktrees/x`, "w0aaaaaa", [talk("x")], 0);
+  });
+  expect([late.woke, late.sleeps]).toEqual([true, 20]); // its first line is at NOW, so it is idle for 20 minutes at the 20th poll
+});
+
+test("a worktree folder of a repo whose own folder is just under 200 characters is found though Claude Code cut it", () => {
+  const h = home();
+  const repo = `/code/${"y".repeat(184)}`; // 190 characters encoded; its worktree folders are over 200
+  const cwd = `${repo}/.claude/worktrees/checkout`;
+  const cut = `${folder(repo)}--claude-worktrees-checkout`.slice(0, 200) + "-9f8e7d";
+  transcript(h, cwd, "cut00001", [talk("x")], 4, cwd, cut);
+  const [one] = hires({ ...base(h, [live("shop.backend-dev-checkout", "cut00001", cwd)]), repo });
+  expect(one.idleMinutes).toBe(4);
+});
+
+test("a fresh re-hire with no transcript yet is the newest entry of its name, not the old one beside it", async () => {
+  const r = await watchFleet(["lead-a"], [a({ ago: 300 }), a({ ago: null })]);
+  expect([r.sleeps, r.out]).toEqual([1, "lead-a: no activity time\n"]);
+});
+
+test("an ended hire whose main transcript is outside the window is not listed, whatever its sub-agents wrote", () => {
+  const h = home();
+  transcript(h, REPO, "old00001", [...named("old00001", "lead-old")], 30 * 60);
+  const dir = join(h, ".claude", "projects", folder(REPO), "old00001", "subagents");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent-a.jsonl"), "{}\n");
+  utimesSync(join(dir, "agent-a.jsonl"), new Date(NOW - 5 * MIN), new Date(NOW - 5 * MIN));
+  expect(hires(base(h, []))).toEqual([]);
+});
+
+test("a stop whose text says only rate_limit_error is a limit stop with no time", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "rle00001", [limitStop("API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}")], 3);
+  expect(hires(base(h, [live("shop.backend-dev-checkout", "rle00001", cwd)]))[0].limitUntil).toBe("unknown");
 });

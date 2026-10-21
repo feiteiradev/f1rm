@@ -113,7 +113,7 @@ function limitUntil(end: string): string | null {
   const line = lastTurn(end);
   if (line?.type !== "assistant" || line.isApiErrorMessage !== true) return null;
   const text = textOf(line.message?.content);
-  if (!/\blimit\b/i.test(text)) return null;
+  if (!/limit/i.test(text)) return null;
   return /\bresets\s+(.+)/i.exec(text)?.[1].trim() ?? "unknown";
 }
 
@@ -129,26 +129,30 @@ function newest(dir: string): number {
   }));
 }
 
-/** Every transcript in this repo's own folder and in the folders of its worktrees. A long path is stored truncated to 200 characters with a hash after it, so a folder that starts with those 200 is looked at too; the ended ones are told apart by the folder they record. */
-function transcripts(home: string, repo: string): Transcript[] {
+/** Every transcript in this repo's own folder and in the folders of its worktrees. A long path is stored truncated to 200 characters with a hash after it, so a worktree's folder name is cut too, and a folder that starts with those 200 is looked at; the ended ones are told apart by the folder they record. */
+function transcripts(home: string, repo: string, listedIds: Set<unknown>, now: number): Transcript[] {
   const root = join(home, ".claude", "projects");
   if (!existsSync(root)) return [];
   const own = folder(repo);
-  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`) || (own.length > 200 && d.startsWith(own.slice(0, 200))));
+  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`.slice(0, 200)) || (own.length > 200 && d.startsWith(own.slice(0, 200))));
   // A folder or a transcript that `claude rm` removes between the listing and the stat is skipped; any other error stays visible.
   return mine.flatMap((d) =>
     ls(join(root, d)).filter((f) => f.endsWith(".jsonl")).flatMap((f) => {
       const path = join(root, d, f);
       const st = statSync(path, { throwIfNoEntry: false });
       const id = f.slice(0, -".jsonl".length);
-      return st ? [{ id, path, mtime: Math.max(st.mtimeMs, newest(join(root, d, id, "subagents"))) }] : [];
+      if (!st) return [];
+      // The sub-agent walk is only for a session that is listed or was written inside the window.
+      const matters = listedIds.has(id) || now - st.mtimeMs <= ENDED_WINDOW_MS;
+      return [{ id, path, mtime: matters ? Math.max(st.mtimeMs, newest(join(root, d, id, "subagents"))) : st.mtimeMs }];
     }),
   );
 }
 
 /** The hires of `repo`: the live ones `agents` lists there, then the ended ones its transcripts still hold from the last day, newest first. */
 export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps): Hire[] {
-  const files = transcripts(home, repo);
+  const listedIds = new Set(listed.map((a) => a?.sessionId));
+  const files = transcripts(home, repo, listedIds, now);
   const byId = new Map(files.map((t) => [t.id, t]));
   const make = (name: string, sessionId: string, t: Transcript | undefined, a?: any): Hire => {
     const { role, team, task, reviewer } = hireName(name)!;
@@ -170,7 +174,6 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
     .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && repoOf(a.cwd) === repo)
     .map((a) => (liveNames.add(a.name), make(a.name, String(a.sessionId ?? ""), byId.get(String(a.sessionId)), a)));
 
-  const listedIds = new Set(listed.map((a) => a?.sessionId));
   const ended = new Map<string, Transcript>();
   for (const t of files.sort((x, y) => y.mtime - x.mtime)) {
     if (listedIds.has(t.id) || now - t.mtime > ENDED_WINDOW_MS) continue;
@@ -220,12 +223,18 @@ const QUIET_MIN = 20;
 /** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
 const LIMITED_MIN = 360;
 
+/** The entry that stands for a name: a live one over an ended one, and among them the newest, a fresh session with no transcript yet counting as the newest of all. */
+function entryOf(name: string, list: Hire[]): Hire | undefined {
+  const age = (x: Hire) => (x.ended ? 1e12 : 0) + (x.idleMinutes ?? -1);
+  return list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || age(x) < age(best) ? x : best), undefined);
+}
+
 /**
  * Why a named session is stalled, or null if it is not: missing, ended, on a limit stop, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is.
  * One that is waiting (for an answer, or for the user at its desk) is judged only for the first three, never for being quiet. With two entries of a name (an old session next to a re-hired one) the newest decides.
  */
 function stalled(name: string, list: Hire[], waiting: boolean): string | null {
-  const h = list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || (x.idleMinutes ?? Infinity) < (best.idleMinutes ?? Infinity) ? x : best), undefined);
+  const h = entryOf(name, list);
   if (!h) return "missing from the list";
   if (h.ended) return "ended";
   if (h.limitUntil) return `limit stop until ${h.limitUntil}`;
@@ -239,8 +248,6 @@ function stalled(name: string, list: Hire[], waiting: boolean): string | null {
 }
 
 export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
-  /** Never called: the stall rule reads no commit, so a poll spawns no git. */
-  commitTime?: HiresDeps["commitTime"];
   now: () => number;
   loadAgents: () => Promise<any[] | null>;
   /** Waits `ms`; injected so a test needs no real time. */
@@ -250,16 +257,26 @@ export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
 /**
  * `f1rm status --watch <name>[:waiting]...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
  * It fails closed: when `claude agents --json` can't be read it returns exit 1. With no name left it returns at once.
+ * A waiting name is watched as a plain one as soon as it writes again: its activity is noted at the first poll that sees it, and any later activity ends the wait. That is how
+ * an approval at the hire's desk (no message reaches anyone) puts it back, while a Reviewer waiting after CHANGES REQUESTED, which writes nothing, stays waiting.
  */
 export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
   const names = given.filter(Boolean).map((n) => (n.endsWith(WAITING) ? { name: n.slice(0, -WAITING.length), waiting: true } : { name: n, waiting: false })).filter((n) => n.name);
   if (!names.length) return { out: "no names\n", err: "", code: 0 };
+  const seen = new Map<string, number | null>();
+  const plain = new Set<string>();
   for (;;) {
     await deps.sleep(POLL_MS);
     const listed = await deps.loadAgents();
     if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so the watch ends", code: 1 };
     const list = hires({ ...deps, commitTime: () => null, now: deps.now(), agents: listed });
-    const out = names.flatMap((n) => { const why = stalled(n.name, list, n.waiting); return why ? [`${n.name}: ${why}`] : []; });
+    for (const n of names.filter((x) => x.waiting && !plain.has(x.name))) {
+      const at = entryOf(n.name, list)?.lastActivity;
+      const now = at ? Date.parse(at) : null;
+      if (!seen.has(n.name)) seen.set(n.name, now);
+      else if (now != null && now > (seen.get(n.name) ?? -Infinity)) plain.add(n.name);
+    }
+    const out = names.flatMap((n) => { const why = stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; });
     if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
   }
 }
@@ -276,7 +293,7 @@ export async function statusIn(argv: string[], cwd: string): Promise<Result> {
   if (argv[0] === "--watch") {
     const names = argv.slice(1);
     if (names.some((n) => n.startsWith("-"))) return { out: "", err: usage, code: 1 };
-    return watch(names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), commitTime, sleep: (ms) => Bun.sleep(ms) });
+    return watch(names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
   }
   return status(argv, {
     repo,
