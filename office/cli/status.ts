@@ -77,22 +77,28 @@ export const tail = (path: string) =>
 /** The entries of a folder, none if it was removed since it was listed. */
 export const ls = (dir: string) => gone(() => readdirSync(dir), [] as string[]);
 
+/** The last line of the conversation in a piece of transcript: the one that is an assistant, user or queue-operation line, past whatever bookkeeping Claude Code writes after a turn. */
+function lastTurn(end: string): any {
+  for (const l of end.split("\n").reverse()) {
+    if (!/"type":"(?:assistant|user|queue-operation)"/.test(l)) continue;
+    try {
+      const line = JSON.parse(l);
+      if (["assistant", "user", "queue-operation"].includes(line.type)) return line;
+    } catch {} // a cut or odd line is not a turn
+  }
+  return null;
+}
+
 /**
  * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
- * names none; null when the transcript's last assistant line is not an API error about a limit.
+ * names none; null unless the last line of the conversation is an API error about a limit, so a delivered `resume` or a reply clears it.
  */
 function limitUntil(end: string): string | null {
-  const last = end.split("\n").findLast((l) => l.includes('"type":"assistant"'));
-  if (!last) return null;
-  try {
-    const line = JSON.parse(last);
-    if (line.isApiErrorMessage !== true) return null;
-    const text = (line.message?.content ?? []).map((c: any) => String(c?.text ?? "")).join(" ");
-    if (!/\blimit\b/i.test(text)) return null;
-    return /\bresets\s+(.+)/i.exec(text)?.[1].trim() ?? "unknown";
-  } catch {
-    return null;
-  }
+  const line = lastTurn(end);
+  if (line?.type !== "assistant" || line.isApiErrorMessage !== true) return null;
+  const text = (line.message?.content ?? []).map((c: any) => String(c?.text ?? "")).join(" ");
+  if (!/\blimit\b/i.test(text)) return null;
+  return /\bresets\s+(.+)/i.exec(text)?.[1].trim() ?? "unknown";
 }
 
 type Transcript = { id: string; path: string; mtime: number; tail?: string };

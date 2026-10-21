@@ -63,6 +63,24 @@ test("a hire whose last assistant line is the limit stop shows when the limit li
   expect(one.idleMinutes).toBe(3);
 });
 
+test("limitUntil needs the stop to be the last line of the conversation: a delivered resume or a reply clears it, a new stop replaces it", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  const until = (lines: object[]) => {
+    transcript(h, cwd, "eeee9999", lines, 3);
+    return hires(base(h, [live("shop.backend-dev-checkout", "eeee9999", cwd)]))[0].limitUntil;
+  };
+  const user = { type: "user", message: { role: "user", content: "resume" } };
+  const noise = [{ type: "system", subtype: "turn_duration" }, { type: "cost-state" }, { type: "last-prompt" }]; // what Claude Code writes after any turn
+  expect(until([talk("work"), limitStop(), ...noise])).toBe("8:40pm (Europe/Lisbon)");
+  expect(until([limitStop(), ...noise, user])).toBeNull(); // the delivered resume
+  expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: "resume" }, ...noise])).toBeNull(); // delivered, not yet read
+  expect(until([limitStop(), user, talk("on it")])).toBeNull();
+  expect(until([limitStop(), user, limitStop("You've hit your session limit · resets 11pm (Europe/Lisbon)"), ...noise])).toBe("11pm (Europe/Lisbon)");
+  // Text that merely contains a conversation line's type does not count as one.
+  expect(until([limitStop(), { type: "api-request-blob", body: '{"type":"user","type":"assistant"}' }])).toBe("8:40pm (Europe/Lisbon)");
+});
+
 test("a limit stop followed by later work is no longer a stop, and the reset reads as the text gives it", () => {
   const h = home();
   const cwd = `${REPO}/.claude/worktrees/checkout`;
