@@ -1,6 +1,6 @@
 // Seam: `f1rm status`, from a temp HOME's transcripts, an injected `claude agents --json` list, an injected clock and an injected commit lookup.
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { hires, status, type Hire } from "./status.ts";
@@ -112,6 +112,19 @@ test("an ended hire is named by its last name line, so a rename counts, also pas
   transcript(h, cwd, "aaaa7002", [...named("aaaa7002", "shop.frontend-dev-old"), ...filler, ...named("aaaa7002", "shop.frontend-dev-new")], 20);
   transcript(h, cwd, "aaaa7003", [...named("aaaa7003", "shop.designer-only"), ...filler], 30); // the one name line is far from the end
   expect(hires(base(h, [])).map((x) => x.name)).toEqual(["shop.backend-dev-new", "shop.frontend-dev-new", "shop.designer-only"]);
+});
+
+test("a transcript that vanishes between the folder listing and the read is skipped; other hires still show", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "gone0001", [talk("x")], 5);
+  transcript(h, cwd, "here0002", [talk("x")], 5);
+  // The listing sees the entry, the stat finds nothing behind it: as a transcript `claude rm` removes in between.
+  const dir = join(h, ".claude", "projects", folder(cwd));
+  rmSync(join(dir, "gone0001.jsonl"));
+  symlinkSync(join(h, "nowhere.jsonl"), join(dir, "gone0001.jsonl"));
+  const list = hires(base(h, [live("shop.backend-dev-checkout", "gone0001", cwd), live("shop.frontend-dev-ui", "here0002", cwd)]));
+  expect(list.map((x) => [x.name, x.lastActivity === null])).toEqual([["shop.backend-dev-checkout", true], ["shop.frontend-dev-ui", false]]);
 });
 
 test("a name that is listed live is not also shown from an older ended transcript, and a reused name shows once", () => {

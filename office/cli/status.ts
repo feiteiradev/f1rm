@@ -51,15 +51,37 @@ function read(path: string, from: number, length: number): string {
   }
 }
 
-const head = (path: string) => read(path, 0, HEAD);
+const head = (path: string) => {
+  try {
+    return read(path, 0, HEAD);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return ""; // removed since it was listed
+    throw e;
+  }
+};
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
 function tail(path: string): string {
-  const size = statSync(path).size;
-  const from = Math.max(0, size - TAIL);
-  const text = read(path, from, Math.min(size, TAIL));
-  return from > 0 ? text.slice(text.indexOf("\n") + 1) : text; // the first line may be cut
+  try {
+    const size = statSync(path).size;
+    const from = Math.max(0, size - TAIL);
+    const text = read(path, from, Math.min(size, TAIL));
+    return from > 0 ? text.slice(text.indexOf("\n") + 1) : text; // the first line may be cut
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return ""; // removed since it was listed
+    throw e;
+  }
+}
+
+/** The entries of a folder, none if it was removed since it was listed. */
+function ls(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw e;
+  }
 }
 
 /**
@@ -90,10 +112,12 @@ function transcripts(home: string, repo: string): Transcript[] {
   if (!existsSync(root)) return [];
   const own = folder(repo);
   const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`));
+  // A folder or a transcript that `claude rm` removes between the listing and the stat is skipped; any other error stays visible.
   return mine.flatMap((d) =>
-    readdirSync(join(root, d)).filter((f) => f.endsWith(".jsonl")).map((f) => {
+    ls(join(root, d)).filter((f) => f.endsWith(".jsonl")).flatMap((f) => {
       const path = join(root, d, f);
-      return { id: f.slice(0, -".jsonl".length), path, mtime: statSync(path).mtimeMs };
+      const st = statSync(path, { throwIfNoEntry: false });
+      return st ? [{ id: f.slice(0, -".jsonl".length), path, mtime: st.mtimeMs }] : [];
     }),
   );
 }
