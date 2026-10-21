@@ -596,6 +596,9 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "**Missing or no activity time**", "check again in a minute; if still so, treat it as ended",
     "until its first new line", // the transcript still ends on the stop until the hire answers `resume`
   ]) expect(w, s).toContain(s);
+  // A stop with no time may be any API error that mentions a limit, so `resume` can meet it again.
+  const noTime = /^ *- \*\*Limit stop with no time\*\*.*$/m.exec(w)?.[0] ?? "";
+  for (const s of ["keep it out of the watcher's names until its first new line shows", "if it stops on the same error again, treat it as ended"]) expect(noTime, s).toContain(s);
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
