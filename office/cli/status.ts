@@ -301,9 +301,10 @@ export type RunDeps = { home: string; now: () => number; loadAgents: () => Promi
  * `f1rm status` for `repo` (null outside git). It answers, in this order: a usage mistake, a watch with no names, a folder that is not a git repo, a path Claude Code would cut,
  * and else runs what `args` asks for. `deps` default to the real Claude Code, git and clock; a test injects them.
  */
-export async function statusFor(args: Args, repo: string | null, deps: Partial<RunDeps> = {}): Promise<Result> {
+export async function statusFor(args: Args, repoOf: string | null | (() => string | null), deps: Partial<RunDeps> = {}): Promise<Result> {
   if ("error" in args) return { out: "", err: args.error, code: 1 };
   if (args.watch && !args.names.length) return NO_NAMES;
+  const repo = typeof repoOf === "function" ? repoOf() : repoOf; // asked for only now, when there is something to serve
   if (!repo) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const tooLong = pathTooLong(repo);
   if (tooLong) return { out: "", err: `f1rm: ${tooLong}`, code: 1 };
@@ -323,9 +324,8 @@ export async function statusFor(args: Args, repo: string | null, deps: Partial<R
 }
 
 /** `f1rm status` run in `cwd`. */
-export async function statusIn(argv: string[], cwd: string): Promise<Result> {
-  const args = parseArgs(argv);
-  // Git is asked only when there is something to serve.
-  const common = "error" in args || (args.watch && !args.names.length) ? null : machine.gitCommonDir(cwd);
-  return statusFor(args, common ? dirname(common) : null);
-}
+export const statusIn = (argv: string[], cwd: string): Promise<Result> =>
+  statusFor(parseArgs(argv), () => {
+    const common = machine.gitCommonDir(cwd);
+    return common ? dirname(common) : null;
+  });

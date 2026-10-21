@@ -199,8 +199,10 @@ export async function hire(words: string[]): Promise<number> {
   // Git is asked once; the edition file, the PM's name and the path limit all read it.
   const common = machine.gitCommonDir(process.cwd());
   const git = { gitCommonDir: () => common };
+  // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
+  const root = common ? dirname(common) : process.cwd();
   try {
-    argv = await planHire({ role, name, task, team, cwd: process.cwd(), edition: readEdition(editionFile(process.cwd(), git)), brief, reportTo: reportTo ?? pmName(process.cwd(), git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
+    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(process.cwd(), git)), brief, reportTo: reportTo ?? pmName(process.cwd(), git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(
@@ -209,6 +211,6 @@ export async function hire(words: string[]): Promise<number> {
     }
     throw err;
   }
-  const proc = Bun.spawn(argv, { env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
+  const proc = Bun.spawn(argv, { cwd: root, env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
   return proc.exited;
 }

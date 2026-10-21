@@ -10,6 +10,7 @@ export function longRepos() {
     repo(length: number, { git = true } = {}): string {
       const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-"));
       made.push(parent);
+      if (length < parent.length + 2) throw new Error(`can't build a path of ${length} characters under ${parent}`);
       const path = join(parent, "r".repeat(length - parent.length - 1));
       if (path.length !== length) throw new Error(`can't build a path of ${length} characters under ${parent} (got ${path.length})`);
       mkdirSync(path);
@@ -18,6 +19,7 @@ export function longRepos() {
     },
     /** A subfolder of `path` whose own path is exactly `length` characters. */
     inside(path: string, length: number): string {
+      if (length < path.length + 2) throw new Error(`can't build a subfolder of ${length} characters under ${path}`);
       const sub = join(path, "s".repeat(length - path.length - 1));
       if (sub.length !== length) throw new Error(`can't build a subfolder of ${length} characters under ${path} (got ${sub.length})`);
       mkdirSync(sub, { recursive: true });

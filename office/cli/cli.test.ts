@@ -967,6 +967,17 @@ test("status refuses, in every form, a git repo whose encoded project folder is 
   }
 });
 
+test("status in a folder that is not a git repo says so and exits 1, except for a watch with no names", async () => {
+  const home = tempHome(), stub = stubClaude(0, []);
+  const plain = repoDir("plain");
+  for (const args of [["--json"], [], ["--watch", "lead-a"]]) {
+    const r = await f1rmIn(plain, home, stub.bin, "status", ...args);
+    expect([args.join(" "), r.code, r.out, r.err]).toEqual([args.join(" "), 1, "", expect.stringContaining("not in a git repo")]);
+  }
+  const none = await f1rmIn(plain, home, stub.bin, "status", "--watch");
+  expect([none.code, none.out]).toEqual([0, "no names"]);
+});
+
 test("f1rm pm checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder start a PM, a long repo or a subfolder of one is refused", () => {
   const repos = longRepos();
   try {

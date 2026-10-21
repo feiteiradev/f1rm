@@ -503,6 +503,19 @@ test("a sibling project's folder is never read, and the worktree folder of the l
   expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([[`shop.backend-dev-${task}`, 6]]);
 });
 
+test("statusFor outside git says so, and asks for the repo only when there is something to serve", async () => {
+  const deps = { home: home(), now: () => NOW, loadAgents: async () => [], sleep: async () => {}, commitTime: () => null };
+  expect(await statusFor(parseArgs(["--json"]), null, deps)).toEqual({ out: "", err: "f1rm: not in a git repo", code: 1 });
+  expect(await statusFor(parseArgs(["--watch", "lead-a"]), null, deps)).toMatchObject({ code: 1, err: "f1rm: not in a git repo" });
+  let asked = 0;
+  const lazy = () => (asked++, "/code/shop");
+  await statusFor(parseArgs(["--bogus"]), lazy, deps);
+  await statusFor(parseArgs(["--watch", ":waiting"]), lazy, deps);
+  expect(asked).toBe(0); // a usage mistake and a watch with no names never ask git
+  expect((await statusFor(parseArgs(["--json"]), lazy, deps)).code).toBe(0);
+  expect(asked).toBe(1);
+});
+
 test("a named watch gets past the length check at 150 characters, and is refused at 151, with the work injected", async () => {
   const repos = longRepos();
   try {
@@ -512,7 +525,7 @@ test("a named watch gets past the length check at 150 characters, and is refused
     const fine = await statusFor(args, repos.repo(150, { git: false }), deps);
     expect([fine.code, fine.err]).toEqual([1, expect.stringContaining("claude agents --json")]);
     expect(fine.err).not.toContain("too long");
-    // Both entry points agree on what is answered before the path: no names, and a usage mistake.
+    // statusFor answers, before it looks at the path: no names, and a usage mistake.
     const longRepo = repos.repo(151, { git: false });
     expect(await statusFor(parseArgs(["--watch"]), longRepo, deps)).toEqual({ out: "no names\n", err: "", code: 0 });
     expect(await statusFor(parseArgs(["--watch", ":waiting"]), longRepo, deps)).toMatchObject({ out: "no names\n", code: 0 });

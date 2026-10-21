@@ -20,11 +20,12 @@ function stubClaude(sessions: Session[] | null) {
   if (sessions) writeFileSync(agents, JSON.stringify(sessions));
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${agents}" 2>/dev/null; exit $?; fi\nprintf '%s\\0' "$@" >> "${log}"\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)' >> "${envLog}"\necho "backgrounded · 7c5dcf5d"\n`,
+    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${agents}" 2>/dev/null; exit $?; fi\nprintf '%s\\0' "$@" >> "${log}"\npwd -P >> "${bin}/cwd.log"\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)' >> "${envLog}"\necho "backgrounded · 7c5dcf5d"\n`,
     { mode: 0o755 },
   );
   return {
     bin,
+    cwd: () => (existsSync(join(bin, "cwd.log")) ? readFileSync(join(bin, "cwd.log"), "utf8").trim() : null),
     argv: () => (existsSync(log) ? readFileSync(log, "utf8").split("\0").slice(0, -1) : null),
     env: () => (existsSync(envLog) ? readFileSync(envLog, "utf8").split("\n").filter(Boolean) : []),
   };
@@ -39,6 +40,21 @@ function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process
 }
 
 const pmArgs = ["--report-to", "pm-shop"];
+
+test("a lead hired from a subfolder of the repo is started in the repo root, which is where status looks for it; outside git it is started where the command ran", () => {
+  const repos = longRepos();
+  try {
+    const repo = repos.repo(100), plain = repos.repo(100, { git: false });
+    const sub = repos.inside(repo, 130);
+    for (const [from, started] of [[repo, repo], [sub, repo], [plain, plain]]) {
+      const stub = stubClaude([]);
+      expect([from.length, hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], from).code]).toEqual([from.length, 0]);
+      expect(stub.cwd()).toBe(started);
+    }
+  } finally {
+    repos.cleanup();
+  }
+});
 
 test("f1rm hire checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder hire, a long repo or a subfolder of one is refused with nothing started", () => {
   const repos = longRepos();
