@@ -614,8 +614,12 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   // One subscription: the same limit stops the PM, the leads and their hires together, and nothing wakes them (the brief rejects a daemon).
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
   const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
-  for (const s of ["after `resume` it notes the time, sleeps 300 seconds in the background, and then reads `f1rm status`", "a stop with no time is treated as ended"]) expect(decisions, s).toContain(s);
-  for (const old of ["under a minute", "stays out of the watcher's names"]) expect(decisions, old).not.toContain(old);
+  for (const s of [
+    "after `resume` it notes the time before sending it, sleeps 300 seconds in the background, then reads `f1rm status --json` and restarts the watcher with every name still working, leaving out sessions that sent `DONE` or `BLOCKED` and any hire it is waiting on",
+    "new activity since the noted time and no limit stop keeps the hire in the names", "a timed limit stop whose time is still ahead is left out and waited for as on a first stop",
+    "anything else (no activity since, a stop with no time or a time already past, or a second `resume` in a row that brought no new commit or message) is treated as ended",
+  ]) expect(decisions, s).toContain(s);
+  for (const old of ["under a minute", "stays out of the watcher's names", "waits again for the time a timed stop names", "only that recheck decides"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
   for (const text of [section("Watching and waking"), readFileSync(join(REPO, "docs", "decisions.md"), "utf8")]) {
