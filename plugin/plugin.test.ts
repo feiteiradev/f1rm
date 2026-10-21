@@ -594,16 +594,21 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
     "**Limit stop with no time** (`limitUntil` is `unknown`)", "send it `resume` as for an idle session",
     "**Missing or no activity time**", "check again in a minute; if still so, treat it as ended",
-    "until its first new line", // the transcript still ends on the stop until the hire answers `resume`
   ]) expect(w, s).toContain(s);
-  // A stop with no time may be any API error that mentions a limit, so `resume` can meet it again.
-  const noTime = /^ *- \*\*Limit stop with no time\*\*.*$/m.exec(w)?.[0] ?? "";
-  // After `resume`, a hire that hits the limit again still ends on a limit line, so the signal is new activity, not a missing `limitUntil`.
-  const signal = "keep it out of the watcher's names until its first new line shows (its `idleMinutes` is back under a minute)";
-  for (const s of [signal, "restart the watcher with it after a few minutes; if it still shows a limit stop with new activity, treat it as ended"]) expect(noTime, s).toContain(s);
-  const timed = /^ *- \*\*Limit stop\*\* \(.*$/m.exec(w)?.[0] ?? "";
-  for (const s of [signal, "restart the watcher with it after a few minutes; if it still shows a limit stop with new activity, wait again for the time it names"]) expect(timed, s).toContain(s);
-  expect(w).not.toContain("gives it no `limitUntil`");
+  // After `resume` there is ONE rule, written once: a timer wakes the lead, and `f1rm status` then decides. A hire that hits the limit again ends on a new limit line,
+  // and `resume` itself writes the transcript, so neither a missing `limitUntil` nor a bare "new line" is the signal.
+  for (const s of [
+    "**After `resume`**", "note the time once it is sent", "background `sleep 300` whose exit wakes you", "no activity since the noted time (its `lastActivity` is before it): treat it as ended",
+    "new activity and no limit stop: add the hire back to the watcher's names", "new activity and still a limit stop: a timed stop waits again for the time it names, and a stop with no time is treated as ended",
+    "The `resume` itself writes the transcript, so only this recheck decides",
+  ]) expect(w, s).toContain(s);
+  expect(w.split("sleep 300").length - 1).toBe(1);
+  // The wake lines that send `resume` follow it by name and repeat none of it.
+  for (const head of ["**Limit stop** (`limitUntil`)", "**Limit stop with no time** (`limitUntil` is `unknown`)", "**Idle 20 minutes, still listed, no limit stop**"]) {
+    const line = w.split("\n").find((l) => l.includes(head)) ?? "";
+    expect(line, head).toContain("follow **After `resume`**");
+  }
+  for (const old of ["under a minute", "keep it out of the watcher's names", "gives it no `limitUntil`", "a few minutes", "until its first new line"]) expect(w, old).not.toContain(old);
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
@@ -612,7 +617,8 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   // One subscription: the same limit stops the PM, the leads and their hires together, and nothing wakes them (the brief rejects a daemon).
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
   const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
-  for (const s of ["stays out of the watcher's names until its first new line shows (its `idleMinutes` is back under a minute)", "a stop with no time is treated as ended"]) expect(decisions, s).toContain(s);
+  for (const s of ["after `resume` it notes the time, sleeps 300 seconds in the background, and then reads `f1rm status`", "a stop with no time is treated as ended"]) expect(decisions, s).toContain(s);
+  for (const old of ["under a minute", "stays out of the watcher's names"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
   for (const text of [section("Watching and waking"), readFileSync(join(REPO, "docs", "decisions.md"), "utf8")]) {
