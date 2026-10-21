@@ -709,7 +709,7 @@ test("K3: leads get pstack:architect or pstack:how only as a first command the P
   expect(reviewer).not.toContain("interrogate");
   expect(role("pm").fm.skills).toContain("mattpocock-skills:grilling");
   const playbook = section("Roster and hiring playbook");
-  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only"]) expect(playbook, s).toContain(s);
+  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only", "a dev's is `/pstack:poteto-mode`", "for a lead only"]) expect(playbook, s).toContain(s);
 });
 
 test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
@@ -730,15 +730,18 @@ test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, psta
 });
 
 test("K5: `f1rm edition` sets the edition only once `f1rm pm` has registered the project, wherever a line says so", () => {
-  const files = [join(PLUGIN, "README.md"), join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), ...Object.keys(ROLES).map((r) => join(PLUGIN, "agents", `${r}.md`))];
+  const cli = ["hire.ts", "f1rm.ts"].map((f) => join(REPO, "office", "cli", f));
+  const files = [join(PLUGIN, "README.md"), join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), ...Object.keys(ROLES).map((r) => join(PLUGIN, "agents", `${r}.md`)), ...cli];
   let seen = 0;
   for (const f of files) {
-    for (const line of readFileSync(f, "utf8").split("\n").filter((l) => /`f1rm edition (work\|founder|work|founder)`/.test(l))) {
+    // The code writes its backticks escaped (\`), so a few characters may sit around `f1rm pm`.
+    for (const line of readFileSync(f, "utf8").split("\n").filter((l) => /`f1rm edition (work\|founder|work|founder)\\?`/.test(l))) {
       seen++;
-      expect(line, f).toContain("once `f1rm pm` has registered the project");
+      expect(line, f).toMatch(/(once|after) .{0,3}f1rm pm.{0,3} has registered the (project|repo)/);
     }
   }
-  expect(seen).toBeGreaterThanOrEqual(2);
+  expect(seen).toBeGreaterThanOrEqual(4);
+  expect(readFileSync(cli[0], "utf8")).toMatch(/after \\?`f1rm pm\\?` has registered the project/);
 });
 
 test("K7: a conflict round never counts toward ESCALATE; the review flow says so once and the Handoff line and reviewer.md point to it", () => {

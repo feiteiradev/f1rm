@@ -16,10 +16,12 @@ export const CAP = 30;
 export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
-// pstack's architect and how carry disable-model-invocation, so the Skill tool refuses them: a lead gets one only as its first command, and only one skill can be.
-const SLASH_ONLY = ["research", "pstack:architect", "pstack:how"];
+// pstack's poteto-mode, architect and how carry disable-model-invocation, so the Skill tool refuses them: each runs only as the first command, and a hire has one.
+// A dev's own first skill is poteto-mode, so no slash-only skill can be added to a dev; architect and how are for a lead.
+const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
+const LEAD_ONLY = ["pstack:architect", "pstack:how"];
 // A bug is diagnosed before it is fixed test-first: this added skill loads ahead of the role's own later skills.
-const EARLY = ["mattpocock-skills:diagnosing-bugs"];
+const DIAGNOSE = "mattpocock-skills:diagnosing-bugs";
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
@@ -127,10 +129,15 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
-  if (added.filter((s) => SLASH_ONLY.includes(s)).length > 1) throw new Error(`only one of ${SLASH_ONLY.join(", ")} can be the first command: pick one`);
+  const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
+  if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
+  let own = roles.find((r) => r.id === role)!.skills;
+  if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
+  const slashes = [...own.slice(0, 1), ...added].filter((s) => SLASH_ONLY.includes(s));
+  if (slashes.length > 1) throw new Error(`${slashes.join(" and ")} are slash-only (the Skill tool refuses them) and a hire has one first command: drop one`);
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
-    throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` to hire one.`);
+    throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` (after \`f1rm pm\` has registered the project) to hire one.`);
   }
   const lead = role === "lead";
   const name = lead ? `lead-${task}` : team ? `${team}.${role}-${task}` : `${role}-${task}`;
@@ -159,11 +166,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
-  let own = roles.find((r) => r.id === role)!.skills;
-  if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slash = added.find((s) => SLASH_ONLY.includes(s));
-  const early = added.filter((s) => EARLY.includes(s)), later = added.filter((s) => s !== slash && !EARLY.includes(s));
-  const [first, ...rest] = slash ? [slash, ...early, ...own, ...later] : [...own.slice(0, 1), ...early, ...own.slice(1), ...later];
+  const [first, ...rest] = [...new Set([slash ?? own[0], ...added.filter((s) => s === DIAGNOSE), ...own, ...added])];
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");

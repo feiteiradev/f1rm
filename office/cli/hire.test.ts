@@ -165,6 +165,33 @@ test.each(["pstack:architect", "pstack:how"])("a lead hired with --skills %s get
   expect(prompt(stub)).toBe(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n${BRIEF}`);
 });
 
+// A dev's own first skill, pstack:poteto-mode, is slash-only too, so a second slash-only skill would push it into the Skill-tool list, which refuses it and holds the hire forever.
+test.each(["frontend-dev", "backend-dev"])("a %s is refused a slash-only --skills (research, architect, how): its own first command is pstack:poteto-mode", (role) => {
+  for (const skill of ["research", "pstack:architect", "pstack:how"]) {
+    const stub = stubClaude([]);
+    const r = hire(stub, ["--skills", skill, ...pmArgs, role, `${role}-x`, "x", BRIEF]);
+    expect(r.code, skill).not.toBe(0);
+    expect(r.err, skill).toMatch(skill === "research" ? /pstack:poteto-mode and research are slash-only/ : /for a lead only/);
+    expect(stub.argv(), skill).toBeNull();
+  }
+});
+
+test("pstack:architect and pstack:how are for a lead only: every other role is refused, a lead takes one, and two slash-only skills are refused", () => {
+  for (const role of ["designer", "researcher", "reviewer"]) {
+    const stub = stubClaude([]);
+    const task = role === "reviewer" ? "review-x" : "x";
+    expect(hire(stub, ["--skills", "pstack:architect", ...pmArgs, role, `${role}-${task}`, task, BRIEF]).err, role).toContain("for a lead only");
+    expect(stub.argv(), role).toBeNull();
+  }
+  const lead = stubClaude([]);
+  const r = hire(lead, ["--skills", "pstack:architect,research", ...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir());
+  expect(r.err).toContain("pstack:architect and research are slash-only");
+  expect(lead.argv()).toBeNull();
+  const research = stubClaude([]);
+  hire(research, ["--skills", "research", ...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir());
+  expect(prompt(research)).toStartWith("/research Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. ");
+});
+
 test("--level sets the reviewer's /code-review level, and high runs security-review on the merge before APPROVED; other roles refuse it", () => {
   const high = stubClaude([]);
   hire(high, ["--level", "high", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);

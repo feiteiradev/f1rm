@@ -1468,7 +1468,7 @@ test("a Founder project lists and hires the founder roles; a Work project, or on
   expect((await ids()).some((r) => founder.includes(r))).toBe(false);
   const marketer = { ...ASSIGN, role: "marketer" };
   const refused = await hireOf(marketer);
-  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` to hire one."]);
+  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` (after `f1rm pm` has registered the project) to hire one."]);
 
   const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
   expect((await setEdition("founder")).status).toBe(200);
