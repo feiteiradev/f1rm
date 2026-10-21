@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -298,6 +298,28 @@ test("office-url is private even when a stale office-url.tmp with open permissio
   chmodSync(join(home, ".f1rm", "office-url.tmp"), 0o644);
   await serveOnce(home);
   expect(statSync(join(home, ".f1rm", "office-url")).mode & 0o777).toBe(0o600);
+});
+
+test("a link planted at office-url.tmp after serve cleared it is not followed: the file it points at is left alone, and no link is published", async () => {
+  const { home } = await installedOnFreePort();
+  const victim = join(home, "victim");
+  writeFileSync(victim, "victim");
+  chmodSync(victim, 0o644);
+  // Preloaded into serve: right after serve removes office-url.tmp, something puts a link to the victim there.
+  const preload = join(home, "plant.ts");
+  writeFileSync(preload, `import { mock } from "bun:test";
+import * as ns from "node:fs";
+const real = { ...ns };
+const rmSync = (p: any, o: any) => { real.rmSync(p, o); if (String(p).endsWith("office-url.tmp")) real.symlinkSync(${JSON.stringify(victim)}, p); };
+mock.module("node:fs", () => ({ ...real, default: real, rmSync }));`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
+  const urlFile = join(home, ".f1rm", "office-url");
+  for (let i = 0; i < 200 && proc.exitCode === null && !existsSync(urlFile); i++) await Bun.sleep(25);
+  proc.kill();
+  await proc.exited;
+  expect(readFileSync(victim, "utf8")).toBe("victim");
+  expect(statSync(victim).mode & 0o777).toBe(0o644);
+  expect(existsSync(urlFile) && lstatSync(urlFile).isSymbolicLink()).toBe(false);
 });
 
 test("the new link key is never written into a malformed file that others can read", async () => {

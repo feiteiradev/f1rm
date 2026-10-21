@@ -258,7 +258,7 @@ function serve() {
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
   rmSync(`${URL_FILE}.tmp`, { force: true }); // a stale one would keep its old mode
-  writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600 });
+  writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
   renameSync(`${URL_FILE}.tmp`, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
   announce(url);
