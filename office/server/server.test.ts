@@ -1577,6 +1577,7 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   start();
   await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
   await skillLoaded("r", "ponytail:ponytail-review");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" }); // the Report to, in the same project
   const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
   const out = await send("APPROVED shop-1");
   expect(out.permissionDecision).toBe("deny");
@@ -1611,4 +1612,52 @@ test("the prompt text never reaches the events table", async () => {
   expect(rows).toContain("UserPromptSubmit");
   expect(rows).not.toContain("SECRET-BRIEF");
   expect(rows).not.toContain("Before you start");
+});
+
+// Projects are isolated: an f1rm role messages only sessions of its own project (room), "main" and its own sub-agents.
+async function projectsOffice() {
+  start({ "/code/shop": "/code/shop/.git", "/code/shop/.claude/worktrees/a": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
+  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
+  await seat("b", "/code/shop/.claude/worktrees/a", "shop.backend-dev-a", "f1rm:backend-dev"); // a worktree shares its repo's room
+  await seat("pm-s", "/code/shop", "pm-shop", "f1rm:pm");
+  await seat("pm-b", "/code/blog", "pm-blog", "f1rm:pm");
+  await seat("twin-s", "/code/shop", "twin");
+  await seat("twin-b", "/code/blog", "twin");
+  await seat("free", "/code/blog", "freelancer"); // no role
+  await hook({ ...common("b", "SubagentStart"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
+  await office((s) => Object.keys(s.employees).length === 6 && Object.keys(s.interns).length === 1);
+  const cwds: Record<string, string> = { b: "/code/shop/.claude/worktrees/a", "pm-b": "/code/blog", free: "/code/blog" };
+  return async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] ?? "/code/shop" }));
+}
+
+test("a SendMessage from an f1rm role goes to its own project, 'main' and its own sub-agent, and to no one else", async () => {
+  const send = await projectsOffice();
+  for (const to of ["pm-shop", "main", "sub-1"]) expect([to, (await send("b", to))?.permissionDecision ?? null]).toEqual([to, null]);
+  const other = await send("b", "pm-blog");
+  expect(other.permissionDecision).toBe("deny");
+  expect(other.permissionDecisionReason).toContain("Projects are isolated");
+  const unknown = await send("b", "pm-nobody");
+  expect(unknown.permissionDecision).toBe("deny");
+  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
+  // A name two rooms answer to, and a sub-agent of another employee, fail closed too.
+  expect((await send("b", "twin")).permissionDecision).toBe("deny");
+  expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny");
+  expect((await send("b", "*")).permissionDecision).toBe("deny");
+  // The PM too, and a freelancer is never held.
+  expect((await send("pm-s", "pm-blog")).permissionDecision).toBe("deny");
+  expect(await send("free", "pm-shop")).toBeNull();
+});
+
+test("a SendMessage refusal is logged with the role, title and rule, and never the message or the target", async () => {
+  const send = await projectsOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await send("b", "pm-blog");
+    await send("b", "SECRET-TARGET");
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual(["refused backend shop.backend-dev-a SendMessage project", "refused backend shop.backend-dev-a SendMessage project-unknown"]);
 });

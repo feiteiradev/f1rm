@@ -497,6 +497,7 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
   expect(mine.every((i) => i >= 6)).toBe(true);
   expect(mine).toEqual([...mine].sort((x, y) => x - y));
   expect(titles).toContain("2026-10-21 Idle members free their team slot");
+  for (const t of ["Projects are isolated", "Decisions log merges by union", "Project notes live outside memory"]) expect(titles).toContain(`2026-10-21 ${t}`);
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
@@ -534,4 +535,41 @@ test("the plugin is 0.4.0, and its README names both documents", () => {
   const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
   expect(readme).toContain("~/.f1rm/milestones/<repo>.md");
   expect(readme).toContain("docs/decisions.md");
+});
+
+test("P1: projects are isolated: the PM and leads filter to their own repo, address no other project, and report f1rm problems to the user", () => {
+  const talk = section("Who talks to whom");
+  for (const s of ["Projects are isolated", "`claude agents --json`", "own repo", "never name, address or rely on another project's sessions, boards, milestones or evidence", "`f1rm feedback: <problem> -> <suggestion>`", "addressed to no session"]) expect(talk, s).toContain(s);
+  expect(section("Gates")).toContain("project gate");
+  expect(section("Gates")).toContain("SendMessage");
+  expect(section("Gates")).toContain("With the office stopped, none runs.");
+  for (const r of ["pm", "lead"]) {
+    for (const s of ["claude agents --json", "own repo", "another project's", "`f1rm feedback: <problem> -> <suggestion>`", "addressed to no session"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
+  }
+  expect(guidelines).toContain("filter");
+});
+
+test("P2: every role keeps only facts about the user and lessons that hold in any project in memory, and project learnings in its notes file", () => {
+  for (const name of Object.keys(ROLES)) {
+    const body = role(name).body;
+    expect(body, name).toContain("facts about the user and how they like to work");
+    expect(body, name).toContain("lessons that hold in any project");
+    expect(body, name).toContain(`~/.f1rm/kept/<repo>/notes/${name}.md`);
+    expect(body, name).not.toContain("to your memory");
+  }
+  expect(section("Brief format")).toContain("Context names the notes file for its role: `~/.f1rm/kept/<repo>/notes/<role>.md`");
+  const md = section("Milestones and decisions");
+  expect(md).toContain("`notes/` is never deleted");
+  expect(md).toContain("neither the Persist group nor the Delete group");
+});
+
+test("P3: a hire that creates the decisions log adds its merge=union line to .gitattributes, and Reviewers still resolve no conflict", () => {
+  const md = section("Milestones and decisions");
+  for (const s of ["the decisions log file, whatever its path", "`<that path> merge=union`", ".gitattributes", "a line of its own"]) expect(md, s).toContain(s);
+  expect(md).toContain("docs/decisions.md merge=union");
+  expect(section("Review and merge flow")).toContain("never resolves a conflict itself");
+  expect(readFileSync(join(REPO, ".gitattributes"), "utf8")).toContain("docs/decisions.md merge=union");
+  for (const name of ["backend-dev", "frontend-dev", "designer", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"]) {
+    expect(/Decisions log:[^\n]*/.exec(role(name).body)?.[0], name).toContain("`<that path> merge=union`");
+  }
 });

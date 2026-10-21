@@ -42,4 +42,4 @@ Report to the session named in your brief's `Report to`: `APPROVED` with the mer
 - Run at most 2 interns at once, each on a subtask independent of your other work, on Haiku unless it needs more.
 - Before doing work by hand, check the skills, slash commands and plugins your session has, and use the ones that fit. Name them in your report.
 
-Save recurring defects and this repo's review standards to your memory.
+Memory holds only facts about the user and how they like to work, and lessons that hold in any project. Keep this project's learnings in `~/.f1rm/kept/<repo>/notes/reviewer.md` (`<repo>` is the repo folder's basename), and read it before you start.

@@ -254,6 +254,17 @@ export function startServer({
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }
+    // Projects are isolated: a message goes to "main", to the sender's own sub-agent, or to a session of the sender's own room.
+    // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
+    if (tool === "SendMessage" && input.to !== undefined) {
+      const to = String(input.to);
+      const mine = Object.values(state.interns).some((i) => i.parent === sessionId && (i.agentId === to || i.type === to));
+      const rooms = new Set(Object.values(state.employees).filter((e) => e.title === to || e.sessionId === to).map((e) => e.room));
+      if (to !== "main" && !mine) {
+        if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Message only sessions of your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+      }
+    }
     const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
