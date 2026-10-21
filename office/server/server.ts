@@ -119,7 +119,7 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   // `checkout -- <path>` (nothing but options before the `--`) restores a path from the index; `checkout <branch> -- <files>` is how the red-<task> worktree gets its check files.
   const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
   // `--amend` as a word, not as the value of `-m`, `-F`, `-C`, `-c`, `-t` or `--message`.
-  const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[A-Za-z]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
+  const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[^mFCct]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
   // `restore` may only unstage; `checkout --ours|--theirs` overwrites a path.
   const discards = (sub === "restore" && !["--staged", "-S"].includes(rest.filter((a) => a.startsWith("-") && a !== "--").join())) || (sub === "checkout" && any(/^--(ours|theirs)$/));
   if (sub === "stash" || amends || restoresPath || discards ||((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
