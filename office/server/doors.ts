@@ -1,7 +1,8 @@
 // Which folders get a door in the lobby. A door means a project: a git repo's main working directory, or a folder that has a
 // settings file under ~/.f1rm/projects. Everything else a session runs in shows behind the one Elsewhere door.
-import { readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, renameSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { writePrivate } from "./private.ts";
 
 /** `p` with its symlinks resolved as far as it exists (/tmp is /private/tmp on macOS), so a path that is gone still compares right. */
 export function realPath(p: string): string {
@@ -40,6 +41,6 @@ export function readForgotten(file?: string): Record<string, number> {
 
 export function writeForgotten(file: string, forgotten: Record<string, number>) {
   const tmp = file + ".tmp";
-  writeFileSync(tmp, JSON.stringify(forgotten) + "\n", { mode: 0o600 });
+  writePrivate(tmp, JSON.stringify(forgotten) + "\n");
   renameSync(tmp, file);
 }

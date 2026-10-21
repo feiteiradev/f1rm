@@ -2,10 +2,10 @@
 // Fake machine: the repos below are git repos; every other folder is not. The folders the office never gives a door are injected.
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { junkRoots } from "./doors.ts";
+import { junkRoots, writeForgotten } from "./doors.ts";
 import { projectFile, writeEdition } from "./editions.ts";
 import { boardFile } from "./board.ts";
 import type { OfficeState } from "./office.ts";
@@ -254,4 +254,27 @@ test("the Elsewhere door has no edition, no board and no PM to start", async () 
     const res = await fetch(`${base(server)}/${TOKEN}/${path}`, { method: "POST", body: JSON.stringify({ room: "elsewhere", edition: "work", role: "backend", task: "t", brief: "b", need: "n" }) });
     expect(res.status).toBe(404);
   }
+});
+
+test("the forgotten-doors file is private even when a stale .tmp with open permissions is left behind", () => {
+  const dir = mkdtempSync(join(tmpdir(), "f1rm-doors-"));
+  const file = join(dir, "forgotten.json");
+  writeFileSync(file + ".tmp", "stale");
+  chmodSync(file + ".tmp", 0o644);
+  writeForgotten(file, { room: 1 });
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ room: 1 });
+});
+
+test("a link left at the forgotten-doors .tmp is not followed: the file it points at is left alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "f1rm-doors-"));
+  const victim = join(dir, "victim");
+  writeFileSync(victim, "victim");
+  chmodSync(victim, 0o644);
+  const file = join(dir, "forgotten.json");
+  symlinkSync(victim, file + ".tmp");
+  writeForgotten(file, { room: 1 });
+  expect(readFileSync(victim, "utf8")).toBe("victim");
+  expect(lstatSync(file).isSymbolicLink()).toBe(false);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
 });

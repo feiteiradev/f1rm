@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { letgo } from "./letgo.ts";
@@ -187,7 +188,7 @@ function installBin(): string {
   return onPath ? `f1rm command installed in ${BIN}.` : `f1rm command installed in ${BIN}. Add ${dirname(BIN)} to your PATH to run it from anywhere.`;
 }
 
-function uninstall() {
+async function uninstall() {
   const before = readSettings();
   if (!installed(before)) return console.log("f1rm hooks are not installed.");
   const after = withoutF1rm(before);
@@ -195,7 +196,7 @@ function uninstall() {
   for (const event of created.events) if (after.hooks![event]?.length === 0) delete after.hooks![event];
   if (created.hooks && Object.keys(after.hooks!).length === 0) delete after.hooks;
   writeSettings(after);
-  if (existsSync(PLIST)) stopService();
+  if (existsSync(PLIST)) await stopService(installed(before));
   // The event log, the boards and the editions stay: they are the user's history, not install state.
   for (const f of [HEADERS_FILE, CREATED_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
   removeOfficeFiles();
@@ -212,6 +213,16 @@ function seconds(name: string, fallback: number): number {
 /** The office's UI token. It lives in a private file, so a restart keeps the URL and open tabs keep working; a missing or malformed file gets a new key. */
 function linkKey(): string {
   mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
+  // A serve killed mid-write leaves its link-key.<pid>, a hard link to the live key; launchd restarts would pile them up.
+  for (const f of readdirSync(F1RM_DIR)) {
+    const pid = /^link-key\.(\d+)$/.exec(f)?.[1];
+    if (!pid || Number(pid) === process.pid) continue;
+    try {
+      process.kill(Number(pid), 0);
+    } catch (e: any) {
+      if (e.code === "ESRCH") rmSync(join(F1RM_DIR, f), { force: true }); // EPERM: alive, someone else's
+    }
+  }
   const saved = () => {
     const key = existsSync(LINK_KEY_FILE) ? readFileSync(LINK_KEY_FILE, "utf8").trim() : "";
     return /^[\w-]{43}$/.test(key) ? key : "";
@@ -224,8 +235,7 @@ function linkKey(): string {
   // The new key goes into a private temp file first, so it is never in a file others can read, then is put in place whole.
   const key = randomBytes(32).toString("base64url");
   const tmp = `${LINK_KEY_FILE}.${process.pid}`;
-  rmSync(tmp, { force: true }); // a leftover of an earlier serve with this pid would keep its mode
-  writeFileSync(tmp, key + "\n", { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  writePrivate(tmp, key + "\n");
   try {
     linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
     return key;
@@ -260,8 +270,7 @@ function serve() {
 
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
-  rmSync(URL_TMP, { force: true }); // a stale one would keep its old mode
-  writeFileSync(URL_TMP, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
   announce(url);
@@ -299,7 +308,7 @@ const launchctl = (...args: string[]) => Bun.spawnSync(["launchctl", ...args], {
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Runs the office at login and keeps it running, so the hooks always reach it. Running it again restarts it. */
-function service() {
+async function service() {
   if (process.argv[3] === "off") return serviceOff();
   startService();
   console.log("f1rm office now runs in the background and at login. `f1rm start` opens it.");
@@ -334,15 +343,22 @@ function startService() {
   }
 }
 
-function serviceOff() {
-  stopService();
+async function serviceOff() {
+  await stopService(installed(readSettings()));
   removeOfficeFiles();
   console.log("f1rm background office stopped and removed.");
 }
 
-function stopService() {
+async function stopService(hook: { url: string } | null) {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
+  // bootout returns before the office has stopped, and an office that is still stopping writes its files late: wait until its
+  // port refuses connections. ponytail: 5 s cap, then clean up anyway; an office that hasn't bound its port yet is not seen.
+  if (!hook) return;
+  const url = `http://127.0.0.1:${new URL(hook.url).port}/`;
+  for (const end = Date.now() + 5000; Date.now() < end; await Bun.sleep(100)) {
+    if (await fetch(url, { signal: AbortSignal.timeout(500) }).then(() => false, (e) => e.name !== "TimeoutError")) return;
+  }
 }
 
 /** What a serve leaves behind: its URL, the temp it writes the URL to, and a link-key.<pid> temp, which is a hard link to the live key when serve was killed mid-write. */
