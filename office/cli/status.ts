@@ -282,25 +282,30 @@ export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
   }
 }
 
-/** Claude Code cuts a project folder name at 200 characters; a worktree's is the repo's plus `--claude-worktrees-<task>`, so the repo's must stay short enough for that to be whole. */
+/**
+ * Claude Code cuts a project folder name at 200 characters (and adds a hash). A worktree's folder is the repo's plus `--claude-worktrees-<task>`, found by that prefix, so a cut name
+ * still matches while the cut keeps the whole prefix. 150 leaves room for it with a margin; a task slug has no cap, but the prefix stays whole whatever its length.
+ */
 const MAX_FOLDER = 150;
 
 /** `f1rm status` run in `cwd`, against the real Claude Code, git and clock. */
 export async function statusIn(argv: string[], cwd: string): Promise<Result> {
+  // A usage mistake, or a watch with no names, is answered before the repo is looked at.
+  const watching = argv[0] === "--watch";
+  if (watching ? argv.slice(1).some((n) => n.startsWith("-")) : argv.some((a) => a !== "--json")) return { out: "", err: usage, code: 1 };
+  if (watching && !argv.slice(1).some(Boolean)) return { out: "no names\n", err: "", code: 0 };
   const common = machine.gitCommonDir(cwd);
   if (!common) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const repo = dirname(common);
   if (folder(repo).length > MAX_FOLDER) {
-    return { out: "", err: `f1rm: this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the longest worktree folder stays under 200)`, code: 1 };
+    return { out: "", err: `f1rm: this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`, code: 1 };
   }
   const commitTime = (branch: string) => {
     const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
     return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
   };
-  if (argv[0] === "--watch") {
-    const names = argv.slice(1);
-    if (names.some((n) => n.startsWith("-"))) return { out: "", err: usage, code: 1 };
-    return watch(names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
+  if (watching) {
+    return watch(argv.slice(1), { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), sleep: (ms) => Bun.sleep(ms) });
   }
   return status(argv, {
     repo,

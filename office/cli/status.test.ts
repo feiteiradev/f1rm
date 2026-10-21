@@ -468,7 +468,7 @@ test("a waiting name whose wrap-up writes during the first minute stays waiting"
   expect((await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: 3 }], 100, touch)).woke).toBe(false);
 });
 
-test("a sibling project's folder is never read, and the worktree folder of the longest repo f1rm status accepts is matched whole and stays under 200 characters", () => {
+test("a sibling project's folder is never read, and the worktree folder of the longest repo f1rm status accepts is found, also with a task slug long enough for Claude Code to cut its name", () => {
   for (const length of [150, 100]) {
     const h = home();
     const repo = `/code/${"z".repeat(length - 6)}`; // "-code-" is 6 characters once encoded
@@ -479,7 +479,15 @@ test("a sibling project's folder is never read, and the worktree folder of the l
     }
     const cwd = `${repo}/.claude/worktrees/checkout`;
     transcript(h, cwd, "mine0001", [talk("x")], 4);
-    expect(folder(cwd).length).toBeLessThan(200);
     expect(hires({ ...base(h, [live("shop.backend-dev-checkout", "mine0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([["shop.backend-dev-checkout", 4]]);
   }
+  // Task slugs have no length cap: at 150 a slug over 31 characters makes Claude Code cut the worktree folder's name (200 characters, then a hash), and the hire is still found
+  // because the filter matches the folder by its `--claude-worktrees-` prefix, which the cut keeps whole.
+  const repo = `/code/${"z".repeat(144)}`;
+  const task = "t".repeat(60);
+  const cwd = `${repo}/.claude/worktrees/${task}`;
+  expect(folder(cwd).length).toBeGreaterThan(200);
+  const h = home();
+  transcript(h, cwd, "long0001", [talk("x")], 6, cwd, `${folder(cwd).slice(0, 200)}-9f8e7d`);
+  expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name.length > 0, x.idleMinutes])).toEqual([[true, 6]]);
 });

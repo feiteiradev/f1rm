@@ -943,7 +943,7 @@ test("status refuses, in every form, a repo whose encoded project folder is over
   const stub = stubClaude(0, []);
   // A character of the path is a character of the folder name, so the repo's path length is the folder's.
   const repoOfLength = (length: number) => {
-    const parent = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-long-")));
+    const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-")); // a short fixed root, whatever TMPDIR is
     const repo = join(parent, "r".repeat(length - parent.length - 1));
     mkdirSync(repo);
     Bun.spawnSync(["git", "init", "-q", repo]);
@@ -954,10 +954,18 @@ test("status refuses, in every form, a repo whose encoded project folder is over
   for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
     const r = await f1rmIn(long, home, stub.bin, "status", ...args);
     expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
-    expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the longest worktree folder stays under 200)");
+    expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
   }
   expect((await f1rmIn(fine, home, stub.bin, "status", "--json")).code).toBe(0);
   expect((await f1rmIn(fine, home, stub.bin, "status", "--watch", "")).out).toBe("no names");
+  // A usage mistake or no names at all is answered before the length is looked at.
+  const bogus = await f1rmIn(long, home, stub.bin, "status", "--bogus");
+  expect([bogus.code, bogus.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+  expect(bogus.err).not.toContain("too long");
+  const flag = await f1rmIn(long, home, stub.bin, "status", "--watch", "--json");
+  expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+  const none = await f1rmIn(long, home, stub.bin, "status", "--watch");
+  expect([none.code, none.out, none.err]).toEqual([0, "no names", ""]);
 });
 
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
