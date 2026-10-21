@@ -440,7 +440,7 @@ const EDITION_LINE: Record<Edition, string> = {
 const pmPrompt = (name: string, edition: Edition) =>
   `/mattpocock-skills:grilling Your session name is ${name}. Hires report to it. Hire only leads with \`f1rm hire lead\`, one or two per milestone even for one task, and answer each \`PLAN <team>\` with \`GO <team>\` without telling me, unless the plan changes agreed scope or a decision. Speak to me only for a decision I must make, something only I can do (a permission, spend, credentials or inputs, a git push, a dirty main checkout), and one report at the end of the milestone; the rest stays on the board. ${EDITION_LINE[edition]} First pick up: read this repo's board and \`claude agents --json\`, run \`claude logs <id>\` for each hire on a \`doing\` or \`review\` row, update the rows, say nothing, and answer when I ask "status?"; with no board, skip this. Then open the interview by asking what I want done, before you explore the repo. Make no plan until I confirm we share an understanding.`;
 
-/** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
+/** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` changes it once `f1rm pm` has registered the repo. */
 function edition() {
   const want = process.argv[3];
   const file = editionFile(process.cwd());
@@ -462,12 +462,13 @@ async function pm() {
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
   // With no answer (no terminal), it starts as Work and asks again next time.
-  register(editionFile(process.cwd()));
-  let chosen = readEdition(editionFile(process.cwd()));
+  const file = editionFile(process.cwd());
+  register(file);
+  let chosen = readEdition(file);
   if (!chosen) {
     const answer = prompt(`Is ${name.slice(3)} a Work or a Founder project? [w/f]`)?.trim().toLowerCase() ?? "";
     chosen = answer.startsWith("f") ? "founder" : answer.startsWith("w") ? "work" : null;
-    if (chosen) writeEdition(editionFile(process.cwd()), chosen);
+    if (chosen) writeEdition(file, chosen);
   }
   const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
     env: claudeEnv(),
