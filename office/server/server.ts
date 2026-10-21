@@ -79,16 +79,18 @@ const gitCall = ([program, ...words]: string[]) => {
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
 const GH_API_WITH_VALUE = new Set(["-H", "--header", "-X", "--method", "-f", "--raw-field", "-F", "--field", "--input", "-p", "--preview", "-q", "--jq", "-t", "--template", "--cache", "--hostname"]);
 // A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or a field or input file with no method (gh then POSTs), writes.
-const API_METHOD = /^(?:--method(?:=(.*))?|-[A-Za-z]*X=?(.*))$/;
-const API_FIELD = /^-[A-Za-z]*[fF]|^--(field|raw-field|input)/;
+const API_METHOD = /^(?:--method(?:=(.*))?|-X=?(.*))$/;
+const API_FIELD = /^-[fF]|^--(field|raw-field|input)/;
 // The endpoints that put code on a branch or a remote: merge a pull request or a branch, update a pull request's branch, write refs, commits, trees, blobs or contents.
 const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/(merge|update-branch)|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
 const LANDING_MUTATION = /mergePullRequest|mergeBranch|updatePullRequestBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
 // ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen,
 // and `-HX-Foo: bar` or a `-fX` field reads as a method. Add an endpoint here when GitHub gains another way to land code.
-const writesApi = (args: string[]) => {
-  // The endpoint is the first word past the options (and their values), so `-p graphql` or `--jq graphql` does not make a REST call a graphql query.
-  if (args[skipOptions(args, 0, GH_API_WITH_VALUE)] === "graphql") return args.some((a) => LANDING_MUTATION.test(a));
+const writesApi = (given: string[]) => {
+  // `-i` is gh api's only short boolean flag: drop it from a cluster, so `-iq`, `-if` and `-iXPUT` read as `-q`, `-f` and `-XPUT`.
+  const args = given.map((a) => a.replace(/^-i+(?=[A-Za-z])/, "-"));
+  // The endpoint is the first word past the options (and their values), so `-p graphql` or `--jq graphql` does not make a REST call a graphql query. It may be a path or a URL.
+  if (/(^|\/)graphql$/.test(args[skipOptions(args, 0, GH_API_WITH_VALUE)] ?? "")) return args.some((a) => LANDING_MUTATION.test(a));
   const methods = args.flatMap((a, j) => {
     const m = API_METHOD.exec(a);
     return m ? [(m[1] ?? m[2]) || (args[j + 1] ?? "")] : [];
