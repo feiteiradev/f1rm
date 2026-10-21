@@ -124,7 +124,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
     if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
     const leads = live.filter((s) => s.name.startsWith("lead-") && s.cwd === cwd).length;
     if (lead && leads >= TEAMS) throw new HireRefused(`this project already has ${leads} teams (the cap is ${TEAMS}).`, busy.length);
-    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`)).length : 0;
+    // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
+    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
     if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
   }
 

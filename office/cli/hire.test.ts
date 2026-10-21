@@ -7,7 +7,7 @@ import { join } from "node:path";
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
 
-type Session = { kind: string; state?: string; name?: string; cwd?: string };
+type Session = { kind: string; state?: string; status?: unknown; name?: string; cwd?: string };
 const bg = (state: string, name = "elsewhere-x", cwd = "/elsewhere"): Session => ({ kind: "background", state, name, cwd });
 
 /** `claude agents --json` prints `sessions` (or fails when null); any other call records its argv (NUL-separated, so a multi-line prompt survives) and env. */
@@ -280,6 +280,29 @@ test("a team works at most 2 at once, its Reviewer included; finished members fr
   const freed = [lead, bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("done", "checkout.backend-dev-api", worktree(repo, "api"))];
   expect(hire(stubClaude(freed), ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
   expect(hire(stubClaude(busy), ["--override", "--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
+});
+
+test("an idle member frees its team slot though its state still says working; busy, blocked and unreadable status still count", () => {
+  const repo = repoDir();
+  const lead = bg("done", "lead-checkout", repo);
+  const at = (state: string, name: string, task: string, status?: unknown): Session => ({ ...bg(state, `checkout.${name}`, worktree(repo, task)), status });
+  const designer = ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF];
+  const form = at("working", "frontend-dev-form", "form", "busy");
+  // Two devs sent DONE and went idle: Claude Code keeps their state "working", their status says idle.
+  const idle = [lead, at("working", "backend-dev-api", "api", "idle"), at("working", "backend-dev-cart", "cart", "idle")];
+  expect(hire(stubClaude(idle), designer, repo).code).toBe(0);
+  expect(hire(stubClaude([...idle, form]), designer, repo).code).toBe(0);
+  // A busy member, a blocked one (no status) and one whose status is unreadable all count as working.
+  for (const other of [at("working", "backend-dev-api", "api", "busy"), at("blocked", "backend-dev-api", "api"), at("blocked", "backend-dev-api", "api", "idle"), at("working", "backend-dev-api", "api"), at("working", "backend-dev-api", "api", 7), at("working", "backend-dev-api", "api", "IDLE")]) {
+    const r = hire(stubClaude([lead, form, other]), designer, repo);
+    expect(r.err).toContain("team checkout already has 2 working (the cap is 2 per team)");
+  }
+});
+
+test("an idle member frees its slot in the team cap only: the machine cap still counts it", () => {
+  const stub = stubClaude([...Array(30).fill({ ...bg("working"), status: "idle" })]);
+  const r = hire(stub, [...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF]);
+  expect(r.err).toContain("30 hires are already working (the cap is 30)");
 });
 
 test("one specialist per task: a task a live session works in is refused, even with --override", () => {

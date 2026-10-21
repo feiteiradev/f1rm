@@ -106,6 +106,7 @@ test("the guidelines run teams: when to form them, the team brief, PLAN/GO/DONE,
   expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
   const caps = section("Cap rule");
   for (const s of ["**30 background sessions working at once**", "**2 teams**", "**2 working in a team**", "**One specialist per task**"]) expect(caps).toContain(s);
+  expect(caps).toMatch(/status is `idle`.*frees its slot.*missing or unreadable status counts as working/s);
   expect(section("Interns")).toContain("**at most 2 interns**");
   expect(section("Board format")).toContain("~/.f1rm/boards/<repo>.team.<team>.md");
   expect(section("Use what is installed")).toContain("skills, slash commands and plugins");
@@ -495,6 +496,7 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
   const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0", "Reviewer sends back every finding"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
   expect(mine.every((i) => i >= 6)).toBe(true);
   expect(mine).toEqual([...mine].sort((x, y) => x - y));
+  expect(titles).toContain("2026-10-21 Idle members free their team slot");
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 

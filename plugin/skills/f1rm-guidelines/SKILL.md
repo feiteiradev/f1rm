@@ -310,7 +310,7 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 - At most **30 background sessions working at once**, counted across the whole machine, not per repo. Leads, the Reviewer, the Researcher and the user's own background sessions all count.
 - At most **2 teams** (live leads) per project.
-- At most **2 working in a team**, its Reviewer included. A finished member frees its slot.
+- At most **2 working in a team**, its Reviewer included. A member whose `claude agents --json` status is `idle` (it ended its turn and waits for a message, as after its DONE) frees its slot, though its state still reads working; a blocked member never does; a missing or unreadable status counts as working. The cap of 30 counts an idle member all the same.
 - **One specialist per task**, which no override skips. Split a task only into tasks that each have their own acceptance criteria and their own files.
 - When it refuses a lead, the lead does not retry or override: it tells the PM and waits. The PM does not retry either.
 - When it refuses the PM, or a lead tells the PM of a refusal, the PM leaves the team's row `todo`, tells the user why, and asks whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
