@@ -1648,6 +1648,36 @@ test("a SendMessage from an f1rm role goes to its own project, 'main' and its ow
   expect(await send("free", "pm-shop")).toBeNull();
 });
 
+test("a finished sub-agent can still be resumed by its parent, by agent id and no other way", async () => {
+  const send = await projectsOffice();
+  await hook({ ...common("b", "SubagentStop"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
+  await office((s) => Object.keys(s.interns).length === 0);
+  expect((await send("b", "sub-1"))?.permissionDecision ?? null).toBeNull();
+  expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny"); // another employee's sub-agent
+  expect((await send("b", "Explore")).permissionDecision).toBe("deny"); // a sub-agent type is not a sub-agent
+});
+
+test("a duplicate name is told apart by the `name [ref]` form, the ref being a session-id prefix", async () => {
+  const send = await projectsOffice();
+  expect((await send("b", "twin [twin-s]"))?.permissionDecision ?? null).toBeNull(); // the one in the sender's project
+  expect((await send("b", "twin [twin-b]")).permissionDecisionReason).toContain("Projects are isolated"); // the one in the other
+  expect((await send("b", "twin [nobody]")).permissionDecisionReason).toContain("unknown to the office");
+  expect((await send("b", "pm-shop [pm-s]"))?.permissionDecision ?? null).toBeNull();
+  expect((await send("b", "pm-shop [pm-b]")).permissionDecision).toBe("deny"); // the ref names another session
+});
+
+test("an offline session does not answer to its name, so a name that an online session holds in one project resolves", async () => {
+  let now = 1_000_000;
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }), clientDir, clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e9 });
+  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
+  await seat("twin-b", "/code/blog", "twin");
+  now += 401;
+  await office((s) => s.employees["twin-b"]?.status === "offline");
+  await seat("twin-s", "/code/shop", "twin");
+  await seat("b", "/code/shop", "shop.backend-dev-a", "f1rm:backend-dev");
+  expect((await held(await hook(preToolUse("b", "SendMessage", { to: "twin", message: "x" }))))?.permissionDecision ?? null).toBeNull();
+});
+
 test("a SendMessage refusal is logged with the role, title and rule, and never the message or the target", async () => {
   const send = await projectsOffice();
   const lines: string[] = [];

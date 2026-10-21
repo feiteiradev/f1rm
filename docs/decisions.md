@@ -172,7 +172,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-21 Decisions log merges by union
 
-- Decision: when a hire creates the decisions log file, whatever its path (`docs/decisions.md` here; some repos keep `docs/decisions.html`), it also adds the line `<that path> merge=union` to the repo's `.gitattributes`; this repo's `.gitattributes` has `docs/decisions.md merge=union`. Reviewers still never resolve a conflict by hand. Union folds the identical first and last lines of two new entries into one, so each entry starts and ends with a line of its own (an HTML entry needs an id and a closing comment); `office/gitattributes.test.ts` shows both.
+- Decision: when a hire creates the decisions log file, whatever its path (`docs/decisions.md` here; some repos keep `docs/decisions.html`), it also adds the line `<that path> merge=union` to the repo's `.gitattributes`; this repo's `.gitattributes` has `docs/decisions.md merge=union`. Reviewers still never resolve a conflict by hand. Union folds the identical first and last lines of two new entries into one, so each entry starts and ends with a line of its own (an HTML entry needs an opening tag with an id and a closing comment after its closing tag); `office/gitattributes.test.ts` shows both.
 - Why: two branches that append different entries to the append-only log no longer conflict, so a Reviewer no longer sends a task back for it.
 - Rejected: letting Reviewers resolve conflicts in the log.
 - Where: projects-isolated

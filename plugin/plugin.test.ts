@@ -546,7 +546,10 @@ test("P1: projects are isolated: the PM and leads filter to their own repo, addr
   for (const r of ["pm", "lead"]) {
     for (const s of ["claude agents --json", "own repo", "another project's", "`f1rm feedback: <problem> -> <suggestion>`", "addressed to no session"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
   }
-  expect(guidelines).toContain("filter");
+  expect(section("Gates")).toContain("Two sessions both outside any door share the Elsewhere room and can message each other.");
+  expect(guidelines.split("Elsewhere room").length - 1).toBe(1);
+  const sentence = (r: string) => /Stay in your own repo: filter[^\n]*?(at pickup and every time after)\./.exec(role(r).body)?.[1];
+  expect([sentence("pm"), sentence("lead")]).toEqual(["at pickup and every time after", "at pickup and every time after"]);
 });
 
 test("P2: every role keeps only facts about the user and lessons that hold in any project in memory, and project learnings in its notes file", () => {
@@ -559,8 +562,7 @@ test("P2: every role keeps only facts about the user and lessons that hold in an
   }
   expect(section("Brief format")).toContain("Context names the notes file for its role: `~/.f1rm/kept/<repo>/notes/<role>.md`");
   const md = section("Milestones and decisions");
-  expect(md).toContain("`notes/` is never deleted");
-  expect(md).toContain("neither the Persist group nor the Delete group");
+  expect(md).toContain("`~/.f1rm/kept/<repo>/notes/` is in neither group; it stays.");
 });
 
 test("P3: a hire that creates the decisions log adds its merge=union line to .gitattributes, and Reviewers still resolve no conflict", () => {
@@ -568,8 +570,16 @@ test("P3: a hire that creates the decisions log adds its merge=union line to .gi
   for (const s of ["the decisions log file, whatever its path", "`<that path> merge=union`", ".gitattributes", "a line of its own"]) expect(md, s).toContain(s);
   expect(md).toContain("docs/decisions.md merge=union");
   expect(section("Review and merge flow")).toContain("never resolves a conflict itself");
-  expect(readFileSync(join(REPO, ".gitattributes"), "utf8")).toContain("docs/decisions.md merge=union");
+  expect(readFileSync(join(REPO, ".gitattributes"), "utf8").split("\n")).toContain("docs/decisions.md merge=union");
+  // Union folds an entry's identical first and last lines, so an HTML entry opens with an id and closes with a comment; one sentence, everywhere.
+  const html = "an HTML entry needs an opening tag with an id and a closing comment after its closing tag";
+  expect(md).toContain(html);
+  expect(md).toContain("The blank line that opens an entry folds too, so the second heading follows the first entry's last line.");
+  const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  expect(decisions).toContain(html);
   for (const name of ["backend-dev", "frontend-dev", "designer", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"]) {
-    expect(/Decisions log:[^\n]*/.exec(role(name).body)?.[0], name).toContain("`<that path> merge=union`");
+    const line = /Decisions log:[^\n]*/.exec(role(name).body)?.[0];
+    expect(line, name).toContain("`<that path> merge=union`");
+    expect(line, name).toContain(html);
   }
 });

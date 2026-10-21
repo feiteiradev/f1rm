@@ -235,6 +235,9 @@ export function startServer({
   const pendingInterns = new Map<string, number[]>();
   // The skills a hire's first prompt names, and the ones its Skill calls have loaded, by session. The prompt itself is never kept.
   // ponytail: in memory, so an office restart empties it and the gate fails open; persist it if hires outlive restarts in practice.
+  // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
+  // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
+  const subagents = new Map<string, Set<string>>();
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
   /** Why the company's rules stop this tool call, or null to let it run. */
   function refusal(sessionId: string, payload: Record<string, any>): string | null {
@@ -254,13 +257,15 @@ export function startServer({
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }
-    // Projects are isolated: a message goes to "main", to the sender's own sub-agent, or to a session of the sender's own room.
+    // Projects are isolated: a message goes to "main", to the sender's own sub-agent (finished ones too: SendMessage resumes them), or to a session of the sender's own room.
+    // A target is a title or session id, with an optional ` [ref]` (a session-id prefix) that SendMessage asks for when two sessions share a name. An offline session answers to no name.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
+    // ponytail: two sessions both outside any door share the Elsewhere room and can message each other; a hire starts in a repo, so refusing Elsewhere could eat legitimate reports.
     if (tool === "SendMessage" && input.to !== undefined) {
       const to = String(input.to);
-      const mine = Object.values(state.interns).some((i) => i.parent === sessionId && (i.agentId === to || i.type === to));
-      const rooms = new Set(Object.values(state.employees).filter((e) => e.title === to || e.sessionId === to).map((e) => e.room));
-      if (to !== "main" && !mine) {
+      const [, name, ref = ""] = /^(.*\S)\s+\[([^\]]+)\]$/.exec(to.trim()) ?? [, to.trim()];
+      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (e.title === name || e.sessionId === name) && e.sessionId.startsWith(ref)).map((e) => e.room));
+      if (to !== "main" && !subagents.get(sessionId)?.has(to)) {
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Message only sessions of your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
         if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
       }
@@ -437,6 +442,8 @@ export function startServer({
             const why = refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
+          if (event.kind === "SubagentStart" && payload.agent_id) subagents.set(event.sessionId, (subagents.get(event.sessionId) ?? new Set()).add(String(payload.agent_id)));
+          if (event.kind === "SessionEnd") subagents.delete(event.sessionId);
           if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
             pendingInterns.get(event.sessionId)?.shift();
           }
