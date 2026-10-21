@@ -1,6 +1,6 @@
 // The company plugin as shipped: role files, the guidelines skill, and a real `claude` install into a throwaway config.
 import { expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeEnv } from "../office/server/machine.ts";
@@ -582,4 +582,63 @@ test("P3: a hire that creates the decisions log adds its merge=union line to .gi
     expect(line, name).toContain("`<that path> merge=union`");
     expect(line, name).toContain(html);
   }
+});
+
+// Self-driving teams: the PM watches its leads and each lead its hires, by real activity from `f1rm status --json`, and wakes or replaces the ones that stopped.
+test("S1: the guidelines state the watcher, the real-activity rule, and what to do on a wake for a limit stop, an ended session and a stalled one", () => {
+  const w = section("Watching and waking");
+  for (const s of [
+    "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "background watcher", "`run_in_background`", "20 minutes", "The exit wakes you",
+    "wait until that time", "send it `resume`", "`resume.md`",
+    "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
+    "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
+  ]) expect(w, s).toContain(s);
+  // The checkpoint is one hire rule, in the playbook.
+  const rule = section("Roster and hiring playbook");
+  for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip"]) expect(rule, s).toContain(s);
+  expect(section("Who talks to whom")).toContain("the watcher is your own");
+});
+
+// The example watcher runs as written, with a stub `f1rm` that prints a fixture; the real delegation gate was run on it too (the evidence of this task).
+function watch(hires: object, names: string) {
+  const block = /```\n\s*(NAMES=[\s\S]*?)```/.exec(section("Watching and waking"))?.[1];
+  expect(block, "a watcher example that starts with NAMES=").toBeDefined();
+  const dir = mkdtempSync(join(tmpdir(), "f1rm-watch-"));
+  writeFileSync(join(dir, "fixture.json"), JSON.stringify(hires));
+  writeFileSync(join(dir, "f1rm"), `#!/bin/sh\ncat "${dir}/fixture.json"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, "watch.sh"), block!.replace(/^NAMES=.*$/m, `NAMES="${names}"`));
+  const r = Bun.spawnSync(["sh", join(dir, "watch.sh")], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, timeout: 2000 });
+  return { woke: !r.exitedDueToTimeout, code: r.exitCode, out: r.stdout.toString() };
+}
+const quiet = { name: "lead-a", ended: false, limitUntil: null, idleMinutes: 3 };
+
+test("S2: the watcher exits when a named hire has been idle 20 minutes, has ended or hit the limit, or when status can't be read; not for a quiet or an unnamed one", () => {
+  for (const [why, hire] of [["idle", { ...quiet, idleMinutes: 20 }], ["ended", { ...quiet, ended: true }], ["limit", { ...quiet, limitUntil: "20:40" }]] as const) {
+    const r = watch([quiet, { ...hire, name: "lead-b" }], "lead-a lead-b");
+    expect([why, r.woke, r.code]).toEqual([why, true, 0]);
+  }
+  expect(watch([{ ...quiet, idleMinutes: 19 }], "lead-a").woke).toBe(false);
+  expect(watch([{ ...quiet, name: "lead-z", ended: true, idleMinutes: 99 }], "lead-a").woke).toBe(false);
+  expect(watch({ not: "a list" }, "lead-a").woke).toBe(true);
+}, 15_000);
+
+test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role file carries the checkpoint line", () => {
+  for (const r of ["pm", "lead"]) {
+    for (const s of ["background watcher", "`f1rm status --json`", "never by status text", "20 minutes", "limit stop", "resume brief", "`name [ref]`", "Watching and waking"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
+  }
+  expect(role("pm").body).toMatch(/watch your leads/i);
+  expect(role("lead").body).toMatch(/watch your own hires/i);
+  for (const name of Object.keys(ROLES)) {
+    const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
+    expect(line, name).toContain("`~/.f1rm/evidence/<repo>/");
+    expect(line, name).toContain("resume.md");
+    if (!["pm", "lead", "reviewer"].includes(name)) expect(line, name).toContain("wip commit");
+  }
+});
+
+test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm status and Self-driving teams entries", () => {
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm status` \|/m);
+  expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm status");
+  const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
+  for (const t of ["f1rm status", "Self-driving teams"]) expect(titles).toContain(`2026-10-21 ${t}`);
 });

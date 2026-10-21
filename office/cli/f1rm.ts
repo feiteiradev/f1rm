@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo | status
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -10,6 +10,7 @@ import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { letgo } from "./letgo.ts";
+import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";
 
@@ -495,8 +496,14 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(r.lines.join("\n"));
     process.exit(r.ok ? 0 : 1);
   },
+  status: async () => {
+    const r = await statusIn(process.argv.slice(3), process.cwd());
+    process.stdout.write(r.out);
+    if (r.err) console.error(r.err);
+    process.exit(r.code);
+  },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>...";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json]";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

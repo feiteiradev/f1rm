@@ -909,6 +909,34 @@ test("help prints the usage line and exits 0; an unknown command, here included,
   }
 });
 
+test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const projects = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(projects, { recursive: true });
+  writeFileSync(join(projects, "aaaa1111.jsonl"), JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }) + "\n");
+  const stub = stubClaude(0, [
+    { id: "aaaa1111", kind: "background", name: "lead-shop", sessionId: "aaaa1111", cwd: repo, state: "working", status: "idle" },
+    { id: "bbbb2222", kind: "background", name: "lead-other", sessionId: "bbbb2222", cwd: "/code/other", state: "working", status: "busy" },
+  ]);
+  const json = await f1rmIn(repo, home, stub.bin, "status", "--json");
+  expect(json.code).toBe(0);
+  const list = JSON.parse(json.out);
+  expect(list.map((h: any) => h.name)).toEqual(["lead-shop"]);
+  expect(list[0]).toMatchObject({ role: "lead", team: "shop", status: "idle", state: "working", ended: false, limitUntil: null });
+  expect(list[0].lastActivity).toBeString();
+  const plain = await f1rmIn(repo, home, stub.bin, "status");
+  expect(plain.code).toBe(0);
+  expect(plain.out).toContain("lead-shop");
+  expect(plain.out).not.toContain("lead-other");
+  const broken = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  writeFileSync(join(broken, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const unreadable = await f1rmIn(repo, home, broken, "status");
+  expect(unreadable.code).toBe(1);
+  expect(unreadable.err).toContain("claude agents --json");
+  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json]");
+});
+
 test("install puts the f1rm command in ~/.local/bin, and uninstall removes it only when it is f1rm's", () => {
   const home = tempHome();
   const stub = stubBin();
