@@ -1,7 +1,7 @@
 // The PixiJS scene: draws the office from the latest server state, animates each employee from its pose.
 import { Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { OfficeState } from "../server/office.ts";
-import { seedFor, seedOf } from "../people.ts";
+import { internSeed, seedFor } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, LEAD_TAG, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { showsLeadTag } from "./lead.ts";
@@ -145,7 +145,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       if (w) delete w.left;
       else if (people.has(i.parent)) {
         const taken = new Set([...walkers.values()].filter((o) => o.parent === i.parent).map((o) => o.slot));
-        const sprite = buildIntern(seedOf(id));
+        const sprite = buildIntern(internSeed(id));
         walkersLayer.addChild(sprite);
         walkers.set(id, {
           sprite,

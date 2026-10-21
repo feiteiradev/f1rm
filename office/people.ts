@@ -113,3 +113,5 @@ export function seedFor(e: { sessionId: string; role: RoleId | null }): number {
   const s = seedOf(e.sessionId);
   return look(s % SKINS, e.role ? ROLES[e.role].shirt : (s >>> 3) % FREELANCER_SHIRTS, (s >>> 7) % HAIRS);
 }
+/** An intern (sub-agent) is drawn as a freelancer: its own skin and hair, never a role's shirt. */
+export const internSeed = (sessionId: string): number => seedFor({ sessionId, role: null });
