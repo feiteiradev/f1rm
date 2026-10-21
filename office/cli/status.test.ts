@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { hires, status, type Hire } from "./status.ts";
+import { head, hires, ls, status, tail, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -125,6 +125,16 @@ test("a transcript that vanishes between the folder listing and the read is skip
   symlinkSync(join(h, "nowhere.jsonl"), join(dir, "gone0001.jsonl"));
   const list = hires(base(h, [live("shop.backend-dev-checkout", "gone0001", cwd), live("shop.frontend-dev-ui", "here0002", cwd)]));
   expect(list.map((x) => [x.name, x.lastActivity === null])).toEqual([["shop.backend-dev-checkout", true], ["shop.frontend-dev-ui", false]]);
+});
+
+test("the readers treat a file or folder that vanished as empty, and let any other error through", () => {
+  const h = home();
+  const missing = join(h, "gone.jsonl");
+  expect([head(missing), tail(missing), ls(join(h, "gone-folder"))]).toEqual(["", "", []]);
+  // A folder is there but is not a file: that is not "vanished", so it must show.
+  expect(() => head(h)).toThrow();
+  expect(() => tail(h)).toThrow();
+  expect(() => ls("/etc/hosts/x")).toThrow(); // ENOTDIR, not ENOENT
 });
 
 test("a name that is listed live is not also shown from an older ended transcript, and a reused name shows once", () => {

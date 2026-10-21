@@ -51,7 +51,7 @@ function read(path: string, from: number, length: number): string {
   }
 }
 
-const head = (path: string) => {
+export const head = (path: string) => {
   try {
     return read(path, 0, HEAD);
   } catch (e) {
@@ -62,7 +62,7 @@ const head = (path: string) => {
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
-function tail(path: string): string {
+export function tail(path: string): string {
   try {
     const size = statSync(path).size;
     const from = Math.max(0, size - TAIL);
@@ -75,7 +75,7 @@ function tail(path: string): string {
 }
 
 /** The entries of a folder, none if it was removed since it was listed. */
-function ls(dir: string): string[] {
+export function ls(dir: string): string[] {
   try {
     return readdirSync(dir);
   } catch (e) {
