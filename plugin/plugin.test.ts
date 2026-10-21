@@ -591,7 +591,8 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "`f1rm status --watch <names>`", "`name:waiting`", "`run_in_background`", "its exit wakes you",
     "idle for 20 minutes", "exits 1 when `claude agents --json` can't be read", "only when it and every hire of its team",
     "Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`",
-    "a waiting name is judged only for ended and a limit stop, never for being quiet", "a waiting name is watched as a plain name as soon as it writes again",
+    "a waiting name is judged only for ended, missing or a limit stop, never for being quiet",
+    "When you answer a session's report (and it works again), restart the watcher with it as a plain name.", "a waiting name is watched as a plain name as soon as it writes again",
     "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
     "After `f1rm letgo`, restart the watcher without the names you let go.", "For a wake about a session you already handled (or took a report from) since that watcher started: ignore it, but still restart the watcher.", "When a session sends its report, restart the watcher with it as `name:waiting`.",
     "A message you send to a waiting session counts as a write and makes it plain.", "Until it writes, a waiting name is woken only for ended, missing or a limit stop.",
@@ -629,9 +630,11 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
     "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
     "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
+    "it refuses, in every form, a repo whose encoded project folder is over 150 characters", "judged only for ended, missing or a limit stop, never for being quiet",
+    "When a session sends its report the lead restarts the watcher with it as `name:waiting`; when it answers the report and the session works again, it restarts the watcher with it as a plain name",
   ]) expect(decisions, s).toContain(s);
-  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
-  for (const old of ["So is a hire waiting on a reset timer", "restart the watcher with it as a plain name", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
+  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "judged only for ended and a limit stop", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["So is a hire waiting on a reset timer", "judged only for ended and a limit stop", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
   for (const text of [w, decisions]) {
