@@ -83,14 +83,11 @@ export type HireRequest = {
   extra?: string[];
 };
 
-/** A live background hire as `claude agents --json` lists it; `status` (busy|idle) is there for a session that has run. */
-type LiveHire = { name: string; state: string; cwd: string; status?: string };
-
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
  * and a HireRefused when the cap is full or the working hires can't be counted. The caller spawns it.
  */
-export async function planHire(req: HireRequest, m: { backgroundSessions(): Promise<LiveHire[] | null> } = machine): Promise<string[]> {
+export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions"> = machine): Promise<string[]> {
   const { role, task, team, cwd, brief, model, override, level, content, skills: added = [], extra = [] } = req;
   const roles = readRoles();
   if (!roles.some((r) => r.id === role)) {
@@ -127,8 +124,8 @@ export async function planHire(req: HireRequest, m: { backgroundSessions(): Prom
     if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
     const leads = live.filter((s) => s.name.startsWith("lead-") && s.cwd === cwd).length;
     if (lead && leads >= TEAMS) throw new HireRefused(`this project already has ${leads} teams (the cap is ${TEAMS}).`, busy.length);
-    // A member that sent its DONE sits idle but keeps state "working", so only its status (idle) frees the slot; no status, or any other, counts as working.
-    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && s.status !== "idle").length : 0;
+    // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
+    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
     if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
   }
 
