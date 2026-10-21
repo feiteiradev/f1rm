@@ -61,6 +61,7 @@ const gone = <T>(f: () => T, empty: T): T => {
   }
 };
 
+// head, tail and ls are exported for the test only.
 export const head = (path: string) => gone(() => read(path, 0, HEAD), "");
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];

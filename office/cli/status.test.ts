@@ -134,7 +134,9 @@ test("the readers treat a file or folder that vanished as empty, and let any oth
   // A folder is there but is not a file: that is not "vanished", so it must show.
   expect(() => head(h)).toThrow();
   expect(() => tail(h)).toThrow();
-  expect(() => ls("/etc/hosts/x")).toThrow(); // ENOTDIR, not ENOENT
+  const file = join(h, "a-file");
+  writeFileSync(file, "x");
+  expect(() => ls(join(file, "x"))).toThrow(); // ENOTDIR on any machine, not ENOENT
 });
 
 test("a name that is listed live is not also shown from an older ended transcript, and a reused name shows once", () => {
