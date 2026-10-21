@@ -37,7 +37,7 @@ export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
  */
 export const MAX_FOLDER = 150;
 
-/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm status` on the repo it runs in, and by `f1rm pm` and `f1rm hire` on the root of a git repo (see `rootTooLong`). */
+/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm status` on the repo it runs in, and by `f1rm pm`, `f1rm hire` and the office's Hire endpoint (through planHire) on the root of a git repo (see `rootTooLong`). */
 export const pathTooLong = (repo: string): string | null =>
   projectFolder(repo).length > MAX_FOLDER
     ? `this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`
