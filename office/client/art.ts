@@ -76,7 +76,7 @@ const CHAR = { x: 15, y: 11 };
 /** The character's horizontal centre in the desk's own frame: half a 16px tile in. */
 const HEAD_X = CHAR.x + 8;
 /** Where the LEAD tag's bottom-centre goes, in the desk's own frame: the character's centre and one pixel over its top. */
-export const leadTagOffset = () => ({ x: HEAD_X, y: CHAR.y - 1 });
+export const LEAD_TAG = { x: HEAD_X, y: CHAR.y - 1 } as const;
 const DESK = { x: 2, y: 24 };
 // Your chair at the PM's table, beside it and facing it; the "?" bubble hangs over it.
 const GUEST = { x: 34, y: 28 };

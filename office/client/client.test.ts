@@ -10,7 +10,7 @@ import { argsText } from "./approvals.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
 import { showsLeadTag } from "./lead.ts";
-import { leadTagOffset } from "./art.ts";
+import { LEAD_TAG } from "./art.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
   sessionId, name: sessionId, role: null, status: "idle", activity: "", tool: "", cwd: "/x", room, terminal: {}, lastEventAt: 0, ...over,
@@ -515,5 +515,5 @@ test("only a team lead gets the LEAD tag, not a specialist or a freelancer", () 
 });
 
 test("the LEAD tag sits over the head: the sprite's centre, one art pixel above its top", () => {
-  expect(leadTagOffset()).toEqual({ x: 23, y: 10 });
+  expect(LEAD_TAG).toEqual({ x: 23, y: 10 });
 });
