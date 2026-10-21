@@ -51,38 +51,30 @@ function read(path: string, from: number, length: number): string {
   }
 }
 
-export const head = (path: string) => {
+/** Runs `f`; `empty` if the file or folder it reads was removed since it was listed (`claude rm` during a letgo). Any other error shows. */
+const gone = <T>(f: () => T, empty: T): T => {
   try {
-    return read(path, 0, HEAD);
+    return f();
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return ""; // removed since it was listed
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty;
     throw e;
   }
 };
+
+export const head = (path: string) => gone(() => read(path, 0, HEAD), "");
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
-export function tail(path: string): string {
-  try {
+export const tail = (path: string) =>
+  gone(() => {
     const size = statSync(path).size;
     const from = Math.max(0, size - TAIL);
     const text = read(path, from, Math.min(size, TAIL));
     return from > 0 ? text.slice(text.indexOf("\n") + 1) : text; // the first line may be cut
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return ""; // removed since it was listed
-    throw e;
-  }
-}
+  }, "");
 
 /** The entries of a folder, none if it was removed since it was listed. */
-export function ls(dir: string): string[] {
-  try {
-    return readdirSync(dir);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw e;
-  }
-}
+export const ls = (dir: string) => gone(() => readdirSync(dir), [] as string[]);
 
 /**
  * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
