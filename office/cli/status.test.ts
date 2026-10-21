@@ -53,7 +53,7 @@ test("a lead has its team from its name, and no branch", () => {
   expect(lead).toMatchObject({ role: "lead", team: "shop", status: "idle", lastCommit: null, ended: false });
 });
 
-test("a hire whose last assistant line is the limit stop shows when the limit lifts, whatever agents says", () => {
+test("a hire whose last line of the conversation is the limit stop shows when the limit lifts, whatever agents says", () => {
   const h = home();
   const cwd = `${REPO}/.claude/worktrees/checkout`;
   transcript(h, cwd, "cccc3333", [talk("step one"), limitStop(), { type: "cost-state", sessionId: "cccc3333" }], 3);
@@ -77,8 +77,18 @@ test("limitUntil needs the stop to be the last line of the conversation: a deliv
   expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: "resume" }, ...noise])).toBeNull(); // delivered, not yet read
   expect(until([limitStop(), user, talk("on it")])).toBeNull();
   expect(until([limitStop(), user, limitStop("You've hit your session limit · resets 11pm (Europe/Lisbon)"), ...noise])).toBe("11pm (Europe/Lisbon)");
-  // Text that merely contains a conversation line's type does not count as one.
+  // A line that carries a conversation line's type in its body does not count as one: the prefilter lets it through, the type check does not.
+  expect(until([limitStop(), { type: "api-request-blob", body: { type: "user", message: "x" } }])).toBe("8:40pm (Europe/Lisbon)");
   expect(until([limitStop(), { type: "api-request-blob", body: '{"type":"user","type":"assistant"}' }])).toBe("8:40pm (Europe/Lisbon)");
+  // Only an enqueue delivers a message: the queue emptying or being edited later does not.
+  for (const operation of ["dequeue", "remove", "popAll"]) expect(until([limitStop(), { type: "queue-operation", operation }])).toBe("8:40pm (Europe/Lisbon)");
+  // The hire's own background task finishing is not a `resume`, as an enqueue or as a user line.
+  const note = "<task-notification><task-id>b1</task-id><status>completed</status></task-notification>";
+  expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: note }, ...noise])).toBe("8:40pm (Europe/Lisbon)");
+  expect(until([limitStop(), { type: "user", message: { role: "user", content: note } }])).toBe("8:40pm (Europe/Lisbon)");
+  expect(until([limitStop(), { type: "user", message: { role: "user", content: [{ type: "text", text: note }] } }])).toBe("8:40pm (Europe/Lisbon)");
+  // A real resume after a notification still clears it.
+  expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: note }, { type: "queue-operation", operation: "enqueue", content: "resume" }])).toBeNull();
 });
 
 test("a limit stop followed by later work is no longer a stop, and the reset reads as the text gives it", () => {
