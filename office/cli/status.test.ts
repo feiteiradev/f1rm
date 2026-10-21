@@ -480,3 +480,29 @@ test("a stop whose text says only rate_limit_error is a limit stop with no time"
   transcript(h, cwd, "rle00001", [limitStop("API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}")], 3);
   expect(hires(base(h, [live("shop.backend-dev-checkout", "rle00001", cwd)]))[0].limitUntil).toBe("unknown");
 });
+
+test("a sibling project's folder is never read, however the worktree prefix is cut: a repo folder of 199 characters, and one that is not truncated at all", () => {
+  for (const length of [199, 150]) {
+    const h = home();
+    const repo = `/code/${"z".repeat(length - 6)}`; // "-code-" is 6 characters once encoded
+    expect(folder(repo).length).toBe(length);
+    // Folders of other projects whose names merely start like this repo's worktree folders; each holds a hire that records this repo as its folder, so it would be listed if it were read.
+    for (const [i, sibling] of [`${folder(repo)}-sibling`, `${folder(repo)}--other-project`].entries()) {
+      transcript(h, repo, `sib0000${i}`, [...named(`sib0000${i}`, `lead-sib${i}`)], 5, repo, sibling);
+    }
+    const mine = `${folder(repo)}--claude-worktrees-checkout`;
+    transcript(h, `${repo}/.claude/worktrees/checkout`, "mine0001", [talk("x")], 4, repo, mine.length > 200 ? `${mine.slice(0, 200)}-9f8e7d` : mine);
+    const names = hires({ ...base(h, [live("shop.backend-dev-checkout", "mine0001", `${repo}/.claude/worktrees/checkout`)]), repo }).map((x) => [x.name, x.idleMinutes]);
+    // At 199 characters the cut worktree folder (`<own>-` and a hash) can't be told from a sibling's, so it is not read and the hire shows no activity time: a known limit.
+    expect(names).toEqual([["shop.backend-dev-checkout", length === 199 ? null : 4]]);
+  }
+});
+
+test("a waiting name whose wrap-up writes during the first minute stays waiting", async () => {
+  const touch = (n: number, h: string, clock: number) => {
+    if (n !== 1) return;
+    const file = join(h, ".claude", "projects", folder(`${REPO}/.claude/worktrees/x`), "w0aaaaaa.jsonl");
+    utimesSync(file, new Date(clock), new Date(clock));
+  };
+  expect((await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: 3 }], 100, touch)).woke).toBe(false);
+});

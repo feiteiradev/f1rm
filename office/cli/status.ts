@@ -134,7 +134,11 @@ function transcripts(home: string, repo: string, listedIds: Set<unknown>, now: n
   const root = join(home, ".claude", "projects");
   if (!existsSync(root)) return [];
   const own = folder(repo);
-  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`.slice(0, 200)) || (own.length > 200 && d.startsWith(own.slice(0, 200))));
+  const worktrees = `${own}--claude-worktrees-`;
+  // A name over 200 characters was cut and has a hash after it; the cut must still hold `<own>--`, or it would match the folders of sibling projects.
+  const cut = (d: string, prefix: string) => d.length > 200 && d.startsWith(prefix);
+  const mine = readdirSync(root).filter((d) =>
+    d === own || (worktrees.length <= 200 ? d.startsWith(worktrees) : own.length + 2 <= 200 && cut(d, worktrees.slice(0, 200))) || (own.length > 200 && cut(d, own.slice(0, 200))));
   // A folder or a transcript that `claude rm` removes between the listing and the stat is skipped; any other error stays visible.
   return mine.flatMap((d) =>
     ls(join(root, d)).filter((f) => f.endsWith(".jsonl")).flatMap((f) => {
@@ -223,15 +227,15 @@ const QUIET_MIN = 20;
 /** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
 const LIMITED_MIN = 360;
 
-/** The entry that stands for a name: a live one over an ended one, and among them the newest, a fresh session with no transcript yet counting as the newest of all. */
+/** The entry that stands for a name: with two (an old session left next to a re-hired one) the newest, a fresh session with no transcript yet counting as the newest of all. */
 function entryOf(name: string, list: Hire[]): Hire | undefined {
-  const age = (x: Hire) => (x.ended ? 1e12 : 0) + (x.idleMinutes ?? -1);
+  const age = (x: Hire) => x.idleMinutes ?? -1;
   return list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || age(x) < age(best) ? x : best), undefined);
 }
 
 /**
  * Why a named session is stalled, or null if it is not: missing, ended, on a limit stop, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is.
- * One that is waiting (for an answer, or for the user at its desk) is judged only for the first three, never for being quiet. With two entries of a name (an old session next to a re-hired one) the newest decides.
+ * One that is waiting (for an answer, or for the user at its desk) is judged only for the first three, never for being quiet.
  */
 function stalled(name: string, list: Hire[], waiting: boolean): string | null {
   const h = entryOf(name, list);
@@ -257,7 +261,8 @@ export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
 /**
  * `f1rm status --watch <name>[:waiting]...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
  * It fails closed: when `claude agents --json` can't be read it returns exit 1. With no name left it returns at once.
- * A waiting name is watched as a plain one as soon as it writes again: its activity is noted at the first poll that sees it, and any later activity ends the wait. That is how
+ * A waiting name is watched as a plain one as soon as it writes again. Its activity is noted at the first poll, a minute after the start, whatever that finds (none, for a session
+ * with no transcript yet), so what it wrote in that first minute (a wrap-up after its report) does not count; any later write ends the wait, including a message sent to it. That is how
  * an approval at the hire's desk (no message reaches anyone) puts it back, while a Reviewer waiting after CHANGES REQUESTED, which writes nothing, stays waiting.
  */
 export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
