@@ -592,17 +592,18 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
     "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
-    "**Limit stop with no time** (`limitUntil` is `unknown`)", "send it `resume` as for an idle session",
+    "**Limit stop with no time** (`limitUntil` is `unknown`)", 
     "**Missing or no activity time**", "check again in a minute; if still so, treat it as ended",
   ]) expect(w, s).toContain(s);
   // After you send `resume` there is one short bullet: the delivered `resume` clears the stop, so the watcher restarts on the names still working.
   for (const s of [
-    "**After you send `resume`**", "restart the watcher with every name still working", "Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
-    "shows a new stop and wakes you again", "a second `resume` in a row that brought no new commit or message means it is ended", "The delivered `resume` clears the stop, so the old stop does not wake the watcher again",
+    "**After you send `resume`**", "restart the watcher a minute later, so its first poll finds the `resume` written", "Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
+    "shows a new stop and wakes you again", "**Status can't be read**", "run `f1rm status` by hand", "After handling any wake, restart the watcher with the names still working.",
+    "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session", "when the last line of the conversation is a limit stop", "a second `resume` in a row that brought no new commit or message means it is ended", "The delivered `resume` clears the stop, so the old stop does not wake the watcher again",
   ]) expect(w, s).toContain(s);
   expect(w.split("delivered `resume` clears the stop").length - 1).toBe(1); // said once
   // The removed recheck rule leaves no trace.
-  for (const old of ["sleep 300", "note the time before you send it", "After handling a wake", "follow **After `resume`**", "under a minute", "a few minutes", "until its first new line"]) expect(w, old).not.toContain(old);
+  for (const old of ["sleep 300", "note the time before you send it", "After handling a wake,", "follow **After `resume`**", "under a minute", "until its first new line"]) expect(w, old).not.toContain(old);
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
@@ -612,9 +613,9 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
   const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
   for (const s of [
-    "After sending `resume` the lead restarts the watcher with every name still working", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
+    "After sending `resume` the PM or lead restarts the watcher a minute later with every name still working", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
     "a hire that hits the limit again shows a new stop and wakes it again", "a second `resume` in a row that brought no new commit or message means the hire is ended",
-    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation",
+    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes",
   ]) expect(decisions, s).toContain(s);
   for (const old of ["sleeps 300 seconds", "notes the time before sending it", "waits again for the time a timed stop names"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
