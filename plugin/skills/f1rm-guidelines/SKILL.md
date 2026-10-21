@@ -134,7 +134,7 @@ The mattpocock skills and the pstack skills work side by side. Each row names th
 | Questions about existing code | none | `pstack:how`, slash-only like architect (`--skills pstack:how`) | A lead not started with it sends a Haiku Explore intern. |
 | Build | `mattpocock-skills:tdd`, loaded second with the Skill tool | `pstack:poteto-mode`, a dev's first command, with its playbook: `feature`, `bug-fix`, `refactoring`, `perf-issue` | The tdd skill is mattpocock's, never pstack's of the same name. Every criterion has a check that fails first. |
 | Diagnose a bug | `mattpocock-skills:diagnosing-bugs`, before tdd (`--skills`) | the `bug-fix` playbook | Diagnose first, then fix test-first. |
-| Review | `/code-review` first, then `mattpocock-skills:code-review` for the Spec axis against the brief | `pstack:interrogate`, slash-only: the user can run it by hand at `--level high` | `/code-review` stays the Reviewer's first command; the review flow decides the merge. |
+| Review | `/code-review` first, then `mattpocock-skills:code-review` for the Spec axis, inline, against the brief | `pstack:interrogate`, slash-only: the user can run it by hand at `--level high` | `/code-review` stays the Reviewer's first command; the review flow decides the merge. |
 | Parallel work | none | `pstack:arena`, `pstack:swarm` | Only when a brief asks, within the interns cap. |
 | Ship | none | the playbooks' Opening a PR, Babysit and Shipping | None of it runs inside a hire. |
 

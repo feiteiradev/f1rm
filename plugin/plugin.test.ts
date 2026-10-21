@@ -729,6 +729,12 @@ test("K3b: a lead says which of pstack:how or a Haiku Explore intern applies, an
   expect(step3).not.toContain("ask the PM.");
 });
 
+test("K3c: the Reviewer runs the Spec axis inline, with no sub-agents, against worktree-<task> and not the main checkout's HEAD", () => {
+  const line = /^- Your first command stays.*$/m.exec(role("reviewer").body)?.[0] ?? "";
+  for (const s of ["inline, with no sub-agents", "`<base>...worktree-<task>`, not the main checkout's HEAD"]) expect(line, s).toContain(s);
+  expect(section("Skill stack")).toContain("`mattpocock-skills:code-review` for the Spec axis, inline, against the brief");
+});
+
 test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
   const md = section("Skill stack");
   expect(md).toContain("| Phase | mattpocock skill | pstack skill | Rule that wins |");
