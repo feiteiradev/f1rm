@@ -56,6 +56,22 @@ test("a lead hired from a subfolder of the repo is started in the repo root, whi
   }
 });
 
+test("a specialist hired from a subfolder is judged against the repo root: the team's lead running at the root counts, and a session working the task's worktree refuses a second", () => {
+  const repos = longRepos();
+  try {
+    const repo = repos.repo(100);
+    const sub = repos.inside(repo, 130);
+    const args = ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF];
+    const lead = bg("working", "lead-checkout", repo);
+    const ok = hire(stubClaude([lead]), args, sub);
+    expect([ok.code, ok.err]).toEqual([0, ""]);
+    const taken = hire(stubClaude([lead, bg("done", "checkout.designer-landing", join(repo, ".claude", "worktrees", "landing"))]), args, sub);
+    expect(taken.err).toContain('a session already works on task "landing": one specialist per task');
+  } finally {
+    repos.cleanup();
+  }
+});
+
 test("f1rm hire checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder hire, a long repo or a subfolder of one is refused with nothing started", () => {
   const repos = longRepos();
   try {

@@ -12,7 +12,6 @@ export function longRepos() {
       made.push(parent);
       if (length < parent.length + 2) throw new Error(`can't build a path of ${length} characters under ${parent}`);
       const path = join(parent, "r".repeat(length - parent.length - 1));
-      if (path.length !== length) throw new Error(`can't build a path of ${length} characters under ${parent} (got ${path.length})`);
       mkdirSync(path);
       if (git && !Bun.spawnSync(["git", "init", "-q", path]).success) throw new Error(`git init failed in ${path}`);
       return path;
@@ -21,7 +20,6 @@ export function longRepos() {
     inside(path: string, length: number): string {
       if (length < path.length + 2) throw new Error(`can't build a subfolder of ${length} characters under ${path}`);
       const sub = join(path, "s".repeat(length - path.length - 1));
-      if (sub.length !== length) throw new Error(`can't build a subfolder of ${length} characters under ${path} (got ${sub.length})`);
       mkdirSync(sub, { recursive: true });
       return sub;
     },

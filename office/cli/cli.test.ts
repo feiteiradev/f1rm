@@ -508,7 +508,7 @@ function stubClaude(exitCode = 0, sessions: object[] = []) {
   writeFileSync(join(bin, "agents.json"), JSON.stringify(sessions));
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${bin}/agents.json"; exit 0; fi\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
+    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${bin}/agents.json"; exit 0; fi\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\necho "cwd:$(pwd -P)" >> "${log}"\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
     { mode: 0o755 },
   );
   const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
@@ -516,6 +516,7 @@ function stubClaude(exitCode = 0, sessions: object[] = []) {
     bin,
     args: () => lines().filter((l) => l.startsWith("arg:")).map((l) => l.slice(4)),
     env: () => lines().filter((l) => l.startsWith("env:")).map((l) => l.slice(4)),
+    cwd: () => lines().find((l) => l.startsWith("cwd:"))?.slice(4) ?? null,
   };
 }
 
@@ -985,11 +986,12 @@ test("f1rm pm checks the path length of the repo root, in a git repo only: a lon
     const pmStarts = (cwd: string) => {
       const stub = stubClaude();
       const r = pmIn(cwd, { stdin: "w\n" }, stub);
-      return { ...r, started: stub.args().length > 0 };
+      return { ...r, started: stub.args().length > 0, startedIn: stub.cwd() };
     };
-    for (const cwd of [short, exact, repos.inside(short, 170), plain]) { // a git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it
+    // A git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it. The PM is started in the repo's root, where its hires are; outside git, where it ran.
+    for (const [cwd, startedIn] of [[short, short], [exact, exact], [repos.inside(short, 170), short], [plain, plain]]) {
       const r = pmStarts(cwd);
-      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
+      expect([cwd.length, r.code, r.started, r.startedIn]).toEqual([cwd.length, 0, true, startedIn]);
     }
     for (const cwd of [long, repos.inside(long, 170)]) {
       const r = pmStarts(cwd);

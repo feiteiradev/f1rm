@@ -164,7 +164,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
-  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself, where `f1rm hire` runs.
+  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
   const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...extra];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
@@ -202,7 +202,7 @@ export async function hire(words: string[]): Promise<number> {
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
   try {
-    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(process.cwd(), git)), brief, reportTo: reportTo ?? pmName(process.cwd(), git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
+    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(

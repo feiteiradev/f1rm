@@ -818,6 +818,22 @@ test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief an
   expect(spawned).toEqual([]);
 });
 
+test("Hire refuses a project whose path is over 150 characters with the path message, hires one of 150, and spawns nothing for the first", async () => {
+  const long = `/code/${"x".repeat(145)}`; // 151 characters once encoded
+  const fine = `/code/${"y".repeat(144)}`;
+  expect([long.length, fine.length]).toEqual([151, 150]);
+  start({ [long]: `${long}/.git`, [fine]: `${fine}/.git` });
+  await hook(sessionStart("s1", long));
+  await hook(sessionStart("s2", fine));
+  await office((s) => `${long}/.git` in s.rooms && `${fine}/.git` in s.rooms);
+  const refused = await hireOf({ ...ASSIGN, room: `${long}/.git` });
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ error: expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters"), working: null });
+  expect(spawned).toEqual([]);
+  expect((await hireOf({ ...ASSIGN, room: `${fine}/.git` })).status).toBe(200);
+  expect(spawned.map((s) => s.cwd)).toEqual([fine]);
+});
+
 test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));

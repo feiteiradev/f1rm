@@ -462,12 +462,15 @@ async function pm() {
   const common = machine.gitCommonDir(process.cwd());
   const tooLong = rootTooLong(common);
   if (tooLong) throw new Error(tooLong);
-  const name = pmName(process.cwd(), { gitCommonDir: () => common });
+  // The PM starts in the repo's root, where its hires start, not in a subfolder it ran from; outside git, where it ran.
+  const root = common ? dirname(common) : process.cwd();
+  const git = { gitCommonDir: () => common };
+  const name = pmName(root, git);
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
   // With no answer (no terminal), it starts as Work and asks again next time.
-  const file = editionFile(process.cwd(), { gitCommonDir: () => common });
+  const file = editionFile(root, git);
   register(file);
   let chosen = readEdition(file);
   if (!chosen) {
@@ -476,6 +479,7 @@ async function pm() {
     if (chosen) writeEdition(file, chosen);
   }
   const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
+    cwd: root,
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],
   });

@@ -666,10 +666,12 @@ export function startServer({
           return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
         const folder = folderOf(room);
-        const common = machine.gitCommonDir(folder); // asked once: the PM's name and the path limit both read it
+        // Asked at most once, and only when something needs it: the PM's name and the path limit both read it, after the cheap checks.
+        let common: string | null | undefined;
+        const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, { gitCommonDir: () => common }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: () => common });
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

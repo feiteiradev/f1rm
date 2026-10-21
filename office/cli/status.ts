@@ -128,7 +128,7 @@ function newest(dir: string): number {
   }));
 }
 
-/** Every transcript in this repo's own folder and in the folders of its worktrees (statusIn refuses a path too long for those names to stay whole); the ended ones are told apart by the folder they record. */
+/** Every transcript in this repo's own folder and in the folders of its worktrees (statusFor refuses a path too long for those names to stay whole); the ended ones are told apart by the folder they record. */
 function transcripts(home: string, repo: string, listedIds: Set<unknown>, now: number): Transcript[] {
   const root = join(home, ".claude", "projects");
   if (!existsSync(root)) return [];
@@ -198,7 +198,7 @@ export type WatchName = { name: string; waiting: boolean };
 /** What the arguments of `f1rm status` ask for: a usage error, a listing, or a watch of some names (empty ones dropped, a `:waiting` suffix read once). */
 export type Args = { error: string } | { watch: false; json: boolean } | { watch: true; names: WatchName[] };
 
-/** Reads the arguments once, for `statusIn`, before it looks at the repo. */
+/** Reads the arguments once, for `statusFor`, before it looks at the repo. */
 export function parseArgs(argv: string[]): Args {
   if (argv[0] === "--watch") {
     const given = argv.slice(1);
@@ -298,13 +298,13 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
 export type RunDeps = { home: string; now: () => number; loadAgents: () => Promise<any[] | null>; sleep: (ms: number) => Promise<void>; commitTime: (branch: string) => number | null };
 
 /**
- * `f1rm status` for `repo` (null outside git). It answers, in this order: a usage mistake, a watch with no names, a folder that is not a git repo, a path Claude Code would cut,
+ * `f1rm status` for a repo, given as its path, as null (not in git), or as a lookup called only when there is something to serve. It answers, in this order: a usage mistake, a watch with no names, a folder that is not a git repo, a path Claude Code would cut,
  * and else runs what `args` asks for. `deps` default to the real Claude Code, git and clock; a test injects them.
  */
-export async function statusFor(args: Args, repoOf: string | null | (() => string | null), deps: Partial<RunDeps> = {}): Promise<Result> {
+export async function statusFor(args: Args, repoOrLookup: string | null | (() => string | null), deps: Partial<RunDeps> = {}): Promise<Result> {
   if ("error" in args) return { out: "", err: args.error, code: 1 };
   if (args.watch && !args.names.length) return NO_NAMES;
-  const repo = typeof repoOf === "function" ? repoOf() : repoOf; // asked for only now, when there is something to serve
+  const repo = typeof repoOrLookup === "function" ? repoOrLookup() : repoOrLookup; // asked for only now, when there is something to serve
   if (!repo) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const tooLong = pathTooLong(repo);
   if (tooLong) return { out: "", err: `f1rm: ${tooLong}`, code: 1 };
