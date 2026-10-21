@@ -103,6 +103,16 @@ test("a hire that agents no longer lists, with a transcript in this repo's folde
   expect(dev).toMatchObject({ ended: true, status: null, state: null, idleMinutes: 40, limitUntil: "20:40 (Europe/Lisbon)", sessionId: "ffff6666" });
 });
 
+test("an ended hire is named by its last name line, so a rename counts, also past a transcript larger than the tail read", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "aaaa7001", [...named("aaaa7001", "shop.backend-dev-old"), talk("x"), ...named("aaaa7001", "shop.backend-dev-new")], 10);
+  const filler = Array.from({ length: 300 }, () => talk("x".repeat(1000)));
+  transcript(h, cwd, "aaaa7002", [...named("aaaa7002", "shop.frontend-dev-old"), ...filler, ...named("aaaa7002", "shop.frontend-dev-new")], 20);
+  transcript(h, cwd, "aaaa7003", [...named("aaaa7003", "shop.designer-only"), ...filler], 30); // the one name line is far from the end
+  expect(hires(base(h, [])).map((x) => x.name)).toEqual(["shop.backend-dev-new", "shop.frontend-dev-new", "shop.designer-only"]);
+});
+
 test("a name that is listed live is not also shown from an older ended transcript, and a reused name shows once", () => {
   const h = home();
   const cwd = `${REPO}/.claude/worktrees/checkout`;

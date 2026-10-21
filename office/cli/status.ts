@@ -52,6 +52,8 @@ function read(path: string, from: number, length: number): string {
 }
 
 const head = (path: string) => read(path, 0, HEAD);
+/** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
+const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
 function tail(path: string): string {
   const size = statSync(path).size;
@@ -128,8 +130,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   const ended = new Map<string, Transcript>();
   for (const t of files.sort((x, y) => y.mtime - x.mtime)) {
     if (listedIds.has(t.id) || now - t.mtime > ENDED_WINDOW_MS) continue;
-    const text = head(t.path);
-    const name = /"agentName":"([^"]+)"/.exec(text)?.[1] ?? /"customTitle":"([^"]+)"/.exec(text)?.[1];
+    const name = lastName(tail(t.path)) ?? lastName(head(t.path));
     if (name && hireName(name) &&!liveNames.has(name) && !ended.has(name)) ended.set(name, t);
   }
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
