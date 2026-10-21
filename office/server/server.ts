@@ -77,6 +77,7 @@ const gitCall = ([program, ...words]: string[]) => {
   return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
+const GH_API_WITH_VALUE = new Set(["-H", "--header", "-X", "--method", "-f", "--raw-field", "-F", "--field", "--input", "-p", "--preview", "-q", "--jq", "-t", "--template", "--cache", "--hostname"]);
 // A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or a field or input file with no method (gh then POSTs), writes.
 const API_METHOD = /^(?:--method(?:=(.*))?|-[A-Za-z]*X=?(.*))$/;
 const API_FIELD = /^(-[fF]|--(field|raw-field|input))/;
@@ -86,7 +87,8 @@ const LANDING_MUTATION = /mergePullRequest|mergeBranch|createCommitOnBranch|crea
 // ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen,
 // and `-HX-Foo: bar` or a `-fX` field reads as a method. Add an endpoint here when GitHub gains another way to land code.
 const writesApi = (args: string[]) => {
-  if (args.includes("graphql")) return args.some((a) => LANDING_MUTATION.test(a));
+  // The endpoint is the first word past the options (and their values), so `-p graphql` or `--jq graphql` does not make a REST call a graphql query.
+  if (args[skipOptions(args, 0, GH_API_WITH_VALUE)] === "graphql") return args.some((a) => LANDING_MUTATION.test(a));
   const methods = args.flatMap((a, j) => {
     const m = API_METHOD.exec(a);
     return m ? [(m[1] ?? m[2]) || (args[j + 1] ?? "")] : [];
