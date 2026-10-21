@@ -161,4 +161,4 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: a team member that has sent its DONE and gone idle does not count toward the 2-working-per-team cap of `f1rm hire`. It is idle when its entry in `claude agents --json` has `status` "idle"; a missing or unreadable status counts as working. The machine-wide cap of 30 (which still counts it) and one specialist per task stay as they are.
 - Why: in the ghosts team two devs sent DONE and went idle, but `claude agents --json` kept their state "working", so `f1rm hire --team` counted them and refused their Reviewers.
 - Rejected: asking the user to raise or override the cap for each Reviewer; letting the lead let the devs go before the review (the dev must stay to take CHANGES REQUESTED).
-- Where: idle-frees-slot (lead-ghosts agreed 2026-10-21 to the one-line status change in machine.ts backgroundSessions)
+- Where: idle-frees-slot, 6e99223 (lead-ghosts agreed 2026-10-21 to the one-line status change in machine.ts backgroundSessions)
