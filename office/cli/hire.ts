@@ -90,7 +90,8 @@ export type HireRequest = {
   edition?: Edition | null;
   brief: string;
   /** The PM session the hire reports to, or null when the project has none. */
-  reportTo: string | null;
+  /** The session the hire reports to: a name, none, or a lookup planHire calls only after its checks (it may run git). */
+  reportTo: string | null | (() => string | null);
   /** `haiku`, `sonnet` or `opus` in place of the role's own model. */
   model?: string | null;
   override?: boolean;
@@ -162,7 +163,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
-  const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
+  const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
+  const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
   const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...extra];

@@ -988,14 +988,14 @@ test("f1rm pm checks the path length of the repo root, in a git repo only: a lon
       const r = pmIn(cwd, { stdin: "w\n" }, stub);
       return { ...r, started: stub.args().length > 0, startedIn: stub.cwd() };
     };
-    // A git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it. The PM is started in the repo's root, where its hires are; outside git, where it ran.
-    for (const [cwd, startedIn] of [[short, short], [exact, exact], [repos.inside(short, 170), short], [plain, plain]]) {
+    // A git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it. The PM starts where it ran, as before (a relative --settings or --add-dir, and --continue, depend on it). The expected lengths are literals.
+    for (const [length, cwd] of [[100, short], [150, exact], [170, repos.inside(short, 170)], [151, plain]] as const) {
       const r = pmStarts(cwd);
-      expect([cwd.length, r.code, r.started, r.startedIn]).toEqual([cwd.length, 0, true, startedIn]);
+      expect([cwd.length, r.code, r.started, r.startedIn]).toEqual([length, 0, true, cwd]);
     }
-    for (const cwd of [long, repos.inside(long, 170)]) {
+    for (const [length, cwd] of [[151, long], [170, repos.inside(long, 170)]] as const) {
       const r = pmStarts(cwd);
-      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 1, false]); // refused before anything starts, and before the edition is asked
+      expect([cwd.length, r.code, r.started]).toEqual([length, 1, false]); // refused before anything starts, and before the edition is asked
       expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
       expect(r.out).not.toContain("Work or a Founder");
     }

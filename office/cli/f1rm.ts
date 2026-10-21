@@ -462,7 +462,7 @@ async function pm() {
   const common = machine.gitCommonDir(process.cwd());
   const tooLong = rootTooLong(common);
   if (tooLong) throw new Error(tooLong);
-  // The PM starts in the repo's root, where its hires start, not in a subfolder it ran from; outside git, where it ran.
+  // The root is for the PM's name and the length check only: the PM itself starts where it ran, so a relative --settings or --add-dir, and --continue, work as before.
   const root = common ? dirname(common) : process.cwd();
   const git = { gitCommonDir: () => common };
   const name = pmName(root, git);
@@ -479,7 +479,6 @@ async function pm() {
     if (chosen) writeEdition(file, chosen);
   }
   const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
-    cwd: root,
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],
   });

@@ -80,13 +80,14 @@ test("f1rm hire checks the path length of the repo root, in a git repo only: a l
       const stub = stubClaude([]);
       return { ...hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], cwd), started: stub.argv() !== null };
     };
-    for (const cwd of [short, exact, repos.inside(short, 170), plain]) { // a git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it
+    // A git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it. The expected lengths are literals.
+    for (const [length, cwd] of [[100, short], [150, exact], [170, repos.inside(short, 170)], [151, plain]] as const) {
       const r = lead(cwd);
-      expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
+      expect([cwd.length, r.code, r.started]).toEqual([length, 0, true]);
     }
-    for (const cwd of [long, repos.inside(long, 170)]) {
+    for (const [length, cwd] of [[151, long], [170, repos.inside(long, 170)]] as const) {
       const r = lead(cwd);
-      expect([cwd.length, r.code === 0, r.started]).toEqual([cwd.length, false, false]);
+      expect([cwd.length, r.code === 0, r.started]).toEqual([length, false, false]);
       expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
       // Not a cap refusal: the message stands alone, without the advice to leave the task todo.
       expect(r.err).not.toContain("Do not hire");

@@ -671,7 +671,7 @@ export function startServer({
         const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

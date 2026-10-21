@@ -22,7 +22,7 @@ let listing = new Map<string, number | undefined>();
 let deadPids = new Set<number>();
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
-  gitCommonDir: (cwd: string) => repos[cwd] ?? null,
+  gitCommonDir: (cwd: string) => (gitCalls++, repos[cwd] ?? null),
   isRepo: (folder: string) => Object.values(repos).includes(folder + "/.git"),
   liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
@@ -735,6 +735,9 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
   expect(calls).toEqual([]);
 });
 
+// How many times the server asked git for a common dir, so a test can say a request asked at most once, or not at all.
+let gitCalls = 0;
+
 const SHOP = { "/code/shop": "/code/shop/.git" };
 const ROOM = "/code/shop/.git";
 const ui = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`${base()}/${token}/${path}`, init);
@@ -832,6 +835,20 @@ test("Hire refuses a project whose path is over 150 characters with the path mes
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, room: `${fine}/.git` })).status).toBe(200);
   expect(spawned.map((s) => s.cwd)).toEqual([fine]);
+});
+
+test("Hire asks git for the common dir once at most, and not at all for a request that fails the cheap checks, with a PM in the room too", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms && Object.keys(s.employees).length === 2);
+  gitCalls = 0;
+  const bad = await hireOf({ ...ASSIGN, role: "nonesuch" });
+  expect(bad.status).toBe(400);
+  expect(gitCalls).toBe(0); // the PM's name is not looked up before the role is checked
+  expect((await hireOf(ASSIGN)).status).toBe(200);
+  expect(gitCalls).toBe(1); // the PM's name and the path limit share one lookup
+  expect((spawned.at(-1)!.argv.find((a) => a.includes("Report to:")) ?? "")).toContain("Report to: pm-shop");
 });
 
 test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
