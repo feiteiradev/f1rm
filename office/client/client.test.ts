@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../server/office.ts";
 import { CELL, CORNER, layoutOffice, POD, ROOM, rosterOf } from "./layout.ts";
-import { decodeLook, nameFor, ROLES, ROLE_IDS, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
+import { decodeLook, nameFor, ROLES, ROLE_IDS, internSeed, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { argsText } from "./approvals.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
@@ -56,6 +56,16 @@ test("each role wears its own shirt, while skin and hair vary by session; the le
   expect(new Set(designers.map((l) => `${l.skin}/${l.hair}`)).size).toBeGreaterThan(5);
   const freelancers = new Set(Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt));
   for (const r of ["lead", "marketer", "seo", "social", "sales", "strategist"] as const) expect(freelancers.has(ROLES[r].shirt)).toBe(false);
+});
+
+test("an intern never wears a role's shirt, only one of the six plain ones", () => {
+  const roleShirts = new Set<number>(((["lead", "marketer", "seo", "social", "sales", "strategist"]) as const).map((r) => ROLES[r].shirt));
+  const shirts = Array.from({ length: 300 }, (_, i) => decodeLook(internSeed(`agent-${i}`)).shirt);
+  for (const s of shirts) {
+    expect(roleShirts.has(s)).toBe(false);
+    expect(s).toBeLessThan(6);
+  }
+  expect(new Set(shirts).size).toBe(6);
 });
 
 test("only f1rm's own agent types are roles", () => {
