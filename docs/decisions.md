@@ -190,3 +190,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user got doors and offices he never asked for, and does not want new doors for the same project (his lobby showed one per hire worktree and subfolder). Worktrees vanish after letgo, so git cannot decide where an old event belongs; the registered folders can.
 - Rejected: automatic doors for git repos; one door per cwd, subfolder or worktree; resolving the door through git. This supersedes "Doors only for projects" (G4), whose any-git-repo rule and "a new event brings the door back" after Remove no longer hold.
 - Where: doors-server (the `f1rm pm` side lands in doors-cli)
+
+## 2026-10-21 f1rm edition changes, never creates
+
+- Decision: `f1rm pm` registers its repo (the same file `editionFile` gives: the git common dir for a repo, so a subfolder or worktree registers the main working directory; the folder itself otherwise) by creating `{}` when missing, even when no edition is chosen, and never overwrites an existing registration or its edition. `f1rm edition work|founder` only changes an existing registration and exits non-zero with "run f1rm pm here first" in an unregistered folder; bare `f1rm edition` there prints "unregistered (run f1rm pm here first)".
+- Why: `f1rm edition` used to create the file in any folder, which gave a subfolder its own door, against "Doors only by f1rm pm".
+- Rejected: letting `f1rm edition` register as a convenience; `f1rm pm` registering only once an edition is chosen (a PM with no terminal would then have no door).
+- Where: doors-cli

@@ -8,7 +8,7 @@ f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead
 
 ## What you get
 
-- **A lobby with a door per project.** Each door shows how many people are inside and whether someone is waiting for you. Enter a door to see that project's office full screen.
+- **A lobby with a door per project.** Each door shows how many people are inside and whether someone is waiting for you. A door appears when you run `f1rm pm` in a project, and not before; sessions in folders without one wait under Elsewhere. Enter a door to see that project's office full screen.
 - **Live employees.** Sessions you start in any terminal arrive as freelancers. Sessions started as a role, such as `claude --agent f1rm:designer`, take that role's desk and shirt. Everyone gets a name of their own. Sub-agents walk out as interns and leave when they finish.
 - **The PM's table.** The PM, the one you talk to, sits at its own table in a glass corner, with a chair for you. When its turn ends, a "?" over your chair says it is waiting for your answer, and its panel's Talk button takes you to its terminal. A tap on the empty table starts a PM.
 - **Work or Founder.** Each project is a Work project (the engineering company) or a Founder project, which adds a Marketer, an SEO specialist, Social media, Sales and a Strategist for your own products. You choose the first time you open a project; they draft, and you publish.
@@ -46,8 +46,8 @@ The office keeps running after you close Claude Code and starts again at login, 
 | `f1rm start` | Opens the office in your browser and exits. If the office isn't running, starts the background office first, as `f1rm service` does. `f1rm serve` runs one in this terminal instead, until you stop it. |
 | `f1rm service` | Runs the office in the background and at login. Run it again to restart it on new code. |
 | `f1rm service off` | Stops the background office and removes it from login. Your sessions keep working; the hooks just go quiet. |
-| `f1rm edition` | Prints this repo's edition. `f1rm edition work` or `f1rm edition founder` sets it. |
-| `f1rm pm` | Starts this repo's PM in this terminal. Extra flags go to `claude`, for example `f1rm pm --model sonnet`. |
+| `f1rm edition` | Prints this repo's edition. `f1rm edition work` or `f1rm edition founder` changes it, once `f1rm pm` has been run in the repo (it never creates a door). |
+| `f1rm pm` | Registers this repo, which gives it a door in the lobby, and starts its PM in this terminal. Extra flags go to `claude`, for example `f1rm pm --model sonnet`. |
 | `f1rm hire` | Starts a lead or a specialist in the background. The PM and leads run it; `f1rm hire --help` shows the syntax. Flags before the role: `--skills a,b` adds skills for one task (`--skills research` starts a Researcher on `/research`), `--level low\|medium\|high` sets the Reviewer's `/code-review` level (`high` also runs `security-review` on the merge), and `--content` starts a cheap Sonnet Reviewer for a branch with no code. |
 | `f1rm letgo` | `f1rm letgo <name>...` lets finished hires go: stops them, removes them, and deletes their worktree and branch when the branch is merged. The PM and leads run it after `APPROVED`. |
 | `f1rm demo` | Opens the recorded demo, with no server and no Claude Code. Needs `bun run build` first. |

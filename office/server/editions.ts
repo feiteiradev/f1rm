@@ -32,6 +32,16 @@ export function writeEdition(file: string, edition: Edition) {
   writeFileSync(file, JSON.stringify({ edition }) + "\n");
 }
 
+/** Registers a project, which is what gives it a door: creates `{}` (no edition chosen) when the file is missing, and leaves an existing one as it is. */
+export function register(file: string) {
+  mkdirSync(dirname(file), { recursive: true });
+  try {
+    writeFileSync(file, "{}\n", { flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+}
+
 /** Changes the edition of a registration that exists: throws ENOENT when the file is gone, so it can't recreate a registration removed in between. */
 export function changeEdition(file: string, edition: Edition) {
   const text = JSON.stringify({ edition }) + "\n";

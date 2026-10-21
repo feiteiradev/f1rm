@@ -769,19 +769,48 @@ const edition = (cwd: string, home: string, ...args: string[]) => {
   return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.stderr.toString() };
 };
 
-test("f1rm edition prints a repo's edition, sets it outside the repo, and refuses anything but work or founder", () => {
+const registered = (home: string) => readdirSync(join(home, ".f1rm", "projects"));
+
+test("f1rm edition changes a registered repo's edition outside the repo, and refuses anything but work or founder", () => {
   const home = tempHome(), repo = repoDir("shop");
+  expect(pmIn(repo, { HOME: home }, stubClaude()).code).toBe(0);
   expect(edition(repo, home).out).toBe("none chosen yet (counts as work)");
   expect(edition(repo, home, "founder")).toMatchObject({ code: 0, out: "edition: founder" });
   expect(edition(repo, home).out).toBe("founder");
   expect(readdirSync(repo)).toEqual([]);
-  const files = readdirSync(join(home, ".f1rm", "projects"));
+  const files = registered(home);
   expect(files).toHaveLength(1);
   expect(JSON.parse(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8"))).toEqual({ edition: "founder" });
-  expect(edition(repoDir("blog"), home).out).toBe("none chosen yet (counts as work)");
   const bad = edition(repo, home, "startup");
   expect(bad.code).not.toBe(0);
   expect(bad.err).toContain("usage: f1rm edition [work|founder]");
+});
+
+test("f1rm edition in an unregistered folder refuses and writes no file, and a bare read says it is unregistered", () => {
+  const home = tempHome(), repo = repoDir("shop");
+  const r = edition(repo, home, "founder");
+  expect(r.code).not.toBe(0);
+  expect(r.err).toContain("run f1rm pm here first");
+  expect(existsSync(join(home, ".f1rm", "projects"))).toBe(false);
+  expect(edition(repo, home)).toMatchObject({ code: 0, out: "unregistered (run f1rm pm here first)" });
+});
+
+test("pm registers its repo with no edition chosen and starts as Work, from a subfolder too, and never overwrites a registration", () => {
+  const home = tempHome(), repo = repoDir("shop");
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  mkdirSync(join(repo, "src"));
+  const stub = stubClaude();
+  expect(pmIn(join(repo, "src"), { HOME: home }, stub).code).toBe(0);
+  expect(stub.args()[4]).toContain("This is a Work project");
+  const files = registered(home);
+  expect(files).toHaveLength(1);
+  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe("{}\n");
+  expect(edition(repo, home, "founder").code).toBe(0);
+  const again = stubClaude();
+  expect(pmIn(repo, { HOME: home }, again).code).toBe(0);
+  expect(registered(home)).toEqual(files);
+  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe('{"edition":"founder"}\n');
+  expect(again.args()[4]).toContain("This is a Founder project");
 });
 
 test("pm asks a repo's edition the first time, saves it, and tells the PM; with no answer it starts as Work and asks again", () => {

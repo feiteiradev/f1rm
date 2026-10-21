@@ -10,7 +10,7 @@ import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { letgo } from "./letgo.ts";
-import { editionFile, isEdition, projectsDir, readEdition, writeEdition, type Edition } from "../server/editions.ts";
+import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";
 
 const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
@@ -443,9 +443,15 @@ const pmPrompt = (name: string, edition: Edition) =>
 /** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` sets it. */
 function edition() {
   const want = process.argv[3];
-  if (want === undefined) return console.log(readEdition(editionFile(process.cwd())) ?? "none chosen yet (counts as work)");
+  const file = editionFile(process.cwd());
+  if (want === undefined) return console.log(!existsSync(file) ? "unregistered (run f1rm pm here first)" : readEdition(file) ?? "none chosen yet (counts as work)");
   if (!isEdition(want)) throw new Error("usage: f1rm edition [work|founder]");
-  writeEdition(editionFile(process.cwd()), want);
+  // Only `f1rm pm` registers a project: changeEdition can't create the file.
+  try {
+    changeEdition(file, want);
+  } catch (e) {
+    throw (e as NodeJS.ErrnoException).code === "ENOENT" ? new Error("run f1rm pm here first") : e;
+  }
   console.log(`edition: ${want}`);
 }
 
@@ -454,7 +460,9 @@ async function pm() {
   const name = pmName(process.cwd());
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
-  // The first PM in a repo sets its edition. With no answer (no terminal), it starts as Work and asks again next time.
+  // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
+  // With no answer (no terminal), it starts as Work and asks again next time.
+  register(editionFile(process.cwd()));
   let chosen = readEdition(editionFile(process.cwd()));
   if (!chosen) {
     const answer = prompt(`Is ${name.slice(3)} a Work or a Founder project? [w/f]`)?.trim().toLowerCase() ?? "";
