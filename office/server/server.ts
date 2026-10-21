@@ -84,8 +84,8 @@ const API_FIELD = /^-[fF]|^--(field|raw-field|input)/;
 // The endpoints that put code on a branch or a remote: merge a pull request or a branch, update a pull request's branch, write refs, commits, trees, blobs or contents.
 const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/(merge|update-branch)|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
 const LANDING_MUTATION = /mergePullRequest|mergeBranch|updatePullRequestBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
-// ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen,
-// and `-HX-Foo: bar` or a `-fX` field reads as a method. Add an endpoint here when GitHub gains another way to land code.
+// ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen.
+// Add an endpoint here when GitHub gains another way to land code.
 const writesApi = (given: string[]) => {
   // `-i` is gh api's only short boolean flag: drop it from a cluster, so `-iq`, `-if` and `-iXPUT` read as `-q`, `-f` and `-XPUT`.
   const args = given.map((a) => a.replace(/^-i+(?=[A-Za-z])/, "-"));
