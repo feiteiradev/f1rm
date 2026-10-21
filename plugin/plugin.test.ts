@@ -643,7 +643,7 @@ test("S2c: a lead counts as stalled only when it and every hire of its team have
   const member = (idleMinutes: number | null, extra: object = {}) => ({ ...quiet, name: "t.backend-dev-x", idleMinutes, ...extra });
   expect(watch([lead, member(3)], "lead-t").woke).toBe(false);
   expect(watch([lead, member(3), { ...member(60), name: "t.reviewer-review-x" }], "lead-t").woke).toBe(false);
-  expect(watch([lead, member(null)], "lead-t").woke).toBe(false);
+  expect(watch([lead, member(null)], "lead-t").woke).toBe(true); // a member with no activity time is not an active one
   expect(watch([lead, member(40)], "lead-t").woke).toBe(true);
   expect(watch([lead], "lead-t").woke).toBe(true);
   expect(watch([lead, { ...member(3), name: "other.backend-dev-x" }], "lead-t").woke).toBe(true); // another team's hire doesn't count
@@ -664,7 +664,7 @@ test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role
   expect(role("pm").body).toMatch(/watch your leads/i);
   expect(role("pm").body).toContain("together with every hire of its team");
   expect(section("Watching and waking")).toContain("only when it and every hire of its team");
-  expect(section("Watching and waking")).toContain("an ended hire, one let go a moment ago too, does not count as active");
+  expect(section("Watching and waking")).toContain("an ended hire, one let go a moment ago too, or one with no activity time does not count as active");
   expect(role("lead").body).toMatch(/watch your own hires/i);
   for (const name of Object.keys(ROLES)) {
     const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];

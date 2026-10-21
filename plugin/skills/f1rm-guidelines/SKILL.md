@@ -160,7 +160,7 @@ In a Founder project the PM follows this on top of everything else here.
 
 The PM watches its leads and each lead watches its own hires, so a session that stopped is found without the user. Judge by real activity, never by status text: `claude agents` and `claude logs` read "working" for hours on a session that hit the subscription limit. `f1rm status --json` lists this repo's hires, judged by their transcripts and branches: `idleMinutes` (since the transcript was last written), `lastCommit`, `ended` (`claude agents` no longer lists the session) and `limitUntil` (when its last line is a limit stop of any kind, session or weekly: the text after "resets" as the stop gives it, such as `8:40pm (Europe/Lisbon)` or `Monday 9:00 (Europe/Lisbon)`; `unknown` if it names no time).
 
-1. **Watch.** After hiring, start a background watcher: a Bash command with `run_in_background` that loops `f1rm status --json` and exits when a session it names has no activity for 20 minutes, has ended or shows a limit stop, is missing from the list or has no activity time, or when status can't be read. The exit wakes you. A lead that waits on its team writes nothing, so a lead counts as stalled only when it and every hire of its team (the names starting `<team>.`) have been quiet for 20 minutes; a lead whose hires are active is not stalled, and an ended hire, one let go a moment ago too, does not count as active. It only reads, so the delegation gate lets it through. Restart it with the names still working whenever a hire starts or is let go. A hire that sent `DONE` or `BLOCKED` and waits for an answer has not stalled: leave it out.
+1. **Watch.** After hiring, start a background watcher: a Bash command with `run_in_background` that loops `f1rm status --json` and exits when a session it names has no activity for 20 minutes, has ended or shows a limit stop, is missing from the list or has no activity time, or when status can't be read. The exit wakes you. A lead that waits on its team writes nothing, so a lead counts as stalled only when it and every hire of its team (the names starting `<team>.`) have been quiet for 20 minutes; a lead whose hires are active is not stalled, and an ended hire, one let go a moment ago too, or one with no activity time does not count as active. It only reads, so the delegation gate lets it through. Restart it with the names still working whenever a hire starts or is let go. A hire that sent `DONE` or `BLOCKED` and waits for an answer has not stalled: leave it out.
 
    ```
    NAMES="lead-a lead-b"   # the sessions to watch
@@ -173,7 +173,7 @@ The PM watches its leads and each lead watches its own hires, so a session that 
      const h = list.find((x) => x.name === name);
      if (!h || h.idleMinutes == null || h.ended || h.limitUntil) return true;
      const team = /^lead-(.+)$/.exec(name)?.[1];
-     return quiet(h) && (!team || list.filter((x) => x.name.startsWith(team + ".")).every((x) => x.ended || quiet(x)));
+     return quiet(h) && (!team || list.filter((x) => x.name.startsWith(team + ".")).every((x) => x.ended || x.idleMinutes == null || quiet(x)));
    };
    process.exit(names.some(stalled) ? 0 : 1);
    ' "$NAMES" && break; sleep 60; done; f1rm status
