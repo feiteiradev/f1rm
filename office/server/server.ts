@@ -325,7 +325,8 @@ export function startServer({
   // never gets its own. Git is not asked about the cwd. A cwd in a junk folder, or under no registered folder, is Elsewhere.
   // The registration is looked up on every call, so a folder registered while the office runs gets its door on its next event.
   // ponytail: cwdPaths holds every distinct cwd ever seen, as the per-cwd cache before it did; prune it if a very long-lived office feels it.
-  const cwdPaths = new Map<string, string[] | null>(); // cwd -> the folders to look at, nearest first; null for a junk cwd
+  // cwd -> the folders to look at, nearest first (null for a junk cwd), and the resolved cwd with its real path
+  const cwdPaths = new Map<string, { paths: string[] | null; chain: string[] }>();
   const junkFolders = new Map<string, boolean>();
   const doorIds = new Map<string, string>(); // registered folder -> its room id
   const ancestors = (p: string) => {
@@ -335,25 +336,27 @@ export function startServer({
   };
   const roomOf = (cwd: string): Room => {
     if (!projectsDir) return ELSEWHERE;
-    let paths = cwdPaths.get(cwd);
-    if (paths === undefined) {
+    let info = cwdPaths.get(cwd);
+    if (!info) {
       const abs = resolve(cwd), real = realPath(abs); // a trailing slash is dropped, and a symlinked cwd is also looked up by its real path
       // The cwd's chain and its real path's chain are interleaved by distance from the cwd, so neither beats a nearer folder of the other.
       const chains = [ancestors(abs), ancestors(real)];
       const near = Array.from({ length: Math.max(...chains.map((c) => c.length)) }, (_, i) => chains.map((c) => c[i])).flat().filter((p): p is string => !!p);
-      cwdPaths.set(cwd, (paths = isJunk(abs, junk) ? null : [...new Set(near)]));
+      // Junk by its own path or by its real one: a link out of ~/.f1rm does not make a cwd in it a project's.
+      const lexicallyJunk = [...junk, ...junkRoots].some((r) => abs === r || abs.startsWith(r + "/"));
+      cwdPaths.set(cwd, (info = { paths: isJunk(abs, junk) || lexicallyJunk ? null : [...new Set(near)], chain: [abs, real] }));
     }
     // ponytail: the file name is lossy (/code/my/shop and /code/my-shop name the same file), so an unregistered folder can get a door
     // through a lookalike's registration, with its own path as the id; decode the registered path from the file if it is felt.
-    for (const p of paths ?? []) {
-      if (!existsSync(projectFile(projectsDir, p))) continue;
+    for (const p of info.paths ?? []) {
+      if (basename(p) === ".git" || !existsSync(projectFile(projectsDir, p))) continue; // a cwd inside a repo's own .git belongs to the repo around it
       // A registered folder inside a junk folder gives no door, however the cwd got there (a link into it).
       let junked = junkFolders.get(p);
       if (junked === undefined) junkFolders.set(p, (junked = isJunk(p, junk)));
       if (junked) continue;
       // A repo is registered under its git common dir and a plain folder under itself; both name the same file.
-      // ponytail: the id is decided once per registered folder, so a `git init` after the registration takes effect after a restart; without that a
-      // door would flip from P to P/.git while the old one lingers.
+      // ponytail: the id is decided once per registered folder, so a `git init` after the registration, or a folder that was missing or unreadable at
+      // first sight, takes effect after a restart (or after a Remove); without that a door would flip from P to P/.git while the old one lingers.
       let id = doorIds.get(p);
       if (!id) doorIds.set(p, (id = machine.isRepo(p) ? join(p, ".git") : p));
       return { id, name: id === p ? basename(p) || p : roomName(id) };
@@ -373,19 +376,19 @@ export function startServer({
   const forgotten = readForgotten(forgottenFile);
   // The log keeps the rooms it was written with; they are decided again here, so a rule change reaches the old events.
   const inside = (folder: string, path: string) => path === folder || path.startsWith(folder + "/");
-  const replayed = new Map<string, { room: Room; chain: string[] }>(); // one lookup per distinct cwd while replaying; live events look again, so a later registration is seen
+  const replayed = new Map<string, Room>(); // one lookup per distinct cwd while replaying; live events look again, so a later registration is seen
   for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
     try {
       const e: F1rmEvent = JSON.parse(row.event);
-      let seen = replayed.get(e.cwd);
-      if (!seen) replayed.set(e.cwd, (seen = { room: roomOf(e.cwd), chain: [resolve(e.cwd), realPath(resolve(e.cwd))] }));
-      e.room = seen.room;
+      let room = replayed.get(e.cwd);
+      if (!room) replayed.set(e.cwd, (room = roomOf(e.cwd)));
+      e.room = room;
       // An event from before its door was removed stays out. It no longer resolves to that door: with no registration left it is
       // Elsewhere, or the door of a registered folder around the removed one. So it is told by its cwd being inside the removed
       // folder, unless a registered folder inside the removed one holds it.
       const removed = Object.entries(forgotten).some(([id, at]) => {
         const folder = folderOf(id);
-        return e.at < at && (e.room.id === id || (seen.chain.some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
+        return e.at < at && (e.room.id === id || (cwdPaths.get(e.cwd)!.chain.some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
       });
       if (!removed) (state = reduce(state, e), trackSubagents(e));
     } catch {} // a row this build can't read must not stop the office from starting
@@ -469,6 +472,7 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
+          // Other ways a room empties (the sweep, a process that died) are caught by the board poll within boardPollMs.
           if (event.kind === "SessionEnd") dropStaleDoors();
           // A new process (a resumed session keeps its id) has no known pid: ask `claude agents` for it at the next check.
           if (event.kind === "SessionStart") {
@@ -570,6 +574,7 @@ export function startServer({
         forgotten[room] = clock();
         if (forgottenFile) writeForgotten(forgottenFile, forgotten);
         if (projectsDir) rmSync(projectFile(projectsDir, room), { force: true });
+        doorIds.delete(folderOf(room)); // a `git init` before the next `f1rm pm` gets the new id
         const { [room]: _, ...kept } = state.rooms;
         state = { ...state, rooms: kept };
         const { [room]: _e, ...left } = editions;

@@ -571,3 +571,63 @@ test("a registered folder inside a junk folder gives no door even when a link le
   await hook(server, "x", join(real, "junk", "link", "sub")); // the cwd is really in code/shop
   expect((await office(server)).employees.x.room).toBe("elsewhere");
 });
+
+test("a registered folder that is really a file, so its .git path is under a file, does not make the event throw: it is logged and the session has a door", async () => {
+  const real = realpathSync(mkdtempSync(join(dir, "afile-")));
+  writeFileSync(join(real, "notes"), "not a folder");
+  expect(machine.isRepo(join(real, "notes"))).toBe(false); // ENOTDIR
+  const files = { dbPath: join(dir, `afile-${n}.db`), root: join(dir, `afile-office-${n++}`) };
+  mkdirSync(files.root, { recursive: true });
+  register(files.root, join(real, "notes"));
+  const { server } = start(files, { machine: { ...fakeMachine(), isRepo: machine.isRepo } });
+  expect((await hook(server, "x", join(real, "notes"))).status).toBe(200);
+  expect((await office(server)).employees.x.room).toBe(join(real, "notes"));
+  expect(new Database(files.dbPath).query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 1 });
+});
+
+test("after a Remove the next registration gets the folder's new id: remove, `git init`, `f1rm pm`", async () => {
+  const repos: string[] = [];
+  const { server, root } = start(undefined, { machine: fakeMachine(repos) });
+  register(root, "/code/app");
+  await settle(server, "a", "/code/app");
+  expect(Object.keys((await office(server)).rooms)).toEqual(["/code/app"]);
+  expect((await remove(server, "/code/app")).status).toBe(200);
+  repos.push("/code/app"); // git init
+  register(root, "/code/app"); // f1rm pm
+  await hook(server, "b", "/code/app");
+  expect(Object.keys((await office(server)).rooms)).toEqual(["/code/app/.git"]);
+});
+
+test("a cwd inside a repo's own .git belongs to the repo around it, named for the repo", async () => {
+  const { server, root } = start();
+  register(root, "/code/feit/.git");
+  await hook(server, "x", "/code/feit/.git/hooks");
+  const state = await office(server);
+  expect(state.employees.x.room).toBe("/code/feit/.git");
+  expect(state.rooms["/code/feit/.git"].name).toBe("feit");
+});
+
+test("a cwd that is in a junk folder by its own path is no project's, even when a link leads it out to a registered folder", async () => {
+  const real = realpathSync(mkdtempSync(join(dir, "linkout-")));
+  mkdirSync(join(real, "code", "shop", "sub"), { recursive: true });
+  mkdirSync(join(real, "junk"));
+  symlinkSync(join(real, "code", "shop"), join(real, "junk", "link"));
+  const { server, root } = start(undefined, { junkRoots: [join(real, "junk")] });
+  register(root, join(real, "code")); // the real path walks up to this one
+  await hook(server, "x", join(real, "junk", "link", "sub"));
+  expect((await office(server)).employees.x.room).toBe("elsewhere");
+});
+
+test("replaying a log, a symlinked cwd inside a removed nested door leaves no ghost in the outer door", async () => {
+  const real = realpathSync(mkdtempSync(join(dir, "ghostlink-")));
+  mkdirSync(join(real, "code", "shop", "sub"), { recursive: true });
+  symlinkSync(join(real, "code", "shop"), join(real, "lnk"));
+  const files = seedLog("ghostlink", { crashed: join(real, "lnk", "sub") });
+  register(files.root, join(real, "code")); // the outer door
+  writeForgotten(join(files.root, "forgotten-doors.json"), { [join(real, "code", "shop")]: now + 5 }); // the inner one was removed
+
+  const { server } = start(files);
+  const state = await office(server);
+  expect(state.employees).toEqual({});
+  expect(state.rooms).toEqual({});
+});

@@ -178,7 +178,11 @@ export const machine = {
 
   /** True when `folder` is a git repo's main working directory, which holds a `.git` directory. Runs no git, so it answers the same whatever the PATH. */
   isRepo(folder: string): boolean {
-    return statSync(join(folder, ".git"), { throwIfNoEntry: false })?.isDirectory() ?? false;
+    try {
+      return statSync(join(folder, ".git")).isDirectory();
+    } catch {
+      return false; // no .git, a file where a folder should be (ENOTDIR), or no access
+    }
   },
 
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */
