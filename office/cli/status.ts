@@ -80,6 +80,9 @@ export const ls = (dir: string) => gone(() => readdirSync(dir), [] as string[]);
 const TURN = ["assistant", "user", "queue-operation"];
 const TURN_LINE = new RegExp(`"type":"(?:${TURN.join("|")})"`);
 
+/** The text of a message's content: a string, or the text blocks of a list. */
+const textOf = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => String(b?.text ?? "")).join("") : "");
+
 /**
  * The last line of the conversation in a piece of transcript: an assistant or user line, or a message put in the queue (an enqueue; the queue emptying or being edited is
  * no message), past whatever bookkeeping Claude Code writes after a turn. A task-notification is the session's own background task finishing, not anyone's message.
@@ -90,7 +93,7 @@ function lastTurn(end: string): any {
     try {
       const line = JSON.parse(l);
       if (!TURN.includes(line.type) || (line.type === "queue-operation" && line.operation !== "enqueue")) continue;
-      if (line.type !== "assistant" && JSON.stringify(line.content ?? line.message?.content ?? "").includes("<task-notification>")) continue;
+      if (line.type !== "assistant" && textOf(line.content ?? line.message?.content).trimStart().startsWith("<task-notification>")) continue; // one that merely quotes the tag is a message
       return line;
     } catch {} // a cut or odd line is not a turn
   }

@@ -87,6 +87,12 @@ test("limitUntil needs the stop to be the last line of the conversation: a deliv
   expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: note }, ...noise])).toBe("8:40pm (Europe/Lisbon)");
   expect(until([limitStop(), { type: "user", message: { role: "user", content: note } }])).toBe("8:40pm (Europe/Lisbon)");
   expect(until([limitStop(), { type: "user", message: { role: "user", content: [{ type: "text", text: note }] } }])).toBe("8:40pm (Europe/Lisbon)");
+  // A resume that merely quotes the tag is still a resume, as an enqueue or a user line.
+  const quoting = "resume — the build you started sent <task-notification>…</task-notification> while you were stopped";
+  expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: quoting }])).toBeNull();
+  expect(until([limitStop(), { type: "user", message: { role: "user", content: [{ type: "text", text: quoting }] } }])).toBeNull();
+  // A removed enqueue still clears the stop; the idle rule catches a hire that never saw the message.
+  expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: "resume" }, { type: "queue-operation", operation: "remove" }])).toBeNull();
   // A real resume after a notification still clears it.
   expect(until([limitStop(), { type: "queue-operation", operation: "enqueue", content: note }, { type: "queue-operation", operation: "enqueue", content: "resume" }])).toBeNull();
 });
