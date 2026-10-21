@@ -95,7 +95,7 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
 - **reviewer**
   1. Load `f1rm:f1rm-guidelines`. The first command, `/code-review <level> worktree-<task>` (`code-review`), reviews the branch under review and gives the findings.
   2. Run the gates of the review flow on the base and on the merge.
-  3. Run `ponytail:ponytail-review` on a code branch. Its findings never block.
+  3. Run `ponytail:ponytail-review` on a code branch; the review flow says what its findings do.
   4. At `--level high`, run `security-review` on the merge before `APPROVED`.
   - With `--content`, use the content checklist only.
 - **researcher**
@@ -152,8 +152,8 @@ In a Founder project the PM follows this on top of everything else here.
 4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists, only into its own team.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
 6. **PLAN before hiring.** A lead writes its team board, then sends the PM `PLAN <team>` with its tasks and the hires it intends. The PM checks the plan against the milestone and the caps and answers `GO <team>` without telling the user, unless the plan changes agreed scope or a decision; then it asks the user first. If the plan needs changes, the PM answers with them. The lead hires nothing before `GO`.
-7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges.
-8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each finding left unfixed) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
+7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges. Every `CHANGES REQUESTED` goes back to the dev, minor findings too, before the merge (see the review flow).
+8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
 
 ## Brief format
 
@@ -213,10 +213,10 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - `BLOCKED <slug>` then the question or the missing input. Send one `BLOCKED` message that lists every open question, and keep working on the rest.
   - `BLOCKED <slug> permission` then the exact command that auto mode blocked. Wait for the answer; do not work around it.
   - `APPROVED <slug> merged=<sha>` from the Reviewer, after the merge.
-  - `CHANGES REQUESTED <slug>` from the Reviewer, then the blocking findings with file and line.
+  - `CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not.
   - `CHANGES REQUESTED <slug> conflict` from the Reviewer when the scratch merge conflicts. The dev rebases its unpushed branch onto the current main (see the review flow) and sends a new `DONE`.
   - `BLOCKED <slug> tip moved` from the Reviewer when the branch tip is not the commit in the dev's `DONE`.
-  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` on one branch. The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
+  - `ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding (see the review flow). The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
 - **The evidence block** of a `DONE` report holds:
   - each acceptance criterion's check command, with its result on the base (it fails) and on the branch (it passes);
   - the full check command and its exit code;
@@ -267,7 +267,7 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
   - **Persist**: what the hires' `keep:` lines named, and anything else a later milestone will need. It moves to `~/.f1rm/kept/<repo>/` (with `mv`) and is never deleted automatically.
   - **Delete**: the milestone's evidence folders, briefs, findings file, research, plans and done board rows.
 
-  The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (findings left unfixed). `docs/decisions.md` and git history stay.
+  The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (ponytail-review findings and anything the user must decide). `docs/decisions.md` and git history stay.
 
 **The decisions log.** `docs/decisions.md` in each project repo, created the first time a decision is recorded and committed like code.
 
@@ -289,7 +289,7 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
    - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
    - it follows `growth/brand.md`;
    - nothing in it was posted, published, sent or paid for.
-4. If any finding blocks, send `CHANGES REQUESTED` and stop. Do not fix the code yourself. After the second `CHANGES REQUESTED` on one branch, send `ESCALATE <slug>` in place of a third; the lead decides.
+4. If any `/code-review` finding is left, or any item of the content checklist is missed, send `CHANGES REQUESTED` with every finding, blocking or not, and stop. Merge only when none is left. Do not fix the code yourself. Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third round with a blocking finding; the lead decides. Rounds of minor findings alone never escalate.
 5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
    - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
    - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
@@ -326,8 +326,8 @@ Never run `git push`, never force, never rewrite published history, never merge 
 The office holds three gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, none runs.
 
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
-- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
-- The **push gate** holds every hire. It refuses `git push` in any form and `gh pr merge`, so only the user pushes and lands on a remote. For the Reviewer it also refuses `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`. Way out: ask the user to run it with `!`, or leave it undone.
+- The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, kept files, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
+- The **push gate** holds every hire. It refuses `git push` in any form (also behind `timeout`, `nice` or `stdbuf`), `gh pr merge` and a `gh api` call that writes to code-landing endpoints (pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations; other `gh api` calls stay allowed), so only the user pushes and lands on a remote. For the Reviewer it also refuses `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`; `git checkout <branch> -- <check files>` stays allowed. Way out: ask the user to run it with `!`, or leave it undone.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
 ## Use what is installed

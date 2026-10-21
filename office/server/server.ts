@@ -21,7 +21,7 @@ const MAX_MESSAGE = 4000;
 // in the plugin are what is left.
 // ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
 // `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
-// The PM and the leads coordinate: they write boards, milestones, memory, evidence and scratch files, and leave code and landing to others.
+// The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
 const COORDINATORS = new Set(["pm", "lead"]);
@@ -29,16 +29,24 @@ const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
 const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]);
 // What can stand in front of a command: shell keywords and wrappers that run the next word.
-const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo"]);
+const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo", "timeout", "nice", "stdbuf"]);
+// The options of those wrappers that take the next word as their value.
+const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", "--kill-after", "--signal"], nice: ["-n", "--adjustment"], stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"], env: ["-u", "--unset"], sudo: ["-u"] };
 /** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
 // ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
-// so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper's flag value (`sudo -u x git push`) is taken for the command.
+// so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
 const simpleCommands = (command: string) => {
   const out: string[][] = [[]];
   for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
-    let i = 0;
-    while (i < words.length && (/^\w+=/.test(words[i]) || BEFORE_COMMAND.has(words[i]) || (i > 0 && words[i].startsWith("-")))) i++;
+    let i = 0, wrapper = "";
+    for (; i < words.length; i++) {
+      const w = words[i];
+      if (BEFORE_COMMAND.has(w)) wrapper = w;
+      else if (i > 0 && w.startsWith("-")) i += WRAPPER_VALUE_OPTIONS[wrapper]?.includes(w) ? 1 : 0;
+      else if (wrapper === "timeout") wrapper = ""; // its first word past the options is the duration
+      else if (!/^\w+=/.test(w)) break;
+    }
     return words.slice(i);
   });
 };
@@ -69,11 +77,33 @@ const gitCall = ([program, ...words]: string[]) => {
   return { sub: args[i] ?? "", rest: args.slice(i + 1), options: args.slice(0, i) };
 };
 const GH_OPTIONS_WITH_VALUE = new Set(["-R", "--repo"]);
-/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`. */
-const ghMerge = ([program, ...words]: string[]) => {
+const GH_API_WITH_VALUE = new Set(["-H", "--header", "-X", "--method", "-f", "--raw-field", "-F", "--field", "--input", "-p", "--preview", "-q", "--jq", "-t", "--template", "--cache", "--hostname"]);
+// A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or a field or input file with no method (gh then POSTs), writes.
+const API_METHOD = /^(?:--method(?:=(.*))?|-X=?(.*))$/;
+const API_FIELD = /^-[fF]|^--(field|raw-field|input)/;
+// The endpoints that put code on a branch or a remote: merge a pull request or a branch, update a pull request's branch, write refs, commits, trees, blobs or contents.
+const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/(merge|update-branch)|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
+const LANDING_MUTATION = /mergePullRequest|mergeBranch|updatePullRequestBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
+// ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen.
+// Add an endpoint here when GitHub gains another way to land code.
+const writesApi = (given: string[]) => {
+  // `-i` is gh api's only short boolean flag: drop it from a cluster, so `-iq`, `-if` and `-iXPUT` read as `-q`, `-f` and `-XPUT`.
+  const args = given.map((a) => a.replace(/^-i+(?=[A-Za-z])/, "-"));
+  // The endpoint is the first word past the options (and their values), so `-p graphql` or `--jq graphql` does not make a REST call a graphql query. It may be a path or a URL.
+  if (/(^|\/)graphql$/.test(args[skipOptions(args, 0, GH_API_WITH_VALUE)] ?? "")) return args.some((a) => LANDING_MUTATION.test(a));
+  const methods = args.flatMap((a, j) => {
+    const m = API_METHOD.exec(a);
+    return m ? [(m[1] ?? m[2]) || (args[j + 1] ?? "")] : [];
+  });
+  const writes = methods.length ? methods.some((m) => !/^get$/i.test(m)) : args.some((a) => API_FIELD.test(a));
+  return writes && args.some((a) => LANDING_ENDPOINT.test(a));
+};
+/** `gh pr merge`, past options such as `-R <repo>` before or after `pr`, or a `gh api` call that writes to a code-landing endpoint (see writesApi). */
+const ghLands = ([program, ...words]: string[]) => {
   if (basename(unquoted(program ?? "")) !== "gh") return false;
   const args = words.map(unquoted);
   const i = skipOptions(args, 0, GH_OPTIONS_WITH_VALUE);
+  if (args[i] === "api") return writesApi(args.slice(i + 1));
   return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
 };
 // What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
@@ -82,6 +112,7 @@ const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am"
 const FORCE_SHORT = new Set(["checkout", "switch", "branch", "worktree", "tag", "merge", "clean", "push", "fetch", "reset", "add", "update-ref"]);
 const RED_WORKTREE = /^\.claude\/worktrees\/red-[^/]+\/?$/;
 // ponytail: a dev task whose slug starts `red-` has its worktree removable by a Reviewer too; tighten it if that ever matters.
+// `git checkout <path>` and `git checkout <ref> -- <path>` are not refused: a path and a ref look alike, and the Reviewer needs `checkout main`, `checkout -b x` and `checkout <branch> -- <files>`.
 /** Whether a git call is one a Reviewer may not run. The one force it needs is removing its red-<task> scratch worktree. */
 const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   if (!call) return false;
@@ -89,7 +120,13 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const any = (re: RegExp) => rest.some((a) => re.test(a));
   if (REVIEWER_NEVER.has(sub)) return true;
   if ((sub === "branch" && any(/^-[A-Za-z]*[DM]/)) || (sub === "checkout" && any(/^-[A-Za-z]*B/)) || (sub === "switch" && any(/^-[A-Za-z]*C/))) return true;
-  if ((sub === "stash" && ["drop", "clear"].includes(rest[0])) || ((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  // `checkout -- <path>` (nothing but options before the `--`) restores a path from the index; `checkout <branch> -- <files>` is how the red-<task> worktree gets its check files.
+  const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
+  // `--amend` as a word, not as the value of `-m`, `-F`, `-C`, `-c`, `-t` or `--message`.
+  const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[^mFCct]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
+  // `restore` may only unstage; `checkout --ours|--theirs` overwrites a path.
+  const discards = (sub === "restore" && !["--staged", "-S"].includes(rest.filter((a) => a.startsWith("-") && a !== "--").join())) || (sub === "checkout" && any(/^--(ours|theirs)$/));
+  if (sub === "stash" || amends || restoresPath || discards || (sub === "checkout" && rest.includes("."))) return true;
   if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
@@ -231,18 +268,18 @@ export function startServer({
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
       const home = process.env.HOME ?? "";
-      const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
+      const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".f1rm", "kept"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
       if (!dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
-        return refuse("write", "The PM and leads write only boards, milestones, memory, evidence and scratch files. Put this work on the board and hire for it.");
+        return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghMerge(w))) {
+    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghLands(w))) {
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
-    if (commands.some((w) => gitCall(w)?.sub === "push" || ghMerge(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
-      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
+      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");

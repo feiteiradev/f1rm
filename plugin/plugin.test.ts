@@ -212,7 +212,7 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
 
 test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
   const gates = section("Gates");
-  for (const s of ["skill gate", "delegation gate", "boards, milestones, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
+  for (const s of ["skill gate", "delegation gate", "boards, milestones, kept files, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);
@@ -448,7 +448,8 @@ test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and
 
 test("C2: the gate refuses every push and the Reviewer's history rewrites, and the Reviewer file no longer calls the no-push rule prompt-only", () => {
   const gates = section("Gates");
-  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`"]) expect(gates, s).toContain(s);
+  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`", "`gh api` call that writes to code-landing endpoints", "pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations", "other `gh api` calls stay allowed", "behind `timeout`, `nice` or `stdbuf`", "`git checkout <branch> -- <check files>` stays allowed"]) expect(gates, s).toContain(s);
+  expect(role("pm").body).toContain("Write and Edit work there too");
   const reviewer = readFileSync(join(PLUGIN, "agents", "reviewer.md"), "utf8");
   expect(reviewer).not.toContain("prompt-only");
   expect(reviewer).toMatch(/gate refuses/i);
@@ -491,10 +492,39 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
     "2026-10-19 Plugin 0.3.0",
   ]);
   // The rules-prose entries, in order, wherever other tasks' entries sit between them.
-  const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
+  const mine = ["PM hires only leads", "Leads filter team traffic", "Reviewer conflict and tip rules", "Only the user pushes", "Milestone cleanup", "Plugin 0.4.0", "Reviewer sends back every finding"].map((t) => titles.indexOf(`2026-10-20 ${t}`));
   expect(mine.every((i) => i >= 6)).toBe(true);
   expect(mine).toEqual([...mine].sort((x, y) => x - y));
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+});
+
+test("the Reviewer sends back every /code-review finding and merges only when none is left; ponytail-review never blocks; only a blocking round counts toward ESCALATE", () => {
+  const flow = section("Review and merge flow");
+  const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";
+  for (const s of ["every finding, blocking or not", "Merge only when none is left", "a round that holds a blocking finding counts toward `ESCALATE`", "ounds of minor findings alone never escalate"]) expect(step4, s).toContain(s);
+  // The guidelines state each rule once, in the review flow; the other places point to it.
+  expect(flow).toContain("its findings go in your report and never block");
+  for (const s of ["never block", "Merge only when none is left", "ounds of minor findings alone never escalate"]) expect(guidelines.split(s).length - 1, s).toBe(1);
+  expect(guidelines).not.toContain("no finding goes to a later branch");
+  const handoff = section("Handoff via SendMessage");
+  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not/);
+  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding \(see the review flow\)/);
+  expect(step4).toContain("in place of a third round with a blocking finding");
+  expect(step4).toContain("or any item of the content checklist is missed");
+  for (const file of [guidelines, ...["reviewer", "lead", "pm"].map((r) => role(r).body)]) expect(file).not.toContain("in place of a third `CHANGES REQUESTED`");
+  const reviewer = role("reviewer").body;
+  for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "Its findings go in your report and never block.", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
+  expect(reviewer).toContain("`CHANGES REQUESTED` with every finding");
+  expect(reviewer).not.toContain("with the blocking findings");
+  expect(reviewer).not.toContain("goes back like a blocking one");
+  expect(reviewer.split("blocking or not").length - 1).toBe(2);
+  const lead = role("lead").body;
+  for (const s of ["minor findings too", "before the merge", "fixed"]) expect(lead, s).toContain(s);
+  expect(section("Teams")).toMatch(/minor findings too[^\n]*before the merge/);
+  expect(section("Teams")).not.toContain("left unfixed");
+  expect(role("pm").body).toContain("before the merge");
+  expect(guidelines).not.toContain("findings left unfixed");
+  for (const text of [guidelines, role("reviewer").body, lead, role("pm").body]) expect(text).not.toMatch(/follow-up branch|merge first|fix(ed)? (them )?later/i);
 });
 
 test("the plugin is 0.4.0, and its README names both documents", () => {
