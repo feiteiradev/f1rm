@@ -238,6 +238,11 @@ export function startServer({
   // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
   // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
   const subagents = new Map<string, Set<string>>();
+  /** Kept for each event the office takes in, live or replayed from the log. */
+  const trackSubagents = (e: F1rmEvent) => {
+    if (e.kind === "SubagentStart" && e.intern) subagents.set(e.sessionId, (subagents.get(e.sessionId) ?? new Set()).add(e.intern.id));
+    if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
+  };
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
   /** Why the company's rules stop this tool call, or null to let it run. */
   function refusal(sessionId: string, payload: Record<string, any>): string | null {
@@ -340,7 +345,7 @@ export function startServer({
     try {
       const e: F1rmEvent = JSON.parse(row.event);
       e.room = roomOf(e.cwd);
-      if (e.at >= (forgotten[e.room.id] ?? 0)) state = reduce(state, e);
+      if (e.at >= (forgotten[e.room.id] ?? 0)) (state = reduce(state, e), trackSubagents(e));
     } catch {} // a row this build can't read must not stop the office from starting
   }
 
@@ -444,8 +449,7 @@ export function startServer({
             const why = refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
-          if (event.kind === "SubagentStart" && payload.agent_id) subagents.set(event.sessionId, (subagents.get(event.sessionId) ?? new Set()).add(String(payload.agent_id)));
-          if (event.kind === "SessionEnd") subagents.delete(event.sessionId);
+          trackSubagents(event);
           if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
             pendingInterns.get(event.sessionId)?.shift();
           }

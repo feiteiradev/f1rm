@@ -1683,6 +1683,20 @@ test("a `uds:<path>` address resolves to the online session that holds the socke
   expect((await send("b", "uds:"))?.permissionDecision).toBe("deny");
 });
 
+test("after an office restart the replayed log still knows a parent's sub-agents, so it can resume one", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  const repos = { "/code/shop": "/code/shop/.git" };
+  const open = () => (server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, dbPath }));
+  open();
+  await hook({ ...common("b", "UserPromptSubmit"), prompt: "go", session_title: "shop.backend-dev-a", agent_type: "f1rm:backend-dev" });
+  await hook({ ...common("b", "SubagentStart"), agent_id: "sub-1", agent_type: "Explore" });
+  server.stop(true);
+  open();
+  const send = async (to: string) => (await held(await hook(preToolUse("b", "SendMessage", { to, message: "x" }))))?.permissionDecision ?? null;
+  expect(await send("sub-1")).toBeNull();
+  expect(await send("sub-2")).toBe("deny");
+});
+
 test("an offline session does not answer to its name, so a name that an online session holds in one project resolves", async () => {
   let now = 1_000_000;
   server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }), clientDir, clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e9 });
