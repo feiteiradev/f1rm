@@ -617,11 +617,11 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
   const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
   for (const s of [
-    "After sending `resume` the PM or lead restarts the watcher a minute later with every name still working", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
-    "a hire that hits the limit again shows a new stop and wakes it again", "a second `resume` in a row that brought no new commit or message means the hire is ended",
-    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes", "only an enqueue or a user line clears the stop, and the session's own task-notification does not",
+    "After sending `resume` the PM or lead restarts the watcher with every name still working (the loop sleeps first, so a restart waits a minute before its first poll)", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
+    "a hire that hits the limit again shows a new stop and wakes it again", "a second `resume` in a row that brought no new commit, message or limit stop in between means the hire is ended",
+    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes", "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
   ]) expect(decisions, s).toContain(s);
-  for (const old of ["sleeps 300 seconds", "notes the time before sending it", "waits again for the time a timed stop names"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["sleeps 300 seconds", "notes the time before sending it", "waits again for the time a timed stop names", "restarts the watcher a minute later", "clears it, and only an enqueue"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
   for (const text of [section("Watching and waking"), readFileSync(join(REPO, "docs", "decisions.md"), "utf8")]) {
