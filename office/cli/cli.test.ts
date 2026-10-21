@@ -353,6 +353,15 @@ test("uninstall removes the link key with the rest of the install state", async 
   expect(existsSync(keyFile(home))).toBe(false);
 });
 
+test("uninstall removes a link-key.<pid> temp file left by a serve that was killed mid-write, which holds the live key", async () => {
+  const { home } = await installedOnFreePort();
+  await serveOnce(home);
+  const leftover = join(home, ".f1rm", "link-key.12345");
+  linkSync(keyFile(home), leftover);
+  expect(f1rm(home, "uninstall").code).toBe(0);
+  expect(existsSync(leftover)).toBe(false);
+});
+
 test("serve runs the office on loopback with a UI token", async () => {
   const home = tempHome();
   const probe = Bun.serve({ port: 0, fetch: () => new Response() });
@@ -646,7 +655,7 @@ test("service off, and uninstall, remove an office-url.tmp left by a serve that 
   for (const off of [["service", "off"], ["uninstall"]]) {
     const home = tempHome();
     const stub = stubBin();
-    stub.run(home, "install"); // no login agent, so uninstall's own cleanup has to do it, not stopService
+    stub.run(home, "install"); // no login agent: removeOfficeFiles does the cleaning for both commands
     writeFileSync(join(home, ".f1rm", "office-url.tmp"), "http://127.0.0.1:1/key/");
     expect(stub.run(home, ...off).code).toBe(0);
     expect(existsSync(join(home, ".f1rm", "office-url.tmp"))).toBe(false);

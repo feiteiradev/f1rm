@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -197,7 +197,8 @@ function uninstall() {
   writeSettings(after);
   if (existsSync(PLIST)) stopService();
   // The event log, the boards and the editions stay: they are the user's history, not install state.
-  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, URL_TMP, LINK_KEY_FILE]) rmSync(f, { force: true });
+  for (const f of [HEADERS_FILE, CREATED_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
+  removeOfficeFiles();
   if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
@@ -223,7 +224,8 @@ function linkKey(): string {
   // The new key goes into a private temp file first, so it is never in a file others can read, then is put in place whole.
   const key = randomBytes(32).toString("base64url");
   const tmp = `${LINK_KEY_FILE}.${process.pid}`;
-  writeFileSync(tmp, key + "\n", { mode: 0o600 });
+  rmSync(tmp, { force: true }); // a leftover of an earlier serve with this pid would keep its mode
+  writeFileSync(tmp, key + "\n", { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
   try {
     linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
     return key;
@@ -332,14 +334,19 @@ function startService() {
 
 function serviceOff() {
   stopService();
+  removeOfficeFiles();
   console.log("f1rm background office stopped and removed.");
 }
 
 function stopService() {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
-  rmSync(URL_FILE, { force: true });
-  rmSync(URL_TMP, { force: true });
+}
+
+/** What a serve leaves behind: its URL, the temp it writes the URL to, and a link-key.<pid> temp, which is a hard link to the live key when serve was killed mid-write. */
+function removeOfficeFiles() {
+  for (const f of [URL_FILE, URL_TMP]) rmSync(f, { force: true });
+  if (existsSync(F1RM_DIR)) for (const f of readdirSync(F1RM_DIR)) if (f.startsWith("link-key.")) rmSync(join(F1RM_DIR, f), { force: true });
 }
 
 /** The running office's URL, once it answers, or null after `ms`. */
