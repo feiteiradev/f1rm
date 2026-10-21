@@ -160,35 +160,18 @@ In a Founder project the PM follows this on top of everything else here.
 
 The PM watches its leads and each lead watches its own hires, so a session that stopped is found without the user. Judge by real activity, never by status text: `claude agents` and `claude logs` read "working" for hours on a session that hit the subscription limit. `f1rm status --json` lists this repo's hires, judged by their transcripts and branches: `idleMinutes` (since the transcript was last written), `lastCommit`, `ended` (`claude agents` no longer lists the session) and `limitUntil` (when the last line of the conversation is a limit stop of any kind, session or weekly: the text after "resets" as the stop gives it, such as `8:40pm (Europe/Lisbon)` or `Monday 9:00 (Europe/Lisbon)`; `unknown` if it names no time).
 
-1. **Watch.** After hiring, start a background watcher: a Bash command with `run_in_background` that polls `f1rm status --json` once a minute and exits when a session it names has no activity for 20 minutes, has ended or shows a limit stop, is missing from the list or has no activity time, or when status can't be read. The exit wakes you. A lead that waits on its team writes nothing, so a lead counts as stalled only when it and every hire of its team (the names starting `<team>.`) have been quiet for 20 minutes; a lead whose hires are active is not stalled, and an ended hire, one let go a moment ago too, or one with no activity time does not count as active. It only reads, so the delegation gate lets it through. Restart it with the names still working whenever a hire starts or is let go. A hire that sent `DONE` or `BLOCKED` and waits for an answer has not stalled: leave it out.
-
-   ```
-   NAMES="lead-a lead-b"   # the sessions to watch
-   while :; do sleep 60; f1rm status --json | bun -e '
-   const names = (process.argv[1] || "").split(" ").filter(Boolean);
-   let list;
-   try { list = JSON.parse(await Bun.stdin.text()); if (!Array.isArray(list)) throw 0; } catch { process.exit(1); }
-   const quiet = (h) => h.idleMinutes >= 20;
-   const stalled = (name) => {
-     const h = list.find((x) => x.name === name);
-     if (!h || h.idleMinutes == null || h.ended || h.limitUntil) return true;
-     const team = /^lead-(.+)$/.exec(name)?.[1];
-     return quiet(h) && (!team || list.filter((x) => x.name.startsWith(team + ".")).every((x) => x.ended || x.idleMinutes == null || (quiet(x) && !x.limitUntil)));
-   };
-   process.exit(names.some(stalled) ? 1 : 0);
-   ' "$NAMES" || break; done; f1rm status
-   ```
-
-2. **On wake**, read the table the watcher printed and take each flagged session in turn:
+1. **Watch.** After hiring, run `f1rm status --watch <names>` in the background (`run_in_background`); its exit wakes you. It polls once a minute and prints each stalled name with its reason: idle for 20 minutes, ended, on a limit stop, missing from the list or without an activity time. It exits 1 when `claude agents --json` can't be read. A lead counts as stalled only when it and every hire of its team have been quiet, so a lead waiting on active hires is not. It only reads, so the delegation gate lets it through.
+   - Leave out of the names: a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED` or `ESCALATE`), and any hire waiting on a reset timer. When you answer a session's report and it works again, restart the watcher with it back in the names.
+   - Start no watcher when no name is left; the reset timers wake you.
+2. **On wake**, read what the watcher printed and take each stalled session in turn:
    - **Limit stop** (`limitUntil`): wait until the time it names, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule).
    - **Limit stop with no time** (`limitUntil` is `unknown`): a rate-limit error that is not the subscription's reads this way, so wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session.
-   - **Missing or no activity time** (not in the list, or `idleMinutes` null): keep it in the names; if the next wake still finds it so, treat it as ended.
-   - **Ended** (`ended`): run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
-   - **Idle 20 minutes, still listed, no limit stop**: send it `resume`.
-   - **Status can't be read**: run `f1rm status` by hand to see why, then restart the watcher (it then wakes at most once a minute).
-   - **After you send `resume`**, restart the watcher. Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer. The delivered `resume` clears the stop, so the old stop does not wake the watcher again. A hire that hits the limit again shows a new stop and wakes you again; a second `resume` in a row that brought no new commit, message or limit stop in between means it is ended.
-   - When you answer a session's `DONE` or `BLOCKED` and it works again, restart the watcher with it back in the names.
-   - After handling any wake, restart the watcher with the names still working. To restart the watcher, stop the running one first, so only one runs. Start no watcher when no name is left; the reset timers wake you.
+   - **Idle 20 minutes**, still listed, no limit stop: send it `resume`.
+   - **Ended**: run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
+   - **Missing or no activity time**: keep it in the names; if the next wake still finds it so, treat it as ended.
+   - **Status can't be read**: run `f1rm status` by hand to see why, then restart the watcher.
+   - **After you send `resume`**, restart the watcher. The delivered `resume` clears the stop, so the old stop does not wake the watcher again. A hire that hits the limit again shows a new stop and wakes you again; a second `resume` in a row that brought no new commit, message or timed limit stop in between means it is ended (an `unknown` stop does not count, so a persistent error ends after two resumes).
+   - After handling any wake, restart the watcher with the names still working. A wake from a stale watcher is ignored when its hire is not in the names you now watch.
 3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
 4. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
 

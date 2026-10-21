@@ -1,6 +1,6 @@
 // The company plugin as shipped: role files, the guidelines skill, and a real `claude` install into a throwaway config.
 import { expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeEnv } from "../office/server/machine.ts";
@@ -584,30 +584,33 @@ test("P3: a hire that creates the decisions log adds its merge=union line to .gi
   }
 });
 
-// Self-driving teams: the PM watches its leads and each lead its hires, by real activity from `f1rm status --json`, and wakes or replaces the ones that stopped.
+// Self-driving teams: the PM watches its leads and each lead its hires with `f1rm status --watch`, and wakes or replaces the ones that stopped.
 test("S1: the guidelines state the watcher, the real-activity rule, and what to do on a wake for a limit stop, an ended session and a stalled one", () => {
   const w = section("Watching and waking");
   for (const s of [
-    "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "background watcher", "`run_in_background`", "20 minutes", "The exit wakes you",
-    "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
-    "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
-    "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
-    "**Limit stop with no time** (`limitUntil` is `unknown`)",
+    "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "`f1rm status --watch <names>`", "`run_in_background`", "its exit wakes you",
+    "idle for 20 minutes", "exits 1 when `claude agents --json` can't be read", "only when it and every hire of its team",
+    "Leave out of the names: a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED` or `ESCALATE`), and any hire waiting on a reset timer",
+    "When you answer a session's report and it works again, restart the watcher with it back in the names.", "Start no watcher when no name is left; the reset timers wake you.",
+    "**Limit stop**", "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
+    "**Limit stop with no time** (`limitUntil` is `unknown`)", "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session",
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
+    "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
+    "`name [ref]`", "`uds:<socket>`", "decides on the bare name", "**Idle 20 minutes",
+    "**Status can't be read**", "run `f1rm status` by hand to see why, then restart the watcher",
+    "when the last line of the conversation is a limit stop",
   ]) expect(w, s).toContain(s);
-  // After you send `resume` there is one short bullet: the delivered `resume` clears the stop, so the watcher restarts on the names still working.
+  // After you send `resume`: the delivered `resume` clears the stop; a second one in a row ends the hire unless a timed limit stop came between.
   for (const s of [
-    "**After you send `resume`**", "**After you send `resume`**, restart the watcher.", "Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
-    "shows a new stop and wakes you again", "**Status can't be read**", "run `f1rm status` by hand to see why, then restart the watcher (it then wakes at most once a minute)", "Start no watcher when no name is left; the reset timers wake you.", "When you answer a session's `DONE` or `BLOCKED` and it works again, restart the watcher with it back in the names.", "To restart the watcher, stop the running one first, so only one runs.",
-    "|| break; done; f1rm status", "After handling any wake, restart the watcher with the names still working.",
-    "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session", "when the last line of the conversation is a limit stop", "a second `resume` in a row that brought no new commit, message or limit stop in between means it is ended", "The delivered `resume` clears the stop, so the old stop does not wake the watcher again",
+    "**After you send `resume`**, restart the watcher.", "The delivered `resume` clears the stop, so the old stop does not wake the watcher again", "shows a new stop and wakes you again",
+    "a second `resume` in a row that brought no new commit, message or timed limit stop in between means it is ended", "an `unknown` stop does not count, so a persistent error ends after two resumes",
+    "After handling any wake, restart the watcher with the names still working.", "A wake from a stale watcher is ignored when its hire is not in the names you now watch.",
   ]) expect(w, s).toContain(s);
   expect(w.split("delivered `resume` clears the stop").length - 1).toBe(1); // said once
-  // Every loop starts with the sleep, so a restart waits a minute before its first poll and "restart the watcher" is always safe; the rule is said once.
-  expect(w).toContain("while :; do sleep 60; f1rm status --json | bun -e '");
-  expect(w.split("After handling any wake, restart the watcher with the names still working.").length - 1).toBe(1);
-  // The removed recheck rule leaves no trace.
-  for (const old of ["sleep 300", "note the time before you send it", "After handling a wake,", "follow **After `resume`**", "under a minute", "until its first new line", "a minute later", "check again in a minute", "; sleep 60; done"]) expect(w, old).not.toContain(old);
+  expect(w.split("After handling any wake, restart the watcher").length - 1).toBe(1);
+  // The watcher is the command: no script in the prose, no timer rules, no running-watcher bookkeeping.
+  for (const old of ["bun -e", "NAMES=", "while :", "sleep 60", "sleep 300", "stop the running one first", "PID", "a minute later", "under a minute", "until its first new line", "complete the other"]) expect(w, old).not.toContain(old);
+  expect(w).not.toMatch(/```/);
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
@@ -617,14 +620,17 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
   const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
   for (const s of [
-    "After sending `resume` the PM or lead restarts the watcher with every name still working (the loop sleeps first, so a restart waits a minute before its first poll)", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
-    "a hire that hits the limit again shows a new stop and wakes it again", "a second `resume` in a row that brought no new commit, message or limit stop in between means the hire is ended",
-    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes", "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
+    "the PM watches its leads and each lead watches its own hires with `f1rm status --watch <names>` in the background", "its exit wakes them",
+    "leaving out sessions waiting for an answer to their report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED` or `ESCALATE`) and any hire waiting on a reset timer",
+    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes",
+    "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
+    "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
+    "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
   ]) expect(decisions, s).toContain(s);
-  for (const old of ["sleeps 300 seconds", "notes the time before sending it", "waits again for the time a timed stop names", "restarts the watcher a minute later", "clears it, and only an enqueue"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "or limit stop in between"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
-  for (const text of [section("Watching and waking"), readFileSync(join(REPO, "docs", "decisions.md"), "utf8")]) {
+  for (const text of [w, decisions]) {
     expect(text).toContain(known);
     expect(text).toContain(pmStop);
   }
@@ -634,84 +640,12 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   expect(section("Who talks to whom")).toContain("the watcher is your own");
 });
 
-// The example watcher runs as written, with a stub `f1rm` that prints a fixture; the real delegation gate was run on it too (the evidence of this task).
-function watch(hires: object, names: string, stubs: { bun?: string; f1rm?: string } = {}) {
-  const block = /```\n\s*(NAMES=[\s\S]*?)```/.exec(section("Watching and waking"))?.[1];
-  expect(block, "a watcher example that starts with NAMES=").toBeDefined();
-  const dir = mkdtempSync(join(tmpdir(), "f1rm-watch-"));
-  writeFileSync(join(dir, "fixture.json"), JSON.stringify(hires));
-  writeFileSync(join(dir, "f1rm"), stubs.f1rm ?? `#!/bin/sh\ncat "${dir}/fixture.json"\n`, { mode: 0o755 });
-  if (stubs.bun) writeFileSync(join(dir, "bun"), stubs.bun, { mode: 0o755 });
-  writeFileSync(join(dir, "watch.sh"), block!.replace(/^NAMES=.*$/m, `NAMES="${names}"`).replace("sleep 60", "sleep 0"));
-  const r = Bun.spawnSync(["sh", join(dir, "watch.sh")], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, timeout: 2000 });
-  return { woke: !r.exitedDueToTimeout, code: r.exitCode, out: r.stdout.toString() };
-}
-const quiet = { name: "lead-a", ended: false, limitUntil: null, idleMinutes: 3 };
-
-test("S2: the watcher exits when a named hire has been idle 20 minutes, has ended or hit the limit, or when status can't be read; not for a quiet or an unnamed one", () => {
-  for (const [why, hire] of [["idle", { ...quiet, idleMinutes: 20 }], ["ended", { ...quiet, ended: true }], ["limit", { ...quiet, limitUntil: "20:40" }]] as const) {
-    const r = watch([quiet, { ...hire, name: "lead-b" }], "lead-a lead-b");
-    expect([why, r.woke, r.code]).toEqual([why, true, 0]);
-  }
-  expect(watch([{ ...quiet, idleMinutes: 19 }], "lead-a").woke).toBe(false);
-  expect(watch([quiet, { ...quiet, name: "lead-z", ended: true, idleMinutes: 99 }], "lead-a").woke).toBe(false);
-  expect(watch({ not: "a list" }, "lead-a").woke).toBe(true);
-}, 15_000);
-
-test("S2d: the watcher skips empty names: none at all, or a stray space, wakes nothing", () => {
-  expect(watch([quiet], "").woke).toBe(false);
-  expect(watch([quiet], "lead-a ").woke).toBe(false);
-  expect(watch([{ ...quiet, ended: true }], "lead-a ").woke).toBe(true);
-}, 15_000);
-
-test("S2e: the watcher fails closed: a check command that is missing or throws, or a status that prints nothing, wakes it", () => {
-  expect(watch([quiet], "lead-a", { bun: "#!/bin/sh\nexit 127\n" }).woke).toBe(true); // the check command cannot run
-  expect(watch([quiet], "lead-a", { bun: "#!/bin/sh\ncat >/dev/null\nexit 1\n" }).woke).toBe(true); // the check throws
-  expect(watch([quiet], "lead-a", { f1rm: "#!/bin/sh\nexit 1\n" }).woke).toBe(true); // f1rm status fails and prints nothing
-  expect(watch([quiet], "lead-a").woke).toBe(false); // and a healthy list still does not
-}, 15_000);
-
-test("S2b: the watcher also exits for a named session that status doesn't list, or lists with no activity time", () => {
-  expect(watch([{ ...quiet, name: "lead-z" }], "lead-a").woke).toBe(true);
-  expect(watch([], "lead-a").woke).toBe(true);
-  expect(watch([{ ...quiet, idleMinutes: null }], "lead-a").woke).toBe(true);
-  expect(watch([{ ...quiet, name: "lead-b" }, quiet], "lead-a lead-b").woke).toBe(false);
-}, 15_000);
-
-test("S2c: a lead counts as stalled only when it and every hire of its team have been quiet 20 minutes; a lead waiting on active hires is not", () => {
-  const lead = { ...quiet, name: "lead-t", idleMinutes: 45 };
-  const member = (idleMinutes: number | null, extra: object = {}) => ({ ...quiet, name: "t.backend-dev-x", idleMinutes, ...extra });
-  expect(watch([lead, member(3)], "lead-t").woke).toBe(false);
-  expect(watch([lead, member(3), { ...member(60), name: "t.reviewer-review-x" }], "lead-t").woke).toBe(false);
-  expect(watch([lead, member(null)], "lead-t").woke).toBe(true); // a member with no activity time is not an active one
-  expect(watch([lead, member(40)], "lead-t").woke).toBe(true);
-  expect(watch([lead], "lead-t").woke).toBe(true);
-  expect(watch([lead, { ...member(3), name: "other.backend-dev-x" }], "lead-t").woke).toBe(true); // another team's hire doesn't count
-  expect(watch([{ ...lead, idleMinutes: 5, ended: true }, member(3)], "lead-t").woke).toBe(true);
-  expect(watch([{ ...lead, idleMinutes: 5, limitUntil: "20:40" }, member(3)], "lead-t").woke).toBe(true);
-  expect(watch([{ ...lead, idleMinutes: 5 }, member(40)], "lead-t").woke).toBe(false);
-  expect(watch([lead, member(5, { ended: true })], "lead-t").woke).toBe(true); // a hire let go a moment ago is not an active one
-  expect(watch([lead, member(40, { limitUntil: "8:40pm (Europe/Lisbon)" })], "lead-t").woke).toBe(false); // a lead waiting on a limited hire is not stalled
-  expect(watch([{ ...lead, limitUntil: "8:40pm (Europe/Lisbon)" }, member(3)], "lead-t").woke).toBe(true); // one that is limited itself is
-}, 30_000);
-
 test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role file carries the checkpoint line", () => {
   for (const r of ["pm", "lead"]) {
-    for (const s of ["background watcher", "`f1rm status --json`", "never by status text", "20 minutes", "limit stop", "resume brief", "`name [ref]`", "Watching and waking"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
-  }
-  // The same triggers in pm.md and lead.md as in the guidelines' watcher.
-  for (const r of ["pm", "lead"]) {
-    for (const s of ["is missing from the list or has no activity time", "when status can't be read", "leave out a session that sent `DONE` or `BLOCKED` and waits for an answer"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
-  }
-  // The limit-stop line points to the bullet by name.
-  for (const r of ["pm", "lead"]) {
-    for (const s of ["**After you send `resume`**", "Watching and waking"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
-    expect(role(r).body, r).not.toContain("sleep 300");
+    for (const s of ["`f1rm status --watch", "run_in_background", "its exit wakes you", "never by status text", "limit stop", "resume brief", "`name [ref]`", "Watching and waking", "**After you send `resume`**", "what it says to leave out"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
+    for (const old of ["bun -e", "sleep 300", "background watcher on `f1rm status --json`"]) expect(role(r).body, `${r}: ${old}`).not.toContain(old);
   }
   expect(role("pm").body).toMatch(/watch your leads/i);
-  expect(role("pm").body).toContain("together with every hire of its team");
-  expect(section("Watching and waking")).toContain("only when it and every hire of its team");
-  expect(section("Watching and waking")).toContain("an ended hire, one let go a moment ago too, or one with no activity time does not count as active");
   expect(role("lead").body).toMatch(/watch your own hires/i);
   for (const name of Object.keys(ROLES)) {
     const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
