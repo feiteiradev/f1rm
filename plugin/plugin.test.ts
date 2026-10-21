@@ -589,7 +589,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   const w = section("Watching and waking");
   for (const s of [
     "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "background watcher", "`run_in_background`", "20 minutes", "The exit wakes you",
-    "wait until that time", "send it `resume`", "`resume.md`",
+    "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
     "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
     "until its first new line", // the transcript still ends on the stop until the hire answers `resume`

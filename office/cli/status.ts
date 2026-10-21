@@ -18,7 +18,7 @@ export type Hire = {
   /** The tip of the hire's branch (ISO); null for a lead, a Reviewer, or a branch that isn't there. */
   lastCommit: string | null;
   ended: boolean;
-  /** "HH:MM" when the transcript ends on the subscription limit, "unknown" if it names no time; else null. */
+  /** When the limit stop the transcript ends on lifts, as its text gives it after "resets" (see limitUntil below); "unknown" if it names none; else null. */
   limitUntil: string | null;
 };
 
@@ -63,8 +63,8 @@ function tail(path: string): string {
 }
 
 /**
- * When a limit stop lifts, as its text gives it: "HH:MM", with the date before it ("Oct 27 09:00") and the timezone after it ("(Europe/Lisbon)")
- * when it names them. "unknown" if it names no time; null when the transcript's last assistant line is not an API error about a limit.
+ * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
+ * names none; null when the transcript's last assistant line is not an API error about a limit.
  */
 function limitUntil(path: string): string | null {
   const last = tail(path).split("\n").findLast((l) => l.includes('"type":"assistant"'));
@@ -74,13 +74,7 @@ function limitUntil(path: string): string | null {
     if (line.isApiErrorMessage !== true) return null;
     const text = (line.message?.content ?? []).map((c: any) => String(c?.text ?? "")).join(" ");
     if (!/\blimit\b/i.test(text)) return null;
-    const reset = /\bresets\b(.*)/is.exec(text)?.[1] ?? "";
-    const date = /\b([A-Z][a-z]{2,8})\.? (\d{1,2})\b/.exec(reset);
-    const t = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])m\b|\b(\d{1,2}):(\d{2})\b/i.exec(reset.replace(date?.[0] ?? "", ""));
-    if (!t) return "unknown";
-    const hour = t[1] ? (Number(t[1]) % 12) + (t[3].toLowerCase() === "p" ? 12 : 0) : Number(t[4]);
-    const zone = /\(([^)]+)\)/.exec(reset)?.[1];
-    return `${date ? `${date[1]} ${date[2]} ` : ""}${String(hour).padStart(2, "0")}:${t[2] ?? t[5] ?? "00"}${zone ? ` (${zone})` : ""}`;
+    return /\bresets\s+(.+)/i.exec(text)?.[1].trim() ?? "unknown";
   } catch {
     return null;
   }
