@@ -13,11 +13,14 @@ const home = () => mkdtempSync(join(tmpdir(), "f1rm-status-"));
 /** Claude Code's folder for a working directory: every character that is not a letter or digit becomes `-`. */
 const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
 
-/** Writes `lines` as the session's transcript under the encoded `cwd` folder, last written `agoMin` minutes before NOW. */
-function transcript(h: string, cwd: string, sessionId: string, lines: object[], agoMin: number) {
+/**
+ * Writes `lines` as the session's transcript under the encoded `cwd` folder, last written `agoMin` minutes before NOW. The last line is the system line Claude Code
+ * ends a turn with, which records the folder the session ran in (`recorded`, the folder it is stored under unless a test says otherwise).
+ */
+function transcript(h: string, cwd: string, sessionId: string, lines: object[], agoMin: number, recorded = cwd) {
   const file = join(h, ".claude", "projects", folder(cwd), `${sessionId}.jsonl`);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  writeFileSync(file, [...lines, { type: "system", subtype: "turn_duration", cwd: recorded }].map((l) => JSON.stringify(l)).join("\n") + "\n");
   const t = new Date(NOW - agoMin * MIN);
   utimesSync(file, t, t);
 }
@@ -204,6 +207,25 @@ test("another repo's sessions and transcripts are never listed, even one whose f
     live("pm-shop", "aaaa0004", REPO, { kind: "interactive" }), // the PM, and the user's own sessions, are not hires
   ]));
   expect(list.map((x) => x.name)).toEqual(["shop.backend-dev-checkout"]);
+});
+
+test("two repos whose folders Claude Code encodes alike are told apart by the cwd their transcripts record", () => {
+  const h = home();
+  // /code/shop-app and /code/shop.app are stored in the same projects folder.
+  const here = { ...base(h, []), repo: "/code/shop-app" };
+  transcript(h, "/code/shop-app", "aaaa8001", [...named("aaaa8001", "lead-mine")], 5);
+  transcript(h, "/code/shop-app", "aaaa8002", [...named("aaaa8002", "lead-theirs")], 5, "/code/shop.app");
+  transcript(h, "/code/shop-app", "aaaa8003", [...named("aaaa8003", "shop.backend-dev-wt")], 5, "/code/shop-app/.claude/worktrees/wt");
+  transcript(h, "/code/shop-app", "aaaa8004", [...named("aaaa8004", "lead-theirs-too")], 5, "/code/shop.app/.claude/worktrees/wt");
+  expect(hires(here).map((x) => x.name).sort()).toEqual(["lead-mine", "shop.backend-dev-wt"]);
+});
+
+test("an assistant line whose content is a string is read like a block list", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  const stop = { type: "assistant", isApiErrorMessage: true, message: { role: "assistant", content: "You've hit your session limit · resets 8:40pm (Europe/Lisbon)" } };
+  transcript(h, cwd, "str00001", [stop], 3);
+  expect(hires(base(h, [live("shop.backend-dev-checkout", "str00001", cwd)]))[0].limitUntil).toBe("8:40pm (Europe/Lisbon)");
 });
 
 test("status never reads the office's database", () => {

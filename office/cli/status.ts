@@ -65,6 +65,8 @@ const gone = <T>(f: () => T, empty: T): T => {
 export const head = (path: string) => gone(() => read(path, 0, HEAD), "");
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
+/** The folder the session last ran in, as its lines record it. */
+const lastCwd = (text: string) => [...text.matchAll(/"cwd":"([^"]+)"/g)].at(-1)?.[1];
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
 export const tail = (path: string) =>
   gone(() => {
@@ -107,7 +109,7 @@ function lastTurn(end: string): any {
 function limitUntil(end: string): string | null {
   const line = lastTurn(end);
   if (line?.type !== "assistant" || line.isApiErrorMessage !== true) return null;
-  const text = (line.message?.content ?? []).map((c: any) => String(c?.text ?? "")).join(" ");
+  const text = textOf(line.message?.content);
   if (!/\blimit\b/i.test(text)) return null;
   return /\bresets\s+(.+)/i.exec(text)?.[1].trim() ?? "unknown";
 }
@@ -160,8 +162,15 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   const ended = new Map<string, Transcript>();
   for (const t of files.sort((x, y) => y.mtime - x.mtime)) {
     if (listedIds.has(t.id) || now - t.mtime > ENDED_WINDOW_MS) continue;
-    const name = lastName(tailOf(t)) ?? lastName(head(t.path));
-    if (name && hireName(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
+    const end = tailOf(t);
+    let name = lastName(end), cwd = lastCwd(end);
+    if (!name || !cwd) {
+      const start = head(t.path);
+      name ??= lastName(start);
+      cwd ??= lastCwd(start);
+    }
+    // Claude Code stores /code/shop.app and /code/shop-app in one folder, so the folder alone does not say whose it is; a transcript that records no folder is not guessed at.
+    if (name && cwd && repoOf(cwd) === repo && hireName(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
   }
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }

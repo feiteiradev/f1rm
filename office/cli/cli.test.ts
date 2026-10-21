@@ -916,7 +916,7 @@ test("status prints all of a large list into a pipe, not the first 64 KB", async
   mkdirSync(projects, { recursive: true });
   const count = 400;
   for (let i = 0; i < count; i++) {
-    writeFileSync(join(projects, `s${i}.jsonl`), JSON.stringify({ type: "agent-name", agentName: `shop.backend-dev-task-${i}`, sessionId: `s${i}` }) + "\n");
+    writeFileSync(join(projects, `s${i}.jsonl`), [{ type: "agent-name", agentName: `shop.backend-dev-task-${i}`, sessionId: `s${i}` }, { type: "system", cwd: repo }].map((l) => JSON.stringify(l)).join("\n") + "\n");
   }
   // A reader that is slow to start, as a pipe to `jq` or a watcher can be.
   const proc = Bun.spawn(["sh", "-c", `bun "${CLI}" status --json | (sleep 1; cat)`], { cwd: repo, env: { ...process.env, HOME: home, PATH: `${stubClaude(0, []).bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
