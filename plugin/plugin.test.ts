@@ -601,7 +601,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
     "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name", "**Idle 20 minutes",
-    "**Status can't be read**", "run `f1rm status` by hand to see why, then restart the watcher",
+    "**Status can't be read**", "If status refuses the repo's path (too long), don't restart: tell your Report to; the PM tells the user.", "run `f1rm status` by hand to see why, then restart the watcher",
     "when the last line of the conversation is a limit stop",
   ]) expect(w, s).toContain(s);
   // After you send `resume`: the delivered `resume` clears the stop; a second one in a row ends the hire unless a timed limit stop came between.
@@ -631,9 +631,10 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
     "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
     "it refuses, in every form, a repo whose encoded project folder is over 150 characters", "judged only for ended, missing or a limit stop, never for being quiet",
-    "When a session sends its report the lead restarts the watcher with it as `name:waiting`; when it answers the report and the session works again, it restarts the watcher with it as a plain name",
+    "When a session sends its report the PM or lead restarts the watcher with it as `name:waiting` (the PM does the same for its leads: `PLAN`, `DONE <team>`); when it answers the report and the session works again, it restarts the watcher with it as a plain name",
+    "so the `--claude-worktrees-` prefix of a worktree's folder stays whole (the filter matches a cut name by that prefix; task slugs have no cap",
   ]) expect(decisions, s).toContain(s);
-  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "judged only for ended and a limit stop", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "judged only for ended and a limit stop", "longest worktree folder", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
   for (const old of ["So is a hire waiting on a reset timer", "judged only for ended and a limit stop", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
