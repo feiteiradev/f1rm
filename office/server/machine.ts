@@ -223,10 +223,13 @@ export const machine = {
     }]));
   },
 
-  /** The live background sessions Claude Code lists, with their name, state, folder and status (busy|idle; "" where it gives none); null if it can't say. */
-  async backgroundSessions(): Promise<{ name: string; state: string; cwd: string; status?: string }[] | null> {
+  /** The live background sessions Claude Code lists, with their name, state, folder and status (busy or idle; none for any other); null if it can't say. */
+  async backgroundSessions(): Promise<{ name: string; state: string; cwd: string; status?: "busy" | "idle" }[] | null> {
     const list = await agents(false);
-    return list && list.filter((a) => a?.kind === "background").map((a) => ({ name: String(a.name ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), status: String(a.status ?? "") }));
+    return list && list.filter((a) => a?.kind === "background").map((a) => ({
+      name: String(a.name ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""),
+      ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }),
+    }));
   },
 
   /** How many background hires hold a slot, or null if `claude agents --json` can't say. A blocked hire waits on a person and still holds its slot; interactive sessions are the user's, not hires. */
