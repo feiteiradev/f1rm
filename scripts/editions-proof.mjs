@@ -20,11 +20,12 @@ const SECRET = "proof-secret", TOKEN = "proof-token";
 const projectsDir = mkdtempSync(join(tmpdir(), "f1rm-projects-"));
 const SHOP = "/code/shop/.git", BLOG = "/code/blog/.git";
 writeEdition(projectFile(projectsDir, BLOG), "founder");
+writeFileSync(projectFile(projectsDir, SHOP), "{}\n"); // a door needs a registration, which only `f1rm pm` writes; the shop has one with no edition chosen
 const boardsDir = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
 writeFileSync(boardFile(boardsDir, BLOG), "# Board: blog\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | marketer-brand | done | worktree-brand | Write growth/brand.md |\n| T2 | marketer-launch | publish | worktree-launch | Launch post |\n| T3 | social-media-week1 | publish | worktree-week1 | Week 1 posts |\n| T4 | - | todo | - | Pricing page copy |\n");
 const server = startServer({
   port: 0, secret: SECRET, token: TOKEN, projectsDir, boardsDir, boardPollMs: 50, clientDir: resolve(import.meta.dir, "../office/client/dist"),
-  machine: { gitCommonDir: (cwd) => ({ "/code/shop": SHOP, "/code/blog": BLOG })[cwd] ?? null, liveSessions: async () => new Set() },
+  machine: { isRepo: (folder) => [SHOP, BLOG].includes(folder + "/.git"), gitCommonDir: (cwd) => ({ "/code/shop": SHOP, "/code/blog": BLOG })[cwd] ?? null, liveSessions: async () => new Set() },
 });
 const base = `http://127.0.0.1:${server.port}`;
 for (const [id, cwd] of [["s1", "/code/shop"], ["b1", "/code/blog"]]) {

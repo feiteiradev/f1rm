@@ -1,9 +1,10 @@
 // Seam 1: the event log, the ghost sweep and restart recovery, on a controllable clock.
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectFile } from "./editions.ts";
 import { processRuns, startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
@@ -31,6 +32,7 @@ let listingNow = 0;
 let listingMost = 0;
 const fakeMachine = () => ({
   gitCommonDir: (cwd: string) => `${cwd}/.git`,
+  isRepo: () => true,
   liveSessions: async () => {
     listings++;
     listingMost = Math.max(listingMost, ++listingNow);
@@ -80,8 +82,12 @@ afterEach(() => {
 let dbN = 0;
 
 function start(dbPath = join(dir, `events-${dbN++}.db`)) {
+  // A door needs a registration, which only `f1rm pm` writes: the shop has one, as if it had run.
+  const projectsDir = join(dir, "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  writeFileSync(projectFile(projectsDir, "/code/shop/.git"), "{}\n");
   const server = startServer({
-    port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir: dir,
+    port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir: dir, projectsDir,
     dbPath, clock: () => now, offlineAfterMs: OFFLINE_AFTER, removeAfterMs: REMOVE_AFTER,
     isAlive: (pid) => (asked.push(pid), !dead.has(pid)),
   });

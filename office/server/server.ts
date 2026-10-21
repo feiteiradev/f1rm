@@ -5,9 +5,9 @@ import { existsSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
-import { isEdition, projectFile, readEdition, writeEdition, type Edition } from "./editions.ts";
+import { changeEdition, isEdition, projectFile, readEdition, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
-import { isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
+import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
@@ -320,34 +320,80 @@ export function startServer({
   // The folder comes from the room the office holds, never from the request. A repo's room id is its git common dir.
   // ponytail: a submodule's common dir lives under .git/modules, so its room resolves to the wrong folder; use an employee's cwd there if it is felt.
   const folderOf = repoDir;
-  // A door is a git repo's main working directory or a folder with a settings file, and never a junk folder; any other cwd is Elsewhere.
-  // ponytail: cached per cwd for the server's lifetime; a folder that later gets `git init` or a settings file needs a restart.
-  const rooms = new Map<string, Room>();
+  // A session belongs to the registered folder (~/.f1rm/projects/<enc>.json, written only by `f1rm pm`, never by this office) that
+  // contains its cwd, the nearest one first, so a subfolder or a worktree, even one removed since, rolls up to its project's door and
+  // never gets its own. Git is not asked about the cwd. A cwd in a junk folder, or under no registered folder, is Elsewhere.
+  // The registration is looked up on every call, so a folder registered while the office runs gets its door on its next event.
+  // ponytail: cwdPaths holds every distinct cwd ever seen, as the per-cwd cache before it did; prune it if a very long-lived office feels it.
+  // cwd -> the folders to look at, nearest first (null for a junk cwd), and the resolved cwd with its real path
+  const cwdPaths = new Map<string, { paths: string[] | null; chain: string[] }>();
+  const junkFolders = new Map<string, boolean>();
+  const doorIds = new Map<string, string>(); // registered folder -> its room id
+  const ancestors = (p: string) => {
+    const all = [p];
+    for (let q = dirname(p); q !== all.at(-1); q = dirname(q)) all.push(q);
+    return all;
+  };
   const roomOf = (cwd: string): Room => {
-    let room = rooms.get(cwd);
-    if (!room) {
-      const common = machine.gitCommonDir(cwd);
-      // A repo's room is its git common dir, so worktrees share it; a non-git folder is its own room.
-      room = common
-        ? { id: common, name: roomName(common) }
-        : { id: cwd, name: basename(cwd) || cwd };
-      if (isJunk(folderOf(room.id), junk) || isJunk(cwd, junk) || (!common && !(projectsDir && existsSync(projectFile(projectsDir, room.id))))) room = ELSEWHERE;
-      rooms.set(cwd, room);
+    if (!projectsDir) return ELSEWHERE;
+    let info = cwdPaths.get(cwd);
+    if (!info) {
+      const abs = resolve(cwd), real = realPath(abs); // a trailing slash is dropped, and a symlinked cwd is also looked up by its real path
+      // The cwd's chain and its real path's chain are interleaved by distance from the cwd, so neither beats a nearer folder of the other.
+      const chains = [ancestors(abs), ancestors(real)];
+      const near = Array.from({ length: Math.max(...chains.map((c) => c.length)) }, (_, i) => chains.map((c) => c[i])).flat().filter((p): p is string => !!p);
+      // Junk by its own path or by its real one, against the roots as given and past their links: a link out of ~/.f1rm, or one into /tmp, is no project's.
+      const junked = [abs, real].some((c) => [...junk, ...junkRoots].some((r) => inside(r, c)));
+      cwdPaths.set(cwd, (info = { paths: junked ? null : [...new Set(near)], chain: [abs, real] }));
     }
-    return room;
+    // ponytail: the file name is lossy (/code/my/shop and /code/my-shop name the same file), so an unregistered folder can get a door
+    // through a lookalike's registration, with its own path as the id; decode the registered path from the file if it is felt.
+    for (const p of info.paths ?? []) {
+      if (basename(p) === ".git" || !existsSync(projectFile(projectsDir, p))) continue; // a cwd inside a repo's own .git belongs to the repo around it
+      // A registered folder inside a junk folder gives no door, however the cwd got there (a link into it).
+      let junked = junkFolders.get(p);
+      if (junked === undefined) junkFolders.set(p, (junked = isJunk(p, junk)));
+      if (junked) continue;
+      // A repo is registered under its git common dir and a plain folder under itself; both name the same file.
+      // ponytail: the id is decided once per registered folder, so a `git init` after the registration, or a folder that was missing or unreadable at
+      // first sight, takes effect after a restart (or after a Remove); without that a door would flip from P to P/.git while the old one lingers.
+      let id = doorIds.get(p);
+      if (!id) doorIds.set(p, (id = machine.isRepo(p) ? join(p, ".git") : p));
+      return { id, name: id === p ? basename(p) || p : roomName(id) };
+    }
+    return ELSEWHERE;
+  };
+  // A door whose registration was removed outside the office, with nobody left in it, goes too.
+  const dropStaleDoors = () => {
+    const stale = Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id && projectsDir && !existsSync(projectFile(projectsDir, id)) && !Object.values(state.employees).some((e) => e.room === id));
+    if (!stale.length) return false;
+    for (const id of stale) doorIds.delete(folderOf(id)); // a later registration decides its id again
+    state = { ...state, rooms: Object.fromEntries(Object.entries(state.rooms).filter(([id]) => !stale.includes(id))) };
+    return true;
   };
 
   // The doors the user removed, by when: the events before that no longer build the room.
   const forgottenFile = projectsDir && join(dirname(projectsDir), "forgotten-doors.json");
   const forgotten = readForgotten(forgottenFile);
   // The log keeps the rooms it was written with; they are decided again here, so a rule change reaches the old events.
+  const replayed = new Map<string, Room>(); // one lookup per distinct cwd while replaying; live events look again, so a later registration is seen
   for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
     try {
       const e: F1rmEvent = JSON.parse(row.event);
-      e.room = roomOf(e.cwd);
-      if (e.at >= (forgotten[e.room.id] ?? 0)) (state = reduce(state, e), trackSubagents(e));
+      let room = replayed.get(e.cwd);
+      if (!room) replayed.set(e.cwd, (room = roomOf(e.cwd)));
+      e.room = room;
+      // An event from before its door was removed stays out. It no longer resolves to that door: with no registration left it is
+      // Elsewhere, or the door of a registered folder around the removed one. So it is told by its cwd being inside the removed
+      // folder, unless a registered folder inside the removed one holds it.
+      const removed = Object.entries(forgotten).some(([id, at]) => {
+        const folder = folderOf(id);
+        return e.at < at && (e.room.id === id || ((cwdPaths.get(e.cwd)?.chain ?? [resolve(e.cwd)]).some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
+      });
+      if (!removed) (state = reduce(state, e), trackSubagents(e));
     } catch {} // a row this build can't read must not stop the office from starting
   }
+  dropStaleDoors();
 
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
   const pmOf = (room: string) => Object.values(state.employees).find((e) => e.room === room && e.role === "pm");
@@ -426,6 +472,8 @@ export function startServer({
         if (event) {
           append.run(event.at, JSON.stringify(event));
           state = reduce(state, event);
+          // Other ways a room empties (the sweep, a process that died) are caught by the board poll within boardPollMs.
+          if (event.kind === "SessionEnd") dropStaleDoors();
           // A new process (a resumed session keeps its id) has no known pid: ask `claude agents` for it at the next check.
           if (event.kind === "SessionStart") {
             pids.delete(event.sessionId);
@@ -515,7 +563,7 @@ export function startServer({
         return tellEmployee(employee, INTERN + subtask.trim());
       }
       if (rest[0] === "remove" && rest.length === 2) {
-        // Forgets an empty door and its edition; boards, evidence and the repo are never touched. A new session there brings the door back.
+        // Forgets an empty door and its registration; boards, evidence and the repo are never touched. The door comes back only when `f1rm pm` registers the folder again.
         let room = "";
         try {
           room = decodeURIComponent(rest[1]);
@@ -526,7 +574,7 @@ export function startServer({
         forgotten[room] = clock();
         if (forgottenFile) writeForgotten(forgottenFile, forgotten);
         if (projectsDir) rmSync(projectFile(projectsDir, room), { force: true });
-        for (const [cwd, r] of rooms) if (r.id === room) rooms.delete(cwd); // a folder with no settings file is Elsewhere from now on
+        doorIds.delete(folderOf(room)); // a `git init` before the next `f1rm pm` gets the new id
         const { [room]: _, ...kept } = state.rooms;
         state = { ...state, rooms: kept };
         const { [room]: _e, ...left } = editions;
@@ -598,7 +646,13 @@ export function startServer({
         if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
         if (!isEdition(edition)) return Response.json({ error: "The edition is work or founder." }, { status: 400 });
         if (!projectsDir) return Response.json({ error: "This office keeps no project settings." }, { status: 500 });
-        writeEdition(projectFile(projectsDir, room), edition);
+        // The dialog only changes a registration `f1rm pm` made; it never creates one.
+        try {
+          changeEdition(projectFile(projectsDir, room), edition); // fails when the file is missing, so it can't create one
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          return Response.json({ error: "This project isn't registered. Run `f1rm pm` in it first." }, { status: 404 });
+        }
         editions = { ...editions, [room]: edition };
         push();
         return Response.json({ ok: true });
@@ -712,6 +766,7 @@ export function startServer({
     if (reading) return;
     reading = true;
     try {
+      if (dropStaleDoors()) push();
       const nextEditions: Record<string, Edition> = {};
       const projects = Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id); // Elsewhere has no edition and no board
       for (const id of projectsDir ? projects : []) {

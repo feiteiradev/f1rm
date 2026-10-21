@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { projectFile, writeEdition } from "../office/server/editions.ts";
 import { claudeEnv } from "../office/server/machine.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
@@ -43,6 +44,9 @@ chmodSync(join(bin, "claude"), 0o755);
 
 const port = 41900 + Math.floor(Math.random() * 100);
 const f1rmEnv = { ...process.env, TMPDIR: "", HOME: home, F1RM_PORT: String(port), PATH: `${bin}:${process.env.PATH}` };
+// A door needs a registration, which `f1rm pm` writes and the office never does: the project has one, as if `f1rm pm` had run in it. It chooses Work, so the page does not open its edition dialog over the room.
+mkdirSync(join(home, ".f1rm", "projects"), { recursive: true });
+writeEdition(projectFile(join(home, ".f1rm", "projects"), proj), "work");
 const cli = (...args) => Bun.spawn(["bun", join(ROOT, "office/cli/f1rm.ts"), ...args], { env: f1rmEnv, cwd: ROOT, stdout: "pipe", stderr: "inherit" });
 await cli("install").exited;
 const f1rmHooks = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).hooks;

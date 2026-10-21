@@ -18,14 +18,22 @@ export function realPath(p: string): string {
   }
 }
 
-/** The folders that never get a door, even when they are a git repo or have a settings file: the office's own, Claude's, and temp folders. */
-export const junkRoots = (home = process.env.HOME, tmp = process.env.TMPDIR) =>
-  [home && join(home, ".f1rm"), home && join(home, ".claude"), "/tmp", "/private/tmp", tmp].filter((p): p is string => !!p).map(realPath);
+/** `path` is `root` or inside it. */
+export const inside = (root: string, path: string) => path === root || path.startsWith(root + "/");
+
+/**
+ * The folders that never get a door, even when they are a git repo or have a settings file: the office's own, Claude's, and temp folders.
+ * Each is listed as given and past its symlinks (/tmp and /private/tmp), so a path is judged by how it is written and by where it leads.
+ */
+export const junkRoots = (home = process.env.HOME, tmp = process.env.TMPDIR) => {
+  const given = [home && join(home, ".f1rm"), home && join(home, ".claude"), "/tmp", "/private/tmp", tmp].filter((p): p is string => !!p);
+  return [...new Set(given.flatMap((p) => [p.replace(/(.)\/+$/, "$1"), realPath(p)]))];
+};
 
 /** `roots` are already resolved with realPath. */
 export function isJunk(folder: string, roots: string[]): boolean {
   const f = realPath(folder);
-  return roots.some((r) => f === r || f.startsWith(r + "/"));
+  return roots.some((r) => inside(r, f));
 }
 
 /** The doors the user removed, room id -> when (ms). Events older than that no longer build the room. */

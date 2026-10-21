@@ -1,6 +1,6 @@
 // A project's edition: Work, the engineering company, or Founder, which adds the go-to-market roles. It lives outside the
 // repo, so an employer's repo never gets an f1rm file. Shared by the CLI and the office server.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { repoKey } from "./board.ts";
 import { machine } from "./machine.ts";
@@ -30,4 +30,13 @@ export const editionFile = (cwd: string, m: Pick<typeof machine, "gitCommonDir">
 export function writeEdition(file: string, edition: Edition) {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ edition }) + "\n");
+}
+
+/** Changes the edition of a registration that exists: throws ENOENT when the file is gone, so it can't recreate a registration removed in between. */
+export function changeEdition(file: string, edition: Edition) {
+  const text = JSON.stringify({ edition }) + "\n";
+  // ponytail: rewritten in place, so a reader that comes between the write and the truncate can see the old tail or an empty file; a temp file
+  // plus rename would fix that but could recreate a removed registration, so bring a lock in if it is felt.
+  writeFileSync(file, text, { flag: "r+" });
+  truncateSync(file, Buffer.byteLength(text));
 }

@@ -7,11 +7,12 @@
 // iTerm2 must be running. The tab's shell is a login shell, so it runs the `f1rm` on your PATH and, like any claude there, reports to
 // the office your settings.json points at. Nothing else of yours is touched.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { machine } from "../office/server/machine.ts";
 import { junkRoots } from "../office/server/doors.ts";
+import { projectFile, writeEdition } from "../office/server/editions.ts";
 import { startServer } from "../office/server/server.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
@@ -83,7 +84,11 @@ for (const cmd of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "seed
 assert.ok(existsSync(join(repo, ".git")), "the throwaway repo exists");
 
 const SECRET = "live-secret", TOKEN = "live-token";
-const server = startServer({ port: 41900 + Math.floor(Math.random() * 100), secret: SECRET, token: TOKEN, machine, clientDir: resolve(import.meta.dir, "../office/client/dist"), junkRoots: junkRoots(process.env.HOME, "") }); // the repo is under tmpdir(), which is no door otherwise
+// A door needs a registration, which only `f1rm pm` writes; this proof starts that PM from the door, so the repo is registered first, with Work chosen so the page does not open its edition dialog over the room.
+const projectsDir = join(tmp, "projects");
+mkdirSync(projectsDir, { recursive: true });
+writeEdition(projectFile(projectsDir, join(repo, ".git")), "work");
+const server = startServer({ port: 41900 + Math.floor(Math.random() * 100), secret: SECRET, token: TOKEN, machine, projectsDir, clientDir: resolve(import.meta.dir, "../office/client/dist"), junkRoots: junkRoots(process.env.HOME, "") }); // the repo is under tmpdir(), which is no door otherwise
 const base = `http://127.0.0.1:${server.port}`;
 const browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
 try {
