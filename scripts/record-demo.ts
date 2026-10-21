@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectFile } from "../office/server/editions.ts";
 import type { F1rmEvent } from "../office/server/office.ts";
 import { KEEP, ROOMS, SCENARIO, WHO } from "../office/demo/scenario.ts";
 import { scrub } from "../office/demo/scrub.ts";
@@ -25,6 +26,9 @@ const repos = Object.fromEntries(ROOMS.map((room) => {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q");
   git(dir, "commit", "-q", "--allow-empty", "-m", "init");
+  // A door needs a registration, which `f1rm pm` writes and the office never does: each repo has one, as if `f1rm pm` had run in it.
+  mkdirSync(join(home, ".f1rm", "projects"), { recursive: true });
+  writeFileSync(projectFile(join(home, ".f1rm", "projects"), join(dir, ".git")), "{}\n");
   return [room, dir];
 }));
 const sessions = Object.fromEntries(Object.entries(WHO).map(([key, who]) => {

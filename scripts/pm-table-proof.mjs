@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
+import { registered } from "./registered.mjs";
 import { layoutOffice, scaleFor } from "../office/client/layout.ts";
 import { projectState } from "../office/client/lobby.ts";
 
@@ -17,9 +18,13 @@ mkdirSync(OUT, { recursive: true });
 
 const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
 const pmTabs = [];
+// A door needs a registration, which only `f1rm pm` writes: these rooms have one.
+const { projectsDir, isRepo } = registered(["/code/shop/.git"]);
 const server = startServer({
+  projectsDir,
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
   machine: {
+    isRepo,
     gitCommonDir: (cwd) => (cwd === "/code/shop" ? `${cwd}/.git` : null),
     liveSessions: async () => new Set(),
     startPmInIterm: async (folder) => void pmTabs.push(folder),

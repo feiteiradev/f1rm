@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { layoutOffice, scaleFor } from "../office/client/layout.ts";
 import { projectState } from "../office/client/lobby.ts";
+import { projectFile } from "../office/server/editions.ts";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "board-proof-out");
@@ -28,6 +29,9 @@ const repo = (name) => {
   const dir = join(home, "code", name);
   mkdirSync(dir, { recursive: true });
   Bun.spawnSync(["git", "init", "-q", dir]);
+  // A door needs a registration, which `f1rm pm` writes and the office never does: each repo has one, as if `f1rm pm` had run in it.
+  mkdirSync(join(home, ".f1rm", "projects"), { recursive: true });
+  writeFileSync(projectFile(join(home, ".f1rm", "projects"), join(dir, ".git")), "{}\n");
   return dir;
 };
 const shop = repo("my shop"), blog = repo("blog");

@@ -1,7 +1,7 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
 import { lstatSync, statSync } from "node:fs";
 import { connect } from "node:net";
-import { basename, dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 /** The environment for a spawned `claude`, without the session variables of a Claude Code session that launched f1rm: they would make the child look like that session's own child. */
 export function claudeEnv(env: Record<string, string | undefined> = process.env) {
@@ -174,6 +174,11 @@ export const machine = {
       c.on("close", () => resolve());
       c.on("error", (err: NodeJS.ErrnoException) => reject(new Error(err.code === "ECONNREFUSED" ? "its inbox socket is gone, so the session has ended" : err.message)));
     });
+  },
+
+  /** True when `folder` is a git repo's main working directory, which holds a `.git` directory. Runs no git, so it answers the same whatever the PATH. */
+  isRepo(folder: string): boolean {
+    return statSync(join(folder, ".git"), { throwIfNoEntry: false })?.isDirectory() ?? false;
   },
 
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */

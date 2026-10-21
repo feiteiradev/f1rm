@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
+import { registered } from "./registered.mjs";
 import { teamBoardFile } from "../office/server/board.ts";
 import { CELL, layoutOffice, scaleFor } from "../office/client/layout.ts";
 import { projectState } from "../office/client/lobby.ts";
@@ -22,9 +23,13 @@ const boardsDir = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
 writeFileSync(teamBoardFile(boardsDir, ROOM, "checkout"), "# Board: shop / checkout\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | checkout.designer-landing | done | worktree-landing | Design the cart page |\n| T2 | checkout.frontend-dev-form | doing | worktree-form | Build the cart form |\n| T3 | - | todo | - | Wire the payment step |\n");
 const spawned = [];
 const live = [{ name: "lead-checkout", state: "done", cwd: "/code/shop" }, { name: "lead-search", state: "working", cwd: "/code/shop" }];
+// A door needs a registration, which only `f1rm pm` writes: these rooms have one.
+const { projectsDir, isRepo } = registered([ROOM]);
 const server = startServer({
+  projectsDir,
   port: 0, secret: SECRET, token: TOKEN, boardsDir, boardPollMs: 50, clientDir: resolve(import.meta.dir, "../office/client/dist"),
   machine: {
+    isRepo,
     gitCommonDir: (cwd) => (cwd === "/code/shop" ? ROOM : null),
     liveSessions: async () => new Set(),
     backgroundId: async () => null,

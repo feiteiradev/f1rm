@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
+import { registered } from "./registered.mjs";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const OUT = resolve(process.env.OUT ?? "jump-proof-out");
@@ -16,9 +17,13 @@ const SECRET = "proof-secret", TOKEN = "proof-token";
 const repos = { "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" };
 const calls = [];
 const tab = (n) => `w0t${n}p0:6C2B4D3E-1A2B-4C5D-8E9F-0123456789A${n}`;
+// A door needs a registration, which only `f1rm pm` writes: these rooms have one.
+const { projectsDir, isRepo } = registered(Object.values(repos));
 const server = startServer({
+  projectsDir,
   port: 0, secret: SECRET, token: TOKEN, clientDir: resolve(import.meta.dir, "../office/client/dist"),
   machine: {
+    isRepo,
     gitCommonDir: (cwd) => repos[cwd] ?? null,
     liveSessions: async () => new Set(),
     backgroundId: async () => null,
@@ -57,10 +62,10 @@ const jumped = async (n) => {
 await key("Meta+k");
 await dialog.waitFor();
 assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("role")), "combobox", "the search box has focus on open");
-assert.equal(await page.getByRole("option").count(), 3, "an empty query lists everyone");
+assert.equal(await dialog.getByRole("option").count(), 3, "an empty query lists everyone");
 await page.screenshot({ path: join(OUT, "palette-open.png") });
 await page.keyboard.type("login");
-assert.equal(await page.getByRole("option").count(), 1, "typing narrows to the one matching a task");
+assert.equal(await dialog.getByRole("option").count(), 1, "typing narrows to the one matching a task");
 await page.screenshot({ path: join(OUT, "palette-typed.png") });
 await key("Enter");
 await jumped(1);
@@ -85,7 +90,7 @@ await page.getByRole("button", { name: "Lobby" }).click();
 // Arrow keys choose among several matches; room names search too.
 await key("Meta+k");
 await page.keyboard.type("shop");
-assert.equal(await page.getByRole("option").count(), 2, "a room name finds its employees");
+assert.equal(await dialog.getByRole("option").count(), 2, "a room name finds its employees");
 await key("ArrowDown");
 assert.equal(await page.locator('[role=option][aria-selected=true]').count(), 1);
 await key("Enter");
@@ -97,7 +102,7 @@ await dialog.waitFor({ state: "hidden" });
 await send("d", "/code/shop", 4, { file_path: "/code/shop/race.ts" });
 await key("Meta+k");
 await page.keyboard.type("shop");
-const optionIds = () => page.getByRole("option").evaluateAll((els) => els.map((e) => e.id.split("-").at(-1)));
+const optionIds = () => dialog.getByRole("option").evaluateAll((els) => els.map((e) => e.id.split("-").at(-1)));
 const highlighted = async () => (await page.locator("[role=option][aria-selected=true]").getAttribute("id")).split("-").at(-1);
 await page.waitForFunction(() => document.querySelectorAll("[role=option]").length === 3);
 const order = await optionIds();
@@ -120,7 +125,7 @@ const raced = calls.length;
 // Fuzzy letters, and a query that matches no one keeps the palette open and does nothing.
 await key("Meta+k");
 await page.keyboard.type("pst");
-assert.equal(await page.getByRole("option").count(), 1, "scattered letters match (post.md)");
+assert.equal(await dialog.getByRole("option").count(), 1, "scattered letters match (post.md)");
 await key("Escape");
 await dialog.waitFor({ state: "hidden" });
 // A session's own title (`--name`) finds it too.
@@ -131,7 +136,7 @@ await fetch(`${base}/ingest`, {
 });
 await key("Meta+k");
 await page.keyboard.type("spring launch");
-assert.equal(await page.getByRole("option").count(), 1, "a session title finds its employee");
+assert.equal(await dialog.getByRole("option").count(), 1, "a session title finds its employee");
 await key("Escape");
 await dialog.waitFor({ state: "hidden" });
 await key("Meta+k");

@@ -63,9 +63,12 @@ writeFileSync(join(clientDir, "index.html"), "<!doctype html>");
 async function officeWithRepo() {
   dir = mkdtempSync(join(tmpdir(), "f1rm-board-"));
   const boardsDir = join(dir, "boards"), projectsDir = join(dir, "projects");
+  // A door needs a registration, which only `f1rm pm` writes: the shop has one, as if it had run.
+  mkdirSync(projectsDir, { recursive: true });
+  writeFileSync(projectFile(projectsDir, "/code/shop/.git"), "{}\n");
   server = startServer({
     port: 0, secret: SECRET, token: TOKEN, clientDir, boardsDir, projectsDir, boardPollMs: 20,
-    machine: { gitCommonDir: () => "/code/shop/.git", liveSessions: async () => new Set<string>() } as any,
+    machine: { gitCommonDir: () => "/code/shop/.git", isRepo: () => true, liveSessions: async () => new Set<string>() } as any,
   });
   await fetch(`http://127.0.0.1:${server.port}/ingest`, {
     method: "POST",

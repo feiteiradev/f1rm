@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeF
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectFile } from "./editions.ts";
 import { startServer } from "./server.ts";
 import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
 import { machine } from "./machine.ts";
@@ -22,6 +23,7 @@ let deadPids = new Set<number>();
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
   gitCommonDir: (cwd: string) => repos[cwd] ?? null,
+  isRepo: (folder: string) => Object.values(repos).includes(folder + "/.git"),
   liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
   letGo: async (id: string) => {
@@ -102,7 +104,10 @@ const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
 function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string) {
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir: mkdtempSync(join(tmpdir(), "f1rm-projects-")), isAlive: (pid) => !deadPids.has(pid) });
+  // A door needs a registration, which only `f1rm pm` writes: these repos have one, as if it had run.
+  const projectsDir = mkdtempSync(join(tmpdir(), "f1rm-projects-"));
+  for (const common of new Set(Object.values(repos ?? {}))) writeFileSync(projectFile(projectsDir, common), "{}\n");
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir, isAlive: (pid) => !deadPids.has(pid) });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
