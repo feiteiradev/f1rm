@@ -625,7 +625,7 @@ test("start prints the full link when its output is a terminal", async () => {
   const url = `http://127.0.0.1:${office.port}/tok/`;
   mkdirSync(join(home, ".f1rm"));
   writeFileSync(join(home, ".f1rm", "office-url"), url);
-  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true
+  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true; this is the BSD form (macOS-only, like the CLI: launchctl)
   const proc = Bun.spawn(["script", "-q", "/dev/null", "bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stdin: "ignore" });
   const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
   office.stop(true);

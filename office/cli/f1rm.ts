@@ -269,7 +269,9 @@ function serve() {
 }
 
 /** Prints the link to a terminal, else only the port: under launchd stdout is a log. */
-const announce = (url: string) => console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
+function announce(url: string) {
+  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
+}
 
 async function runningOffice(): Promise<string | null> {
   const url = existsSync(URL_FILE) ? readFileSync(URL_FILE, "utf8").trim() : "";
