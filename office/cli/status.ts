@@ -2,7 +2,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, machine } from "../server/machine.ts";
-import { hireName } from "./letgo.ts";
+import { hireName, repoOf } from "./letgo.ts";
 
 export type Hire = {
   name: string;
@@ -38,7 +38,7 @@ const ENDED_WINDOW_MS = 24 * 60 * 60_000;
 const TAIL = 256 * 1024;
 const HEAD = 64 * 1024;
 
-/** Whether `cwd` is the repo's main working directory or under it (a worktree, a subfolder). */
+/** Whether a recorded `cwd` is the repo's main working directory or under it (a worktree, a subfolder). */
 const inRepo = (cwd: string, repo: string) => cwd === repo || cwd.startsWith(`${repo}/`);
 
 /** Claude Code's folder name for a working directory: every character that is not a letter or digit becomes `-`. */
@@ -121,18 +121,27 @@ type Transcript = { id: string; path: string; mtime: number; tail?: string };
 /** The end of a transcript, read once. */
 const tailOf = (t: Transcript) => (t.tail ??= tail(t.path));
 
-/** Every transcript in this repo's own folder and in the folders of its worktrees, and in no other. */
+/** The newest write under a folder, none if it is not there: a session busy in a long sub-agent writes only to its `subagents/` transcripts. */
+function newest(dir: string): number {
+  return Math.max(0, ...ls(dir).map((f) => {
+    const st = statSync(join(dir, f), { throwIfNoEntry: false });
+    return st ? (st.isDirectory() ? newest(join(dir, f)) : st.mtimeMs) : 0;
+  }));
+}
+
+/** Every transcript in this repo's own folder and in the folders of its worktrees. A long path is stored truncated to 200 characters with a hash after it, so a folder that starts with those 200 is looked at too; the ended ones are told apart by the folder they record. */
 function transcripts(home: string, repo: string): Transcript[] {
   const root = join(home, ".claude", "projects");
   if (!existsSync(root)) return [];
   const own = folder(repo);
-  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`));
+  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`) || (own.length > 200 && d.startsWith(own.slice(0, 200))));
   // A folder or a transcript that `claude rm` removes between the listing and the stat is skipped; any other error stays visible.
   return mine.flatMap((d) =>
     ls(join(root, d)).filter((f) => f.endsWith(".jsonl")).flatMap((f) => {
       const path = join(root, d, f);
       const st = statSync(path, { throwIfNoEntry: false });
-      return st ? [{ id: f.slice(0, -".jsonl".length), path, mtime: st.mtimeMs }] : [];
+      const id = f.slice(0, -".jsonl".length);
+      return st ? [{ id, path, mtime: Math.max(st.mtimeMs, newest(join(root, d, id, "subagents"))) }] : [];
     }),
   );
 }
@@ -158,7 +167,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
 
   const liveNames = new Set<string>();
   const out = listed
-    .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && inRepo(a.cwd, repo))
+    .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && repoOf(a.cwd) === repo)
     .map((a) => (liveNames.add(a.name), make(a.name, String(a.sessionId ?? ""), byId.get(String(a.sessionId)), a)));
 
   const listedIds = new Set(listed.map((a) => a?.sessionId));
@@ -178,7 +187,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }
 
-const usage = "usage: f1rm status [--json] | f1rm status --watch <name>...";
+const usage = "usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...";
 type Result = { out: string; err: string; code: number };
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
@@ -206,26 +215,32 @@ export async function status(argv: string[], deps: Omit<HiresDeps, "agents"> & {
 }
 
 const POLL_MS = 60_000;
+const WAITING = ":waiting";
 const QUIET_MIN = 20;
 /** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
 const LIMITED_MIN = 360;
 
-/** Why a named session is stalled, or null if it is not: ended, on a limit stop, missing, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is. */
-function stalled(name: string, list: Hire[]): string | null {
-  const h = list.find((x) => x.name === name);
+/**
+ * Why a named session is stalled, or null if it is not: missing, ended, on a limit stop, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is.
+ * One that is waiting (for an answer, or for the user at its desk) is judged only for the first three, never for being quiet. With two entries of a name (an old session next to a re-hired one) the newest decides.
+ */
+function stalled(name: string, list: Hire[], waiting: boolean): string | null {
+  const h = list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || (x.idleMinutes ?? Infinity) < (best.idleMinutes ?? Infinity) ? x : best), undefined);
   if (!h) return "missing from the list";
   if (h.ended) return "ended";
   if (h.limitUntil) return `limit stop until ${h.limitUntil}`;
+  if (waiting) return null;
   if (h.idleMinutes == null) return "no activity time";
   if (h.idleMinutes < QUIET_MIN) return null;
-  const team = /^lead-(.+)$/.exec(name)?.[1];
   // A hire that ended, has no activity time, or is quiet counts as quiet, unless a limit stop holds it (it waits for its reset, which a lead cannot hurry).
   const quiet = (x: Hire) => x.ended || x.idleMinutes == null || (x.idleMinutes >= QUIET_MIN && !(x.limitUntil && x.idleMinutes < LIMITED_MIN));
-  if (team && !list.filter((x) => x.name.startsWith(`${team}.`)).every(quiet)) return null;
+  if (h.role === "lead" && !list.filter((x) => x.team === h.team && x.role !== "lead").every(quiet)) return null;
   return `idle ${h.idleMinutes} minutes`;
 }
 
-export type WatchDeps = Omit<HiresDeps, "agents" | "now"> & {
+export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
+  /** Never called: the stall rule reads no commit, so a poll spawns no git. */
+  commitTime?: HiresDeps["commitTime"];
   now: () => number;
   loadAgents: () => Promise<any[] | null>;
   /** Waits `ms`; injected so a test needs no real time. */
@@ -233,18 +248,18 @@ export type WatchDeps = Omit<HiresDeps, "agents" | "now"> & {
 };
 
 /**
- * `f1rm status --watch <name>...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
+ * `f1rm status --watch <name>[:waiting]...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
  * It fails closed: when `claude agents --json` can't be read it returns exit 1. With no name left it returns at once.
  */
 export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
-  const names = given.filter(Boolean);
+  const names = given.filter(Boolean).map((n) => (n.endsWith(WAITING) ? { name: n.slice(0, -WAITING.length), waiting: true } : { name: n, waiting: false })).filter((n) => n.name);
   if (!names.length) return { out: "no names\n", err: "", code: 0 };
   for (;;) {
     await deps.sleep(POLL_MS);
     const listed = await deps.loadAgents();
     if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so the watch ends", code: 1 };
-    const list = hires({ ...deps, now: deps.now(), agents: listed });
-    const out = names.flatMap((n) => { const why = stalled(n, list); return why ? [`${n}: ${why}`] : []; });
+    const list = hires({ ...deps, commitTime: () => null, now: deps.now(), agents: listed });
+    const out = names.flatMap((n) => { const why = stalled(n.name, list, n.waiting); return why ? [`${n.name}: ${why}`] : []; });
     if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
   }
 }

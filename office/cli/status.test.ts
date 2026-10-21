@@ -18,8 +18,8 @@ const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
  * Writes `lines` as the session's transcript under the encoded `cwd` folder, last written `agoMin` minutes before NOW. The last line is the system line Claude Code
  * ends a turn with, which records the folder the session ran in (`recorded`, the folder it is stored under unless a test says otherwise).
  */
-function transcript(h: string, cwd: string, sessionId: string, lines: object[], agoMin: number, recorded = cwd) {
-  const file = join(h, ".claude", "projects", folder(cwd), `${sessionId}.jsonl`);
+function transcript(h: string, cwd: string, sessionId: string, lines: object[], agoMin: number, recorded = cwd, dirName = folder(cwd)) {
+  const file = join(h, ".claude", "projects", dirName, `${sessionId}.jsonl`);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, [...lines, { type: "system", subtype: "turn_duration", cwd: recorded }].map((l) => JSON.stringify(l)).join("\n") + "\n");
   const t = new Date(NOW - agoMin * MIN);
@@ -282,10 +282,11 @@ function fleet(h: string, members: Member[]) {
 async function watchFleet(names: string[], members: Member[], cap = 30) {
   const h = home();
   const listed = fleet(h, members);
-  let clock = NOW, sleeps = 0;
+  let clock = NOW, sleeps = 0, loads = 0;
   try {
     const r = await watch(names, {
-      repo: REPO, home: h, now: () => clock, commitTime: () => null, loadAgents: async () => listed,
+      repo: REPO, home: h, now: () => clock, commitTime: () => { throw new Error("watch reads no commits"); },
+      loadAgents: async () => { if (++loads > 100) throw new Error("runaway"); return listed; },
       sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; },
     });
     return { ...r, sleeps, woke: true };
@@ -296,6 +297,24 @@ async function watchFleet(names: string[], members: Member[], cap = 30) {
 }
 
 const a = (extra: Partial<Member> = {}): Member => ({ name: "lead-a", ago: 3, ...extra });
+
+test("a name given as name:waiting is judged only for ended, missing and a limit stop: never idle, never without an activity time", async () => {
+  expect(await watchFleet(["lead-a"], [a({ ago: 600 })])).toMatchObject({ woke: true, out: "lead-a: idle 601 minutes\n" }); // the plain name is judged for idle
+  expect((await watchFleet(["lead-a:waiting"], [a({ ago: 600 })], 100)).woke).toBe(false); // the waiting one is not
+  expect((await watchFleet(["lead-a:waiting"], [a({ ago: null })], 100)).woke).toBe(false); // nor for a missing activity time
+  expect(await watchFleet(["lead-a:waiting"], [a({ ended: true })])).toMatchObject({ woke: true, sleeps: 1, out: "lead-a: ended\n" });
+  expect(await watchFleet(["lead-a:waiting"], [a({ limit: true })])).toMatchObject({ woke: true, sleeps: 1, out: "lead-a: limit stop until 8:40pm (Europe/Lisbon)\n" });
+  expect(await watchFleet(["lead-gone:waiting"], [a()])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
+  // A waiting lead is judged on itself, not on its team; a plain name beside it still wakes for idle.
+  expect((await watchFleet(["lead-t:waiting"], [{ name: "lead-t", ago: 90 }, { name: "t.backend-dev-x", ago: 90 }], 100)).woke).toBe(false);
+  expect(await watchFleet(["lead-a:waiting", "lead-b"], [a({ ago: 600 }), a({ name: "lead-b", ago: 19 })])).toMatchObject({ sleeps: 1, out: "lead-b: idle 20 minutes\n" });
+});
+
+test("a watch with the runaway budget: a poll before the first sleep, or a failure that is read as fine, can't hang the suite", async () => {
+  // watchFleet throws "runaway" after 100 polls, so a watcher that never sleeps fails the test instead of hanging; this one sleeps first and polls once a minute.
+  const r = await watchFleet(["lead-a"], [a()]);
+  expect(r.sleeps).toBe(17);
+});
 
 test("watch sleeps first, then names each stalled session with its reason on the first poll that finds one, and exits 0", async () => {
   for (const [why, extra, reason] of [
@@ -330,10 +349,11 @@ test("watch skips empty names, and with none left prints no names and exits 0 wi
 test("watch exits 1 with the reason on stderr when claude agents can't be read, at the first poll or a later one", async () => {
   const h = home();
   const listed = fleet(h, [a()]);
-  let clock = NOW, polls = 0;
-  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, commitTime: () => null, sleep: async (ms: number) => void (clock += ms), loadAgents: async () => (++polls > readable ? null : listed) });
+  let clock = NOW, polls = 0, sleeps = 0;
+  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, commitTime: () => null, sleep: async (ms: number) => { if (++sleeps > 100) throw new Error("runaway"); clock += ms; }, loadAgents: async () => (++polls > readable ? null : listed) });
   for (const readable of [0, 3]) {
     polls = 0;
+    sleeps = 0;
     const r = await watch(["lead-a"], deps(readable));
     expect([r.code, r.out, r.err]).toEqual([1, "", expect.stringContaining("claude agents --json")]);
     expect(polls).toBe(readable + 1);
@@ -368,4 +388,43 @@ test("an ended hire whose recorded folder is a subfolder of the repo is listed, 
   transcript(h, REPO, "sub00001", [...named("sub00001", "lead-sub")], 5, `${REPO}/src/deep`);
   transcript(h, REPO, "sub00002", [...named("sub00002", "lead-near")], 5, `${REPO}-two`);
   expect(hires(base(h, [])).map((x) => x.name)).toEqual(["lead-sub"]);
+});
+
+test("activity a session does only in its sub-agents' transcripts counts: the newest of them is the session's last activity", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "sub11111", [talk("waiting on a sub-agent")], 40);
+  const dir = join(h, ".claude", "projects", folder(cwd), "sub11111", "subagents");
+  mkdirSync(dir, { recursive: true });
+  for (const [name, ago] of [["agent-a.jsonl", 30], ["agent-b.jsonl", 2]] as const) {
+    writeFileSync(join(dir, name), "{}\n");
+    utimesSync(join(dir, name), new Date(NOW - ago * MIN), new Date(NOW - ago * MIN));
+  }
+  const [one] = hires(base(h, [live("shop.backend-dev-checkout", "sub11111", cwd)]));
+  expect([one.idleMinutes, one.lastActivity]).toEqual([2, new Date(NOW - 2 * MIN).toISOString()]);
+});
+
+test("a live session in a folder under the repo that is not a worktree (a repo nested in it) is not this repo's hire", () => {
+  const h = home();
+  transcript(h, REPO, "nest0001", [talk("x")], 5, `${REPO}/vendor/lib`);
+  const nested = hires(base(h, [live("shop.backend-dev-vendor", "nest0001", `${REPO}/vendor/lib`)]));
+  expect(nested).toEqual([]);
+});
+
+test("with two entries of one name, the stall is judged on the one with the newest activity", async () => {
+  // an old session left next to a re-hired one: 300 minutes silent beside 3 minutes
+  const r = await watchFleet(["lead-a"], [a({ ago: 300 }), a({ ago: 3 })]);
+  expect([r.sleeps, r.out]).toEqual([17, "lead-a: idle 20 minutes\n"]);
+});
+
+test("a transcript is found by its session id in a project folder Claude Code truncated and hashed", () => {
+  const h = home();
+  const repo = `/code/${"long-name-".repeat(30)}app`; // over 200 characters once encoded
+  const cwd = `${repo}/.claude/worktrees/checkout`;
+  const hashed = `${folder(repo).slice(0, 200)}-1a2b3c`;
+  transcript(h, cwd, "long0001", [talk("x")], 5, cwd, hashed);
+  transcript(h, repo, "long0002", [...named("long0002", "lead-long")], 6, repo, hashed);
+  transcript(h, "/code/other", "long0003", [...named("long0003", "lead-other")], 6, "/code/other");
+  const list = hires({ ...base(h, [live("shop.backend-dev-checkout", "long0001", cwd)]), repo });
+  expect(list.map((x) => [x.name, x.idleMinutes])).toEqual([["shop.backend-dev-checkout", 5], ["lead-long", 6]]);
 });

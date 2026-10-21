@@ -934,8 +934,8 @@ test("status --watch with no name left prints no names and exits 0 at once; a fl
   expect([none.code, none.out]).toEqual([0, "no names"]);
   const flag = await f1rmIn(repo, home, stub.bin, "status", "--watch", "--json");
   expect(flag.code).toBe(1);
-  expect(flag.err).toContain("usage: f1rm status [--json] | f1rm status --watch <name>...");
-  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>...");
+  expect(flag.err).toContain("usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...");
+  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>[:waiting]...");
 });
 
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {

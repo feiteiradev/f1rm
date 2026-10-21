@@ -503,7 +503,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code; // not process.exit: on a pipe it cuts the output at 64 KB
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json] | status --watch <name>...";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json] | status --watch <name>[:waiting]...";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);
