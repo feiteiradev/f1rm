@@ -390,6 +390,17 @@ test("uninstall removes the link key with the rest of the install state", async 
   expect(existsSync(keyFile(home))).toBe(false);
 });
 
+test("serve start sweeps link-key.<pid> files of serves that are gone, and keeps those of live processes and other names", async () => {
+  const { home } = await installedOnFreePort();
+  const dead = Bun.spawn(["true"]);
+  await dead.exited; // its pid is now free
+  const dir = join(home, ".f1rm");
+  const planted = [`link-key.${dead.pid}`, `link-key.${process.pid}`, "link-key.1", "link-key.bak"]; // pid 1 is alive but not ours: kill(1, 0) fails with EPERM
+  for (const f of planted) writeFileSync(join(dir, f), "x");
+  await serveOnce(home);
+  expect(planted.map((f) => existsSync(join(dir, f)))).toEqual([false, true, true, true]);
+});
+
 test("uninstall removes a link-key.<pid> temp file left by a serve that was killed mid-write, which holds the live key", async () => {
   const { home } = await installedOnFreePort();
   await serveOnce(home);

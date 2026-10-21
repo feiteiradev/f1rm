@@ -213,6 +213,16 @@ function seconds(name: string, fallback: number): number {
 /** The office's UI token. It lives in a private file, so a restart keeps the URL and open tabs keep working; a missing or malformed file gets a new key. */
 function linkKey(): string {
   mkdirSync(F1RM_DIR, { recursive: true, mode: 0o700 });
+  // A serve killed mid-write leaves its link-key.<pid>, a hard link to the live key; launchd restarts would pile them up.
+  for (const f of readdirSync(F1RM_DIR)) {
+    const pid = /^link-key\.(\d+)$/.exec(f)?.[1];
+    if (!pid || Number(pid) === process.pid) continue;
+    try {
+      process.kill(Number(pid), 0);
+    } catch (e: any) {
+      if (e.code === "ESRCH") rmSync(join(F1RM_DIR, f), { force: true }); // EPERM: alive, someone else's
+    }
+  }
   const saved = () => {
     const key = existsSync(LINK_KEY_FILE) ? readFileSync(LINK_KEY_FILE, "utf8").trim() : "";
     return /^[\w-]{43}$/.test(key) ? key : "";
