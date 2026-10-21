@@ -147,7 +147,8 @@ test("a session inside a junk folder gets no door even when its git repo is the 
 test("the folders never given a door are the temp folders and the office's own, past symlinks", () => {
   const roots = junkRoots("/Users/me", "/Users/me/Library/Caches/T/");
   expect(roots).toEqual(expect.arrayContaining(["/Users/me/.f1rm", "/Users/me/.claude", "/Users/me/Library/Caches/T", realpathSync("/tmp"), "/private/tmp"]));
-  expect(junkRoots("/Users/me", "")).toHaveLength(roots.length - 1);
+  expect(roots).toEqual(expect.arrayContaining(["/tmp"])); // as written too, so a lexical /tmp/<link> is caught
+  expect(junkRoots("/Users/me", "").some((r) => r.includes("/Caches/T"))).toBe(false);
 });
 
 test("a lobby that an older office filled with junk doors is clean after a restart, with the same log", async () => {
@@ -630,4 +631,37 @@ test("replaying a log, a symlinked cwd inside a removed nested door leaves no gh
   const state = await office(server);
   expect(state.employees).toEqual({});
   expect(state.rooms).toEqual({});
+});
+
+test("with the default junk roots, a cwd written under /tmp that a link leads to a registered folder is no project's", async () => {
+  const real = realpathSync(mkdtempSync(join(dir, "tmplink-")));
+  mkdirSync(join(real, "shop", "sub"), { recursive: true });
+  const link = join("/tmp", `f1rm-doors-link-${process.pid}-${n++}`);
+  symlinkSync(join(real, "shop"), link);
+  try {
+    const { server, root } = start(undefined, { junkRoots: junkRoots(HOME, "") }); // the defaults: /tmp as written, and /private/tmp past its link
+    register(root, join(real, "shop"));
+    await hook(server, "x", join(link, "sub"));
+    await hook(server, "y", join(real, "shop", "sub"));
+    const state = await office(server);
+    expect(state.employees.x.room).toBe("elsewhere");
+    expect(state.employees.y.room).toBe(join(real, "shop"));
+  } finally {
+    rmSync(link);
+  }
+});
+
+test("a door dropped because its registration vanished forgets its id: `git init` then `f1rm pm` gets the new one", async () => {
+  const repos: string[] = [];
+  const { server, root } = start(undefined, { machine: fakeMachine(repos) });
+  register(root, "/code/app");
+  await hook(server, "a", "/code/app");
+  expect(Object.keys((await office(server)).rooms)).toEqual(["/code/app"]);
+  rmSync(projectFile(join(root, "projects"), "/code/app")); // removed outside the office
+  await hook(server, "a", "/code/app", "SessionEnd"); // the door goes with its last session
+  expect((await office(server)).rooms).toEqual({});
+  repos.push("/code/app"); // git init
+  register(root, "/code/app"); // f1rm pm
+  await hook(server, "b", "/code/app");
+  expect(Object.keys((await office(server)).rooms)).toEqual(["/code/app/.git"]);
 });

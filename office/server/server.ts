@@ -7,7 +7,7 @@ import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { changeEdition, isEdition, projectFile, readEdition, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
-import { isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
+import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
@@ -342,9 +342,9 @@ export function startServer({
       // The cwd's chain and its real path's chain are interleaved by distance from the cwd, so neither beats a nearer folder of the other.
       const chains = [ancestors(abs), ancestors(real)];
       const near = Array.from({ length: Math.max(...chains.map((c) => c.length)) }, (_, i) => chains.map((c) => c[i])).flat().filter((p): p is string => !!p);
-      // Junk by its own path or by its real one: a link out of ~/.f1rm does not make a cwd in it a project's.
-      const lexicallyJunk = [...junk, ...junkRoots].some((r) => abs === r || abs.startsWith(r + "/"));
-      cwdPaths.set(cwd, (info = { paths: isJunk(abs, junk) || lexicallyJunk ? null : [...new Set(near)], chain: [abs, real] }));
+      // Junk by its own path or by its real one, against the roots as given and past their links: a link out of ~/.f1rm, or one into /tmp, is no project's.
+      const junked = [abs, real].some((c) => [...junk, ...junkRoots].some((r) => inside(r, c)));
+      cwdPaths.set(cwd, (info = { paths: junked ? null : [...new Set(near)], chain: [abs, real] }));
     }
     // ponytail: the file name is lossy (/code/my/shop and /code/my-shop name the same file), so an unregistered folder can get a door
     // through a lookalike's registration, with its own path as the id; decode the registered path from the file if it is felt.
@@ -365,9 +365,10 @@ export function startServer({
   };
   // A door whose registration was removed outside the office, with nobody left in it, goes too.
   const dropStaleDoors = () => {
-    const rooms = Object.entries(state.rooms).filter(([id]) => id === ELSEWHERE.id || !projectsDir || existsSync(projectFile(projectsDir, id)) || Object.values(state.employees).some((e) => e.room === id));
-    if (rooms.length === Object.keys(state.rooms).length) return false;
-    state = { ...state, rooms: Object.fromEntries(rooms) };
+    const stale = Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id && projectsDir && !existsSync(projectFile(projectsDir, id)) && !Object.values(state.employees).some((e) => e.room === id));
+    if (!stale.length) return false;
+    for (const id of stale) doorIds.delete(folderOf(id)); // a later registration decides its id again
+    state = { ...state, rooms: Object.fromEntries(Object.entries(state.rooms).filter(([id]) => !stale.includes(id))) };
     return true;
   };
 
@@ -375,7 +376,6 @@ export function startServer({
   const forgottenFile = projectsDir && join(dirname(projectsDir), "forgotten-doors.json");
   const forgotten = readForgotten(forgottenFile);
   // The log keeps the rooms it was written with; they are decided again here, so a rule change reaches the old events.
-  const inside = (folder: string, path: string) => path === folder || path.startsWith(folder + "/");
   const replayed = new Map<string, Room>(); // one lookup per distinct cwd while replaying; live events look again, so a later registration is seen
   for (const row of db.query("SELECT event FROM events ORDER BY id").all() as { event: string }[]) {
     try {
@@ -388,7 +388,7 @@ export function startServer({
       // folder, unless a registered folder inside the removed one holds it.
       const removed = Object.entries(forgotten).some(([id, at]) => {
         const folder = folderOf(id);
-        return e.at < at && (e.room.id === id || (cwdPaths.get(e.cwd)!.chain.some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
+        return e.at < at && (e.room.id === id || ((cwdPaths.get(e.cwd)?.chain ?? [resolve(e.cwd)]).some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
       });
       if (!removed) (state = reduce(state, e), trackSubagents(e));
     } catch {} // a row this build can't read must not stop the office from starting
