@@ -591,9 +591,9 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "`f1rm status --watch <names>`", "`name:waiting`", "`run_in_background`", "its exit wakes you",
     "idle for 20 minutes", "exits 1 when `claude agents --json` can't be read", "only when it and every hire of its team",
     "Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`",
-    "a waiting name is judged only for ended and a limit stop, never for being quiet", "unless you hold the timer yourself, then leave it out of the names",
-    "When a session works again (you answered its report, or the user approved at its desk), restart the watcher with it as a plain name.", "Start no watcher when no name is left; the reset timers wake you.",
-    "After `f1rm letgo`, restart the watcher without the names you let go.", "Ignore a wake for a session you already handled since that watcher started.",
+    "a waiting name is judged only for ended and a limit stop, never for being quiet", "a waiting name is watched as a plain name as soon as it writes again",
+    "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
+    "After `f1rm letgo`, restart the watcher without the names you let go.", "Ignore a wake for a session you already handled (or took a report from) since that watcher started.",
     "**Limit stop**", "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
     "**Limit stop with no time** (`limitUntil` is `unknown`)", "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session",
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
@@ -629,7 +629,8 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
     "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
   ]) expect(decisions, s).toContain(s);
-  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "or limit stop in between", "leaving out sessions waiting"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["So is a hire waiting on a reset timer", "restart the watcher with it as a plain name", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
   for (const text of [w, decisions]) {
