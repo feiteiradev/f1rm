@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName } from "./hire.ts";
 import { letgo } from "./letgo.ts";
@@ -224,8 +225,7 @@ function linkKey(): string {
   // The new key goes into a private temp file first, so it is never in a file others can read, then is put in place whole.
   const key = randomBytes(32).toString("base64url");
   const tmp = `${LINK_KEY_FILE}.${process.pid}`;
-  rmSync(tmp, { force: true }); // a leftover of an earlier serve with this pid would keep its mode
-  writeFileSync(tmp, key + "\n", { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  writePrivate(tmp, key + "\n");
   try {
     linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
     return key;
@@ -260,8 +260,7 @@ function serve() {
 
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
-  rmSync(URL_TMP, { force: true }); // a stale one would keep its old mode
-  writeFileSync(URL_TMP, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
   announce(url);
