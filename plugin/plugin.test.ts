@@ -721,6 +721,14 @@ test("K3a: a lead started with pstack:architect or pstack:how loads the guidelin
   for (const s of ["unless the PM started you with `pstack:architect` or `pstack:how`", "load the guidelines with the Skill tool"]) expect(step1, s).toContain(s);
 });
 
+test("K3b: a lead says which of pstack:how or a Haiku Explore intern applies, and that a running lead gets architect or how only through letgo and a re-hire by the PM", () => {
+  const step3 = /^3\. \*\*Plan\.\*\*.*$/m.exec(role("lead").body)?.[0] ?? "";
+  for (const s of [
+    "If the PM started you with `pstack:how`, it ran first; otherwise send a Haiku Explore intern", "A running lead cannot gain a first command", "tell the PM, who runs `f1rm letgo lead-<team>` and hires you again with it",
+  ]) expect(step3, s).toContain(s);
+  expect(step3).not.toContain("ask the PM.");
+});
+
 test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
   const md = section("Skill stack");
   expect(md).toContain("| Phase | mattpocock skill | pstack skill | Rule that wins |");
