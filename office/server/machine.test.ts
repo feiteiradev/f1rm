@@ -74,6 +74,19 @@ test("workingHires counts the background sessions that are working or blocked, a
   expect((await run("machine.workingHires()", "[]", { all: 1 })).value).toBeNull();
 });
 
+test("backgroundSessions lists the live background sessions with name, state, folder and status, and an empty status where claude gives none", async () => {
+  const out = JSON.stringify([
+    { kind: "interactive", name: "pm-shop", cwd: "/code/shop", status: "idle" },
+    { kind: "background", name: "shop.dev-a", cwd: "/code/shop/w", state: "working", status: "idle" },
+    { kind: "background", name: "shop.dev-b", cwd: "/code/shop/x", state: "blocked" },
+  ]);
+  expect((await run("machine.backgroundSessions()", out)).value).toEqual([
+    { name: "shop.dev-a", state: "working", cwd: "/code/shop/w", status: "idle" },
+    { name: "shop.dev-b", state: "blocked", cwd: "/code/shop/x", status: "" },
+  ]);
+  expect((await run("machine.backgroundSessions()", "[]", { all: 1 })).value).toBeNull();
+});
+
 test("spawnBackground runs the argv as given in the folder, without the parent session's variables, and says why it failed", async () => {
   const folder = realpathSync(mkdtempSync(join(dir, "folder-")));
   const argv = ["claude", "--bg", "--worktree", "w", "a brief with $(rm -rf /) and\nnewlines"];
