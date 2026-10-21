@@ -73,8 +73,10 @@ const SHIRTS: [number, number][] = [[7, 0], [11, 0], [15, 0], [7, 5], [15, 5], [
 const HAIRS: [number, number][] = [[19, 0], [23, 0], [19, 4], [23, 4], [19, 8], [21, 0]];
 
 const CHAR = { x: 15, y: 11 };
-/** Where the LEAD tag's bottom-centre goes, in the desk's own frame: the character's centre (half a 16px tile in) and one pixel over its top. */
-export const leadTagOffset = () => ({ x: CHAR.x + 8, y: CHAR.y - 1 });
+/** The character's horizontal centre in the desk's own frame: half a 16px tile in. */
+const HEAD_X = CHAR.x + 8;
+/** Where the LEAD tag's bottom-centre goes, in the desk's own frame: the character's centre and one pixel over its top. */
+export const leadTagOffset = () => ({ x: HEAD_X, y: CHAR.y - 1 });
 const DESK = { x: 2, y: 24 };
 // Your chair at the PM's table, beside it and facing it; the "?" bubble hangs over it.
 const GUEST = { x: 34, y: 28 };
@@ -212,15 +214,14 @@ export function drawDesk(g: Graphics, pose: Pose, f: number, skin: number, selec
       box(g, KEYS.x + 7 - (f % 2) * 4, 30 - (f % 2), 2, 2, skin);
     }
   }
-  const head = CHAR.x + 8;
   if (pose === "hand") {
     const wave = f % 4 < 2 ? 0 : 1;
     box(g, CHAR.x + 15, 14, 2, 10, skin);
     box(g, CHAR.x + 14 + wave, 11, 4, 3, skin);
     raisedHand(g, 3, 1 + wave);
   } else if (pose === "running") {
-    bubble(g, head - 6, 1, 0x10261a);
-    for (let i = 0; i < 3; i++) box(g, head - 4 + i * 3, f % 3 === i ? 3 : 5, 2, 2, COLORS.green);
+    bubble(g, HEAD_X - 6, 1, 0x10261a);
+    for (let i = 0; i < 3; i++) box(g, HEAD_X - 4 + i * 3, f % 3 === i ? 3 : 5, 2, 2, COLORS.green);
   } else if (pose === "coffee" && table) {
     yourTurn(g, GUEST.x + 3, GUEST.y - 15 + ((f >> 3) % 2));
   } else if (pose === "coffee") {
