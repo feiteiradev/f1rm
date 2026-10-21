@@ -124,7 +124,7 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[^mFCct]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
   // `restore` may only unstage; `checkout --ours|--theirs` overwrites a path.
   const discards = (sub === "restore" && !["--staged", "-S"].includes(rest.filter((a) => a.startsWith("-") && a !== "--").join())) || (sub === "checkout" && any(/^--(ours|theirs)$/));
-  if (sub === "stash" || amends || restoresPath || discards ||((sub === "checkout" || sub === "restore") && rest.includes("."))) return true;
+  if (sub === "stash" || amends || restoresPath || discards || (sub === "checkout" && rest.includes("."))) return true;
   if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
