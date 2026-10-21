@@ -66,8 +66,8 @@ function tail(path: string): string {
  * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
  * names none; null when the transcript's last assistant line is not an API error about a limit.
  */
-function limitUntil(path: string): string | null {
-  const last = tail(path).split("\n").findLast((l) => l.includes('"type":"assistant"'));
+function limitUntil(end: string): string | null {
+  const last = end.split("\n").findLast((l) => l.includes('"type":"assistant"'));
   if (!last) return null;
   try {
     const line = JSON.parse(last);
@@ -80,7 +80,9 @@ function limitUntil(path: string): string | null {
   }
 }
 
-type Transcript = { id: string; path: string; mtime: number };
+type Transcript = { id: string; path: string; mtime: number; tail?: string };
+/** The end of a transcript, read once. */
+const tailOf = (t: Transcript) => (t.tail ??= tail(t.path));
 
 /** Every transcript in this repo's own folder and in the folders of its worktrees, and in no other. */
 function transcripts(home: string, repo: string): Transcript[] {
@@ -111,7 +113,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
       idleMinutes: t ? Math.max(0, Math.floor((now - t.mtime) / 60_000)) : null,
       lastCommit: commit == null ? null : new Date(commit).toISOString(),
       ended: !a,
-      limitUntil: t ? limitUntil(t.path) : null,
+      limitUntil: t ? limitUntil(tailOf(t)) : null,
     };
   };
 
@@ -124,8 +126,8 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   const ended = new Map<string, Transcript>();
   for (const t of files.sort((x, y) => y.mtime - x.mtime)) {
     if (listedIds.has(t.id) || now - t.mtime > ENDED_WINDOW_MS) continue;
-    const name = lastName(tail(t.path)) ?? lastName(head(t.path));
-    if (name && hireName(name) &&!liveNames.has(name) && !ended.has(name)) ended.set(name, t);
+    const name = lastName(tailOf(t)) ?? lastName(head(t.path));
+    if (name && hireName(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
   }
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }
