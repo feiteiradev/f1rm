@@ -510,6 +510,7 @@ test("the Reviewer sends back every /code-review finding and merges only when no
   expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not/);
   expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding \(see the review flow\)/);
   expect(step4).toContain("in place of a third round with a blocking finding");
+  expect(step4).toContain("or any item of the content checklist is missed");
   for (const file of [guidelines, ...["reviewer", "lead", "pm"].map((r) => role(r).body)]) expect(file).not.toContain("in place of a third `CHANGES REQUESTED`");
   const reviewer = role("reviewer").body;
   for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "Its findings go in your report and never block.", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
