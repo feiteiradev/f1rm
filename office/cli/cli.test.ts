@@ -1,6 +1,6 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -292,6 +292,51 @@ test("office-url is replaced in one step, so a reader never sees it empty or hal
   expect(statSync(urlFile).mode & 0o777).toBe(0o600);
 });
 
+test("office-url is private even when a stale office-url.tmp with open permissions is left behind", async () => {
+  const { home } = await installedOnFreePort();
+  writeFileSync(join(home, ".f1rm", "office-url.tmp"), "stale");
+  chmodSync(join(home, ".f1rm", "office-url.tmp"), 0o644);
+  await serveOnce(home);
+  expect(statSync(join(home, ".f1rm", "office-url")).mode & 0o777).toBe(0o600);
+});
+
+test("a link planted at office-url.tmp after serve cleared it is not followed: the file it points at is left alone, and no link is published", async () => {
+  const { home } = await installedOnFreePort();
+  const victim = join(home, "victim");
+  writeFileSync(victim, "victim");
+  chmodSync(victim, 0o644);
+  // Preloaded into serve: right after serve removes office-url.tmp, something puts a link to the victim there.
+  const preload = join(home, "plant.ts");
+  writeFileSync(preload, `import { mock } from "bun:test";
+import * as ns from "node:fs";
+const real = { ...ns };
+const rmSync = (p: any, o: any) => { real.rmSync(p, o); if (String(p).endsWith("office-url.tmp")) real.symlinkSync(${JSON.stringify(victim)}, p); };
+mock.module("node:fs", () => ({ ...real, default: real, rmSync }));`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
+  const urlFile = join(home, ".f1rm", "office-url");
+  for (let i = 0; i < 200 && proc.exitCode === null && !existsSync(urlFile); i++) await Bun.sleep(25);
+  proc.kill();
+  await proc.exited;
+  expect(readFileSync(victim, "utf8")).toBe("victim");
+  expect(statSync(victim).mode & 0o777).toBe(0o644);
+  expect(existsSync(urlFile) && lstatSync(urlFile).isSymbolicLink()).toBe(false);
+});
+
+test("the link key is private even when a link-key.<pid> with open permissions is left behind by an earlier serve with this pid", async () => {
+  const { home } = await installedOnFreePort();
+  // Preloaded into serve, so the file is there under serve's own pid before it makes its key.
+  const preload = join(home, "leftover.ts");
+  writeFileSync(preload, `import { chmodSync, writeFileSync } from "node:fs";
+const f = process.env.HOME + "/.f1rm/link-key." + process.pid;
+writeFileSync(f, "stale");
+chmodSync(f, 0o644);`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
+  for (let i = 0; i < 200 && proc.exitCode === null && !existsSync(join(home, ".f1rm", "office-url")); i++) await Bun.sleep(25);
+  proc.kill();
+  await proc.exited;
+  expect(statSync(keyFile(home)).mode & 0o777).toBe(0o600);
+});
+
 test("the new link key is never written into a malformed file that others can read", async () => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), "not a key");
@@ -321,6 +366,18 @@ test("uninstall removes the link key with the rest of the install state", async 
   expect(existsSync(keyFile(home))).toBe(true);
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(existsSync(keyFile(home))).toBe(false);
+});
+
+test("uninstall removes a link-key.<pid> temp file left by a serve that was killed mid-write, which holds the live key", async () => {
+  const { home } = await installedOnFreePort();
+  await serveOnce(home);
+  const leftover = join(home, ".f1rm", "link-key.12345");
+  linkSync(keyFile(home), leftover);
+  const backup = join(home, ".f1rm", "link-key.bak"); // the user's own file, not a temp of serve
+  writeFileSync(backup, "mine");
+  expect(f1rm(home, "uninstall").code).toBe(0);
+  expect(existsSync(leftover)).toBe(false);
+  expect(existsSync(backup)).toBe(true);
 });
 
 test("serve runs the office on loopback with a UI token", async () => {
@@ -576,9 +633,38 @@ test("start opens the office that is already running instead of starting another
   office.stop(true);
   expect(code).toBe(0);
   expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
-  expect(out).not.toContain("tok");
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
+
+test("a link on the scheme's default port still says which port when its output is not a terminal", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  mkdirSync(join(home, ".f1rm"));
+  writeFileSync(join(home, ".f1rm", "office-url"), "http://127.0.0.1/tok/"); // F1RM_PORT=80: URL.port is "" for it
+  const preload = join(home, "up.ts"); // nothing can listen on port 80 here, so the office is faked as answering
+  writeFileSync(preload, `globalThis.fetch = (async () => new Response("office")) as any;`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe" });
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  expect(code).toBe(0);
+  expect(out.trim()).toBe("f1rm office: running on port 80");
+});
+
+// `script -q /dev/null cmd` is the BSD (macOS) form, like the CLI itself
+test.skipIf(process.platform !== "darwin")("start prints the full link when its output is a terminal", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  const url = `http://127.0.0.1:${office.port}/tok/`;
+  mkdirSync(join(home, ".f1rm"));
+  writeFileSync(join(home, ".f1rm", "office-url"), url);
+  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true
+  const proc = Bun.spawn(["script", "-q", "/dev/null", "bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stdin: "ignore", timeout: 8000 }); // killed if start stalls, so the test fails instead of hanging
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  office.stop(true);
+  expect(code).toBe(0);
+  expect(out).toContain(`f1rm office: ${url}`); // script adds a stray ^D of its own
+  expect(stub.calls()).toEqual([`open ${url}`]);
+}, 10_000);
 
 test("start with no office running starts the background office, opens it, and exits", async () => {
   const home = tempHome();
@@ -593,10 +679,22 @@ test("start with no office running starts the background office, opens it, and e
   office.stop(true);
   expect(code).toBe(0);
   expect(out.trim()).toBe(`f1rm office: running on port ${new URL(url).port}`); // piped stdout: no link, so no key
-  expect(out).not.toContain("tok");
   expect(stub.calls().filter((c) => c.startsWith("launchctl bootstrap"))).toHaveLength(1);
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
+
+test("service off, and uninstall, remove an office-url.tmp and a link-key.<pid> left by a serve that died mid-write", () => {
+  for (const off of [["service", "off"], ["uninstall"]]) {
+    const home = tempHome();
+    const stub = stubBin();
+    stub.run(home, "install"); // no login agent: removeOfficeFiles does the cleaning for both commands
+    writeFileSync(join(home, ".f1rm", "office-url.tmp"), "http://127.0.0.1:1/key/");
+    writeFileSync(join(home, ".f1rm", "link-key.12345"), "a key's temp file");
+    expect(stub.run(home, ...off).code).toBe(0);
+    expect(existsSync(join(home, ".f1rm", "office-url.tmp"))).toBe(false);
+    expect(existsSync(join(home, ".f1rm", "link-key.12345"))).toBe(false);
+  }
+});
 
 test("uninstall keeps the event log and the PM's boards", () => {
   const home = tempHome();

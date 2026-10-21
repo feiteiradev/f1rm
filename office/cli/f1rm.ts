@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
@@ -20,6 +20,7 @@ const HEADERS_FILE = join(F1RM_DIR, "ingest-headers");
 const CREATED_FILE = join(F1RM_DIR, "created.json");
 // The running office's tokenized URL, so `f1rm start` can open an office that is already up.
 const URL_FILE = join(F1RM_DIR, "office-url");
+const URL_TMP = `${URL_FILE}.tmp`; // serve writes here, then renames over URL_FILE
 // The token in that URL, kept across restarts until uninstall (or the user) deletes it.
 const LINK_KEY_FILE = join(F1RM_DIR, "link-key");
 // The `f1rm` command `install` puts on PATH, so a terminal finds this clone.
@@ -196,7 +197,8 @@ function uninstall() {
   writeSettings(after);
   if (existsSync(PLIST)) stopService();
   // The event log, the boards and the editions stay: they are the user's history, not install state.
-  for (const f of [HEADERS_FILE, CREATED_FILE, URL_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
+  for (const f of [HEADERS_FILE, CREATED_FILE, LINK_KEY_FILE]) rmSync(f, { force: true });
+  removeOfficeFiles();
   if (existsSync(BIN) && binIsOurs()) rmSync(BIN);
   console.log(`f1rm hooks removed from ${SETTINGS}`);
 }
@@ -222,7 +224,8 @@ function linkKey(): string {
   // The new key goes into a private temp file first, so it is never in a file others can read, then is put in place whole.
   const key = randomBytes(32).toString("base64url");
   const tmp = `${LINK_KEY_FILE}.${process.pid}`;
-  writeFileSync(tmp, key + "\n", { mode: 0o600 });
+  rmSync(tmp, { force: true }); // a leftover of an earlier serve with this pid would keep its mode
+  writeFileSync(tmp, key + "\n", { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
   try {
     linkSync(tmp, LINK_KEY_FILE); // fails when the file exists, e.g. another start got there first
     return key;
@@ -257,11 +260,17 @@ function serve() {
 
   startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000 });
   const url = `http://127.0.0.1:${port}/${token}/`;
-  writeFileSync(`${URL_FILE}.tmp`, url, { mode: 0o600 });
-  renameSync(`${URL_FILE}.tmp`, URL_FILE); // one step, so a reader never sees the file empty
+  rmSync(URL_TMP, { force: true }); // a stale one would keep its old mode
+  writeFileSync(URL_TMP, url, { mode: 0o600, flag: "wx" }); // wx: never opens a file or link that appeared since the rm
+  renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
   // Under launchd stdout is office.log, which is not private: the link stays in office-url (0600), which `f1rm` reads.
-  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${port}`);
+  announce(url);
   return url;
+}
+
+/** Prints the link to a terminal, else only the port: under launchd stdout is a log. */
+function announce(url: string) {
+  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port || 80}`);
 }
 
 async function runningOffice(): Promise<string | null> {
@@ -274,7 +283,7 @@ async function runningOffice(): Promise<string | null> {
 /** Opens the running office, starting the background one first when none is up, and exits. `f1rm serve` runs one in this terminal. */
 async function start() {
   const url = (await runningOffice()) ?? (await startBackgroundOffice());
-  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
+  announce(url);
   Bun.spawn(["open", url]);
 }
 
@@ -327,13 +336,19 @@ function startService() {
 
 function serviceOff() {
   stopService();
+  removeOfficeFiles();
   console.log("f1rm background office stopped and removed.");
 }
 
 function stopService() {
   launchctl("bootout", `gui/${process.getuid!()}/${SERVICE}`);
   rmSync(PLIST, { force: true });
-  rmSync(URL_FILE, { force: true });
+}
+
+/** What a serve leaves behind: its URL, the temp it writes the URL to, and a link-key.<pid> temp, which is a hard link to the live key when serve was killed mid-write. */
+function removeOfficeFiles() {
+  for (const f of [URL_FILE, URL_TMP]) rmSync(f, { force: true });
+  if (existsSync(F1RM_DIR)) for (const f of readdirSync(F1RM_DIR)) if (/^link-key\.\d+$/.test(f)) rmSync(join(F1RM_DIR, f), { force: true });
 }
 
 /** The running office's URL, once it answers, or null after `ms`. */
