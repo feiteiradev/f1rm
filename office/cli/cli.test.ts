@@ -337,6 +337,28 @@ chmodSync(f, 0o644);`);
   expect(statSync(keyFile(home)).mode & 0o777).toBe(0o600);
 });
 
+test("a link planted at link-key.<pid> after serve cleared it is not followed: the file it points at is left alone, and the key is not readable by others", async () => {
+  const { home } = await installedOnFreePort();
+  const victim = join(home, "victim");
+  writeFileSync(victim, "victim");
+  chmodSync(victim, 0o644);
+  // Preloaded into serve: right after serve removes its link-key.<pid>, something puts a link to the victim there.
+  const preload = join(home, "plant.ts");
+  writeFileSync(preload, `import { mock } from "bun:test";
+import * as ns from "node:fs";
+const real = { ...ns };
+const rmSync = (p: any, o: any) => { real.rmSync(p, o); if (String(p).endsWith("link-key." + process.pid)) real.symlinkSync(${JSON.stringify(victim)}, p); };
+mock.module("node:fs", () => ({ ...real, default: real, rmSync }));`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
+  for (let i = 0; i < 200 && proc.exitCode === null && !existsSync(join(home, ".f1rm", "office-url")); i++) await Bun.sleep(25);
+  proc.kill();
+  await proc.exited;
+  expect(readFileSync(victim, "utf8")).toBe("victim");
+  expect(statSync(victim).mode & 0o777).toBe(0o644);
+  expect(existsSync(keyFile(home)) ? statSync(keyFile(home)).mode & 0o777 : 0o600).toBe(0o600);
+  expect(existsSync(keyFile(home)) && lstatSync(keyFile(home)).isSymbolicLink()).toBe(false);
+});
+
 test("the new link key is never written into a malformed file that others can read", async () => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), "not a key");
