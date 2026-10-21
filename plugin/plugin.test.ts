@@ -598,10 +598,10 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   ]) expect(w, s).toContain(s);
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
-  for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `<team>/resume.md` and the PM's `pm/resume.md`"]) expect(rule, s).toContain(s);
+  for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
   // The lead and PM files say the same paths.
-  expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/<team>/resume.md`");
-  expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm/resume.md`");
+  expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/lead-<team>/resume.md`");
+  expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm-<repo>/resume.md`");
   expect(section("Who talks to whom")).toContain("the watcher is your own");
 });
 

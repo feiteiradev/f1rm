@@ -61,7 +61,7 @@ Playbook:
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the Reviewer runs it with the Skill tool from its scratch worktree on the merge, with `<base>...<merge sha>` as its args, before `APPROVED`.
    - `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
-9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `<team>/resume.md` and the PM's `pm/resume.md`; they have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
+9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`, keyed by session name so a team or task of the same name cannot collide; they have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
 
 ## Workflows
 
