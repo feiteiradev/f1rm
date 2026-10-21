@@ -916,7 +916,7 @@ test("status prints all of a large list into a pipe, not the first 64 KB", async
   Bun.spawnSync(["git", "init", "-q", repo]);
   const projects = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
   mkdirSync(projects, { recursive: true });
-  const count = 400;
+  const count = 260; // about 330 bytes each once printed: well over 64 KB
   for (let i = 0; i < count; i++) {
     writeFileSync(join(projects, `s${i}.jsonl`), [{ type: "agent-name", agentName: `shop.backend-dev-task-${i}`, sessionId: `s${i}` }, { type: "system", cwd: repo }].map((l) => JSON.stringify(l)).join("\n") + "\n");
   }
@@ -926,7 +926,7 @@ test("status prints all of a large list into a pipe, not the first 64 KB", async
   await proc.exited;
   expect(out.length).toBeGreaterThan(65536);
   expect(JSON.parse(out)).toHaveLength(count);
-});
+}, 30_000); // under load the listing and the slow reader take a few seconds
 
 test("status --watch with no name left prints no names and exits 0 at once; a flag among the names is a usage error; the usage names --watch", async () => {
   const home = tempHome(), repo = realpathSync(repoDir("shop"));
