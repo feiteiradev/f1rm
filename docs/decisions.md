@@ -224,3 +224,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: pstack's poteto-mode and playbooks give devs a stricter way of working, and mattpocock's skills stay for tdd, diagnosis, grilling and the spec review. Checked on Claude Code 2.1.306 with pstack 0.15.29: `architect`, `how`, `interrogate`, `arena` and `swarm` carry `disable-model-invocation`, so the Skill tool refuses them ("reserved for explicit user invocation") and only a first slash command in the prompt expands them, while `/pstack:poteto-mode` as the first command expands and `mattpocock-skills:tdd` then loads through the Skill tool. That is why a lead gets architect or how only from the PM, why the Reviewer gets no `pstack:interrogate` (the user can run it by hand at `--level high`), and why the playbooks' Opening a PR step is skipped.
 - Rejected: dropping the mattpocock skills; letting pstack's PR opening, babysit loops, `/loop` ticks and `afk` run inside f1rm hires; reading a refused pstack skill's file and following it anyway (the refusal forbids it); pstack's own tdd skill.
 - Where: skill-stack
+
+## 2026-10-21 Conflict rounds do not count toward ESCALATE
+
+- Decision: a round whose only item is `CHANGES REQUESTED conflict` never counts toward ESCALATE; a round with a conflict and a blocking finding counts once, for the finding. The rule is stated once, in the review flow; the Handoff ESCALATE line and reviewer.md point to it.
+- Why: a conflict is the base moving, not the work failing, so it says nothing about whether the task needs re-scoping.
+- Rejected: counting conflicts toward ESCALATE.
+- Where: skill-stack

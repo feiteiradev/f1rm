@@ -741,6 +741,20 @@ test("K5: `f1rm edition` sets the edition only once `f1rm pm` has registered the
   expect(seen).toBeGreaterThanOrEqual(2);
 });
 
+test("K7: a conflict round never counts toward ESCALATE; the review flow says so once and the Handoff line and reviewer.md point to it", () => {
+  const rule = "A round whose only item is `CHANGES REQUESTED conflict` never counts toward ESCALATE. A round with a conflict and a blocking finding counts once, for the finding.";
+  expect(/^4\. .*$/m.exec(section("Review and merge flow"))?.[0]).toContain(rule);
+  expect(guidelines.split(rule)).toHaveLength(2);
+  const line = /^ *- `ESCALATE <slug>`.*$/m.exec(section("Handoff via SendMessage"))?.[0] ?? "";
+  expect(line).toContain("(see the review flow)");
+  expect(line).not.toContain("only item");
+  expect(role("reviewer").body).toMatch(/conflict round never counts[^\n]*review flow/);
+  expect(role("reviewer").body).not.toContain("only item");
+  expect(role("lead").body).not.toContain("only item");
+  const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
+  expect(titles).toContain("2026-10-21 Conflict rounds do not count toward ESCALATE");
+});
+
 test("K6: docs/decisions.md has the Ask the user only for big decisions and Skill stack entries, the second recording why pstack skills are slash-only", () => {
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const titles = entries.map((e) => e.split("\n")[0]);
