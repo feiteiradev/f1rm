@@ -61,7 +61,7 @@ Playbook:
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the Reviewer runs it with the Skill tool from its scratch worktree on the merge, with `<base>...<merge sha>` as its args, before `APPROVED`.
    - `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
-9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`, keyed by session name so they don't collide with a team's or a task's folder; they have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
+9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`: each lives in a folder named after the session. They have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
 
 ## Workflows
 
@@ -185,7 +185,7 @@ The PM watches its leads and each lead watches its own hires, so a session that 
    - **Missing or no activity time** (not in the list, or `idleMinutes` null): check again in a minute; if still so, treat it as ended.
    - **Ended** (`ended`): run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
    - **Idle 20 minutes, still listed, no limit stop**: send it `resume`. If `f1rm status` shows no new activity a few minutes later, treat it as ended.
-3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
+3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
 4. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
 
 ## Brief format

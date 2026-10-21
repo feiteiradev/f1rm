@@ -607,12 +607,18 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
-  expect(rule).toContain("keyed by session name so they don't collide with a team's or a task's folder");
-  expect(rule).not.toContain("cannot collide");
+  expect(rule).toContain("each lives in a folder named after the session");
+  expect(rule).not.toMatch(/collide/);
   // One subscription: the same limit stops the PM, the leads and their hires together, and nothing wakes them (the brief rejects a daemon).
   const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
-  expect(section("Watching and waking")).toContain(known);
-  expect(readFileSync(join(REPO, "docs", "decisions.md"), "utf8")).toContain(known);
+  const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  for (const s of ["stays out of the watcher's names until its first new line shows (its `idleMinutes` is back under a minute)", "a stop with no time is treated as ended"]) expect(decisions, s).toContain(s);
+  // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
+  const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
+  for (const text of [section("Watching and waking"), readFileSync(join(REPO, "docs", "decisions.md"), "utf8")]) {
+    expect(text).toContain(known);
+    expect(text).toContain(pmStop);
+  }
   // The lead and PM files say the same paths.
   expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/lead-<team>/resume.md`");
   expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm-<repo>/resume.md`");
