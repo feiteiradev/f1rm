@@ -196,8 +196,11 @@ export async function hire(words: string[]): Promise<number> {
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
   let argv: string[];
+  // Git is asked once; the edition file, the PM's name and the path limit all read it.
+  const common = machine.gitCommonDir(process.cwd());
+  const git = { gitCommonDir: () => common };
   try {
-    argv = await planHire({ role, name, task, team, cwd: process.cwd(), edition: readEdition(editionFile(process.cwd())), brief, reportTo: reportTo ?? pmName(process.cwd()), override, skills, level, content, extra });
+    argv = await planHire({ role, name, task, team, cwd: process.cwd(), edition: readEdition(editionFile(process.cwd(), git)), brief, reportTo: reportTo ?? pmName(process.cwd(), git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(

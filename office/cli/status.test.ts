@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
-import { longRepos } from "./long-repo.ts";
+import { longRepos } from "./long-repo.test-helper.ts";
 import { head, hires, ls, parseArgs, status, statusFor, tail, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
@@ -512,7 +512,12 @@ test("a named watch gets past the length check at 150 characters, and is refused
     const fine = await statusFor(args, repos.repo(150, { git: false }), deps);
     expect([fine.code, fine.err]).toEqual([1, expect.stringContaining("claude agents --json")]);
     expect(fine.err).not.toContain("too long");
-    const long = await statusFor(args, repos.repo(151, { git: false }), deps);
+    // Both entry points agree on what is answered before the path: no names, and a usage mistake.
+    const longRepo = repos.repo(151, { git: false });
+    expect(await statusFor(parseArgs(["--watch"]), longRepo, deps)).toEqual({ out: "no names\n", err: "", code: 0 });
+    expect(await statusFor(parseArgs(["--watch", ":waiting"]), longRepo, deps)).toMatchObject({ out: "no names\n", code: 0 });
+    expect(await statusFor(parseArgs(["--bogus"]), longRepo, deps)).toMatchObject({ code: 1, err: expect.stringContaining("usage: f1rm status") });
+    const long = await statusFor(args, longRepo, deps);
     expect([long.code, long.err]).toEqual([1, expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)")]);
   } finally {
     repos.cleanup();

@@ -1,4 +1,4 @@
-// A test helper (not a test): repos whose path has a given length, for the tests of the path limit.
+// A test helper (not a test, not product code): repos whose path has a given length, for the tests of the path limit.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -11,13 +11,15 @@ export function longRepos() {
       const parent = realpathSync(mkdtempSync("/tmp/f1rm-long-"));
       made.push(parent);
       const path = join(parent, "r".repeat(length - parent.length - 1));
+      if (path.length !== length) throw new Error(`can't build a path of ${length} characters under ${parent} (got ${path.length})`);
       mkdirSync(path);
-      if (git) Bun.spawnSync(["git", "init", "-q", path]);
+      if (git && !Bun.spawnSync(["git", "init", "-q", path]).success) throw new Error(`git init failed in ${path}`);
       return path;
     },
     /** A subfolder of `path` whose own path is exactly `length` characters. */
     inside(path: string, length: number): string {
       const sub = join(path, "s".repeat(length - path.length - 1));
+      if (sub.length !== length) throw new Error(`can't build a subfolder of ${length} characters under ${path} (got ${sub.length})`);
       mkdirSync(sub, { recursive: true });
       return sub;
     },

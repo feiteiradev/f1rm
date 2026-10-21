@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { longRepos } from "./long-repo.ts";
+import { longRepos } from "./long-repo.test-helper.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
@@ -43,12 +43,12 @@ const pmArgs = ["--report-to", "pm-shop"];
 test("f1rm hire checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder hire, a long repo or a subfolder of one is refused with nothing started", () => {
   const repos = longRepos();
   try {
-    const short = repos.repo(100), long = repos.repo(151), plain = repos.repo(151, { git: false });
+    const short = repos.repo(100), exact = repos.repo(150), long = repos.repo(151), plain = repos.repo(151, { git: false });
     const lead = (cwd: string) => {
       const stub = stubClaude([]);
       return { ...hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], cwd), started: stub.argv() !== null };
     };
-    for (const cwd of [short, repos.inside(short, 170), plain]) {
+    for (const cwd of [short, exact, repos.inside(short, 170), plain]) { // a git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it
       const r = lead(cwd);
       expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
     }

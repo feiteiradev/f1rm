@@ -467,7 +467,7 @@ async function pm() {
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
   // With no answer (no terminal), it starts as Work and asks again next time.
-  const file = editionFile(process.cwd());
+  const file = editionFile(process.cwd(), { gitCommonDir: () => common });
   register(file);
   let chosen = readEdition(file);
   if (!chosen) {

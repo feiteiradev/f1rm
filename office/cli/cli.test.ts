@@ -7,7 +7,7 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { machine } from "../server/machine.ts";
 import { SLUG } from "./hire.ts";
 import { hireName, hireTask, letgo } from "./letgo.ts";
-import { longRepos } from "./long-repo.ts";
+import { longRepos } from "./long-repo.test-helper.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -970,13 +970,13 @@ test("status refuses, in every form, a git repo whose encoded project folder is 
 test("f1rm pm checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder start a PM, a long repo or a subfolder of one is refused", () => {
   const repos = longRepos();
   try {
-    const short = repos.repo(100), long = repos.repo(151), plain = repos.repo(151, { git: false });
+    const short = repos.repo(100), exact = repos.repo(150), long = repos.repo(151), plain = repos.repo(151, { git: false });
     const pmStarts = (cwd: string) => {
       const stub = stubClaude();
       const r = pmIn(cwd, { stdin: "w\n" }, stub);
       return { ...r, started: stub.args().length > 0 };
     };
-    for (const cwd of [short, repos.inside(short, 170), plain]) {
+    for (const cwd of [short, exact, repos.inside(short, 170), plain]) { // a git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it
       const r = pmStarts(cwd);
       expect([cwd.length, r.code, r.started]).toEqual([cwd.length, 0, true]);
     }
