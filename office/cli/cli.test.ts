@@ -667,14 +667,16 @@ test("start with no office running starts the background office, opens it, and e
   expect(stub.calls().at(-1)).toBe(`open ${url}`);
 }, 10_000);
 
-test("service off, and uninstall, remove an office-url.tmp left by a serve that died before its rename", () => {
+test("service off, and uninstall, remove an office-url.tmp and a link-key.<pid> left by a serve that died mid-write", () => {
   for (const off of [["service", "off"], ["uninstall"]]) {
     const home = tempHome();
     const stub = stubBin();
     stub.run(home, "install"); // no login agent: removeOfficeFiles does the cleaning for both commands
     writeFileSync(join(home, ".f1rm", "office-url.tmp"), "http://127.0.0.1:1/key/");
+    writeFileSync(join(home, ".f1rm", "link-key.12345"), "a key's temp file");
     expect(stub.run(home, ...off).code).toBe(0);
     expect(existsSync(join(home, ".f1rm", "office-url.tmp"))).toBe(false);
+    expect(existsSync(join(home, ".f1rm", "link-key.12345"))).toBe(false);
   }
 });
 
