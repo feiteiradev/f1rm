@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { machine } from "../server/machine.ts";
 import { SLUG } from "./hire.ts";
-import { hireTask, letgo } from "./letgo.ts";
+import { hireName, hireTask, letgo } from "./letgo.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -1089,6 +1089,16 @@ test("hireTask takes exactly the task names that hire.ts's SLUG takes", () => {
   for (const task of ["a", "a-b", "a1-b2-c3", "a--b", "-a", "a-", "A", "a b", "a.b", ""]) {
     expect([task, hireTask(`frontend-dev-${task}`) !== null]).toEqual([task, SLUG.test(task)]);
   }
+});
+
+test("hireName reads a hire's role, team and task, a lead's team too; hireTask still takes no lead", () => {
+  expect(hireName("shop.backend-dev-checkout")).toEqual({ role: "backend-dev", team: "shop", task: "checkout", reviewer: false });
+  expect(hireName("designer-landing")).toEqual({ role: "designer", team: null, task: "landing", reviewer: false });
+  expect(hireName("shop.reviewer-review-checkout")).toEqual({ role: "reviewer", team: "shop", task: "checkout", reviewer: true });
+  expect(hireName("lead-shop")).toEqual({ role: "lead", team: "shop", task: "shop", reviewer: false });
+  for (const bad of ["pm-shop", "x.lead-shop", "lead-", "lead-Shop", "backend-dev", "random", "shop.pm-x"]) expect([bad, hireName(bad)]).toEqual([bad, null]);
+  expect(hireTask("lead-shop")).toBeNull();
+  expect(hireTask("shop.backend-dev-checkout")).toEqual({ task: "checkout", reviewer: false });
 });
 
 test("letgo lets a Reviewer or a lead go without touching any branch", async () => {

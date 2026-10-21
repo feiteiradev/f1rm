@@ -1,9 +1,8 @@
 // `f1rm status [--json]`: what each hire of this repo is really doing, from its transcript and its branch, never from the status text `claude agents` shows.
-import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, machine } from "../server/machine.ts";
-import { readRoles, SLUG } from "./hire.ts";
-import { hireTask, repoOf } from "./letgo.ts";
+import { hireName, repoOf } from "./letgo.ts";
 
 export type Hire = {
   name: string;
@@ -38,17 +37,9 @@ export type HiresDeps = {
 const ENDED_WINDOW_MS = 24 * 60 * 60_000;
 const TAIL = 256 * 1024;
 const HEAD = 64 * 1024;
-const SLUG_SRC = SLUG.source.slice(1, -1);
 
 /** Claude Code's folder name for a working directory: every character that is not a letter or digit becomes `-`. */
 const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
-
-/** `<role>-<slug>`, `<team>.<role>-<slug>` or `lead-<team>`; null for the PM, the user's own sessions and any other name. */
-function parseHire(name: string): { role: string; team: string | null } | null {
-  const m = new RegExp(`^(?:(${SLUG_SRC})\\.)?(${readRoles().map((r) => r.id).join("|")})-(${SLUG_SRC})$`).exec(name);
-  if (!m) return null;
-  return { role: m[2], team: m[2] === "lead" ? m[3] : m[1] ?? null };
-}
 
 function read(path: string, from: number, length: number): string {
   const fd = openSync(path, "r");
@@ -63,9 +54,7 @@ function read(path: string, from: number, length: number): string {
 const head = (path: string) => read(path, 0, HEAD);
 /** ponytail: only the last 256 KB are read, so a limit line followed by more than that is missed; read backwards if it ever is. */
 function tail(path: string): string {
-  const fd = openSync(path, "r");
-  const size = fstatSync(fd).size;
-  closeSync(fd);
+  const size = statSync(path).size;
   const from = Math.max(0, size - TAIL);
   const text = read(path, from, Math.min(size, TAIL));
   return from > 0 ? text.slice(text.indexOf("\n") + 1) : text; // the first line may be cut
@@ -116,9 +105,8 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   const files = transcripts(home, repo);
   const byId = new Map(files.map((t) => [t.id, t]));
   const make = (name: string, sessionId: string, t: Transcript | undefined, a?: any): Hire => {
-    const { role, team } = parseHire(name)!;
-    const task = hireTask(name);
-    const commit = task && !task.reviewer ? commitTime(`worktree-${task.task}`) : null;
+    const { role, team, task, reviewer } = hireName(name)!;
+    const commit = role === "lead" || reviewer ? null : commitTime(`worktree-${task}`);
     return {
       name, role, team, sessionId,
       status: a ? String(a.status ?? "") || null : null,
@@ -133,7 +121,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
 
   const liveNames = new Set<string>();
   const out = listed
-    .filter((a) => a?.kind === "background" && typeof a.name === "string" && parseHire(a.name) && typeof a.cwd === "string" && repoOf(a.cwd) === repo)
+    .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && repoOf(a.cwd) === repo)
     .map((a) => (liveNames.add(a.name), make(a.name, String(a.sessionId ?? ""), byId.get(String(a.sessionId)), a)));
 
   const listedIds = new Set(listed.map((a) => a?.sessionId));
@@ -142,7 +130,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
     if (listedIds.has(t.id) || now - t.mtime > ENDED_WINDOW_MS) continue;
     const text = head(t.path);
     const name = /"agentName":"([^"]+)"/.exec(text)?.[1] ?? /"customTitle":"([^"]+)"/.exec(text)?.[1];
-    if (name && parseHire(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
+    if (name && hireName(name) &&!liveNames.has(name) && !ended.has(name)) ended.set(name, t);
   }
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }

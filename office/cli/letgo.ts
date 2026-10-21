@@ -10,16 +10,26 @@ const SLUG_SRC = SLUG.source.slice(1, -1);
 const NOT_LET_GO = "not let go:";
 let nameRe: RegExp | undefined;
 
+export type HireName = { role: string; team: string | null; task: string; reviewer: boolean };
+
 /**
- * The task a hire's name carries (`<role>-<task>`, `<team>.<role>-<task>`), or null for a lead or any other name. A Reviewer is
- * named `reviewer-review-<task>`; its task is the one it reviews, and it has no branch or worktree of its own.
+ * What a hire's name says (`<role>-<task>`, `<team>.<role>-<task>`, `lead-<team>`), or null for the PM or any other name. A lead's team
+ * is the one it heads, and its task repeats it. A Reviewer is named `reviewer-review-<task>`; its task is the one it reviews, and it has no branch or worktree of its own.
  */
-export function hireTask(name: string): { task: string; reviewer: boolean } | null {
-  nameRe ??= new RegExp(`^(?:${SLUG_SRC}\\.)?(${readRoles().map((r) => r.id).filter((id) => id !== "lead").join("|")})-(${SLUG_SRC})$`);
+export function hireName(name: string): HireName | null {
+  nameRe ??= new RegExp(`^(?:(${SLUG_SRC})\\.)?(${readRoles().map((r) => r.id).join("|")})-(${SLUG_SRC})$`);
   const m = nameRe.exec(name);
   if (!m) return null;
-  const reviewer = m[1] === "reviewer";
-  return { task: reviewer ? m[2].replace(/^review-/, "") : m[2], reviewer };
+  const [, team, role, rest] = m;
+  if (role === "lead") return team ? null : { role, team: rest, task: rest, reviewer: false };
+  const reviewer = role === "reviewer";
+  return { role, team: team ?? null, task: reviewer ? rest.replace(/^review-/, "") : rest, reviewer };
+}
+
+/** The task a hire's name carries, or null for a lead or any other name (see hireName). */
+export function hireTask(name: string): { task: string; reviewer: boolean } | null {
+  const h = hireName(name);
+  return h && h.role !== "lead" ? { task: h.task, reviewer: h.reviewer } : null;
 }
 
 /** The repo's main working directory a session belongs to: its own folder, or the folder above `.claude/worktrees`. */
