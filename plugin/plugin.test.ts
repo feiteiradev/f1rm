@@ -593,6 +593,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name",
     "**Limit stop with no time** (`limitUntil` is `unknown`)", "send it `resume` as for an idle session",
+    "**Missing or no activity time**", "check again in a minute; if still so, treat it as ended",
     "until its first new line", // the transcript still ends on the stop until the hire answers `resume`
   ]) expect(w, s).toContain(s);
   // The checkpoint is one hire rule, in the playbook.
