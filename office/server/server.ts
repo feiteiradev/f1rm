@@ -81,9 +81,9 @@ const GH_API_WITH_VALUE = new Set(["-H", "--header", "-X", "--method", "-f", "--
 // A `gh api` method (`-X PUT`, `-X=PUT`, `-XPUT`, `-iXPUT`, `--method PUT`, `--method=PUT`) other than GET, or a field or input file with no method (gh then POSTs), writes.
 const API_METHOD = /^(?:--method(?:=(.*))?|-[A-Za-z]*X=?(.*))$/;
 const API_FIELD = /^-[A-Za-z]*[fF]|^--(field|raw-field|input)/;
-// The endpoints that put code on a branch or a remote: merge a pull request or a branch, write refs, commits, trees, blobs or contents.
-const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/merge|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
-const LANDING_MUTATION = /mergePullRequest|mergeBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
+// The endpoints that put code on a branch or a remote: merge a pull request or a branch, update a pull request's branch, write refs, commits, trees, blobs or contents.
+const LANDING_ENDPOINT = /(^|\/)(pulls\/\d+\/(merge|update-branch)|merges|git\/(refs|commits|trees|blobs)|contents|branches\/[^/?#]+\/merge[^/?#]*)(?=[/?#]|$)/;
+const LANDING_MUTATION = /mergePullRequest|mergeBranch|updatePullRequestBranch|createCommitOnBranch|createRef|updateRef|enablePullRequestAutoMerge/i;
 // ponytail: only code-landing endpoints are held; other `gh api` writes (issues, comments, labels) pass. A graphql query kept in a file or a shell variable is not seen,
 // and `-HX-Foo: bar` or a `-fX` field reads as a method. Add an endpoint here when GitHub gains another way to land code.
 const writesApi = (args: string[]) => {
