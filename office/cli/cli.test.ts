@@ -322,6 +322,21 @@ mock.module("node:fs", () => ({ ...real, default: real, rmSync }));`);
   expect(existsSync(urlFile) && lstatSync(urlFile).isSymbolicLink()).toBe(false);
 });
 
+test("the link key is private even when a link-key.<pid> with open permissions is left behind by an earlier serve with this pid", async () => {
+  const { home } = await installedOnFreePort();
+  // Preloaded into serve, so the file is there under serve's own pid before it makes its key.
+  const preload = join(home, "leftover.ts");
+  writeFileSync(preload, `import { chmodSync, writeFileSync } from "node:fs";
+const f = process.env.HOME + "/.f1rm/link-key." + process.pid;
+writeFileSync(f, "stale");
+chmodSync(f, 0o644);`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "serve"], { env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
+  for (let i = 0; i < 200 && proc.exitCode === null && !existsSync(join(home, ".f1rm", "office-url")); i++) await Bun.sleep(25);
+  proc.kill();
+  await proc.exited;
+  expect(statSync(keyFile(home)).mode & 0o777).toBe(0o600);
+});
+
 test("the new link key is never written into a malformed file that others can read", async () => {
   const { home, port } = await installedOnFreePort();
   writeFileSync(keyFile(home), "not a key");
