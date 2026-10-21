@@ -649,21 +649,22 @@ test("a link on the scheme's default port still says which port when its output 
   expect(out.trim()).toBe("f1rm office: running on port 80");
 });
 
-test("start prints the full link when its output is a terminal", async () => {
+// `script -q /dev/null cmd` is the BSD (macOS) form, like the CLI itself
+test.skipIf(process.platform !== "darwin")("start prints the full link when its output is a terminal", async () => {
   const home = tempHome();
   const stub = stubBin();
   const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
   const url = `http://127.0.0.1:${office.port}/tok/`;
   mkdirSync(join(home, ".f1rm"));
   writeFileSync(join(home, ".f1rm", "office-url"), url);
-  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true; this is the BSD form (macOS-only, like the CLI: launchctl)
-  const proc = Bun.spawn(["script", "-q", "/dev/null", "bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stdin: "ignore" });
+  // `script` runs start on a pseudo-terminal, so stdout.isTTY is true
+  const proc = Bun.spawn(["script", "-q", "/dev/null", "bun", CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe", stdin: "ignore", timeout: 8000 }); // killed if start stalls, so the test fails instead of hanging
   const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
   office.stop(true);
   expect(code).toBe(0);
   expect(out).toContain(`f1rm office: ${url}`); // script adds a stray ^D of its own
   expect(stub.calls()).toEqual([`open ${url}`]);
-});
+}, 10_000);
 
 test("start with no office running starts the background office, opens it, and exits", async () => {
   const home = tempHome();
