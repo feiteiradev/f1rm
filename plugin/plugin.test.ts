@@ -602,6 +602,12 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
+  expect(rule).toContain("keyed by session name so they don't collide with a team's or a task's folder");
+  expect(rule).not.toContain("cannot collide");
+  // One subscription: the same limit stops the PM, the leads and their hires together, and nothing wakes them (the brief rejects a daemon).
+  const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
+  expect(section("Watching and waking")).toContain(known);
+  expect(readFileSync(join(REPO, "docs", "decisions.md"), "utf8")).toContain(known);
   // The lead and PM files say the same paths.
   expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/lead-<team>/resume.md`");
   expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm-<repo>/resume.md`");
