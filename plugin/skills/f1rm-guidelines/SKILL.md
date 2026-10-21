@@ -167,16 +167,16 @@ The PM watches its leads and each lead watches its own hires, so a session that 
    while :; do sleep 60; f1rm status --json | bun -e '
    const names = (process.argv[1] || "").split(" ").filter(Boolean);
    let list;
-   try { list = JSON.parse(await Bun.stdin.text()); if (!Array.isArray(list)) throw 0; } catch { process.exit(0); }
+   try { list = JSON.parse(await Bun.stdin.text()); if (!Array.isArray(list)) throw 0; } catch { process.exit(1); }
    const quiet = (h) => h.idleMinutes >= 20;
    const stalled = (name) => {
      const h = list.find((x) => x.name === name);
      if (!h || h.idleMinutes == null || h.ended || h.limitUntil) return true;
      const team = /^lead-(.+)$/.exec(name)?.[1];
-     return quiet(h) && (!team || list.filter((x) => x.name.startsWith(team + ".")).every((x) => x.ended || x.idleMinutes == null || quiet(x)));
+     return quiet(h) && (!team || list.filter((x) => x.name.startsWith(team + ".")).every((x) => x.ended || x.idleMinutes == null || (quiet(x) && !x.limitUntil)));
    };
-   process.exit(names.some(stalled) ? 0 : 1);
-   ' "$NAMES" && break; done; f1rm status
+   process.exit(names.some(stalled) ? 1 : 0);
+   ' "$NAMES" || break; done; f1rm status
    ```
 
 2. **On wake**, read the table the watcher printed and take each flagged session in turn:
@@ -186,8 +186,9 @@ The PM watches its leads and each lead watches its own hires, so a session that 
    - **Ended** (`ended`): run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
    - **Idle 20 minutes, still listed, no limit stop**: send it `resume`.
    - **Status can't be read**: run `f1rm status` by hand to see why, then restart the watcher (it then wakes at most once a minute).
-   - **After you send `resume`**, restart the watcher. Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer. The delivered `resume` clears the stop, so the old stop does not wake the watcher again. A hire that hits the limit again shows a new stop and wakes you again; a second `resume` in a row that brought no new commit or message means it is ended.
-   - After handling any wake, restart the watcher with the names still working. Start no watcher when no name is left; the reset timers wake you.
+   - **After you send `resume`**, restart the watcher. Leave out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer. The delivered `resume` clears the stop, so the old stop does not wake the watcher again. A hire that hits the limit again shows a new stop and wakes you again; a second `resume` in a row that brought no new commit, message or limit stop in between means it is ended.
+   - When you answer a session's `DONE` or `BLOCKED` and it works again, restart the watcher with it back in the names.
+   - After handling any wake, restart the watcher with the names still working. To restart the watcher, stop the running one first, so only one runs. Start no watcher when no name is left; the reset timers wake you.
 3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
 4. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
 
