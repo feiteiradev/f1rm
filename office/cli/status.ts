@@ -2,7 +2,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, machine } from "../server/machine.ts";
-import { hireName, repoOf } from "./letgo.ts";
+import { hireName } from "./letgo.ts";
 
 export type Hire = {
   name: string;
@@ -37,6 +37,9 @@ export type HiresDeps = {
 const ENDED_WINDOW_MS = 24 * 60 * 60_000;
 const TAIL = 256 * 1024;
 const HEAD = 64 * 1024;
+
+/** Whether `cwd` is the repo's main working directory or under it (a worktree, a subfolder). */
+const inRepo = (cwd: string, repo: string) => cwd === repo || cwd.startsWith(`${repo}/`);
 
 /** Claude Code's folder name for a working directory: every character that is not a letter or digit becomes `-`. */
 const folder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -155,7 +158,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
 
   const liveNames = new Set<string>();
   const out = listed
-    .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && repoOf(a.cwd) === repo)
+    .filter((a) => a?.kind === "background" && typeof a.name === "string" && hireName(a.name) && typeof a.cwd === "string" && inRepo(a.cwd, repo))
     .map((a) => (liveNames.add(a.name), make(a.name, String(a.sessionId ?? ""), byId.get(String(a.sessionId)), a)));
 
   const listedIds = new Set(listed.map((a) => a?.sessionId));
@@ -170,12 +173,12 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
       cwd ??= lastCwd(start);
     }
     // Claude Code stores /code/shop.app and /code/shop-app in one folder, so the folder alone does not say whose it is; a transcript that records no folder is not guessed at.
-    if (name && cwd && repoOf(cwd) === repo && hireName(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
+    if (name && cwd && inRepo(cwd, repo) && hireName(name) && !liveNames.has(name) && !ended.has(name)) ended.set(name, t);
   }
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }
 
-const usage = "usage: f1rm status [--json]";
+const usage = "usage: f1rm status [--json] | f1rm status --watch <name>...";
 type Result = { out: string; err: string; code: number };
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
@@ -202,19 +205,69 @@ export async function status(argv: string[], deps: Omit<HiresDeps, "agents"> & {
   return { out: argv.includes("--json") ? JSON.stringify(list, null, 2) + "\n" : table(list, deps.now), err: "", code: 0 };
 }
 
+const POLL_MS = 60_000;
+const QUIET_MIN = 20;
+/** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
+const LIMITED_MIN = 360;
+
+/** Why a named session is stalled, or null if it is not: ended, on a limit stop, missing, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is. */
+function stalled(name: string, list: Hire[]): string | null {
+  const h = list.find((x) => x.name === name);
+  if (!h) return "missing from the list";
+  if (h.ended) return "ended";
+  if (h.limitUntil) return `limit stop until ${h.limitUntil}`;
+  if (h.idleMinutes == null) return "no activity time";
+  if (h.idleMinutes < QUIET_MIN) return null;
+  const team = /^lead-(.+)$/.exec(name)?.[1];
+  // A hire that ended, has no activity time, or is quiet counts as quiet, unless a limit stop holds it (it waits for its reset, which a lead cannot hurry).
+  const quiet = (x: Hire) => x.ended || x.idleMinutes == null || (x.idleMinutes >= QUIET_MIN && !(x.limitUntil && x.idleMinutes < LIMITED_MIN));
+  if (team && !list.filter((x) => x.name.startsWith(`${team}.`)).every(quiet)) return null;
+  return `idle ${h.idleMinutes} minutes`;
+}
+
+export type WatchDeps = Omit<HiresDeps, "agents" | "now"> & {
+  now: () => number;
+  loadAgents: () => Promise<any[] | null>;
+  /** Waits `ms`; injected so a test needs no real time. */
+  sleep: (ms: number) => Promise<void>;
+};
+
+/**
+ * `f1rm status --watch <name>...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
+ * It fails closed: when `claude agents --json` can't be read it returns exit 1. With no name left it returns at once.
+ */
+export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
+  const names = given.filter(Boolean);
+  if (!names.length) return { out: "no names\n", err: "", code: 0 };
+  for (;;) {
+    await deps.sleep(POLL_MS);
+    const listed = await deps.loadAgents();
+    if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so the watch ends", code: 1 };
+    const list = hires({ ...deps, now: deps.now(), agents: listed });
+    const out = names.flatMap((n) => { const why = stalled(n, list); return why ? [`${n}: ${why}`] : []; });
+    if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
+  }
+}
+
 /** `f1rm status` run in `cwd`, against the real Claude Code, git and clock. */
 export async function statusIn(argv: string[], cwd: string): Promise<Result> {
   const common = machine.gitCommonDir(cwd);
   if (!common) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const repo = dirname(common);
+  const commitTime = (branch: string) => {
+    const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
+    return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
+  };
+  if (argv[0] === "--watch") {
+    const names = argv.slice(1);
+    if (names.some((n) => n.startsWith("-"))) return { out: "", err: usage, code: 1 };
+    return watch(names, { repo, home: process.env.HOME!, now: Date.now, loadAgents: () => agents(false), commitTime, sleep: (ms) => Bun.sleep(ms) });
+  }
   return status(argv, {
     repo,
     home: process.env.HOME!,
     now: Date.now(),
     loadAgents: () => agents(false),
-    commitTime: (branch) => {
-      const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
-      return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
-    },
+    commitTime,
   });
 }

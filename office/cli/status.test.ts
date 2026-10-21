@@ -3,7 +3,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { head, hires, ls, status, tail, type Hire } from "./status.ts";
+import { hireName } from "./letgo.ts";
+import { head, hires, ls, status, tail, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -259,4 +260,112 @@ test("status rejects an unknown flag", async () => {
   const r = await status(["--bogus"], { ...base(home(), []), loadAgents: async () => [] });
   expect(r.code).toBe(1);
   expect(r.err).toContain("usage: f1rm status [--json]");
+});
+
+// f1rm status --watch <name>...: the stall rule the PM's and the leads' background watcher runs. The clock and the sleep are injected, so nothing here waits.
+type Member = { name: string; ago?: number | null; limit?: boolean; ended?: boolean };
+
+/** The agents list of some hires, with a transcript each: `ago` minutes since its last write (null: none), `limit` ends it on a limit stop, `ended` leaves it out of the list. */
+function fleet(h: string, members: Member[]) {
+  const listed: object[] = [];
+  members.forEach((m, i) => {
+    const { role, task } = hireName(m.name)!;
+    const cwd = role === "lead" ? REPO : `${REPO}/.claude/worktrees/${task}`;
+    const sessionId = `w${i}aaaaaa`;
+    if (m.ago !== null) transcript(h, cwd, sessionId, [...(m.ended ? named(sessionId, m.name) : []), m.limit ? limitStop() : talk("x")], m.ago ?? 3);
+    if (!m.ended) listed.push(live(m.name, sessionId, cwd));
+  });
+  return listed;
+}
+
+/** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
+async function watchFleet(names: string[], members: Member[], cap = 30) {
+  const h = home();
+  const listed = fleet(h, members);
+  let clock = NOW, sleeps = 0;
+  try {
+    const r = await watch(names, {
+      repo: REPO, home: h, now: () => clock, commitTime: () => null, loadAgents: async () => listed,
+      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; },
+    });
+    return { ...r, sleeps, woke: true };
+  } catch (e) {
+    if ((e as Error).message === "never woke") return { out: "", err: "", code: -1, sleeps, woke: false };
+    throw e;
+  }
+}
+
+const a = (extra: Partial<Member> = {}): Member => ({ name: "lead-a", ago: 3, ...extra });
+
+test("watch sleeps first, then names each stalled session with its reason on the first poll that finds one, and exits 0", async () => {
+  for (const [why, extra, reason] of [
+    ["idle", { ago: 19 }, "lead-b: idle 20 minutes"],
+    ["ended", { ended: true }, "lead-b: ended"],
+    ["limit", { limit: true }, "lead-b: limit stop until 8:40pm (Europe/Lisbon)"],
+    ["no activity time", { ago: null }, "lead-b: no activity time"],
+  ] as const) {
+    const r = await watchFleet(["lead-a", "lead-b"], [a(), a({ name: "lead-b", ...extra })]);
+    expect([why, r.code, r.sleeps, r.out, r.err]).toEqual([why, 0, 1, expect.stringContaining(reason), ""]);
+    expect(r.out).not.toContain("lead-a");
+  }
+});
+
+test("watch keeps polling a quiet session once a minute until it has been idle 20 minutes, and ignores a stalled one it was not asked about", async () => {
+  const r = await watchFleet(["lead-a"], [a(), { name: "lead-z", ended: true, ago: 99 }]);
+  expect([r.woke, r.sleeps, r.out]).toEqual([true, 17, "lead-a: idle 20 minutes\n"]); // 3 minutes idle at the start, 20 after 17 polls
+  expect((await watchFleet(["lead-a"], [a({ ago: 19 })])).sleeps).toBe(1);
+});
+
+test("watch wakes for a named session that the list does not have", async () => {
+  expect(await watchFleet(["lead-a", "lead-gone"], [a()])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
+  expect(await watchFleet(["lead-gone"], [])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
+});
+
+test("watch skips empty names, and with none left prints no names and exits 0 without polling", async () => {
+  expect(await watchFleet([], [a()])).toMatchObject({ code: 0, out: "no names\n", sleeps: 0 });
+  expect(await watchFleet(["", ""], [a({ ended: true })])).toMatchObject({ code: 0, out: "no names\n", sleeps: 0 });
+  expect(await watchFleet(["lead-a", ""], [a()])).toMatchObject({ sleeps: 17 }); // a stray empty name is not a missing session
+});
+
+test("watch exits 1 with the reason on stderr when claude agents can't be read, at the first poll or a later one", async () => {
+  const h = home();
+  const listed = fleet(h, [a()]);
+  let clock = NOW, polls = 0;
+  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, commitTime: () => null, sleep: async (ms: number) => void (clock += ms), loadAgents: async () => (++polls > readable ? null : listed) });
+  for (const readable of [0, 3]) {
+    polls = 0;
+    const r = await watch(["lead-a"], deps(readable));
+    expect([r.code, r.out, r.err]).toEqual([1, "", expect.stringContaining("claude agents --json")]);
+    expect(polls).toBe(readable + 1);
+  }
+});
+
+test("a lead is stalled only when it and every hire of its team are quiet: ended or without activity counts as quiet, a hire of another team does not count", async () => {
+  const lead = (extra: Partial<Member> = {}): Member => ({ name: "lead-t", ago: 45, ...extra });
+  const member = (ago: number | null, extra: Partial<Member> = {}): Member => ({ name: "t.backend-dev-x", ago, ...extra });
+  const sleeps = async (members: Member[]) => (await watchFleet(["lead-t"], members)).sleeps;
+  expect(await sleeps([lead(), member(3)])).toBe(17); // woken when its last active hire went quiet, not at the first poll
+  expect(await sleeps([lead(), member(3), { name: "t.reviewer-review-x", ago: 60 }])).toBe(17);
+  expect(await sleeps([lead(), member(40)])).toBe(1);
+  expect(await sleeps([lead()])).toBe(1);
+  expect(await sleeps([lead(), member(null)])).toBe(1); // no activity time is not an active hire
+  expect(await sleeps([lead(), member(5, { ended: true })])).toBe(1); // nor is one let go a moment ago
+  expect(await sleeps([lead(), { name: "other.backend-dev-x", ago: 3 }])).toBe(1); // nor one of another team
+  expect(await sleeps([lead({ ago: 5, ended: true }), member(3)])).toBe(1); // a lead that ended wakes at once, whatever its hires do
+  expect(await sleeps([lead({ ago: 5, limit: true }), member(3)])).toBe(1);
+  expect(await sleeps([lead({ ago: 5 }), member(40)])).toBe(15); // quiet itself after 15 more minutes
+});
+
+test("a lead waiting on a hire stopped by a limit is not stalled, until that hire has been silent for 6 hours", async () => {
+  const lead: Member = { name: "lead-t", ago: 45 };
+  const limited = (ago: number): Member => ({ name: "t.backend-dev-x", ago, limit: true });
+  expect((await watchFleet(["lead-t"], [lead, limited(40)], 100)).woke).toBe(false); // still waiting for the reset
+  expect((await watchFleet(["lead-t"], [lead, limited(350)])).sleeps).toBe(10); // 360 minutes: the reset is long past, so the lead wakes
+});
+
+test("an ended hire whose recorded folder is a subfolder of the repo is listed, one of another repo with a similar name is not", () => {
+  const h = home();
+  transcript(h, REPO, "sub00001", [...named("sub00001", "lead-sub")], 5, `${REPO}/src/deep`);
+  transcript(h, REPO, "sub00002", [...named("sub00002", "lead-near")], 5, `${REPO}-two`);
+  expect(hires(base(h, [])).map((x) => x.name)).toEqual(["lead-sub"]);
 });

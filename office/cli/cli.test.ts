@@ -926,6 +926,18 @@ test("status prints all of a large list into a pipe, not the first 64 KB", async
   expect(JSON.parse(out)).toHaveLength(count);
 });
 
+test("status --watch with no name left prints no names and exits 0 at once; a flag among the names is a usage error; the usage names --watch", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const stub = stubClaude(0, []);
+  const none = await f1rmIn(repo, home, stub.bin, "status", "--watch", "");
+  expect([none.code, none.out]).toEqual([0, "no names"]);
+  const flag = await f1rmIn(repo, home, stub.bin, "status", "--watch", "--json");
+  expect(flag.code).toBe(1);
+  expect(flag.err).toContain("usage: f1rm status [--json] | f1rm status --watch <name>...");
+  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>...");
+});
+
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
   const home = tempHome(), repo = realpathSync(repoDir("shop"));
   Bun.spawnSync(["git", "init", "-q", repo]);
