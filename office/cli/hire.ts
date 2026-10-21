@@ -16,14 +16,17 @@ export const CAP = 30;
 export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
-const SLASH_ONLY = ["research"];
+// pstack's architect and how carry disable-model-invocation, so the Skill tool refuses them: a lead gets one only as its first command, and only one skill can be.
+const SLASH_ONLY = ["research", "pstack:architect", "pstack:how"];
+// A bug is diagnosed before it is fixed test-first: this added skill loads ahead of the role's own later skills.
+const EARLY = ["mattpocock-skills:diagnosing-bugs"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
 export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
-const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
+const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:ponytail-review", "security-review"];
 // The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
@@ -124,6 +127,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
+  if (added.filter((s) => SLASH_ONLY.includes(s)).length > 1) throw new Error(`only one of ${SLASH_ONLY.join(", ")} can be the first command: pick one`);
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
     throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` to hire one.`);
@@ -158,7 +162,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   let own = roles.find((r) => r.id === role)!.skills;
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slash = added.find((s) => SLASH_ONLY.includes(s));
-  const [first, ...rest] = slash ? [slash, ...own, ...added.filter((s) => s !== slash)] : [...own, ...added];
+  const early = added.filter((s) => EARLY.includes(s)), later = added.filter((s) => s !== slash && !EARLY.includes(s));
+  const [first, ...rest] = slash ? [slash, ...early, ...own, ...later] : [...own.slice(0, 1), ...early, ...own.slice(1), ...later];
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");

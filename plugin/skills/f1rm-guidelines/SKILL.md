@@ -16,9 +16,9 @@ Hierarchy: the user, then one PM per repo. The PM hires only leads, one or two p
 | `pm` | Started by the user with `f1rm pm`. Never hired. | `mattpocock-skills:grilling` |
 | `lead` | One slice of a milestone, one or two leads per milestone. Hired only by the PM | `f1rm:f1rm-guidelines`, `f1rm:hire` |
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
-| `frontend-dev` | UI implementation | `mattpocock-skills:tdd` |
-| `backend-dev` | Server, data, API implementation | `mattpocock-skills:tdd` |
-| `reviewer` | Review and local merge of every finished branch | `code-review`, `f1rm:f1rm-guidelines`, `ponytail:ponytail-review` |
+| `frontend-dev` | UI implementation | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
+| `backend-dev` | Server, data, API implementation | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
+| `reviewer` | Review and local merge of every finished branch | `code-review`, `f1rm:f1rm-guidelines`, `ponytail:ponytail-review`, `mattpocock-skills:code-review` |
 | `researcher` | A question that needs current, cited facts | `mattpocock-skills:research` |
 | `marketer` | Founder only. Positioning, landing copy, launch plans, conversion, and `growth/brand.md` first | `cro`, `anthropic-skills:content-creator`, `brandkit` |
 | `seo-specialist` | Founder only. Audits, keywords, AI-search visibility | `seo-audit`, `ai-seo` |
@@ -58,6 +58,7 @@ Playbook:
 6. **Name** each hire `<role>-<task slug>`, for example `designer-landing`; a team member `<team>.<role>-<task slug>`, for example `checkout.designer-landing`; a lead `lead-<team>`. `f1rm hire` refuses any other name. Team and task slugs are lowercase words joined by hyphens, unique on their board. A Reviewer's task slug is `review-<task>`, for the task it reviews, so its name is `reviewer-review-<task>`; its lead pastes the dev's `DONE` report into its Inputs.
 7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline`. Only the first slash command in a prompt expands, so `f1rm hire` names the other skills in the brief and the hire loads them with the Skill tool before starting.
    - `/research` is a command, not a Skill-tool skill. `--skills research` makes it the first command; the Researcher's own skill is `mattpocock-skills:research`.
+   - `pstack:architect` and `pstack:how` are slash-only too: `--skills pstack:architect` or `--skills pstack:how` on a lead's hire makes it the lead's first command, and `f1rm:f1rm-guidelines` and `f1rm:hire` then load with the Skill tool. A hire takes one slash-only skill. The PM gives `pstack:architect` for a cross-team contract or a new module.
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the Reviewer runs it with the Skill tool from its scratch worktree on the merge, with `<base>...<merge sha>` as its args, before `APPROVED`.
    - `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
@@ -76,7 +77,7 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   6. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
-  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`.
+  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before PLAN; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
   2. Write the team board and send `PLAN <team>`.
   3. After `GO <team>`, hire into the team with `f1rm hire --team`, and watch your hires with a background watcher (see Watching and waking).
   4. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
@@ -86,17 +87,19 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   2. Run `design-pipeline` to the spec.
   3. Check the result in a browser and keep a screenshot.
 - **frontend-dev**
-  1. Run `mattpocock-skills:tdd`: a failing check for each criterion.
-  2. Build to the Designer's spec.
-  3. Run the app with `run` and take a screenshot (`claude-in-chrome` for a page).
+  1. Work the way `/pstack:poteto-mode` sets, with its playbook for the task (`feature`, `bug-fix`, `refactoring` or `perf-issue`); skip its Opening a PR step.
+  2. Run `mattpocock-skills:tdd`: a failing check for each criterion.
+  3. Build to the Designer's spec.
+  4. Run the app with `run` and take a screenshot (`claude-in-chrome` for a page).
   - With no Designer spec, run `design-pipeline` before step 2.
 - **backend-dev**
-  1. For a bug, run `mattpocock-skills:diagnosing-bugs` to find the cause, then `mattpocock-skills:tdd` to fix it.
-  2. For a feature, run `mattpocock-skills:tdd`.
+  1. Work the way `/pstack:poteto-mode` sets, with its playbook for the task (`feature`, `bug-fix`, `refactoring` or `perf-issue`); skip its Opening a PR step.
+  2. For a bug, run `mattpocock-skills:diagnosing-bugs` first to find the cause, then `mattpocock-skills:tdd` to fix it.
+  3. For a feature, run `mattpocock-skills:tdd`.
 - **reviewer**
   1. Load `f1rm:f1rm-guidelines`. The first command, `/code-review <level> worktree-<task>` (`code-review`), reviews the branch under review and gives the findings.
   2. Run the gates of the review flow on the base and on the merge.
-  3. Run `ponytail:ponytail-review` on a code branch; the review flow says what its findings do.
+  3. Run the Spec axis of `mattpocock-skills:code-review` against the brief, and `ponytail:ponytail-review` on a code branch; the review flow says what their findings do.
   4. At `--level high`, run `security-review` on the merge before `APPROVED`.
   - With `--content`, use the content checklist only.
 - **researcher**
@@ -120,9 +123,28 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   3. Research customer pain with `anthropic-skills:3-customer-pain-point-researcher`.
   4. Write the plan with `anthropic-skills:4-lean-startup-business-plan-builder`.
 
+## Skill stack
+
+The mattpocock skills and the pstack skills work side by side. Each row names the skill of a phase and the f1rm rule that wins when the two disagree.
+
+| Phase | mattpocock skill | pstack skill | Rule that wins |
+| :- | :- | :- | :- |
+| Interview | `mattpocock-skills:grilling`, the PM's first command | none | Ask the user only for big decisions. |
+| Plan a cross-team contract or new module | none | `pstack:architect`, slash-only: a lead's first command, which the PM names with `--skills pstack:architect` | PLAN, then GO, before any hire. |
+| Questions about existing code | none | `pstack:how`, slash-only like architect (`--skills pstack:how`) | A lead not started with it sends a Haiku Explore intern. |
+| Build | `mattpocock-skills:tdd`, loaded second with the Skill tool | `pstack:poteto-mode`, a dev's first command, with its playbook: `feature`, `bug-fix`, `refactoring`, `perf-issue` | The tdd skill is mattpocock's, never pstack's of the same name. Every criterion has a check that fails first. |
+| Diagnose a bug | `mattpocock-skills:diagnosing-bugs`, before tdd (`--skills`) | the `bug-fix` playbook | Diagnose first, then fix test-first. |
+| Review | `/code-review` first, then `mattpocock-skills:code-review` for the Spec axis against the brief | `pstack:interrogate`, slash-only: the user can run it by hand at `--level high` | `/code-review` stays the Reviewer's first command; the review flow decides the merge. |
+| Parallel work | none | `pstack:arena`, `pstack:swarm` | Only when a brief asks, within the interns cap. |
+| Ship | none | the playbooks' Opening a PR, Babysit and Shipping | None of it runs inside a hire. |
+
+Inside a hire: no PR opening, no babysit loops, no `/loop` ticks, no `afk`; `pstack:arena` and `pstack:swarm` only when a brief asks; at most 2 interns; pushing stays the user's. A question poteto-mode would put to the human goes to the session in your `Report to` as `BLOCKED`.
+
+`pstack:architect`, `pstack:how`, `pstack:interrogate`, `pstack:arena` and `pstack:swarm` carry `disable-model-invocation`: the Skill tool refuses them, so only a first slash command runs them. A dev picks its playbook inside poteto-mode; the playbooks are its files, not skills.
+
 ## Editions
 
-Every project is **Work** or **Founder**, and the user chooses: the office asks on the first entry, `f1rm pm` asks on its first run, and the top bar or `f1rm edition work|founder` changes it. It lives in `~/.f1rm/projects/<repo>.json`, outside the repo. Never set it yourself.
+Every project is **Work** or **Founder**, and the user chooses: the office asks on the first entry, `f1rm pm` asks on its first run, and the top bar or `f1rm edition work|founder`, once `f1rm pm` has registered the project, changes it. It lives in `~/.f1rm/projects/<repo>.json`, outside the repo. Never set it yourself.
 
 - **Work** is the engineering company: every role above that is not marked Founder only.
 - **Founder** adds the five Founder-only roles for a product of the user's own. `f1rm hire` refuses a Founder-only role in a Work project, and a project with no edition chosen counts as Work.
@@ -195,7 +217,7 @@ Report: when done or blocked, SendMessage to the session named in `Report to`, a
 
 Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. `f1rm hire` fills in `Report to` with it, so pass `--report-to` only if you were started another way. A lead's hires report to `lead-<team>`, which `f1rm hire --team` fills in. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review, and its Inputs hold the dev's `DONE` report.
 
-A brief's Context names the notes file for its role: `~/.f1rm/kept/<repo>/notes/<role>.md`, with `<repo>` the repo folder's basename, as in `~/.f1rm/evidence/<repo>/`. The hire reads it before it starts and keeps this project's learnings there. Agent memory is shared across projects, so it holds only facts about the user and how they like to work, and lessons that hold in any project.
+A dev's brief Context also names the pstack playbook that fits the task (see Skill stack). A brief's Context names the notes file for its role: `~/.f1rm/kept/<repo>/notes/<role>.md`, with `<repo>` the repo folder's basename, as in `~/.f1rm/evidence/<repo>/`. The hire reads it before it starts and keeps this project's learnings there. Agent memory is shared across projects, so it holds only facts about the user and how they like to work, and lessons that hold in any project.
 
 When a task carries a core decision, its Context states the decision and why, and a criterion reads "docs/decisions.md has the entry <title>" (see Milestones and decisions).
 
@@ -219,10 +241,11 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 
 ## Who talks to whom
 
-- **Only the PM talks to the user** and asks the user for decisions. Everything reaches the user through the PM, and unprompted the PM tells the user only:
-  - questions that need the user's decision;
+- **Ask the user only for big decisions.** The PM's interview and every question to the user cover only business, product scope (what the software does), design direction, strategy, and irreversible or external actions (push, deploy, spend, data deletion, messaging people). Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules) are made by the PM or the lead and logged in `docs/decisions.md` with their why. The end-of-milestone report lists them under "Decisions taken without you".
+- **Only the PM talks to the user** and asks the user for those decisions. Everything reaches the user through the PM, and unprompted the PM tells the user only:
+  - big decisions;
   - things only the user can do: a permission on a hire's desk, spend, credentials or inputs, a `git push`, a dirty main checkout;
-  - one end-of-milestone report: what landed, how to try it, what is open, ending with the `git push` line (see Milestones and decisions for its cleanup lists).
+  - one end-of-milestone report: what landed, how to try it, what is open, "Decisions taken without you" (the decisions-log titles), ending with the `git push` line (see Milestones and decisions for its cleanup lists).
 
   Everything else stays between agents: `PLAN` and `GO`, `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
 - A specialist reports only to the session in its `Report to`, its team's lead. It never messages the user, the PM, another team or another specialist.

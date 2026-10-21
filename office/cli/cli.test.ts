@@ -576,6 +576,14 @@ test("the PM's first prompt asks it to pick up from the board and the live sessi
   expect(prompt.indexOf("claude agents --json")).toBeLessThan(prompt.indexOf("interview"));
 });
 
+test("the PM's first prompt points to the guidelines' decision policy by name and promises the end-of-milestone decisions line, without restating the policy", () => {
+  const stub = stubClaude();
+  pmIn(repoDir("shop"), {}, stub);
+  const prompt = stub.args()[4];
+  for (const s of ["Ask the user only for big decisions", "Decisions taken without you"]) expect(prompt).toContain(s);
+  for (const restated of ["architecture", "libraries", "irreversible"]) expect(prompt).not.toContain(restated);
+});
+
 test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
   const repo = repoDir("shop");
   Bun.spawnSync(["git", "init", "-q", repo]);

@@ -7,6 +7,7 @@ skills:
   - code-review
   - f1rm:f1rm-guidelines
   - ponytail:ponytail-review
+  - mattpocock-skills:code-review
 # ponytail: the office's gate refuses `git push` in any form for every hire, and this role's history rewrites. `disallowedTools: Bash(git push *)` would remove the whole Bash tool, so the gate holds it, not this file.
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, Agent, SendMessage
 ---
@@ -16,7 +17,8 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 ## Work
 
 - Read the brief and acceptance criteria that the branch was built against. The message from whoever hired you names the branch, the brief and the main branch.
-- The findings come from the `/code-review` that starts your session, at the level your brief names. Do not review the diff a second time; your own work is the gates below. Send back every `/code-review` finding, blocking or not, and merge only when none is left.
+- The findings come from the `/code-review` that starts your session, at the level your brief names. Apart from the Spec axis below, do not review the diff a second time; your own work is the gates below. Send back every `/code-review` finding, blocking or not, and merge only when none is left.
+- Your first command stays `/code-review`. Load `mattpocock-skills:code-review` with the Skill tool and run its Spec axis only, against the brief's acceptance criteria and the branch under review; its findings are `/code-review` findings, sent back the same way.
 - Run `ponytail:ponytail-review` on a code branch. Its findings go in your report and never block.
 - At `--level high`, run security-review with the Skill tool from the scratch worktree on the merge, with `<base>...<merge sha>` as its args, before you send `APPROVED`. The office holds your approval until it has run.
 - You run in the repo's main working directory. Build the merge in a scratch worktree (`git worktree add --detach .claude/worktrees/review-<task> <base>`, then `git merge --no-ff <branch>` there) and run the repo's full check command on that result, not only on the branch.

@@ -210,3 +210,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a limit stop used to end the work silently, and every hire in the milestone sat idle for hours.
 - Rejected: waiting for the user to notice; polling in the main conversation; a daemon that restarts sessions by itself.
 - Where: self-driving, ba44481
+
+## 2026-10-21 Ask the user only for big decisions
+
+- Decision: the PM's interview and every question to the user cover only business, product scope (what the software does), design direction, strategy, and irreversible or external actions (push, deploy, spend, data deletion, messaging people). Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules) are made by the PM or the lead and logged in `docs/decisions.md` with their why. The end-of-milestone report lists them under "Decisions taken without you", with the decisions-log titles. The rule is stated once, in the guidelines' Who talks to whom; pm.md, lead.md and the `f1rm pm` prompt point to it by name. The push, spend and permission rules are unchanged.
+- Why: the user wants to be asked fewer questions.
+- Rejected: asking about every technical choice.
+- Where: skill-stack
+
+## 2026-10-21 Skill stack: mattpocock + pstack
+
+- Decision: devs start with pstack's `/pstack:poteto-mode` as the first slash command and pick its playbook (`feature`, `bug-fix`, `refactoring`, `perf-issue`: files of poteto-mode, not skills); `mattpocock-skills:tdd` loads second with the Skill tool, and a backend bug loads `mattpocock-skills:diagnosing-bugs` before it (`f1rm hire` puts that skill ahead of the role's later skills). The Reviewer keeps `/code-review` first and adds `mattpocock-skills:code-review` for the Spec axis against the brief. The PM keeps `mattpocock-skills:grilling`. `pstack:architect` and `pstack:how` are slash-only: `f1rm hire --skills pstack:architect` (or `pstack:how`) makes one a lead's first command, with the guidelines and `f1rm:hire` loaded by the Skill tool after it, and one slash-only skill per hire. A Skill stack table in the guidelines names the phase, both skills and the f1rm rule that wins. Inside a hire: no PR opening, no babysit loops, no `/loop` ticks, no `afk`; `pstack:arena` and `pstack:swarm` only when a brief asks; at most 2 interns; pushing stays the user's.
+- Why: pstack's poteto-mode and playbooks give devs a stricter way of working, and mattpocock's skills stay for tdd, diagnosis, grilling and the spec review. Checked on Claude Code 2.1.306 with pstack 0.15.29: `architect`, `how`, `interrogate`, `arena` and `swarm` carry `disable-model-invocation`, so the Skill tool refuses them ("reserved for explicit user invocation") and only a first slash command in the prompt expands them, while `/pstack:poteto-mode` as the first command expands and `mattpocock-skills:tdd` then loads through the Skill tool. That is why a lead gets architect or how only from the PM, why the Reviewer gets no `pstack:interrogate` (the user can run it by hand at `--level high`), and why the playbooks' Opening a PR step is skipped.
+- Rejected: dropping the mattpocock skills; letting pstack's PR opening, babysit loops, `/loop` ticks and `afk` run inside f1rm hires; reading a refused pstack skill's file and following it anyway (the refusal forbids it); pstack's own tdd skill.
+- Where: skill-stack

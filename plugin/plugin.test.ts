@@ -14,9 +14,9 @@ const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
   lead: [GUIDELINES, "f1rm:hire"],
   designer: ["design-pipeline"],
-  "frontend-dev": ["mattpocock-skills:tdd"],
-  "backend-dev": ["mattpocock-skills:tdd"],
-  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review"],
+  "frontend-dev": ["pstack:poteto-mode", "mattpocock-skills:tdd"],
+  "backend-dev": ["pstack:poteto-mode", "mattpocock-skills:tdd"],
+  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review", "mattpocock-skills:code-review"],
   researcher: ["mattpocock-skills:research"],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
@@ -404,7 +404,7 @@ test("pickup keeps status internal: the PM updates the rows and says nothing unt
   expect(pmStep(1)).toContain('answer when the user asks "status?"');
   expect(pickup[1]).toContain('answer when the user asks "status?"');
   expect(pmPromptText()).toContain('answer when I ask "status?"');
-  expect(pmPromptText()).toContain("Speak to me only for");
+  expect(pmPromptText()).toContain("Ask me only as");
 });
 
 test("three gates, the README's hiring line, and the content checklist match the new rules", () => {
@@ -421,7 +421,7 @@ test("three gates, the README's hiring line, and the content checklist match the
 
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
-  for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
+  for (const s of ["big decisions;", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
   expect(talk).toMatch(/lead receives all of its team's messages/);
   expect(talk).toMatch(/sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`/);
   expect(section("Team brief")).toMatch(/Report: PLAN before hiring, BLOCKED[^\n]*DONE/);
@@ -433,7 +433,7 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
   for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
   expect(pm).toContain("`GO <team>` without telling the user");
-  for (const s of ["questions that need the user's decision", "git push"]) expect(pm, s).toContain(s);
+  for (const s of ["big decisions", "git push"]) expect(pm, s).toContain(s);
   expect(pmPromptText()).toContain("GO <team>");
 });
 
@@ -669,4 +669,82 @@ test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm stat
   expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm status");
   const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
   for (const t of ["f1rm status", "Self-driving teams"]) expect(titles).toContain(`2026-10-21 ${t}`);
+});
+
+test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.md point to it by name, and the report gains the decisions line", () => {
+  const who = section("Who talks to whom");
+  for (const s of [
+    "**Ask the user only for big decisions.**", "business, product scope (what the software does), design direction, strategy", "irreversible or external actions (push, deploy, spend, data deletion, messaging people)",
+    "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", "logged in `docs/decisions.md` with their why", "Decisions taken without you",
+  ]) expect(who, s).toContain(s);
+  expect(guidelines.split("product scope (what the software does)")).toHaveLength(2);
+  for (const r of ["pm", "lead"]) {
+    expect(role(r).body, r).toContain("Ask the user only for big decisions");
+    expect(role(r).body, r).not.toContain("product scope (what the software does)");
+  }
+  expect(role("pm").body).toContain("Decisions taken without you");
+  expect(role("pm").body).not.toContain("questions that need the user's decision");
+});
+
+test("K2: devs start with /pstack:poteto-mode, pick its playbook, skip Opening a PR, and load tdd second; a backend bug loads diagnosing-bugs first", () => {
+  for (const r of ["frontend-dev", "backend-dev"]) {
+    const body = role(r).body;
+    for (const s of ["/pstack:poteto-mode", "`feature`", "`bug-fix`", "`refactoring`", "`perf-issue`", "Opening a PR", "mattpocock-skills:tdd"]) expect(body, `${r}: ${s}`).toContain(s);
+    expect(body, r).not.toMatch(/pstack:tdd|pstack's tdd/);
+  }
+  expect(role("backend-dev").body).toMatch(/diagnosing-bugs[^\n]*before[^\n]*tdd|first[^\n]*diagnosing-bugs/);
+  const flows = section("Workflows");
+  const entry = (r: string) => flows.split(/^- \*\*/m).find((e) => e.startsWith(`${r}**`))!;
+  for (const r of ["frontend-dev", "backend-dev"]) expect(entry(r), r).toContain("pstack:poteto-mode");
+  expect(entry("backend-dev").indexOf("diagnosing-bugs")).toBeLessThan(entry("backend-dev").indexOf("mattpocock-skills:tdd"));
+});
+
+test("K3: leads get pstack:architect or pstack:how only as a first command the PM names with --skills; the Reviewer adds mattpocock-skills:code-review and not interrogate; the PM keeps grilling", () => {
+  const lead = role("lead").body;
+  for (const s of ["pstack:architect", "pstack:how", "ask the PM", "Haiku Explore"]) expect(lead, s).toContain(s);
+  expect(role("lead").fm.skills).toEqual([GUIDELINES, "f1rm:hire"]);
+  const reviewer = role("reviewer").body;
+  for (const s of ["mattpocock-skills:code-review", "Spec", "the brief"]) expect(reviewer, s).toContain(s);
+  expect(reviewer).toMatch(/first command stays `\/code-review`|`\/code-review` stays first/);
+  expect(reviewer).not.toContain("interrogate");
+  expect(role("pm").fm.skills).toContain("mattpocock-skills:grilling");
+  const playbook = section("Roster and hiring playbook");
+  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only"]) expect(playbook, s).toContain(s);
+});
+
+test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
+  const md = section("Skill stack");
+  expect(md).toContain("| Phase | mattpocock skill | pstack skill | Rule that wins |");
+  const rows = md.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Phase") && !l.startsWith("| :-"));
+  expect(rows.length).toBeGreaterThanOrEqual(6);
+  for (const r of rows) expect(r.split("|").length, r).toBe(6); // four cells
+  for (const s of [
+    "`mattpocock-skills:grilling`", "`mattpocock-skills:tdd`", "`mattpocock-skills:diagnosing-bugs`", "`mattpocock-skills:code-review`", "`pstack:poteto-mode`", "`pstack:architect`", "`pstack:how`", "`pstack:interrogate`",
+    "`feature`, `bug-fix`, `refactoring`, `perf-issue`", "slash-only", "disable-model-invocation", "/code-review", "the user can run it by hand",
+  ]) expect(md, s).toContain(s);
+  for (const s of ["no PR opening", "no babysit loops", "no `/loop` ticks", "no `afk`", "`pstack:arena` and `pstack:swarm` only when a brief asks", "at most 2 interns", "pushing stays the user's"]) expect(md, s).toContain(s);
+  // Only pstack skills that exist are named.
+  const real = ["poteto-mode", "architect", "how", "interrogate", "arena", "swarm"];
+  for (const m of guidelines.matchAll(/pstack:([a-z-]+)/g)) expect(real, m[0]).toContain(m[1]);
+  expect(section("Brief format")).toContain("names the pstack playbook that fits the task (see Skill stack)");
+});
+
+test("K5: `f1rm edition` sets the edition only once `f1rm pm` has registered the project, wherever a line says so", () => {
+  const files = [join(PLUGIN, "README.md"), join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), ...Object.keys(ROLES).map((r) => join(PLUGIN, "agents", `${r}.md`))];
+  let seen = 0;
+  for (const f of files) {
+    for (const line of readFileSync(f, "utf8").split("\n").filter((l) => /`f1rm edition (work\|founder|work|founder)`/.test(l))) {
+      seen++;
+      expect(line, f).toContain("once `f1rm pm` has registered the project");
+    }
+  }
+  expect(seen).toBeGreaterThanOrEqual(2);
+});
+
+test("K6: docs/decisions.md has the Ask the user only for big decisions and Skill stack entries, the second recording why pstack skills are slash-only", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const titles = entries.map((e) => e.split("\n")[0]);
+  for (const t of ["Ask the user only for big decisions", "Skill stack: mattpocock + pstack"]) expect(titles).toContain(`2026-10-21 ${t}`);
+  const stack = entries.find((e) => e.startsWith("2026-10-21 Skill stack: mattpocock + pstack"))!;
+  for (const s of ["disable-model-invocation", "architect", "interrogate", "arena", "swarm", "Opening a PR", "afk"]) expect(stack, s).toContain(s);
 });

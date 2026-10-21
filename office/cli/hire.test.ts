@@ -119,14 +119,14 @@ test("hire without --report-to reports to the PM session of the repo it runs in"
   const repo = join(mkdtempSync(join(tmpdir(), "f1rm-repo-")), "shop");
   mkdirSync(repo);
   hire(stub, ["backend-dev", "backend-dev-api", "api", BRIEF], repo);
-  expect(stub.argv()![7]).toBe(`/mattpocock-skills:tdd Report to: pm-shop\n\n${BRIEF}`);
+  expect(stub.argv()![7]).toBe(`/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd. Report to: pm-shop\n\n${BRIEF}`);
 });
 
 test.each([
-  ["frontend-dev", "/mattpocock-skills:tdd"],
-  ["backend-dev", "/mattpocock-skills:tdd"],
+  ["frontend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
+  ["backend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
   ["researcher", "/mattpocock-skills:research"],
-  ["reviewer", "/code-review medium worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review."],
+  ["reviewer", "/code-review medium worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review."],
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
   const task = role === "reviewer" ? "review-x" : "x";
@@ -139,7 +139,7 @@ const prompt = (stub: ReturnType<typeof stubClaude>) => stub.argv()!.find((a) =>
 test("--skills adds to the list; a slash-only skill becomes the first command and the role's own first skill moves into the list", () => {
   const dev = stubClaude([]);
   hire(dev, ["--skills", "ponytail:ponytail,vercel:nextjs", ...pmArgs, "frontend-dev", "frontend-dev-x", "x", BRIEF]);
-  expect(prompt(dev)).toStartWith("/mattpocock-skills:tdd Before you start, load these with the Skill tool: ponytail:ponytail, vercel:nextjs. Report to: pm-shop\n\n");
+  expect(prompt(dev)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd, ponytail:ponytail, vercel:nextjs. Report to: pm-shop\n\n");
   const researcher = stubClaude([]);
   hire(researcher, ["--skills", "research,seo-audit", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]);
   expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research, seo-audit. Report to: pm-shop\n\n");
@@ -149,15 +149,31 @@ test("--skills adds to the list; a slash-only skill becomes the first command an
   expect(reviewer.argv()).toBeNull();
 });
 
+test("a backend bug loads diagnosing-bugs before tdd: --skills mattpocock-skills:diagnosing-bugs goes ahead of the role's own later skills", () => {
+  const bug = stubClaude([]);
+  hire(bug, ["--skills", "mattpocock-skills:diagnosing-bugs", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]);
+  expect(prompt(bug)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:diagnosing-bugs, mattpocock-skills:tdd. Report to: pm-shop\n\n");
+  const stack = stubClaude([]);
+  hire(stack, ["--skills", "ponytail:ponytail,mattpocock-skills:diagnosing-bugs", ...pmArgs, "backend-dev", "backend-dev-y", "y", BRIEF]);
+  expect(prompt(stack)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:diagnosing-bugs, mattpocock-skills:tdd, ponytail:ponytail. ");
+});
+
+// architect and how carry disable-model-invocation, so the Skill tool refuses them: a lead gets one only as its first slash command.
+test.each(["pstack:architect", "pstack:how"])("a lead hired with --skills %s gets it as the first slash command and still loads the guidelines and f1rm:hire with the Skill tool", (skill) => {
+  const stub = stubClaude([]);
+  expect(hire(stub, ["--skills", skill, ...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir()).code).toBe(0);
+  expect(prompt(stub)).toBe(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n${BRIEF}`);
+});
+
 test("--level sets the reviewer's /code-review level, and high runs security-review on the merge before APPROVED; other roles refuse it", () => {
   const high = stubClaude([]);
   hire(high, ["--level", "high", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
   expect(prompt(high)).toStartWith(
-    "/code-review high worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review. Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args. Report to: pm-shop",
+    "/code-review high worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review. Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args. Report to: pm-shop",
   );
   const low = stubClaude([]);
   hire(low, ["--level", "low", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(prompt(low)).toStartWith("/code-review low worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review. ");
+  expect(prompt(low)).toStartWith("/code-review low worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review. ");
   const bad = stubClaude([]);
   expect(hire(bad, ["--level", "max", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("level");
   expect(hire(bad, ["--level", "high", ...pmArgs, "designer", "designer-x", "x", BRIEF]).err).toContain("reviewer only");
