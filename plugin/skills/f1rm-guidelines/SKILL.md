@@ -216,7 +216,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - `CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not.
   - `CHANGES REQUESTED <slug> conflict` from the Reviewer when the scratch merge conflicts. The dev rebases its unpushed branch onto the current main (see the review flow) and sends a new `DONE`.
   - `BLOCKED <slug> tip moved` from the Reviewer when the branch tip is not the commit in the dev's `DONE`.
-  - `ESCALATE <slug>` from the Reviewer in place of a third `CHANGES REQUESTED` (see the review flow). The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
+  - `ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding (see the review flow). The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
 - **The evidence block** of a `DONE` report holds:
   - each acceptance criterion's check command, with its result on the base (it fails) and on the branch (it passes);
   - the full check command and its exit code;
@@ -289,7 +289,7 @@ The Reviewer is the only role that merges, and it merges locally. Nobody pushes;
    - no claim is made up: every number, quote, testimonial and promise has a source or is marked as an assumption;
    - it follows `growth/brand.md`;
    - nothing in it was posted, published, sent or paid for.
-4. If any `/code-review` finding is left, send `CHANGES REQUESTED` with every finding, blocking or not, and stop. Merge only when none is left. Do not fix the code yourself. Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third `CHANGES REQUESTED`; the lead decides. Rounds of minor findings alone never escalate.
+4. If any `/code-review` finding is left, send `CHANGES REQUESTED` with every finding, blocking or not, and stop. Merge only when none is left. Do not fix the code yourself. Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third round with a blocking finding; the lead decides. Rounds of minor findings alone never escalate.
 5. Otherwise, build the result in a scratch worktree, so the main working directory stays untouched until the result is verified. You run in the main working directory, and `<task>` is the task under review:
    - `git worktree add --detach .claude/worktrees/review-<task> <base>`.
    - Prove each check fails without the change, in a second throwaway worktree: `git worktree add --detach .claude/worktrees/red-<task> <base>`, bring in only the branch's check files there with `git checkout <branch> -- <check files>`, and run each criterion's check. It must fail; one that passes on the base proves nothing. Then `git worktree remove --force .claude/worktrees/red-<task>`, the one forced command, on your own throwaway.
