@@ -1617,15 +1617,17 @@ test("the prompt text never reaches the events table", async () => {
 // Projects are isolated: an f1rm role messages only sessions of its own project (room), "main" and its own sub-agents.
 async function projectsOffice() {
   start({ "/code/shop": "/code/shop/.git", "/code/shop/.claude/worktrees/a": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
-  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
+  const sockets: Record<string, string> = { "pm-s": "/tmp/cc-socks/1.sock", "pm-b": "/tmp/cc-socks/2.sock", "free": "/tmp/cc-socks/3.sock" };
+  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) }, sockets[id] ? { "x-f1rm-messaging-socket": sockets[id] } : {});
   await seat("b", "/code/shop/.claude/worktrees/a", "shop.backend-dev-a", "f1rm:backend-dev"); // a worktree shares its repo's room
   await seat("pm-s", "/code/shop", "pm-shop", "f1rm:pm");
+  await seat("pm-s-mirror", "/code/shop", "pm-shop", "f1rm:pm"); // the same session seen twice (local and Remote Control)
   await seat("pm-b", "/code/blog", "pm-blog", "f1rm:pm");
   await seat("twin-s", "/code/shop", "twin");
   await seat("twin-b", "/code/blog", "twin");
   await seat("free", "/code/blog", "freelancer"); // no role
   await hook({ ...common("b", "SubagentStart"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
-  await office((s) => Object.keys(s.employees).length === 6 && Object.keys(s.interns).length === 1);
+  await office((s) => Object.keys(s.employees).length === 7 && Object.keys(s.interns).length === 1);
   const cwds: Record<string, string> = { b: "/code/shop/.claude/worktrees/a", "pm-b": "/code/blog", free: "/code/blog" };
   return async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] ?? "/code/shop" }));
 }
@@ -1657,13 +1659,28 @@ test("a finished sub-agent can still be resumed by its parent, by agent id and n
   expect((await send("b", "Explore")).permissionDecision).toBe("deny"); // a sub-agent type is not a sub-agent
 });
 
-test("a duplicate name is told apart by the `name [ref]` form, the ref being a session-id prefix", async () => {
+test("`name [ref]` is read as the bare name, whatever the ref: one project answers, or the name is unknown", async () => {
   const send = await projectsOffice();
-  expect((await send("b", "twin [twin-s]"))?.permissionDecision ?? null).toBeNull(); // the one in the sender's project
-  expect((await send("b", "twin [twin-b]")).permissionDecisionReason).toContain("Projects are isolated"); // the one in the other
-  expect((await send("b", "twin [nobody]")).permissionDecisionReason).toContain("unknown to the office");
-  expect((await send("b", "pm-shop [pm-s]"))?.permissionDecision ?? null).toBeNull();
-  expect((await send("b", "pm-shop [pm-b]")).permissionDecision).toBe("deny"); // the ref names another session
+  const allowed = async (to: string) => (await send("b", to))?.permissionDecision ?? null;
+  expect(await allowed("pm-shop")).toBeNull(); // listed twice, but one project
+  expect(await allowed("pm-shop [36698c]")).toBeNull(); // the 6-hex ref Claude Code gives is not a session-id prefix
+  expect(await allowed("pm-shop [4e323bd1a0f2]")).toBeNull();
+  const other = await send("b", "pm-blog [36698c]");
+  expect(other.permissionDecisionReason).toContain("Projects are isolated");
+  const two = await send("b", "twin [36698c]"); // two projects run a session of this name
+  expect(two.permissionDecision).toBe("deny");
+  expect(two.permissionDecisionReason).toContain("unknown to the office");
+  expect(two.permissionDecisionReason).toContain("`uds:` address");
+});
+
+test("a `uds:<path>` address resolves to the online session that holds the socket, then gets the same project check", async () => {
+  const send = await projectsOffice();
+  expect((await send("b", "uds:/tmp/cc-socks/1.sock"))?.permissionDecision ?? null).toBeNull(); // pm-shop
+  expect((await send("b", "uds:/tmp/cc-socks/2.sock")).permissionDecisionReason).toContain("Projects are isolated"); // pm-blog
+  const unknown = await send("b", "uds:/tmp/cc-socks/99.sock");
+  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
+  expect(unknown.permissionDecisionReason).toContain("`uds:` address");
+  expect((await send("b", "uds:"))?.permissionDecision).toBe("deny");
 });
 
 test("an offline session does not answer to its name, so a name that an online session holds in one project resolves", async () => {

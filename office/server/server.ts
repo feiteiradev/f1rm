@@ -258,15 +258,17 @@ export function startServer({
       }
     }
     // Projects are isolated: a message goes to "main", to the sender's own sub-agent (finished ones too: SendMessage resumes them), or to a session of the sender's own room.
-    // A target is a title or session id, with an optional ` [ref]` (a session-id prefix) that SendMessage asks for when two sessions share a name. An offline session answers to no name.
+    // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
+    // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
     // ponytail: two sessions both outside any door share the Elsewhere room and can message each other; a hire starts in a repo, so refusing Elsewhere could eat legitimate reports.
     if (tool === "SendMessage" && input.to !== undefined) {
       const to = String(input.to);
-      const [, name, ref = ""] = /^(.*\S)\s+\[([^\]]+)\]$/.exec(to.trim()) ?? [, to.trim()];
-      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (e.title === name || e.sessionId === name) && e.sessionId.startsWith(ref)).map((e) => e.room));
+      const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
+      const socket = /^uds:(.+)$/.exec(name)?.[1];
+      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name)).map((e) => e.room));
       if (to !== "main" && !subagents.get(sessionId)?.has(to)) {
-        if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Message only sessions of your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
         if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
       }
     }
