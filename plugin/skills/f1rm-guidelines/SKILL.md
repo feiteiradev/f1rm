@@ -180,12 +180,16 @@ The PM watches its leads and each lead watches its own hires, so a session that 
    ```
 
 2. **On wake**, read the table the watcher printed and take each flagged session in turn:
-   - **Limit stop** (`limitUntil`): wait until the time it names, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule), and follow **After `resume`**.
-   - **Limit stop with no time** (`limitUntil` is `unknown`): a rate-limit error that is not the subscription's reads this way, so send it `resume` as for an idle session, and follow **After `resume`**.
+   - **Limit stop** (`limitUntil`): wait until the time it names, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule).
+   - **Limit stop with no time** (`limitUntil` is `unknown`): a rate-limit error that is not the subscription's reads this way, so send it `resume` as for an idle session.
    - **Missing or no activity time** (not in the list, or `idleMinutes` null): check again in a minute; if still so, treat it as ended.
    - **Ended** (`ended`): run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
-   - **Idle 20 minutes, still listed, no limit stop**: send it `resume`, and follow **After `resume`**.
-   - **After `resume`**: note the time once it is sent, and start a background `sleep 300` whose exit wakes you. Then run `f1rm status`: no activity since the noted time (its `lastActivity` is before it): treat it as ended; new activity and no limit stop: add the hire back to the watcher's names; new activity and still a limit stop: a timed stop waits again for the time it names, and a stop with no time is treated as ended. The `resume` itself writes the transcript, so only this recheck decides.
+   - **Idle 20 minutes, still listed, no limit stop**: send it `resume`.
+   - **After `resume`**: note the time before you send it, then start a background `sleep 300` whose exit wakes you. Then run `f1rm status --json`, and restart the watcher with every name still working, leaving out sessions that sent `DONE` or `BLOCKED` and any hire you are waiting on:
+     - new activity since the noted time and no limit stop: it is back, so keep it in the names;
+     - a timed limit stop whose time is still ahead: leave it out, and wait for that time as on a first stop;
+     - anything else (no activity since, a stop with no time or a time already past, or a second `resume` in a row that brought no new commit or message): treat it as ended.
+   - After handling a wake, restart the watcher with the names still working.
 3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
 4. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
 
