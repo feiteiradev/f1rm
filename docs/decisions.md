@@ -202,11 +202,11 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: a CLI command `f1rm status [--json]`, run in a repo, lists only that repo's hires (the background sessions `claude agents --json` lists under its main working directory, plus unlisted ones whose transcript in this repo's folders carries a hire's name and was written in the last day), judged by real activity: the mtime of the session's transcript, the last commit time of its `worktree-<task>` branch, `ended` when `claude agents` no longer lists it, and `limitUntil` when the transcript's last assistant line is the usage-limit stop. Never by status text. If `claude agents --json` cannot be read it says so on stderr and exits 1; it never guesses.
 - Why: `claude agents` status and `claude logs` looked alive for hours on sessions that had hit the subscription usage limit, and nobody woke them.
 - Rejected: reading `~/.f1rm/events.db` (a second reader causes SQLITE_BUSY ingest losses, and it needs the office running); trusting `claude agents` status text.
-- Where: self-driving
+- Where: self-driving, 0b989f0
 
 ## 2026-10-21 Self-driving teams
 
 - Decision: the PM watches its leads and each lead watches its own hires with a background watcher (a Bash command with `run_in_background` that loops `f1rm status --json`) that exits when a named session has no activity for 20 minutes, has ended, shows a limit stop, or when status cannot be read. On wake a limit stop waits for the reset and then gets `resume`; an ended session is let go with `f1rm letgo` and hired again with a resume brief before the original brief; every hire checkpoints (a wip commit and `resume.md`) before a long step and whenever it stops. The watcher is the lead's and the PM's own: no per-task reports are added.
 - Why: a limit stop used to end the work silently, and every hire in the milestone sat idle for hours.
 - Rejected: waiting for the user to notice; polling in the main conversation; a daemon that restarts sessions by itself.
-- Where: self-driving
+- Where: self-driving, 0b989f0
