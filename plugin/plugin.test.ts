@@ -618,15 +618,38 @@ test("S2: the watcher exits when a named hire has been idle 20 minutes, has ende
     expect([why, r.woke, r.code]).toEqual([why, true, 0]);
   }
   expect(watch([{ ...quiet, idleMinutes: 19 }], "lead-a").woke).toBe(false);
-  expect(watch([{ ...quiet, name: "lead-z", ended: true, idleMinutes: 99 }], "lead-a").woke).toBe(false);
+  expect(watch([quiet, { ...quiet, name: "lead-z", ended: true, idleMinutes: 99 }], "lead-a").woke).toBe(false);
   expect(watch({ not: "a list" }, "lead-a").woke).toBe(true);
 }, 15_000);
+
+test("S2b: the watcher also exits for a named session that status doesn't list, or lists with no activity time", () => {
+  expect(watch([{ ...quiet, name: "lead-z" }], "lead-a").woke).toBe(true);
+  expect(watch([], "lead-a").woke).toBe(true);
+  expect(watch([{ ...quiet, idleMinutes: null }], "lead-a").woke).toBe(true);
+  expect(watch([{ ...quiet, name: "lead-b" }, quiet], "lead-a lead-b").woke).toBe(false);
+}, 15_000);
+
+test("S2c: a lead counts as stalled only when it and every hire of its team have been quiet 20 minutes; a lead waiting on active hires is not", () => {
+  const lead = { ...quiet, name: "lead-t", idleMinutes: 45 };
+  const member = (idleMinutes: number | null, extra: object = {}) => ({ ...quiet, name: "t.backend-dev-x", idleMinutes, ...extra });
+  expect(watch([lead, member(3)], "lead-t").woke).toBe(false);
+  expect(watch([lead, member(3), { ...member(60), name: "t.reviewer-review-x" }], "lead-t").woke).toBe(false);
+  expect(watch([lead, member(null)], "lead-t").woke).toBe(false);
+  expect(watch([lead, member(40)], "lead-t").woke).toBe(true);
+  expect(watch([lead], "lead-t").woke).toBe(true);
+  expect(watch([lead, { ...member(3), name: "other.backend-dev-x" }], "lead-t").woke).toBe(true); // another team's hire doesn't count
+  expect(watch([{ ...lead, idleMinutes: 5, ended: true }, member(3)], "lead-t").woke).toBe(true);
+  expect(watch([{ ...lead, idleMinutes: 5, limitUntil: "20:40" }, member(3)], "lead-t").woke).toBe(true);
+  expect(watch([{ ...lead, idleMinutes: 5 }, member(40)], "lead-t").woke).toBe(false);
+}, 30_000);
 
 test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role file carries the checkpoint line", () => {
   for (const r of ["pm", "lead"]) {
     for (const s of ["background watcher", "`f1rm status --json`", "never by status text", "20 minutes", "limit stop", "resume brief", "`name [ref]`", "Watching and waking"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
   }
   expect(role("pm").body).toMatch(/watch your leads/i);
+  expect(role("pm").body).toContain("together with every hire of its team");
+  expect(section("Watching and waking")).toContain("only when it and every hire of its team");
   expect(role("lead").body).toMatch(/watch your own hires/i);
   for (const name of Object.keys(ROLES)) {
     const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
