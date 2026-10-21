@@ -58,7 +58,7 @@ test("a hire whose last assistant line is the limit stop shows when the limit li
   const cwd = `${REPO}/.claude/worktrees/checkout`;
   transcript(h, cwd, "cccc3333", [talk("step one"), limitStop(), { type: "cost-state", sessionId: "cccc3333" }], 3);
   const [one] = hires(base(h, [live("shop.backend-dev-checkout", "cccc3333", cwd)]));
-  expect(one.limitUntil).toBe("20:40");
+  expect(one.limitUntil).toBe("20:40 (Europe/Lisbon)");
   expect(one.status).toBe("busy"); // as agents says, not as it is
   expect(one.idleMinutes).toBe(3);
 });
@@ -69,9 +69,22 @@ test("a limit stop followed by later work is no longer a stop, and a bare hour r
   transcript(h, cwd, "dddd4444", [limitStop(), talk("resumed")], 3);
   expect(hires(base(h, [live("shop.backend-dev-checkout", "dddd4444", cwd)]))[0].limitUntil).toBeNull();
   transcript(h, cwd, "dddd4444", [limitStop("You've hit your usage limit · resets 1pm (Europe/Lisbon)")], 3);
-  expect(hires(base(h, [live("shop.backend-dev-checkout", "dddd4444", cwd)]))[0].limitUntil).toBe("13:00");
+  expect(hires(base(h, [live("shop.backend-dev-checkout", "dddd4444", cwd)]))[0].limitUntil).toBe("13:00 (Europe/Lisbon)");
   transcript(h, cwd, "dddd4444", [limitStop("Claude usage limit reached.")], 3);
   expect(hires(base(h, [live("shop.backend-dev-checkout", "dddd4444", cwd)]))[0].limitUntil).toBe("unknown");
+});
+
+test("any limit on an API error line is a stop (weekly, model); the reset keeps its date and timezone as given, and prose about a limit is not a stop", () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  const until = (line: object) => {
+    transcript(h, cwd, "weekly01", [line], 3);
+    return hires(base(h, [live("shop.backend-dev-checkout", "weekly01", cwd)]))[0].limitUntil;
+  };
+  expect(until(limitStop("You've hit your weekly limit · resets Oct 27, 9am (Europe/Lisbon)"))).toBe("Oct 27 09:00 (Europe/Lisbon)");
+  expect(until(limitStop("You've hit your Opus limit · resets 11:30pm (America/New_York)"))).toBe("23:30 (America/New_York)");
+  expect(until(limitStop("You've hit your weekly limit"))).toBe("unknown");
+  expect(until(talk("the session limit resets 8:40pm"))).toBeNull(); // no API error flag: just prose
 });
 
 test("a live hire with no transcript has no activity, and is not guessed at", () => {
@@ -87,7 +100,7 @@ test("a hire that agents no longer lists, with a transcript in this repo's folde
   const list = hires(base(h, []));
   expect(list.map((x) => x.name).sort()).toEqual(["lead-shop", "shop.backend-dev-checkout"]);
   const dev = list.find((x) => x.role === "backend-dev")!;
-  expect(dev).toMatchObject({ ended: true, status: null, state: null, idleMinutes: 40, limitUntil: "20:40", sessionId: "ffff6666" });
+  expect(dev).toMatchObject({ ended: true, status: null, state: null, idleMinutes: 40, limitUntil: "20:40 (Europe/Lisbon)", sessionId: "ffff6666" });
 });
 
 test("a name that is listed live is not also shown from an older ended transcript, and a reused name shows once", () => {
@@ -139,7 +152,7 @@ test("status --json prints one array of hires and exits 0; the plain output is a
   const plain = await status([], deps);
   expect(plain.code).toBe(0);
   expect(plain.out).toContain("shop.backend-dev-checkout");
-  expect(plain.out).toContain("limit until 20:40");
+  expect(plain.out).toContain("limit until 20:40 (Europe/Lisbon)");
   expect(plain.out).toContain("ended");
 });
 

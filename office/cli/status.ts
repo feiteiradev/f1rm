@@ -71,7 +71,10 @@ function tail(path: string): string {
   return from > 0 ? text.slice(text.indexOf("\n") + 1) : text; // the first line may be cut
 }
 
-/** "HH:MM" when the transcript's last assistant line is the limit stop, "unknown" if it gives no time; null when it is not a stop. */
+/**
+ * When a limit stop lifts, as its text gives it: "HH:MM", with the date before it ("Oct 27 09:00") and the timezone after it ("(Europe/Lisbon)")
+ * when it names them. "unknown" if it names no time; null when the transcript's last assistant line is not an API error about a limit.
+ */
 function limitUntil(path: string): string | null {
   const last = tail(path).split("\n").findLast((l) => l.includes('"type":"assistant"'));
   if (!last) return null;
@@ -79,11 +82,14 @@ function limitUntil(path: string): string | null {
     const line = JSON.parse(last);
     if (line.isApiErrorMessage !== true) return null;
     const text = (line.message?.content ?? []).map((c: any) => String(c?.text ?? "")).join(" ");
-    if (!/\b(?:session|usage) limit\b/i.test(text)) return null;
-    const t = /(\d{1,2})(?::(\d{2}))?\s*([ap])m\b/i.exec(text);
+    if (!/\blimit\b/i.test(text)) return null;
+    const reset = /\bresets\b(.*)/is.exec(text)?.[1] ?? "";
+    const date = /\b([A-Z][a-z]{2,8})\.? (\d{1,2})\b/.exec(reset);
+    const t = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])m\b|\b(\d{1,2}):(\d{2})\b/i.exec(reset.replace(date?.[0] ?? "", ""));
     if (!t) return "unknown";
-    const hour = (Number(t[1]) % 12) + (t[3].toLowerCase() === "p" ? 12 : 0);
-    return `${String(hour).padStart(2, "0")}:${t[2] ?? "00"}`;
+    const hour = t[1] ? (Number(t[1]) % 12) + (t[3].toLowerCase() === "p" ? 12 : 0) : Number(t[4]);
+    const zone = /\(([^)]+)\)/.exec(reset)?.[1];
+    return `${date ? `${date[1]} ${date[2]} ` : ""}${String(hour).padStart(2, "0")}:${t[2] ?? t[5] ?? "00"}${zone ? ` (${zone})` : ""}`;
   } catch {
     return null;
   }
