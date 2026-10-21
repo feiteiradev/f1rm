@@ -180,7 +180,7 @@ The PM watches its leads and each lead watches its own hires, so a session that 
    ```
 
 2. **On wake**, read the table the watcher printed and take each flagged session in turn:
-   - **Limit stop** (`limitUntil`): wait until that time, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule).
+   - **Limit stop** (`limitUntil`): wait until that time, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule). Its transcript still ends on the stop until it answers, so keep it out of the watcher's names until its first new line shows (`f1rm status` gives it no `limitUntil`), then restart the watcher with it.
    - **Ended** (`ended`): run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
    - **Idle 20 minutes, still listed, no limit stop**: send it `resume`. If `f1rm status` shows no new activity a few minutes later, treat it as ended.
 3. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
