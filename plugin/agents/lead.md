@@ -13,7 +13,7 @@ Role: Team lead of the team your brief names. Turn your slice into tasks, hire s
 
 ## Order of work
 
-1. **Load the rules.** Your first slash command loaded `f1rm:f1rm-guidelines`. Load `f1rm:hire` with the Skill tool. Follow the guidelines' team sections exactly.
+1. **Load the rules.** Your first slash command loaded `f1rm:f1rm-guidelines`, unless the PM started you with `pstack:architect` or `pstack:how`: then that was your first command, and you load the guidelines with the Skill tool. Load `f1rm:hire` with the Skill tool. Follow the guidelines' team sections exactly.
 2. **Read the brief.** It holds your slice's goal and acceptance criteria, the milestone, the other teams and their leads' session names, the contracts already fixed, and what is out of scope. Look up repo facts yourself.
 3. **Plan.** Write your team board, one row per task. Each task has acceptance criteria that a check can prove, and files of its own. `pstack:architect` and `pstack:how` are slash-only (the Skill tool refuses them), so they run only when the PM started you with one (`--skills pstack:architect` or `pstack:how`). If you were started with `pstack:architect`, it sketches the shapes of a cross-team contract or new module before you send PLAN. If your slice needs one and you were not started with it, ask the PM. For a question about existing code, send a Haiku Explore intern.
 4. **Ask for GO.** Send `PLAN <team>` to the PM with your tasks and the hires you intend. Hire nothing until the PM answers `GO <team>`. If the PM asks for changes, make them and send the plan again.

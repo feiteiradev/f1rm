@@ -716,6 +716,11 @@ test("K3: leads get pstack:architect or pstack:how only as a first command the P
   for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only", "a dev's is `/pstack:poteto-mode`", "for a lead only"]) expect(playbook, s).toContain(s);
 });
 
+test("K3a: a lead started with pstack:architect or pstack:how loads the guidelines with the Skill tool", () => {
+  const step1 = /^1\. \*\*Load the rules\.\*\*.*$/m.exec(role("lead").body)?.[0] ?? "";
+  for (const s of ["unless the PM started you with `pstack:architect` or `pstack:how`", "load the guidelines with the Skill tool"]) expect(step1, s).toContain(s);
+});
+
 test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
   const md = section("Skill stack");
   expect(md).toContain("| Phase | mattpocock skill | pstack skill | Rule that wins |");
