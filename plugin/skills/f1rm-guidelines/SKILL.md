@@ -67,7 +67,7 @@ Playbook:
 Each role's steps, and the skill or command at each step. Every dev and specialist ends with a `DONE` report that has the evidence block (see Handoff) and lists the skills used.
 
 - **pm**
-  1. Pick up: read the board, the milestones file and `claude agents --json`, run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
+  1. Pick up: read the board, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
   2. Interview with `mattpocock-skills:grilling` until the user confirms.
   3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
   4. Hire one or two leads with `f1rm hire lead`, and answer each `PLAN <team>` with `GO <team>`.
@@ -172,6 +172,8 @@ Report: when done or blocked, SendMessage to the session named in `Report to`, a
 
 Your session name is `pm-<repo basename>`. `f1rm pm` starts the session with `--name pm-<repo basename>` and states the name in your first prompt. `f1rm hire` fills in `Report to` with it, so pass `--report-to` only if you were started another way. A lead's hires report to `lead-<team>`, which `f1rm hire --team` fills in. The ListAgents tool shows your hires and their state. The Reviewer's brief also names the branch to review, the base branch, and the brief of the task under review, and its Inputs hold the dev's `DONE` report.
 
+A brief's Context names the notes file for its role: `~/.f1rm/kept/<repo>/notes/<role>.md`, with `<repo>` the repo folder's basename, as in `~/.f1rm/evidence/<repo>/`. The hire reads it before it starts and keeps this project's learnings there. Agent memory is shared across projects, so it holds only facts about the user and how they like to work, and lessons that hold in any project.
+
 When a task carries a core decision, its Context states the decision and why, and a criterion reads "docs/decisions.md has the entry <title>" (see Milestones and decisions).
 
 ## Team brief
@@ -204,6 +206,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 - **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports. It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
 - **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead passes it to the PM the same way. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
+- **Projects are isolated.** A session works inside its own repo. The PM and leads filter `claude agents --json` and ListAgents to their own repo (a cwd under its main working directory) at pickup and every time after, and never name, address or rely on another project's sessions, boards, milestones or evidence. A problem with f1rm itself goes to the user as one line, `f1rm feedback: <problem> -> <suggestion>`, written in your reply and addressed to no session. The project gate (see Gates) refuses a message to another project.
 
 ## Handoff via SendMessage
 
@@ -267,6 +270,8 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
   - **Persist**: what the hires' `keep:` lines named, and anything else a later milestone will need. It moves to `~/.f1rm/kept/<repo>/` (with `mv`) and is never deleted automatically.
   - **Delete**: the milestone's evidence folders, briefs, findings file, research, plans and done board rows.
 
+  `~/.f1rm/kept/<repo>/notes/` is in neither group; it stays.
+
   The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (ponytail-review findings and anything the user must decide). `docs/decisions.md` and git history stay.
 
 **The decisions log.** `docs/decisions.md` in each project repo, created the first time a decision is recorded and committed like code.
@@ -274,6 +279,7 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
 - **Core decision.** Any of: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason. Bug fixes and wording tweaks get no entry.
 - **Format.** The log is append-only, oldest first. Each entry is a heading `## <YYYY-MM-DD> <title>` and four lines: `- Decision:`, `- Why:`, `- Rejected:` and `- Where:` (the task id and commit, or the task id alone when the commit doesn't exist yet).
 - **Who writes it.** When a task carries a core decision, the PM (or the lead) puts the decision and its why in the brief's Context, with the criterion "docs/decisions.md has the entry <title>". The hire adds that entry in its own commit, plus an entry for any core design decision it made that the brief didn't fix.
+- **Merging.** A hire that creates the decisions log file, whatever its path (`docs/decisions.md` here; some repos keep `docs/decisions.html`), also adds the line `<that path> merge=union` to the repo's `.gitattributes`, for example `docs/decisions.md merge=union`, so two branches that append different entries merge without a conflict. Union folds the identical first and last lines of two new entries into one, so start and end every entry with a line of its own: the heading and the `- Where:` line are, and an HTML entry needs an opening tag with an id and a closing comment after its closing tag. The blank line that opens an entry folds too, so the second heading follows the first entry's last line. The Reviewer still never resolves a conflict by hand.
 - **Check.** The Reviewer confirms that every entry the brief asks for is there, and a missing entry blocks.
 - **ADRs.** A repo that has `docs/adr/` keeps its ADRs; an entry links to the ADR rather than copying it.
 
@@ -323,11 +329,12 @@ Never run `git push`, never force, never rewrite published history, never merge 
 
 ## Gates
 
-The office holds three gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, none runs.
+The office holds four gates with hooks. A refusal says which rule held the call, and each is logged to `~/.f1rm/office.log`. With the office stopped, none runs.
 
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool. If one is not installed, send `BLOCKED <slug>` naming it.
 - The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, kept files, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
 - The **push gate** holds every hire. It refuses `git push` in any form (also behind `timeout`, `nice` or `stdbuf`), `gh pr merge` and a `gh api` call that writes to code-landing endpoints (pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations; other `gh api` calls stay allowed), so only the user pushes and lands on a remote. For the Reviewer it also refuses `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`; `git checkout <branch> -- <check files>` stays allowed. Way out: ask the user to run it with `!`, or leave it undone.
+- The **project gate** holds every company role's SendMessage. It refuses a message to a session of another project, and to a name the office does not know or that sessions of more than one project answer to. Messages to `main`, to your own sub-agents and to sessions of your own project pass. Two sessions both outside any door share the Elsewhere room and can message each other. Way out: message only your own project's sessions; a problem with f1rm goes to the user as `f1rm feedback: <problem> -> <suggestion>`.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
 ## Use what is installed

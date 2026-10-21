@@ -1577,6 +1577,7 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   start();
   await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
   await skillLoaded("r", "ponytail:ponytail-review");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" }); // the Report to, in the same project
   const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
   const out = await send("APPROVED shop-1");
   expect(out.permissionDecision).toBe("deny");
@@ -1611,4 +1612,113 @@ test("the prompt text never reaches the events table", async () => {
   expect(rows).toContain("UserPromptSubmit");
   expect(rows).not.toContain("SECRET-BRIEF");
   expect(rows).not.toContain("Before you start");
+});
+
+// Projects are isolated: an f1rm role messages only sessions of its own project (room), "main" and its own sub-agents.
+async function projectsOffice() {
+  start({ "/code/shop": "/code/shop/.git", "/code/shop/.claude/worktrees/a": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
+  const sockets: Record<string, string> = { "pm-s": "/tmp/cc-socks/1.sock", "pm-b": "/tmp/cc-socks/2.sock", "free": "/tmp/cc-socks/3.sock" };
+  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) }, sockets[id] ? { "x-f1rm-messaging-socket": sockets[id] } : {});
+  await seat("b", "/code/shop/.claude/worktrees/a", "shop.backend-dev-a", "f1rm:backend-dev"); // a worktree shares its repo's room
+  await seat("pm-s", "/code/shop", "pm-shop", "f1rm:pm");
+  await seat("pm-s-mirror", "/code/shop", "pm-shop", "f1rm:pm"); // the same session seen twice (local and Remote Control)
+  await seat("pm-b", "/code/blog", "pm-blog", "f1rm:pm");
+  await seat("twin-s", "/code/shop", "twin");
+  await seat("twin-b", "/code/blog", "twin");
+  await seat("free", "/code/blog", "freelancer"); // no role
+  await hook({ ...common("b", "SubagentStart"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
+  await office((s) => Object.keys(s.employees).length === 7 && Object.keys(s.interns).length === 1);
+  const cwds: Record<string, string> = { b: "/code/shop/.claude/worktrees/a", "pm-b": "/code/blog", free: "/code/blog" };
+  return async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] ?? "/code/shop" }));
+}
+
+test("a SendMessage from an f1rm role goes to its own project, 'main' and its own sub-agent, and to no one else", async () => {
+  const send = await projectsOffice();
+  for (const to of ["pm-shop", "main", "sub-1"]) expect([to, (await send("b", to))?.permissionDecision ?? null]).toEqual([to, null]);
+  const other = await send("b", "pm-blog");
+  expect(other.permissionDecision).toBe("deny");
+  expect(other.permissionDecisionReason).toContain("Projects are isolated");
+  const unknown = await send("b", "pm-nobody");
+  expect(unknown.permissionDecision).toBe("deny");
+  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
+  // A name two rooms answer to, and a sub-agent of another employee, fail closed too.
+  expect((await send("b", "twin")).permissionDecision).toBe("deny");
+  expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny");
+  expect((await send("b", "*")).permissionDecision).toBe("deny");
+  // The PM too, and a freelancer is never held.
+  expect((await send("pm-s", "pm-blog")).permissionDecision).toBe("deny");
+  expect(await send("free", "pm-shop")).toBeNull();
+});
+
+test("a finished sub-agent can still be resumed by its parent, by agent id and no other way", async () => {
+  const send = await projectsOffice();
+  await hook({ ...common("b", "SubagentStop"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
+  await office((s) => Object.keys(s.interns).length === 0);
+  expect((await send("b", "sub-1"))?.permissionDecision ?? null).toBeNull();
+  expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny"); // another employee's sub-agent
+  expect((await send("b", "Explore")).permissionDecision).toBe("deny"); // a sub-agent type is not a sub-agent
+});
+
+test("`name [ref]` is read as the bare name, whatever the ref: one project answers, or the name is unknown", async () => {
+  const send = await projectsOffice();
+  const allowed = async (to: string) => (await send("b", to))?.permissionDecision ?? null;
+  expect(await allowed("pm-shop")).toBeNull(); // listed twice, but one project
+  expect(await allowed("pm-shop [36698c]")).toBeNull(); // the 6-hex ref Claude Code gives is not a session-id prefix
+  expect(await allowed("pm-shop [4e323bd1a0f2]")).toBeNull();
+  const other = await send("b", "pm-blog [36698c]");
+  expect(other.permissionDecisionReason).toContain("Projects are isolated");
+  const two = await send("b", "twin [36698c]"); // two projects run a session of this name
+  expect(two.permissionDecision).toBe("deny");
+  expect(two.permissionDecisionReason).toContain("unknown to the office");
+  expect(two.permissionDecisionReason).toContain("`uds:` address");
+});
+
+test("a `uds:<path>` address resolves to the online session that holds the socket, then gets the same project check", async () => {
+  const send = await projectsOffice();
+  expect((await send("b", "uds:/tmp/cc-socks/1.sock"))?.permissionDecision ?? null).toBeNull(); // pm-shop
+  expect((await send("b", "uds:/tmp/cc-socks/2.sock")).permissionDecisionReason).toContain("Projects are isolated"); // pm-blog
+  const unknown = await send("b", "uds:/tmp/cc-socks/99.sock");
+  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
+  expect(unknown.permissionDecisionReason).toContain("`uds:` address");
+  expect((await send("b", "uds:"))?.permissionDecision).toBe("deny");
+});
+
+test("after an office restart the replayed log still knows a parent's sub-agents, so it can resume one", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  const repos = { "/code/shop": "/code/shop/.git" };
+  const open = () => (server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, dbPath }));
+  open();
+  await hook({ ...common("b", "UserPromptSubmit"), prompt: "go", session_title: "shop.backend-dev-a", agent_type: "f1rm:backend-dev" });
+  await hook({ ...common("b", "SubagentStart"), agent_id: "sub-1", agent_type: "Explore" });
+  server.stop(true);
+  open();
+  const send = async (to: string) => (await held(await hook(preToolUse("b", "SendMessage", { to, message: "x" }))))?.permissionDecision ?? null;
+  expect(await send("sub-1")).toBeNull();
+  expect(await send("sub-2")).toBe("deny");
+});
+
+test("an offline session does not answer to its name, so a name that an online session holds in one project resolves", async () => {
+  let now = 1_000_000;
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }), clientDir, clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e9 });
+  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
+  await seat("twin-b", "/code/blog", "twin");
+  now += 401;
+  await office((s) => s.employees["twin-b"]?.status === "offline");
+  await seat("twin-s", "/code/shop", "twin");
+  await seat("b", "/code/shop", "shop.backend-dev-a", "f1rm:backend-dev");
+  expect((await held(await hook(preToolUse("b", "SendMessage", { to: "twin", message: "x" }))))?.permissionDecision ?? null).toBeNull();
+});
+
+test("a SendMessage refusal is logged with the role, title and rule, and never the message or the target", async () => {
+  const send = await projectsOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await send("b", "pm-blog");
+    await send("b", "SECRET-TARGET");
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual(["refused backend shop.backend-dev-a SendMessage project", "refused backend shop.backend-dev-a SendMessage project-unknown"]);
 });

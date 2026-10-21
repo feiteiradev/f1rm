@@ -235,6 +235,14 @@ export function startServer({
   const pendingInterns = new Map<string, number[]>();
   // The skills a hire's first prompt names, and the ones its Skill calls have loaded, by session. The prompt itself is never kept.
   // ponytail: in memory, so an office restart empties it and the gate fails open; persist it if hires outlive restarts in practice.
+  // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
+  // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
+  const subagents = new Map<string, Set<string>>();
+  /** Kept for each event the office takes in, live or replayed from the log. */
+  const trackSubagents = (e: F1rmEvent) => {
+    if (e.kind === "SubagentStart" && e.intern) subagents.set(e.sessionId, (subagents.get(e.sessionId) ?? new Set()).add(e.intern.id));
+    if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
+  };
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
   /** Why the company's rules stop this tool call, or null to let it run. */
   function refusal(sessionId: string, payload: Record<string, any>): string | null {
@@ -252,6 +260,21 @@ export function startServer({
       if (missing.length && !READING.has(tool)) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to.`);
       if (gate.security && !has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
+      }
+    }
+    // Projects are isolated: a message goes to "main", to the sender's own sub-agent (finished ones too: SendMessage resumes them), or to a session of the sender's own room.
+    // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
+    // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
+    // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
+    // ponytail: two sessions both outside any door share the Elsewhere room and can message each other; a hire starts in a repo, so refusing Elsewhere could eat legitimate reports.
+    if (tool === "SendMessage" && input.to !== undefined) {
+      const to = String(input.to);
+      const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
+      const socket = /^uds:(.+)$/.exec(name)?.[1];
+      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name)).map((e) => e.room));
+      if (to !== "main" && !subagents.get(sessionId)?.has(to)) {
+        if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
       }
     }
     const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
@@ -322,7 +345,7 @@ export function startServer({
     try {
       const e: F1rmEvent = JSON.parse(row.event);
       e.room = roomOf(e.cwd);
-      if (e.at >= (forgotten[e.room.id] ?? 0)) state = reduce(state, e);
+      if (e.at >= (forgotten[e.room.id] ?? 0)) (state = reduce(state, e), trackSubagents(e));
     } catch {} // a row this build can't read must not stop the office from starting
   }
 
@@ -426,6 +449,7 @@ export function startServer({
             const why = refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
+          trackSubagents(event);
           if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
             pendingInterns.get(event.sessionId)?.shift();
           }

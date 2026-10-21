@@ -162,3 +162,24 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: in the ghosts team two devs sent DONE and went idle, but `claude agents --json` kept their state "working", so `f1rm hire --team` counted them and refused their Reviewers.
 - Rejected: asking the user to raise or override the cap for each Reviewer; letting the lead let the devs go before the review (the dev must stay to take CHANGES REQUESTED).
 - Where: idle-frees-slot, 3434935 and 3117ce9 (lead-ghosts agreed 2026-10-21 to the one-line status change in machine.ts backgroundSessions)
+
+## 2026-10-21 Projects are isolated
+
+- Decision: (a) the gate refuses a SendMessage from any f1rm role to a session whose project (room) differs from the sender's, with a message naming the rule; a target name that resolves to no session, or to sessions in more than one room, counts as unknown and is refused; "main" and the sender's own sub-agents stay allowed. (b) PMs and leads filter `claude agents --json` to their own repo (a cwd under the main working directory) at pickup and every time after, and never name, address or rely on another project's sessions, boards, milestones or evidence. (c) A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session. (d) Memory (every role keeps `memory: user`) holds only facts about the user and how they like to work, never project facts; project facts go in that project's milestones file or board.
+- Why: one project's PM must not steer or learn from another's: a PM learned of another project's PM from `claude agents --json` and the shared memory folder, and asked the user to relay a message to it.
+- Rejected: relying on prompt rules alone (the gate holds only while the office runs, so the prose stays as the fallback); removing `memory: user` from the roles.
+- Where: projects-isolated
+
+## 2026-10-21 Decisions log merges by union
+
+- Decision: when a hire creates the decisions log file, whatever its path (`docs/decisions.md` here; some repos keep `docs/decisions.html`), it also adds the line `<that path> merge=union` to the repo's `.gitattributes`; this repo's `.gitattributes` has `docs/decisions.md merge=union`. Reviewers still never resolve a conflict by hand. Union folds the identical first and last lines of two new entries into one, so each entry starts and ends with a line of its own (an HTML entry needs an opening tag with an id and a closing comment after its closing tag); `office/gitattributes.test.ts` shows both.
+- Why: two branches that append different entries to the append-only log no longer conflict, so a Reviewer no longer sends a task back for it.
+- Rejected: letting Reviewers resolve conflicts in the log.
+- Where: projects-isolated
+
+## 2026-10-21 Project notes live outside memory
+
+- Decision: every role keeps project learnings in `~/.f1rm/kept/<repo>/notes/<role>.md`, where `<repo>` is the repo folder's basename, as in `~/.f1rm/evidence/<repo>/`. Agent memory (`memory: user`, shared across projects) keeps only lessons that hold in any project. A brief's Context names the notes file for its role, and the milestone cleanup never deletes `notes/` (it is in neither the Persist nor the Delete group).
+- Why: the specialists' shared memories were full of project knowledge, which leaked one project's existence into another.
+- Rejected: Claude Code's project and local memory scopes: the committed variant would put notes into the repo, and the uncommitted variant does not carry across hires' separate worktrees.
+- Where: projects-isolated
