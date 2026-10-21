@@ -938,6 +938,28 @@ test("status --watch with no name left prints no names and exits 0 at once; a fl
   expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>[:waiting]...");
 });
 
+test("status refuses, in every form, a repo whose encoded project folder is over 150 characters, and works at 150", async () => {
+  const home = tempHome();
+  const stub = stubClaude(0, []);
+  // A character of the path is a character of the folder name, so the repo's path length is the folder's.
+  const repoOfLength = (length: number) => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-long-")));
+    const repo = join(parent, "r".repeat(length - parent.length - 1));
+    mkdirSync(repo);
+    Bun.spawnSync(["git", "init", "-q", repo]);
+    return repo;
+  };
+  const long = repoOfLength(151), fine = repoOfLength(150);
+  expect([long.length, fine.length]).toEqual([151, 150]);
+  for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
+    const r = await f1rmIn(long, home, stub.bin, "status", ...args);
+    expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
+    expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the longest worktree folder stays under 200)");
+  }
+  expect((await f1rmIn(fine, home, stub.bin, "status", "--json")).code).toBe(0);
+  expect((await f1rmIn(fine, home, stub.bin, "status", "--watch", "")).out).toBe("no names");
+});
+
 test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
   const home = tempHome(), repo = realpathSync(repoDir("shop"));
   Bun.spawnSync(["git", "init", "-q", repo]);

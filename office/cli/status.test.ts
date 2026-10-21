@@ -417,18 +417,6 @@ test("with two entries of one name, the stall is judged on the one with the newe
   expect([r.sleeps, r.out]).toEqual([17, "lead-a: idle 20 minutes\n"]);
 });
 
-test("a transcript is found by its session id in a project folder Claude Code truncated and hashed", () => {
-  const h = home();
-  const repo = `/code/${"long-name-".repeat(30)}app`; // over 200 characters once encoded
-  const cwd = `${repo}/.claude/worktrees/checkout`;
-  const hashed = `${folder(repo).slice(0, 200)}-1a2b3c`;
-  transcript(h, cwd, "long0001", [talk("x")], 5, cwd, hashed);
-  transcript(h, repo, "long0002", [...named("long0002", "lead-long")], 6, repo, hashed);
-  transcript(h, "/code/other", "long0003", [...named("long0003", "lead-other")], 6, "/code/other");
-  const list = hires({ ...base(h, [live("shop.backend-dev-checkout", "long0001", cwd)]), repo });
-  expect(list.map((x) => [x.name, x.idleMinutes])).toEqual([["shop.backend-dev-checkout", 5], ["lead-long", 6]]);
-});
-
 test("a waiting name is watched as a plain one as soon as it writes again: an approved hire that then goes idle wakes, one that never writes stays waiting", async () => {
   const touch = (at: number) => (n: number, h: string, clock: number) => {
     if (n !== at) return;
@@ -447,16 +435,6 @@ test("a waiting name is watched as a plain one as soon as it writes again: an ap
     if (n === 2) transcript(h, `${REPO}/.claude/worktrees/x`, "w0aaaaaa", [talk("x")], 0);
   });
   expect([late.woke, late.sleeps]).toEqual([true, 20]); // its first line is at NOW, so it is idle for 20 minutes at the 20th poll
-});
-
-test("a worktree folder of a repo whose own folder is just under 200 characters is found though Claude Code cut it", () => {
-  const h = home();
-  const repo = `/code/${"y".repeat(184)}`; // 190 characters encoded; its worktree folders are over 200
-  const cwd = `${repo}/.claude/worktrees/checkout`;
-  const cut = `${folder(repo)}--claude-worktrees-checkout`.slice(0, 200) + "-9f8e7d";
-  transcript(h, cwd, "cut00001", [talk("x")], 4, cwd, cut);
-  const [one] = hires({ ...base(h, [live("shop.backend-dev-checkout", "cut00001", cwd)]), repo });
-  expect(one.idleMinutes).toBe(4);
 });
 
 test("a fresh re-hire with no transcript yet is the newest entry of its name, not the old one beside it", async () => {
@@ -481,23 +459,6 @@ test("a stop whose text says only rate_limit_error is a limit stop with no time"
   expect(hires(base(h, [live("shop.backend-dev-checkout", "rle00001", cwd)]))[0].limitUntil).toBe("unknown");
 });
 
-test("a sibling project's folder is never read, however the worktree prefix is cut: a repo folder of 199 characters, and one that is not truncated at all", () => {
-  for (const length of [199, 150]) {
-    const h = home();
-    const repo = `/code/${"z".repeat(length - 6)}`; // "-code-" is 6 characters once encoded
-    expect(folder(repo).length).toBe(length);
-    // Folders of other projects whose names merely start like this repo's worktree folders; each holds a hire that records this repo as its folder, so it would be listed if it were read.
-    for (const [i, sibling] of [`${folder(repo)}-sibling`, `${folder(repo)}--other-project`].entries()) {
-      transcript(h, repo, `sib0000${i}`, [...named(`sib0000${i}`, `lead-sib${i}`)], 5, repo, sibling);
-    }
-    const mine = `${folder(repo)}--claude-worktrees-checkout`;
-    transcript(h, `${repo}/.claude/worktrees/checkout`, "mine0001", [talk("x")], 4, repo, mine.length > 200 ? `${mine.slice(0, 200)}-9f8e7d` : mine);
-    const names = hires({ ...base(h, [live("shop.backend-dev-checkout", "mine0001", `${repo}/.claude/worktrees/checkout`)]), repo }).map((x) => [x.name, x.idleMinutes]);
-    // At 199 characters the cut worktree folder (`<own>-` and a hash) can't be told from a sibling's, so it is not read and the hire shows no activity time: a known limit.
-    expect(names).toEqual([["shop.backend-dev-checkout", length === 199 ? null : 4]]);
-  }
-});
-
 test("a waiting name whose wrap-up writes during the first minute stays waiting", async () => {
   const touch = (n: number, h: string, clock: number) => {
     if (n !== 1) return;
@@ -505,4 +466,20 @@ test("a waiting name whose wrap-up writes during the first minute stays waiting"
     utimesSync(file, new Date(clock), new Date(clock));
   };
   expect((await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: 3 }], 100, touch)).woke).toBe(false);
+});
+
+test("a sibling project's folder is never read, and the worktree folder of the longest repo f1rm status accepts is matched whole and stays under 200 characters", () => {
+  for (const length of [150, 100]) {
+    const h = home();
+    const repo = `/code/${"z".repeat(length - 6)}`; // "-code-" is 6 characters once encoded
+    expect(folder(repo).length).toBe(length);
+    // Folders of other projects whose names merely start like this repo's; each holds a hire that records this repo as its folder, so it would be listed if it were read.
+    for (const [i, sibling] of [`${folder(repo)}-sibling`, `${folder(repo)}--other-project`, `${folder(repo)}--claude-worktrees`].entries()) {
+      transcript(h, repo, `sib0000${i}`, [...named(`sib0000${i}`, `lead-sib${i}`)], 5, repo, sibling);
+    }
+    const cwd = `${repo}/.claude/worktrees/checkout`;
+    transcript(h, cwd, "mine0001", [talk("x")], 4);
+    expect(folder(cwd).length).toBeLessThan(200);
+    expect(hires({ ...base(h, [live("shop.backend-dev-checkout", "mine0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([["shop.backend-dev-checkout", 4]]);
+  }
 });

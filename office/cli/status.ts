@@ -129,16 +129,12 @@ function newest(dir: string): number {
   }));
 }
 
-/** Every transcript in this repo's own folder and in the folders of its worktrees. A long path is stored truncated to 200 characters with a hash after it, so a worktree's folder name is cut too, and a folder that starts with those 200 is looked at; the ended ones are told apart by the folder they record. */
+/** Every transcript in this repo's own folder and in the folders of its worktrees (statusIn refuses a path too long for those names to stay whole); the ended ones are told apart by the folder they record. */
 function transcripts(home: string, repo: string, listedIds: Set<unknown>, now: number): Transcript[] {
   const root = join(home, ".claude", "projects");
   if (!existsSync(root)) return [];
   const own = folder(repo);
-  const worktrees = `${own}--claude-worktrees-`;
-  // A name over 200 characters was cut and has a hash after it; the cut must still hold `<own>--`, or it would match the folders of sibling projects.
-  const cut = (d: string, prefix: string) => d.length > 200 && d.startsWith(prefix);
-  const mine = readdirSync(root).filter((d) =>
-    d === own || (worktrees.length <= 200 ? d.startsWith(worktrees) : own.length + 2 <= 200 && cut(d, worktrees.slice(0, 200))) || (own.length > 200 && cut(d, own.slice(0, 200))));
+  const mine = readdirSync(root).filter((d) => d === own || d.startsWith(`${own}--claude-worktrees-`));
   // A folder or a transcript that `claude rm` removes between the listing and the stat is skipped; any other error stays visible.
   return mine.flatMap((d) =>
     ls(join(root, d)).filter((f) => f.endsWith(".jsonl")).flatMap((f) => {
@@ -227,7 +223,7 @@ const QUIET_MIN = 20;
 /** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
 const LIMITED_MIN = 360;
 
-/** The entry that stands for a name: with two (an old session left next to a re-hired one) the newest, a fresh session with no transcript yet counting as the newest of all. */
+/** The entry that stands for a name: with two listed entries of one name (an old session beside a re-hired one) the newest, a fresh session with no transcript yet counting as the newest of all. */
 function entryOf(name: string, list: Hire[]): Hire | undefined {
   const age = (x: Hire) => x.idleMinutes ?? -1;
   return list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || age(x) < age(best) ? x : best), undefined);
@@ -286,11 +282,17 @@ export async function watch(given: string[], deps: WatchDeps): Promise<Result> {
   }
 }
 
+/** Claude Code cuts a project folder name at 200 characters; a worktree's is the repo's plus `--claude-worktrees-<task>`, so the repo's must stay short enough for that to be whole. */
+const MAX_FOLDER = 150;
+
 /** `f1rm status` run in `cwd`, against the real Claude Code, git and clock. */
 export async function statusIn(argv: string[], cwd: string): Promise<Result> {
   const common = machine.gitCommonDir(cwd);
   if (!common) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const repo = dirname(common);
+  if (folder(repo).length > MAX_FOLDER) {
+    return { out: "", err: `f1rm: this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the longest worktree folder stays under 200)`, code: 1 };
+  }
   const commitTime = (branch: string) => {
     const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
     return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
