@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { machine } from "../server/machine.ts";
 import { SLUG } from "./hire.ts";
-import { hireTask, letgo } from "./letgo.ts";
+import { hireName, hireTask, letgo } from "./letgo.ts";
+import { longRepos } from "./long-repo.test-helper.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
@@ -507,7 +508,7 @@ function stubClaude(exitCode = 0, sessions: object[] = []) {
   writeFileSync(join(bin, "agents.json"), JSON.stringify(sessions));
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${bin}/agents.json"; exit 0; fi\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
+    `#!/bin/sh\nif [ "$1" = agents ]; then cat "${bin}/agents.json"; exit 0; fi\nfor a in "$@"; do echo "arg:$a" >> "${log}"; done\necho "cwd:$(pwd -P)" >> "${log}"\nenv | grep -E '^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CONFIG_DIR)' | sed 's/^/env:/' >> "${log}"\nexit ${exitCode}\n`,
     { mode: 0o755 },
   );
   const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
@@ -515,6 +516,7 @@ function stubClaude(exitCode = 0, sessions: object[] = []) {
     bin,
     args: () => lines().filter((l) => l.startsWith("arg:")).map((l) => l.slice(4)),
     env: () => lines().filter((l) => l.startsWith("env:")).map((l) => l.slice(4)),
+    cwd: () => lines().find((l) => l.startsWith("cwd:"))?.slice(4) ?? null,
   };
 }
 
@@ -909,6 +911,127 @@ test("help prints the usage line and exits 0; an unknown command, here included,
   }
 });
 
+test("status prints all of a large list into a pipe, not the first 64 KB", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const projects = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(projects, { recursive: true });
+  const count = 260; // about 296 bytes each once printed (77,003 for 260): over 64 KB
+  for (let i = 0; i < count; i++) {
+    writeFileSync(join(projects, `s${i}.jsonl`), [{ type: "agent-name", agentName: `shop.backend-dev-task-${i}`, sessionId: `s${i}` }, { type: "system", cwd: repo }].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  }
+  // A reader that is slow to start, as a pipe to `jq` or a watcher can be.
+  const proc = Bun.spawn(["sh", "-c", `bun "${CLI}" status --json | (sleep 1; cat)`], { cwd: repo, env: { ...process.env, HOME: home, PATH: `${stubClaude(0, []).bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  expect(out.length).toBeGreaterThan(65536);
+  expect(JSON.parse(out)).toHaveLength(count);
+}, 30_000); // under load the listing and the slow reader take a few seconds
+
+test("status --watch with no name left prints no names and exits 0 at once; a flag among the names is a usage error; the usage names --watch", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const stub = stubClaude(0, []);
+  const none = await f1rmIn(repo, home, stub.bin, "status", "--watch", "");
+  expect([none.code, none.out]).toEqual([0, "no names"]);
+  const flag = await f1rmIn(repo, home, stub.bin, "status", "--watch", "--json");
+  expect(flag.code).toBe(1);
+  expect(flag.err).toContain("usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...");
+  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>[:waiting]...");
+});
+
+test("status refuses, in every form, a git repo whose encoded project folder is over 150 characters, and works at 150", async () => {
+  const home = tempHome();
+  const stub = stubClaude(0, []);
+  const repos = longRepos();
+  try {
+    const long = repos.repo(151), fine = repos.repo(150);
+    expect([long.length, fine.length]).toEqual([151, 150]);
+    for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
+      const r = await f1rmIn(long, home, stub.bin, "status", ...args);
+      expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
+      expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
+    }
+    expect((await f1rmIn(fine, home, stub.bin, "status", "--json")).code).toBe(0);
+    // A usage mistake or no names at all is answered before the length is looked at.
+    const bogus = await f1rmIn(long, home, stub.bin, "status", "--bogus");
+    expect([bogus.code, bogus.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+    expect(bogus.err).not.toContain("too long");
+    const flag = await f1rmIn(long, home, stub.bin, "status", "--watch", "--json");
+    expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
+    for (const names of [[], [":waiting"], [""]]) {
+      const r = await f1rmIn(long, home, stub.bin, "status", "--watch", ...names);
+      expect([names.join(","), r.code, r.out, r.err]).toEqual([names.join(","), 0, "no names", ""]);
+    }
+  } finally {
+    repos.cleanup();
+  }
+});
+
+test("status in a folder that is not a git repo says so and exits 1, except for a watch with no names", async () => {
+  const home = tempHome(), stub = stubClaude(0, []);
+  const plain = repoDir("plain");
+  for (const args of [["--json"], [], ["--watch", "lead-a"]]) {
+    const r = await f1rmIn(plain, home, stub.bin, "status", ...args);
+    expect([args.join(" "), r.code, r.out, r.err]).toEqual([args.join(" "), 1, "", expect.stringContaining("not in a git repo")]);
+  }
+  const none = await f1rmIn(plain, home, stub.bin, "status", "--watch");
+  expect([none.code, none.out]).toEqual([0, "no names"]);
+});
+
+test("f1rm pm checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder start a PM, a long repo or a subfolder of one is refused", () => {
+  const repos = longRepos();
+  try {
+    const short = repos.repo(100), exact = repos.repo(150), long = repos.repo(151), plain = repos.repo(151, { git: false });
+    const pmStarts = (cwd: string) => {
+      const stub = stubClaude();
+      const r = pmIn(cwd, { stdin: "w\n" }, stub);
+      return { ...r, started: stub.args().length > 0, startedIn: stub.cwd() };
+    };
+    // A git repo at exactly 150 is accepted: the limit is on the root, not on the .git inside it. The PM starts where it ran, as before (a relative --settings or --add-dir, and --continue, depend on it). The expected lengths are literals.
+    for (const [length, cwd] of [[100, short], [150, exact], [170, repos.inside(short, 170)], [151, plain]] as const) {
+      const r = pmStarts(cwd);
+      expect([cwd.length, r.code, r.started, r.startedIn]).toEqual([length, 0, true, cwd]);
+    }
+    for (const [length, cwd] of [[151, long], [170, repos.inside(long, 170)]] as const) {
+      const r = pmStarts(cwd);
+      expect([cwd.length, r.code, r.started]).toEqual([length, 1, false]); // refused before anything starts, and before the edition is asked
+      expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
+      expect(r.out).not.toContain("Work or a Founder");
+    }
+  } finally {
+    repos.cleanup();
+  }
+});
+
+test("status is a command: it lists this repo's hires from claude agents, never another repo's, and the usage names it", async () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const projects = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(projects, { recursive: true });
+  writeFileSync(join(projects, "aaaa1111.jsonl"), JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }) + "\n");
+  const stub = stubClaude(0, [
+    { id: "aaaa1111", kind: "background", name: "lead-shop", sessionId: "aaaa1111", cwd: repo, state: "working", status: "idle" },
+    { id: "bbbb2222", kind: "background", name: "lead-other", sessionId: "bbbb2222", cwd: "/code/other", state: "working", status: "busy" },
+  ]);
+  const json = await f1rmIn(repo, home, stub.bin, "status", "--json");
+  expect(json.code).toBe(0);
+  const list = JSON.parse(json.out);
+  expect(list.map((h: any) => h.name)).toEqual(["lead-shop"]);
+  expect(list[0]).toMatchObject({ role: "lead", team: "shop", status: "idle", state: "working", ended: false, limitUntil: null });
+  expect(list[0].lastActivity).toBeString();
+  const plain = await f1rmIn(repo, home, stub.bin, "status");
+  expect(plain.code).toBe(0);
+  expect(plain.out).toContain("lead-shop");
+  expect(plain.out).not.toContain("lead-other");
+  const broken = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  writeFileSync(join(broken, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const unreadable = await f1rmIn(repo, home, broken, "status");
+  expect(unreadable.code).toBe(1);
+  expect(unreadable.err).toContain("claude agents --json");
+  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json]");
+});
+
 test("install puts the f1rm command in ~/.local/bin, and uninstall removes it only when it is f1rm's", () => {
   const home = tempHome();
   const stub = stubBin();
@@ -1061,6 +1184,16 @@ test("hireTask takes exactly the task names that hire.ts's SLUG takes", () => {
   for (const task of ["a", "a-b", "a1-b2-c3", "a--b", "-a", "a-", "A", "a b", "a.b", ""]) {
     expect([task, hireTask(`frontend-dev-${task}`) !== null]).toEqual([task, SLUG.test(task)]);
   }
+});
+
+test("hireName reads a hire's role, team and task, a lead's team too; hireTask still takes no lead", () => {
+  expect(hireName("shop.backend-dev-checkout")).toEqual({ role: "backend-dev", team: "shop", task: "checkout", reviewer: false });
+  expect(hireName("designer-landing")).toEqual({ role: "designer", team: null, task: "landing", reviewer: false });
+  expect(hireName("shop.reviewer-review-checkout")).toEqual({ role: "reviewer", team: "shop", task: "checkout", reviewer: true });
+  expect(hireName("lead-shop")).toEqual({ role: "lead", team: "shop", task: "shop", reviewer: false });
+  for (const bad of ["pm-shop", "x.lead-shop", "lead-", "lead-Shop", "backend-dev", "random", "shop.pm-x"]) expect([bad, hireName(bad)]).toEqual([bad, null]);
+  expect(hireTask("lead-shop")).toBeNull();
+  expect(hireTask("shop.backend-dev-checkout")).toEqual({ task: "checkout", reviewer: false });
 });
 
 test("letgo lets a Reviewer or a lead go without touching any branch", async () => {

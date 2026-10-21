@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo | status
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -8,8 +8,9 @@ import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
-import { hire, pmName } from "./hire.ts";
+import { hire, pmName, rootTooLong } from "./hire.ts";
 import { letgo } from "./letgo.ts";
+import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";
 
@@ -457,12 +458,19 @@ function edition() {
 
 // ponytail: extra args go to claude as given, so a variadic flag such as --allowedTools would swallow the prompt.
 async function pm() {
-  const name = pmName(process.cwd());
+  // The PM and its leads watch with f1rm status, which can't serve a repo whose project folder name Claude Code cuts: refuse before anything starts.
+  const common = machine.gitCommonDir(process.cwd());
+  const tooLong = rootTooLong(common);
+  if (tooLong) throw new Error(tooLong);
+  // The root is for the PM's name and the registration; the length check reads the same git root through rootTooLong. The PM itself starts where it ran, so a relative --settings or --add-dir, and --continue, work as before.
+  const root = common ? dirname(common) : process.cwd();
+  const git = { gitCommonDir: () => common };
+  const name = pmName(root, git);
   // One PM per repo: two would write one board. If Claude Code can't list its sessions, the user still gets a PM.
   if ((await agents(false))?.some((a) => a?.name === name)) throw new Error(`${name} is already running for this repo. Talk to it, or stop it before starting another.`);
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
   // With no answer (no terminal), it starts as Work and asks again next time.
-  const file = editionFile(process.cwd());
+  const file = editionFile(root, git);
   register(file);
   let chosen = readEdition(file);
   if (!chosen) {
@@ -495,8 +503,14 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(r.lines.join("\n"));
     process.exit(r.ok ? 0 : 1);
   },
+  status: async () => {
+    const r = await statusIn(process.argv.slice(3), process.cwd());
+    process.stdout.write(r.out);
+    if (r.err) console.error(r.err);
+    process.exitCode = r.code; // not process.exit: on a pipe it cuts the output at 64 KB
+  },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>...";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json] | status --watch <name>[:waiting]...";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

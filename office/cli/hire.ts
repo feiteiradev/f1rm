@@ -28,6 +28,24 @@ const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
+/** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
+export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+
+/**
+ * Claude Code cuts a project folder name at 200 characters (and adds a hash). A worktree's folder is the repo's plus `--claude-worktrees-<task>`, found by that prefix, so a cut name
+ * still matches while the cut keeps the whole prefix. 150 leaves room for it with a margin; a task slug has no cap, but the prefix stays whole whatever its length.
+ */
+export const MAX_FOLDER = 150;
+
+/** Why `f1rm status` can't serve a repo (the PM and the leads watch with it), or null: its project folder name is too long. Checked by `f1rm status` on the repo it runs in, and by `f1rm pm`, `f1rm hire` and the office's Hire endpoint (through planHire) on the root of a git repo (see `rootTooLong`). */
+export const pathTooLong = (repo: string): string | null =>
+  projectFolder(repo).length > MAX_FOLDER
+    ? `this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is ${MAX_FOLDER} characters, so the \`--claude-worktrees-\` prefix of a worktree's folder stays whole)`
+    : null;
+
+/** `pathTooLong` for the repo a command runs in, given its git common dir: the root of a git repo (not the subfolder it ran from), and nothing outside git, where `f1rm pm` and `f1rm hire` still work. */
+export const rootTooLong = (common: string | null): string | null => (common ? pathTooLong(dirname(common)) : null);
+
 /** The PM session name `f1rm pm` gives this repo; a hire reports to it. */
 export function pmName(cwd: string, m: Pick<typeof machine, "gitCommonDir"> = machine): string {
   const common = m.gitCommonDir(cwd);
@@ -48,7 +66,10 @@ export function readRoles(): Role[] {
     });
 }
 
-/** The cap, or a count that can't be made, stopped a hire. `working` is null when it couldn't count. */
+/**
+ * A hire was refused. `working` is the number of working hires when a cap refused it: the caller then adds the advice to leave the task todo and tell the session to report to.
+ * It is null for any other refusal (the hires couldn't be counted, the repo's path is too long): the message then stands alone.
+ */
 export class HireRefused extends Error {
   constructor(message: string, readonly working: number | null) {
     super(message);
@@ -68,8 +89,8 @@ export type HireRequest = {
   /** The project's edition; a founder role is hired only in a Founder project. Work when not chosen. */
   edition?: Edition | null;
   brief: string;
-  /** The PM session the hire reports to, or null when the project has none. */
-  reportTo: string | null;
+  /** The session the hire reports to: a name, none, or a lookup planHire calls only after its checks (it may run git). */
+  reportTo: string | null | (() => string | null);
   /** `haiku`, `sonnet` or `opus` in place of the role's own model. */
   model?: string | null;
   override?: boolean;
@@ -85,9 +106,9 @@ export type HireRequest = {
 
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
- * and a HireRefused when the cap is full or the working hires can't be counted. The caller spawns it.
+ * and a HireRefused when the cap is full, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
  */
-export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions"> = machine): Promise<string[]> {
+export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions" | "gitCommonDir"> = machine): Promise<string[]> {
   const { role, task, team, cwd, brief, model, override, level, content, skills: added = [], extra = [] } = req;
   const roles = readRoles();
   if (!roles.some((r) => r.id === role)) {
@@ -111,6 +132,9 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const name = lead ? `lead-${task}` : team ? `${team}.${role}-${task}` : `${role}-${task}`;
   if (req.name && req.name !== name) throw new Error(`this hire's name must be "${name}"`);
   const reportTo = team ? `lead-${team}` : req.reportTo;
+
+  const tooLong = rootTooLong(m.gitCommonDir(cwd));
+  if (tooLong) throw new HireRefused(tooLong, null);
 
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
@@ -138,9 +162,10 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
-  const prompt = `/${command}${more}${reportTo ? ` Report to: ${reportTo}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
+  const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
+  const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
-  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself, where `f1rm hire` runs.
+  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
   const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...extra];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
@@ -172,8 +197,13 @@ export async function hire(words: string[]): Promise<number> {
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
   let argv: string[];
+  // Git is asked once; the edition file, the PM's name and the path limit all read it.
+  const common = machine.gitCommonDir(process.cwd());
+  const git = { gitCommonDir: () => common };
+  // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
+  const root = common ? dirname(common) : process.cwd();
   try {
-    argv = await planHire({ role, name, task, team, cwd: process.cwd(), edition: readEdition(editionFile(process.cwd())), brief, reportTo: reportTo ?? pmName(process.cwd()), override, skills, level, content, extra });
+    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(
@@ -182,6 +212,6 @@ export async function hire(words: string[]): Promise<number> {
     }
     throw err;
   }
-  const proc = Bun.spawn(argv, { env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
+  const proc = Bun.spawn(argv, { cwd: root, env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
   return proc.exited;
 }

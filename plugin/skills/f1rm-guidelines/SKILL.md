@@ -61,6 +61,7 @@ Playbook:
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the Reviewer runs it with the Skill tool from its scratch worktree on the merge, with `<base>...<merge sha>` as its args, before `APPROVED`.
    - `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
+9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`: each lives in a folder named after the session. They have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
 
 ## Workflows
 
@@ -71,13 +72,13 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   2. Interview with `mattpocock-skills:grilling` until the user confirms.
   3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
   4. Hire one or two leads with `f1rm hire lead`, and answer each `PLAN <team>` with `GO <team>`.
-  5. Wait. Tell the user only what the Who talks to whom rules allow. After `DONE <team>`, let the lead go with `f1rm letgo`.
+  5. Wait, with a background watcher on your leads (see Watching and waking). Tell the user only what the Who talks to whom rules allow. After `DONE <team>`, let the lead go with `f1rm letgo`.
   6. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
   1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`.
   2. Write the team board and send `PLAN <team>`.
-  3. After `GO <team>`, hire into the team with `f1rm hire --team`.
+  3. After `GO <team>`, hire into the team with `f1rm hire --team`, and watch your hires with a background watcher (see Watching and waking).
   4. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
   5. Write the findings file, let the team go with `f1rm letgo`, then send `DONE <team>`.
 - **designer**
@@ -155,6 +156,28 @@ In a Founder project the PM follows this on top of everything else here.
 7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges. Every `CHANGES REQUESTED` goes back to the dev, minor findings too, before the merge (see the review flow).
 8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
 
+## Watching and waking
+
+The PM watches its leads and each lead watches its own hires, so a session that stopped is found without the user. Judge by real activity, never by status text: `claude agents` and `claude logs` read "working" for hours on a session that hit the subscription limit. `f1rm status --json` lists this repo's hires, judged by their transcripts and branches: `idleMinutes` (since the transcript was last written), `lastCommit`, `ended` (`claude agents` no longer lists the session) and `limitUntil` (when the last line of the conversation is a limit stop of any kind, session or weekly: the text after "resets" as the stop gives it, such as `8:40pm (Europe/Lisbon)` or `Monday 9:00 (Europe/Lisbon)`; `unknown` if it names no time).
+
+1. **Watch.** After hiring, run `f1rm status --watch <names>` in the background (`run_in_background`); its exit wakes you. It polls once a minute and prints each stalled name with its reason: idle for 20 minutes, ended, on a limit stop, missing from the list or without an activity time. It exits 1 when `claude agents --json` can't be read. A lead counts as stalled only when it and every hire of its team have been quiet, so a lead waiting on active hires is not. It only reads, so the delegation gate lets it through.
+   - Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`: a waiting name is judged only for ended, missing or a limit stop, never for being quiet, and a waiting name is watched as a plain name as soon as it writes again, so an approval at the hire's desk (which no message reports) puts it back without you. A message you send to a waiting session counts as a write and makes it plain. Until it writes, a waiting name is woken only for ended, missing or a limit stop.
+   - Leave out a hire waiting on a reset timer you hold.
+   - When you answer a session's report (and it works again), restart the watcher with it as a plain name.
+   - Start no watcher when no name is left; the reset timers wake you.
+2. **On wake**, read what the watcher printed and take each stalled session in turn:
+   - **Limit stop** (`limitUntil`): wait until the time it names, with a background `sleep` whose exit wakes you, then send it `resume` and where it stopped, from its `resume.md` (see the Checkpoint rule).
+   - **Limit stop with no time** (`limitUntil` is `unknown`): a rate-limit error that is not the subscription's reads this way, so wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session.
+   - **Idle 20 minutes**, still listed, no limit stop: send it `resume`.
+   - **Ended**: run `f1rm letgo <name>`, then hire it again with a resume brief placed before the original brief: the merged commits, the branch tip, the stale scratch worktrees to remove first, the remaining specs. A specialist gets a new task slug and resets its worktree to the old tip; a lead keeps its name. If `letgo` refuses because the branch is not merged, leave the old session: its tip lives on in the new branch, and it is let go after that merge.
+   - **Missing or no activity time**: keep it in the names; if the next wake still finds it so, treat it as ended.
+   - **Status can't be read**: if status refuses the repo itself (not a git repo, path too long), don't restart: tell the session in your `Report to` (the PM tells the user). Otherwise run `f1rm status` by hand to see why, then restart the watcher.
+   - **After you send `resume`**, restart the watcher. The delivered `resume` clears the stop, so the old stop does not wake the watcher again. A hire that hits the limit again shows a new stop and wakes you again; a second `resume` in a row that brought no new commit, message or timed limit stop in between means it is ended (an `unknown` stop does not count, so a persistent error ends after two resumes).
+   - When a session sends its report, restart the watcher with it as `name:waiting`.
+   - After handling any wake (unless status refused the repo), restart the watcher with the names still working. After `f1rm letgo`, restart the watcher without the names you let go. A wake from a stale watcher is ignored when its hire is not in the names you now watch. For a wake about a session you already handled (or took a report from) since that watcher started: ignore it, but still restart the watcher.
+3. **Known limit.** If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon that restarts sessions by itself.
+4. **Address a re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
+
 ## Brief format
 
 A hire sees only its brief and the repo. Write the brief so it can work without asking. `f1rm hire` puts `Report to: <PM session name>` right after the slash commands. Write exactly these sections, in this order.
@@ -203,7 +226,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 
   Everything else stays between agents: `PLAN` and `GO`, `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
 - A specialist reports only to the session in its `Report to`, its team's lead. It never messages the user, the PM, another team or another specialist.
-- **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports. It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
+- **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports, and the watcher is your own (see Watching and waking). It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
 - **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead passes it to the PM the same way. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
 - **Projects are isolated.** A session works inside its own repo. The PM and leads filter `claude agents --json` and ListAgents to their own repo (a cwd under its main working directory) at pickup and every time after, and never name, address or rely on another project's sessions, boards, milestones or evidence. A problem with f1rm itself goes to the user as one line, `f1rm feedback: <problem> -> <suggestion>`, written in your reply and addressed to no session. The project gate (see Gates) refuses a message to another project.

@@ -20,9 +20,14 @@ let backgroundIds: Record<string, string> = {};
 // What `claude agents --json` lists (session id -> pid), and the pids whose process has ended.
 let listing = new Map<string, number | undefined>();
 let deadPids = new Set<number>();
+// How many times the server asked git for a common dir, so a test can say a request asked at most once, or not at all.
+let gitCalls = 0;
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
-  gitCommonDir: (cwd: string) => repos[cwd] ?? null,
+  gitCommonDir: (cwd: string) => {
+    gitCalls++;
+    return repos[cwd] ?? null;
+  },
   isRepo: (folder: string) => Object.values(repos).includes(folder + "/.git"),
   liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
@@ -816,6 +821,36 @@ test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief an
   ];
   for (const [body, status] of cases) expect([JSON.stringify(body), (await hireOf(body)).status]).toEqual([JSON.stringify(body), status]);
   expect(spawned).toEqual([]);
+});
+
+test("Hire refuses a project whose path is over 150 characters with the path message, hires one of 150, and spawns nothing for the first", async () => {
+  const long = `/code/${"x".repeat(145)}`; // 151 characters once encoded
+  const fine = `/code/${"y".repeat(144)}`;
+  expect([long.length, fine.length]).toEqual([151, 150]);
+  start({ [long]: `${long}/.git`, [fine]: `${fine}/.git` });
+  await hook(sessionStart("s1", long));
+  await hook(sessionStart("s2", fine));
+  await office((s) => `${long}/.git` in s.rooms && `${fine}/.git` in s.rooms);
+  const refused = await hireOf({ ...ASSIGN, room: `${long}/.git` });
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ error: expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters"), working: null });
+  expect(spawned).toEqual([]);
+  expect((await hireOf({ ...ASSIGN, room: `${fine}/.git` })).status).toBe(200);
+  expect(spawned.map((s) => s.cwd)).toEqual([fine]);
+});
+
+test("Hire asks git for the common dir once at most, and not at all for a request that fails the cheap checks, with a PM in the room too", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms && Object.keys(s.employees).length === 2);
+  gitCalls = 0;
+  const bad = await hireOf({ ...ASSIGN, role: "nonesuch" });
+  expect(bad.status).toBe(400);
+  expect(gitCalls).toBe(0); // the PM's name is not looked up before the role is checked
+  expect((await hireOf(ASSIGN)).status).toBe(200);
+  expect(gitCalls).toBe(1); // the PM's name and the path limit share one lookup
+  expect((spawned.at(-1)!.argv.find((a) => a.includes("Report to:")) ?? "")).toContain("Report to: pm-shop");
 });
 
 test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {

@@ -29,6 +29,7 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 - Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third. Rounds of minor findings alone never escalate.
 - Follow the review-and-merge flow in `f1rm:f1rm-guidelines` exactly. Merge locally. Never push, never force, never rewrite history; the gate refuses them.
 - Change no product code. Return findings to the session in your `Report to`, with file and line for each, and mark each as blocking or not.
+- **Checkpoint.** Before a long step and whenever you stop, write `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, the scratch worktree and merge sha if any. You merge instead of committing, so no wip commit.
 
 ## Handoff
 

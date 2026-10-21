@@ -583,3 +583,90 @@ test("P3: a hire that creates the decisions log adds its merge=union line to .gi
     expect(line, name).toContain(html);
   }
 });
+
+// Self-driving teams: the PM watches its leads and each lead its hires with `f1rm status --watch`, and wakes or replaces the ones that stopped.
+test("S1: the guidelines state the watcher, the real-activity rule, and what to do on a wake for a limit stop, an ended session and a stalled one", () => {
+  const w = section("Watching and waking");
+  for (const s of [
+    "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "`f1rm status --watch <names>`", "`name:waiting`", "`run_in_background`", "its exit wakes you",
+    "idle for 20 minutes", "exits 1 when `claude agents --json` can't be read", "only when it and every hire of its team",
+    "Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`",
+    "a waiting name is judged only for ended, missing or a limit stop, never for being quiet",
+    "When you answer a session's report (and it works again), restart the watcher with it as a plain name.", "a waiting name is watched as a plain name as soon as it writes again",
+    "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
+    "After `f1rm letgo`, restart the watcher without the names you let go.", "For a wake about a session you already handled (or took a report from) since that watcher started: ignore it, but still restart the watcher.", "When a session sends its report, restart the watcher with it as `name:waiting`.",
+    "A message you send to a waiting session counts as a write and makes it plain.", "Until it writes, a waiting name is woken only for ended, missing or a limit stop.",
+    "**Limit stop**", "wait until the time it names", "the text after \"resets\"", "send it `resume`", "`resume.md`",
+    "**Limit stop with no time** (`limitUntil` is `unknown`)", "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session",
+    "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
+    "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
+    "`name [ref]`", "`uds:<socket>`", "decides on the bare name", "**Idle 20 minutes",
+    "**Status can't be read**", "if status refuses the repo itself (not a git repo, path too long), don't restart: tell the session in your `Report to` (the PM tells the user). Otherwise run `f1rm status` by hand to see why, then restart the watcher.",
+    "when the last line of the conversation is a limit stop",
+  ]) expect(w, s).toContain(s);
+  // After you send `resume`: the delivered `resume` clears the stop; a second one in a row ends the hire unless a timed limit stop came between.
+  for (const s of [
+    "**After you send `resume`**, restart the watcher.", "The delivered `resume` clears the stop, so the old stop does not wake the watcher again", "shows a new stop and wakes you again",
+    "a second `resume` in a row that brought no new commit, message or timed limit stop in between means it is ended", "an `unknown` stop does not count, so a persistent error ends after two resumes",
+    "After handling any wake (unless status refused the repo), restart the watcher with the names still working.", "A wake from a stale watcher is ignored when its hire is not in the names you now watch.",
+  ]) expect(w, s).toContain(s);
+  expect(w.split("delivered `resume` clears the stop").length - 1).toBe(1); // said once
+  expect(w.split("After handling any wake (unless status refused the repo), restart the watcher").length - 1).toBe(1);
+  // The watcher is the command: no script in the prose, no timer rules, no running-watcher bookkeeping.
+  for (const old of ["bun -e", "NAMES=", "while :", "sleep 60", "sleep 300", "stop the running one first", "PID", "a minute later", "under a minute", "until its first new line", "complete the other"]) expect(w, old).not.toContain(old);
+  expect(w).not.toMatch(/```/);
+  // The checkpoint is one hire rule, in the playbook.
+  const rule = section("Roster and hiring playbook");
+  for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
+  expect(rule).toContain("each lives in a folder named after the session");
+  expect(rule).not.toMatch(/collide/);
+  // One subscription: the same limit stops the PM, the leads and their hires together, and nothing wakes them (the brief rejects a daemon).
+  const known = "If the PM and the leads are stopped by the same limit, nothing wakes them; the user restarts them after the reset.";
+  const decisions = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  for (const s of [
+    "the PM watches its leads and each lead watches its own hires with `f1rm status --watch <names>` in the background", "its exit wakes them",
+    "passes sessions waiting for an answer to their report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`",
+    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes",
+    "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
+    "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
+    "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
+    "it refuses, in every form, a repo whose encoded project folder is over 150 characters",
+    "`f1rm hire` starts hires at the git repo root, not in the subfolder it ran from (outside git, where it ran)", "the PM starts where it ran", "a repo whose `.git` is not inside its working tree (a submodule or a separate git dir) is not supported", "the office's Hire endpoint refuses a long-path repo too, with the same message", "matching cut repo folders was dropped", "The refusal happens at `f1rm pm`, `f1rm hire` and `f1rm status`", "`f1rm pm` and `f1rm hire` check the root of a git repo, not the subfolder they ran from, and refuse nothing outside git", "judged only for ended, missing or a limit stop, never for being quiet",
+    "When a session sends its report the PM or lead restarts the watcher with it as `name:waiting` (the PM does the same for its leads: `PLAN`, `DONE <team>`); when it answers the report and the session works again, it restarts the watcher with it as a plain name",
+    "so the `--claude-worktrees-` prefix of a worktree's folder stays whole (the filter matches a cut worktree name by that prefix; task slugs have no cap",
+  ]) expect(decisions, s).toContain(s);
+  for (const old of ["bun snippet", "the loop sleeps first", "loops `f1rm status --json`", "restarts the watcher a minute later", "`f1rm hire` and `f1rm pm` start the session at the git repo root", "judged only for ended and a limit stop", "longest worktree folder", "and nothing outside git (plain-folder", "(except a refused repo)", "matches a cut name by that prefix", "matching cut names was dropped", "or limit stop in between", "leaving out sessions waiting", "it is restored as a plain name when it works again"]) expect(decisions, old).not.toContain(old);
+  for (const old of ["So is a hire waiting on a reset timer", "judged only for ended and a limit stop", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
+  // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
+  const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
+  for (const text of [w, decisions]) {
+    expect(text).toContain(known);
+    expect(text).toContain(pmStop);
+  }
+  // The lead and PM files say the same paths.
+  expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/lead-<team>/resume.md`");
+  expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm-<repo>/resume.md`");
+  expect(section("Who talks to whom")).toContain("the watcher is your own");
+});
+
+test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role file carries the checkpoint line", () => {
+  for (const r of ["pm", "lead"]) {
+    for (const s of ["`f1rm status --watch", "run_in_background", "its exit wakes you", "never by status text", "limit stop", "resume brief", "`name [ref]`", "Watching and waking", "**After you send `resume`**", "`name:waiting`"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
+    for (const old of ["bun -e", "sleep 300", "background watcher on `f1rm status --json`"]) expect(role(r).body, `${r}: ${old}`).not.toContain(old);
+  }
+  expect(role("pm").body).toMatch(/watch your leads/i);
+  expect(role("lead").body).toMatch(/watch your own hires/i);
+  for (const name of Object.keys(ROLES)) {
+    const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
+    expect(line, name).toContain("`~/.f1rm/evidence/<repo>/");
+    expect(line, name).toContain("resume.md");
+    if (!["pm", "lead", "reviewer"].includes(name)) expect(line, name).toContain("wip commit");
+  }
+});
+
+test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm status and Self-driving teams entries", () => {
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm status` \|/m);
+  expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm status");
+  const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
+  for (const t of ["f1rm status", "Self-driving teams"]) expect(titles).toContain(`2026-10-21 ${t}`);
+});
