@@ -618,7 +618,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   for (const s of [
     "After sending `resume` the PM or lead restarts the watcher a minute later with every name still working", "leaving out sessions that sent `DONE` or `BLOCKED` and wait for an answer, and any hire waiting on a reset timer",
     "a hire that hits the limit again shows a new stop and wakes it again", "a second `resume` in a row that brought no new commit or message means the hire is ended",
-    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes",
+    "the delivered `resume` clears the stop", "only while the stop is the last line of the conversation", "a stop that names no time gets `resume` after a few minutes", "only an enqueue or a user line clears the stop, and the session's own task-notification does not",
   ]) expect(decisions, s).toContain(s);
   for (const old of ["sleeps 300 seconds", "notes the time before sending it", "waits again for the time a timed stop names"]) expect(decisions, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
