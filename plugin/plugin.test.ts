@@ -601,7 +601,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
     "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
     "`name [ref]`", "`uds:<socket>`", "decides on the bare name", "**Idle 20 minutes",
-    "**Status can't be read**", "run `f1rm status` by hand to see why, then restart the watcher",
+    "**Status can't be read**", "If status refuses the repo itself (not a git repo, path too long), don't restart: tell the session in your `Report to` (the PM tells the user).", "run `f1rm status` by hand to see why, then restart the watcher",
     "when the last line of the conversation is a limit stop",
   ]) expect(w, s).toContain(s);
   // After you send `resume`: the delivered `resume` clears the stop; a second one in a row ends the hire unless a timed limit stop came between.
@@ -610,7 +610,6 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "a second `resume` in a row that brought no new commit, message or timed limit stop in between means it is ended", "an `unknown` stop does not count, so a persistent error ends after two resumes",
     "After handling any wake, restart the watcher with the names still working.", "A wake from a stale watcher is ignored when its hire is not in the names you now watch.",
   ]) expect(w, s).toContain(s);
-  expect(w).not.toContain("If status refuses the repo's path");
   expect(w.split("delivered `resume` clears the stop").length - 1).toBe(1); // said once
   expect(w.split("After handling any wake, restart the watcher").length - 1).toBe(1);
   // The watcher is the command: no script in the prose, no timer rules, no running-watcher bookkeeping.
@@ -631,7 +630,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "a reply or a delivered message (an enqueue or a user line) clears it; the session's own task-notification does not",
     "a second `resume` in a row that brought no new commit, message or timed limit stop in between means the hire is ended",
     "an ended hire is listed only when the folder its transcript records is this repo's folder or under it",
-    "it refuses, in every form, a repo whose encoded project folder is over 150 characters", "matching cut repo folders was dropped", "The refusal happens at `f1rm pm`, `f1rm hire` and `f1rm status`", "judged only for ended, missing or a limit stop, never for being quiet",
+    "it refuses, in every form, a repo whose encoded project folder is over 150 characters", "matching cut repo folders was dropped", "The refusal happens at `f1rm pm`, `f1rm hire` and `f1rm status`", "`f1rm pm` and `f1rm hire` check the root of a git repo, not the subfolder they ran from, and nothing outside git", "judged only for ended, missing or a limit stop, never for being quiet",
     "When a session sends its report the PM or lead restarts the watcher with it as `name:waiting` (the PM does the same for its leads: `PLAN`, `DONE <team>`); when it answers the report and the session works again, it restarts the watcher with it as a plain name",
     "so the `--claude-worktrees-` prefix of a worktree's folder stays whole (the filter matches a cut worktree name by that prefix; task slugs have no cap",
   ]) expect(decisions, s).toContain(s);
