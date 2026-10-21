@@ -598,7 +598,12 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   ]) expect(w, s).toContain(s);
   // A stop with no time may be any API error that mentions a limit, so `resume` can meet it again.
   const noTime = /^ *- \*\*Limit stop with no time\*\*.*$/m.exec(w)?.[0] ?? "";
-  for (const s of ["keep it out of the watcher's names until its first new line shows", "if it stops on the same error again, treat it as ended"]) expect(noTime, s).toContain(s);
+  // After `resume`, a hire that hits the limit again still ends on a limit line, so the signal is new activity, not a missing `limitUntil`.
+  const signal = "keep it out of the watcher's names until its first new line shows (its `idleMinutes` is back under a minute)";
+  for (const s of [signal, "restart the watcher with it after a few minutes; if it still shows a limit stop with new activity, treat it as ended"]) expect(noTime, s).toContain(s);
+  const timed = /^ *- \*\*Limit stop\*\* \(.*$/m.exec(w)?.[0] ?? "";
+  for (const s of [signal, "restart the watcher with it after a few minutes; if it still shows a limit stop with new activity, wait again for the time it names"]) expect(timed, s).toContain(s);
+  expect(w).not.toContain("gives it no `limitUntil`");
   // The checkpoint is one hire rule, in the playbook.
   const rule = section("Roster and hiring playbook");
   for (const s of ["Checkpoint", "wip commit", "`~/.f1rm/evidence/<repo>/<task>/resume.md`", "done, next step, tip", "A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`"]) expect(rule, s).toContain(s);
