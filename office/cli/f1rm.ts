@@ -462,7 +462,7 @@ async function pm() {
   const common = machine.gitCommonDir(process.cwd());
   const tooLong = rootTooLong(common);
   if (tooLong) throw new Error(tooLong);
-  // The root is for the PM's name and the length check only: the PM itself starts where it ran, so a relative --settings or --add-dir, and --continue, work as before.
+  // The root is for the PM's name, the registration and the length check: the PM itself starts where it ran, so a relative --settings or --add-dir, and --continue, work as before.
   const root = common ? dirname(common) : process.cwd();
   const git = { gitCommonDir: () => common };
   const name = pmName(root, git);

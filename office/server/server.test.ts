@@ -20,9 +20,11 @@ let backgroundIds: Record<string, string> = {};
 // What `claude agents --json` lists (session id -> pid), and the pids whose process has ended.
 let listing = new Map<string, number | undefined>();
 let deadPids = new Set<number>();
+// How many times the server asked git for the hire test's folder, so a test can say a request asked at most once, or not at all.
+let gitCalls = 0;
 const fakeMachine = (repos: Record<string, string> = {}) => ({
   // cwd -> git common dir, canned
-  gitCommonDir: (cwd: string) => (gitCalls++, repos[cwd] ?? null),
+  gitCommonDir: (cwd: string) => (cwd === "/code/shop" && gitCalls++, repos[cwd] ?? null),
   isRepo: (folder: string) => Object.values(repos).includes(folder + "/.git"),
   liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
@@ -734,9 +736,6 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
   }
   expect(calls).toEqual([]);
 });
-
-// How many times the server asked git for a common dir, so a test can say a request asked at most once, or not at all.
-let gitCalls = 0;
 
 const SHOP = { "/code/shop": "/code/shop/.git" };
 const ROOM = "/code/shop/.git";

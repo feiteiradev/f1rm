@@ -89,7 +89,6 @@ export type HireRequest = {
   /** The project's edition; a founder role is hired only in a Founder project. Work when not chosen. */
   edition?: Edition | null;
   brief: string;
-  /** The PM session the hire reports to, or null when the project has none. */
   /** The session the hire reports to: a name, none, or a lookup planHire calls only after its checks (it may run git). */
   reportTo: string | null | (() => string | null);
   /** `haiku`, `sonnet` or `opus` in place of the role's own model. */
