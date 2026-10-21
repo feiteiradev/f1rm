@@ -618,6 +618,19 @@ test("start opens the office that is already running instead of starting another
   expect(stub.calls()).toEqual([`open ${url}`]);
 });
 
+test("a link on the scheme's default port still says which port when its output is not a terminal", async () => {
+  const home = tempHome();
+  const stub = stubBin();
+  mkdirSync(join(home, ".f1rm"));
+  writeFileSync(join(home, ".f1rm", "office-url"), "http://127.0.0.1/tok/"); // F1RM_PORT=80: URL.port is "" for it
+  const preload = join(home, "up.ts"); // nothing can listen on port 80 here, so the office is faked as answering
+  writeFileSync(preload, `globalThis.fetch = (async () => new Response("office")) as any;`);
+  const proc = Bun.spawn(["bun", "--preload", preload, CLI, "start"], { env: { ...process.env, HOME: home, PATH: `${stub.bin}:${process.env.PATH}` }, stdout: "pipe" });
+  const [code, out] = [await proc.exited, await new Response(proc.stdout).text()];
+  expect(code).toBe(0);
+  expect(out.trim()).toBe("f1rm office: running on port 80");
+});
+
 test("start prints the full link when its output is a terminal", async () => {
   const home = tempHome();
   const stub = stubBin();

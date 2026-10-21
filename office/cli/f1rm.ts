@@ -270,7 +270,7 @@ function serve() {
 
 /** Prints the link to a terminal, else only the port: under launchd stdout is a log. */
 function announce(url: string) {
-  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port}`);
+  console.log(process.stdout.isTTY ? `f1rm office: ${url}` : `f1rm office: running on port ${new URL(url).port || 80}`);
 }
 
 async function runningOffice(): Promise<string | null> {
