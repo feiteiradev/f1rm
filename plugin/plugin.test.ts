@@ -653,6 +653,10 @@ test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role
   for (const r of ["pm", "lead"]) {
     for (const s of ["background watcher", "`f1rm status --json`", "never by status text", "20 minutes", "limit stop", "resume brief", "`name [ref]`", "Watching and waking"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
   }
+  // The same triggers in pm.md and lead.md as in the guidelines' watcher.
+  for (const r of ["pm", "lead"]) {
+    for (const s of ["is missing from the list or has no activity time", "when status can't be read", "leave out a session that sent `DONE` or `BLOCKED` and waits for an answer"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
+  }
   expect(role("pm").body).toMatch(/watch your leads/i);
   expect(role("pm").body).toContain("together with every hire of its team");
   expect(section("Watching and waking")).toContain("only when it and every hire of its team");
