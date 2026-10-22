@@ -136,7 +136,7 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)]\s*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
+const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
 // Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
 const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
@@ -162,16 +162,23 @@ const TALK = {
 };
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
-// `$(mktemp -d)`, and not the user's real home (see REAL_HOME). Text only: a HOME exported by an earlier call is not seen, and a later `env` option that clears it (`-i`, `-u HOME`) undoes the prefix.
+// `$(mktemp -d)`, and neither the user's real home (see REAL_HOME) nor the HOME this office runs with (a second office is measured by its own sessions).
+// Text only: a HOME exported by an earlier call is not seen, and an option of an `env` word after the HOME= word that clears it (`-`, `-i`, `--ignore-environment`, `-u HOME`) undoes the prefix.
 const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
 const ownHome = (prefix: string[]) => {
   // Only the options of an `env` word after the HOME= word can clear it; another wrapper's `-i` (`stdbuf -i 0`) does not.
   const at = prefix.findLastIndex((w) => w.startsWith("HOME=")), env = prefix.findIndex((w, j) => j > at && unquoted(w) === "env");
-  const options = env < 0 ? [] : prefix.slice(env + 1).map(unquoted);
-  const cleared = options.some((w, j) => ["-", "-i", "--ignore-environment", "-uHOME", "--unset=HOME"].includes(w) || ((w === "-u" || w === "--unset") && options[j + 1] === "HOME"));
+  // env's own options end at its first other word (`env F1RM_PORT=4999 stdbuf -i 0 …`); `-u` and `--unset` take the next word as their value.
+  let cleared = false;
+  if (env >= 0) {
+    for (let j = env + 1; j < prefix.length && unquoted(prefix[j]).startsWith("-"); j++) {
+      const option = unquoted(prefix[j]);
+      if (["-", "-i", "--ignore-environment", "-uHOME", "--unset=HOME"].includes(option)) cleared = true;
+      if ((option === "-u" || option === "--unset") && unquoted(prefix[++j] ?? "") === "HOME") cleared = true;
+    }
+  }
   const value = unquoted(prefix[at]?.slice(5) ?? "");
-  // Neither the user's real home nor the HOME this office runs with (a second office is measured by its own sessions).
-  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, homeKey(process.env.HOME ?? "/"), "/"].includes(homeKey(value))));
+  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, homeKey(process.env.HOME || "/"), "/"].includes(homeKey(value))));
 };
 // What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper splitCommands drops), `npm exec`.
 const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
@@ -182,7 +189,7 @@ const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) =
   if (!/^claude(?:-code)?(?:@\S+)?$/i.test(basename(unquoted(words[i] ?? "").replace(/^\\/, "")))) return null;
   // What follows `--` is another command's (`claude mcp add x -- npx srv -sp 1`), but `npm exec` consumes the first `--` itself and hands claude what follows it.
   const rest = words.slice(i + 1).map(unquoted);
-  if (words[0] === "npm" && rest.includes("--")) rest.splice(rest.indexOf("--"), 1);
+  if (words[0] === "npm" && !words.slice(1, i).includes("--") && rest.includes("--")) rest.splice(rest.indexOf("--"), 1); // not when npm used it before the package
   const args = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : undefined);
   const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
   // A wake resumes the session it names; `--fork-session` starts a new one.
