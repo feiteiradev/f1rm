@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
-import { mayWake, planWake, DEFAULT_NOTE } from "./wake.ts";
+import { DEFAULT_NOTE, lastModel, mayWake, planWake } from "./wake.ts";
 
 setDefaultTimeout(30_000);
 const made: string[] = [];
@@ -24,12 +24,13 @@ const idle = (name: string, sessionId: string, cwd: string) => running(name, ses
 const stopped = (name: string, sessionId: string, cwd: string, state = "stopped", more: Entry = {}) => entry(name, sessionId, cwd, { state, ...more });
 
 /** What the two `claude agents --json` calls say: --all lists everything, the plain call the sessions that run, and a blocked one (it has no process but holds its slot). */
-const deps = (list: Entry[], more: { home?: string; exists?: (p: string) => boolean } = {}) => ({
+const deps = (list: Entry[], more: { home?: string; exists?: (p: string) => boolean; modelOf?: (cwd: string, sessionId: string) => string | null } = {}) => ({
   agents: async (all: boolean) => (all ? list : list.filter((a) => a.pid || a.state === "blocked")),
   gitCommonDir: () => `${REPO}/.git`,
   home: more.home ?? tmp("f1rm-wake-home-"),
   now: NOW,
   exists: more.exists ?? (() => true),
+  modelOf: more.modelOf ?? (() => null),
 });
 const plan = (target: string, list: Entry[], req: { message?: string; override?: boolean; extra?: string[] } = {}, more: Parameters<typeof deps>[1] = {}) =>
   planWake({ target, cwd: REPO, ...req }, deps(list, more));
@@ -62,6 +63,28 @@ test("a hire is found by its name, its session id or its short id, and flags aft
     const p = await plan(target, [lead, dev], { extra: ["--model", "haiku"] });
     expect([target, p.argv.slice(0, 8), p.argv.slice(-2)]).toEqual([target, ["claude", "--bg", "--resume", "abcd1234-0000", "--agent", "f1rm:designer", "--name", "shop.designer-landing"], ["--model", "haiku"]]);
   }
+});
+
+test("the woken hire keeps the model it last answered with, unless the caller gives one: a resume alone falls back to the role's own", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  const seen: string[][] = [];
+  const modelOf = (cwd: string, sessionId: string) => (seen.push([cwd, sessionId]), "claude-haiku-5-5");
+  const kept = await plan("shop.backend-dev-checkout", [lead, dev], {}, { modelOf });
+  expect(seen).toEqual([[wt("checkout"), "dev-sid-1"]]);
+  expect(kept.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
+  const given = await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--model", "opus"] }, { modelOf });
+  expect(given.argv.filter((a) => a === "--model")).toHaveLength(1);
+  expect(given.argv.slice(-2)).toEqual(["--model", "opus"]);
+  expect((await plan("shop.backend-dev-checkout", [lead, dev])).argv).not.toContain("--model"); // no transcript to read
+});
+
+test("lastModel reads the model of the conversation's last answer, not a sub-agent's, an error line's or a session with none", () => {
+  const line = (o: object) => JSON.stringify(o);
+  const answer = (model: string, more: object = {}) => line({ type: "assistant", message: { model, content: [{ type: "text", text: "x" }] }, ...more });
+  expect(lastModel([answer("claude-sonnet-5-5"), answer("claude-haiku-5-5")].join("\n"))).toBe("claude-haiku-5-5");
+  expect(lastModel([answer("claude-haiku-5-5"), answer("claude-opus-5-5", { isSidechain: true }), answer("<synthetic>"), line({ type: "system" }), "{cut"].join("\n"))).toBe("claude-haiku-5-5");
+  expect(lastModel(line({ type: "user", message: { content: "hi" } }))).toBeNull();
+  expect(lastModel("")).toBeNull();
 });
 
 test("a lead is woken from the repo itself and reports to the PM; a Reviewer reports to its lead", async () => {

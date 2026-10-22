@@ -1,11 +1,11 @@
 // `f1rm wake <name|id> [message]`: resumes a stopped, blocked or done hire (or lead) of this project in place, with its history, name and Report to.
 // A session whose process ended is resumed as a NEW session (new id, the old history copied, the old transcript untouched); name and folder are kept only because they are passed here.
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
-import { checkSlots, HireRefused, pmName, rootTooLong, type LiveHires } from "./hire.ts";
+import { checkSlots, HireRefused, pmName, projectFolder, rootTooLong, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { hires } from "./status.ts";
+import { hires, tail } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake [--override] <name|id> [message] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -33,7 +33,25 @@ export type WakeDeps = {
   home: string;
   now: number;
   exists: (path: string) => boolean;
+  /** The model a session last answered with, or null when its transcript says none. */
+  modelOf: (cwd: string, sessionId: string) => string | null;
 };
+
+/**
+ * The model of the conversation's last answer in a piece of transcript: an assistant line that is no sub-agent's and no synthetic error line (`<synthetic>`). A resume with no `--model`
+ * runs the role's own model, so a hire started on Haiku would wake on Sonnet, and an Opus one on less.
+ */
+export function lastModel(end: string): string | null {
+  for (const l of end.split("\n").reverse()) {
+    if (!l.includes('"type":"assistant"')) continue;
+    try {
+      const line = JSON.parse(l);
+      const model = line.message?.model;
+      if (line.type === "assistant" && !line.isSidechain && typeof model === "string" && !model.startsWith("<")) return model;
+    } catch {} // a cut or odd line is no answer
+  }
+  return null;
+}
 
 export type WakePlan = { argv: string[]; cwd: string; name: string; sessionId: string };
 
@@ -80,7 +98,9 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const reportTo = hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common });
   const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}`;
   const sessionId = String(target.sessionId);
-  return { argv: ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...(req.extra ?? [])], cwd, name, sessionId };
+  const extra = req.extra ?? [];
+  const model = extra.includes("--model") ? null : d.modelOf(cwd, sessionId);
+  return { argv: ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])], cwd, name, sessionId };
 }
 
 /** Runs `f1rm wake` and returns the exit code. */
@@ -93,7 +113,9 @@ export async function wake(words: string[]): Promise<number> {
   const message = rest[0] && !rest[0].startsWith("-") ? rest.shift() : undefined;
   let plan: WakePlan;
   try {
-    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home: process.env.HOME!, now: Date.now(), exists: existsSync });
+    const home = process.env.HOME!;
+    const modelOf = (cwd: string, sessionId: string) => lastModel(tail(join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`)));
+    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync, modelOf });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(`${err.message} Do not wake it; tell the session you report to. Only after the user approves this wake in that conversation is it rerun with --override.`);
