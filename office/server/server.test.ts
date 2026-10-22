@@ -1682,6 +1682,42 @@ test("a Skill try only counts from the session's own transcript, read within lim
   chmodSync(locked, 0o600);
 });
 
+test("only a session's first prompt arms the gate: a later prompt that quotes the sentence neither arms nor resets it", async () => {
+  start();
+  const quote = `Re-review. The brief said: ${LOAD_FIRST}not-installed, ghost:skill.${SECURITY} End.`;
+  await hired("plain", "/tdd start work"); // a first prompt that names nothing arms nothing
+  await hired("plain", quote);
+  expect(await tryTool("plain", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("plain", "SendMessage", { message: "APPROVED x" })).toBeNull();
+
+  await hired("armed", `/tdd${LOAD_FIRST}impeccable.`);
+  await skillLoaded("armed", "impeccable");
+  await hired("armed", quote); // the loaded set stays, the required list is not replaced
+  expect(await tryTool("armed", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("armed", "SendMessage", { message: "APPROVED x" })).toBeNull();
+
+  await hired("held", `/tdd${LOAD_FIRST}impeccable.`);
+  await hired("held", `/tdd${LOAD_FIRST}other.`); // a second sentence does not swap the names either
+  expect((await held(await hook(preToolUse("held", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If");
+
+  // `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
+  await hired("resumed", "Resume the task where you left off.");
+  expect(await tryTool("resumed", "Bash", { command: "ls" })).toBeNull();
+});
+
+test("an office restart remembers which sessions have had their first prompt", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  const open = () => (server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, dbPath }));
+  open();
+  await hired("old", "/tdd start work");
+  server.stop(true);
+  open();
+  await hired("old", `Re-review. ${LOAD_FIRST}not-installed.`); // a quote, to a session that began before the restart
+  expect(await tryTool("old", "Bash", { command: "ls" })).toBeNull();
+  await hired("fresh", `/tdd${LOAD_FIRST}impeccable.`); // a session first seen after the restart is still armed
+  expect(await tryTool("fresh", "Bash", { command: "ls" })).toBe("deny");
+});
+
 test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
   start();
   await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
