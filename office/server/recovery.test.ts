@@ -49,6 +49,8 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     woke: [] as { repo: string; name: string; note: string }[],
     told: [] as { to: string; message: string }[],
     toldSession: [] as (string | undefined)[],
+    tailCalls: [] as string[],
+    commitCalls: 0,
     inbox: true,
     store: {} as Record<string, Entries>,
   };
@@ -56,11 +58,11 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     now: () => w.now,
     sessions: async () => w.list,
     // The real readers are asynchronous (nothing may block the office's event loop), so the fakes are too.
-    tail: async (_cwd, sid) => (w.transcripts[sid] ?? []).join("\n"),
+    tail: async (_cwd, sid) => (w.tailCalls.push(sid), (w.transcripts[sid] ?? []).join("\n")),
     mtime: async (_cwd, sid) => w.mtimes[sid] ?? null,
     promptOf: async (_cwd, sid) => over.prompts?.[sid] ?? null,
     board: async (_repo, team) => w.boards[team ?? "pm"] ?? [],
-    commitTime: async (_repo, branch) => w.commits[branch] ?? null,
+    commitTime: async (_repo, branch) => (w.commitCalls++, w.commits[branch] ?? null),
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
     tell: async (_repo, to, message, sessionId) => (w.told.push({ to, message }), w.toldSession.push(sessionId), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
@@ -594,4 +596,26 @@ test("the Report to is told through its newest live session, not whichever seat 
   await o.tick();
   expect(o.w.told.map((t) => t.to)).toEqual(["lead-shop"]);
   expect(o.w.toldSession).toEqual(["lead-new"]);
+});
+
+test("an ended session already woken or told is not read again, and the branch tip is asked for once per tick", async () => {
+  const o = office();
+  stoppedDev(o, [say("compiling", 1)]);
+  o.w.commits["worktree-checkout"] = T0 - 60 * MIN;
+  await o.tick();
+  expect(o.w.woke).toHaveLength(1);
+  o.w.tailCalls.length = 0;
+  await o.tick();
+  expect(o.w.tailCalls.filter((sid) => sid === "dev-1")).toEqual([]); // the 256 KB tail is not read for a stop that is handled
+  // Ended again soon with progress (a commit): woken again, and the tip is asked for once.
+  const woke = o.w.now;
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(DEV, "dev-2", DEV_CWD, { startedAt: 2000 })];
+  o.w.transcripts["dev-2"] = [say("compiling", 1)];
+  o.w.mtimes["dev-2"] = woke + 4 * MIN;
+  o.w.commits["worktree-checkout"] = woke + MIN;
+  o.w.now = woke + 5 * MIN;
+  o.w.commitCalls = 0;
+  await o.tick();
+  expect(o.w.woke).toHaveLength(2);
+  expect(o.w.commitCalls).toBe(1);
 });

@@ -217,11 +217,11 @@ export function createRecovery(d: RecoveryDeps) {
         delete e.unreachable;
         continue;
       }
-      const tailText = await d.tail(cwd, sid);
-      const turn = lastTurn(tailText);
-      const said = turn?.type === "assistant" && turn.isApiErrorMessage !== true ? textOf(turn.message?.content) : null;
 
       if (cur.pid) {
+        const tailText = await d.tail(cwd, sid);
+        const turn = lastTurn(tailText);
+        const said = turn?.type === "assistant" && turn.isApiErrorMessage !== true ? textOf(turn.message?.content) : null;
         // Live: a stop's note is stale. A nudge that could not be delivered stays until the hire writes again.
         const mt = await d.mtime(cwd, sid);
         const quiet = cur.status === "idle" && mt != null && now - mt >= QUIET_MS && said !== null;
@@ -241,7 +241,9 @@ export function createRecovery(d: RecoveryDeps) {
       }
 
       // Ended. A stop is handled once. A limit stop is judged on its reset whatever the turn held; any other end skips a hire whose last turn closes with its report (its row waits on a review, or an answer).
-      if (e.wokeFrom === sid || e.told === sid) continue;
+      if (e.wokeFrom === sid || e.told === sid) continue; // before the 256 KB tail is read
+      const tailText = await d.tail(cwd, sid);
+      const turn = lastTurn(tailText);
       const first = await d.promptOf(cwd, sid);
       /** A lead and a Reviewer have no branch of their own. */
       const tipOf = async () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
@@ -256,7 +258,7 @@ export function createRecovery(d: RecoveryDeps) {
         const ok = await safeTell(repo, to, message, newestLive && String(newestLive.sessionId ?? newestLive.id));
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
-      const wakeIt = async (note: string, failed: string) => {
+      const wakeIt = async (note: string, failed: string, tip?: number | null) => {
         try {
           await d.wake(repo, name, note);
         } catch (err) {
@@ -264,7 +266,7 @@ export function createRecovery(d: RecoveryDeps) {
         }
         e.wokeAt = now;
         e.wokeFrom = sid;
-        e.tip = await tipOf();
+        e.tip = tip === undefined ? await tipOf() : tip;
         delete e.told;
         delete e.note;
       };
@@ -279,11 +281,12 @@ export function createRecovery(d: RecoveryDeps) {
       }
       if (reported(tailText).closes) continue;
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
-      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, await tipOf())) {
+      const tipNow = soon ? await tipOf() : undefined; // asked once: it is also the tip the next wake is judged against
+      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tipNow ?? null)) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);
         continue;
       }
-      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`);
+      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`, tipNow);
     }
     for (const [name, e] of Object.entries(entries)) if (!Object.keys(e).length) delete entries[name];
     if (JSON.stringify(entries) !== before) d.store.save(repo, entries);
