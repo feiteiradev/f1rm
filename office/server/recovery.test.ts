@@ -464,3 +464,23 @@ test("progress counts assistant messages, not transcript lines: one reply with t
   expect(moved.woke).toHaveLength(2);
   expect(moved.told).toEqual([]);
 });
+
+test("a board row counts when its status cell starts with doing or review, and when parseBoard clipped a long owner", async () => {
+  const woken = async (status: string, owner: string, name = DEV) => {
+    const o = office();
+    stoppedDev(o, [say("compiling", 1)]);
+    o.w.list[1] = ended(name, "dev-1", DEV_CWD);
+    o.w.boards.shop = [row(owner, status, "checkout")];
+    await o.tick();
+    return o.w.woke.length;
+  };
+  expect(await woken("review (live proof waits for the user)", DEV)).toBe(1);
+  expect(await woken("doing, blocked on the key", DEV)).toBe(1);
+  expect(await woken("reviewed", DEV)).toBe(0);
+  expect(await woken("doing-nothing", DEV)).toBe(0);
+  const long = `shop.backend-dev-${"x".repeat(60)}`;
+  const clipped = `${long.slice(0, 59)}…`; // what parseBoard keeps of a 60-character owner cell
+  expect(clipped).toHaveLength(60);
+  expect(await woken("doing", clipped, long)).toBe(1);
+  expect(await woken("doing", `${"y".repeat(59)}…`, long)).toBe(0);
+});

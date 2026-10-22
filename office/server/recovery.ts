@@ -147,8 +147,12 @@ function madeProgress(tailText: string, since: number, tipBefore: number | null 
   return replies.size >= 2;
 }
 
+/** parseBoard keeps 60 characters of an owner cell and ends a longer one with "…". */
+const owns = (owner: string, name: string) => owner === name || (owner.length === 60 && owner.endsWith("…") && name.startsWith(owner.slice(0, -1)));
+
+/** A row is live when its status cell starts with doing or review: real boards annotate it ("review (live proof waits for the user)"). */
 const active = (rows: BoardRow[], name: string, h: HireName) =>
-  rows.some((r) => (r.status === "doing" || r.status === "review") && (r.owner === name || (h.reviewer && r.branch === `worktree-${h.task}`)));
+  rows.some((r) => /^(?:doing|review)(?![\w-])/.test(r.status) && (owns(r.owner, name) || (h.reviewer && r.branch === `worktree-${h.task}`)));
 
 /**
  * The recovery tick. For each registered project, each background hire or lead whose board row is doing or review is judged by its newest session:
