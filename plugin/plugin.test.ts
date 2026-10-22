@@ -215,7 +215,7 @@ test("the guidelines say what each gate holds and the way out, and a cap refusal
   const gates = section("Gates");
   for (const s of ["skill gate", "delegation gate", "boards, milestones, kept files, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const skillGate = gates.split("\n").find((l) => l.includes("**skill gate**")) ?? "";
-  for (const s of ["Only a session's first prompt arms it", "a later message that quotes the sentence changes nothing", "a skill the Skill tool refuses counts as tried, read from the session's own transcript"]) expect(skillGate, s).toContain(s);
+  for (const s of ["Only a session's first prompt arms it", "a later message that quotes that prompt's skill list changes nothing", "forked from one is not armed", "a skill the Skill tool refuses counts as tried, read from the session's own transcript", "reserved for the user, go on", "unknown or not installed, go on and send `BLOCKED <slug>`"]) expect(skillGate, s).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);

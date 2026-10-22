@@ -307,7 +307,7 @@ export function startServer({
         for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (gate.required.includes(skill)) gate.loaded.add(skill);
         missing = missing.filter((r) => !gate.loaded.has(r));
       }
-      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried once you have called it.`);
+      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send \`BLOCKED <task>\` as above too.`);
       if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
@@ -536,7 +536,7 @@ export function startServer({
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
-          // A session resumed with `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
+          // A session resumed with its own id (`claude --bg --resume`) has had its first prompt already. One forked on resume (`--fork-session`) is a new session id whose first prompt is the resume note, which re-lists nothing. Neither is armed again.
           if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
             const prompt = String(payload.prompt ?? "");
             const at = prompt.indexOf(LOAD_FIRST);

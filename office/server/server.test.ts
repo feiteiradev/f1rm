@@ -1588,7 +1588,7 @@ test("a hire whose prompt names skills is refused every tool but the reading one
   await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
   const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
   expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried once you have called it.");
+  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send `BLOCKED <task>` as above too.");
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
   for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
   // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
@@ -1635,7 +1635,7 @@ test("the gate's way-out says that a skill the Skill tool refuses counts as trie
   start();
   await hired("w", `/tdd${LOAD_FIRST}impeccable.`);
   const out = await held(await hook(preToolUse("w", "Bash", { command: "ls" })));
-  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried once you have called it.");
+  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send `BLOCKED <task>` as above too.");
 });
 
 test("a Skill try only counts from the session's own transcript, read within limits, and fails closed", async () => {
