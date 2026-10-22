@@ -467,6 +467,10 @@ test("R8b: the three workflows are said once in the guidelines; pm.md and the PM
 });
 
 test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on its board instead of messaging the PM", () => {
+  expect(role("lead").body).toContain("act on it and record what changed on your team board, which the PM reads");
+  expect(role("lead").body).not.toContain("tell the PM what changed");
+  expect(section("Who talks to whom")).toContain("(a lead records it on its team board, which the PM reads)");
+  expect(section("Who talks to whom")).not.toContain("(a lead tells the PM)");
   expect(role("pm").body).toContain("Work handed to you, other than ops (see Picking the workflow), including a slash command, becomes a board task for a hire.");
 });
 
