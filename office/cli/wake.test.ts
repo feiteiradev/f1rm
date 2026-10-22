@@ -3,7 +3,7 @@ import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { HireRefused, LOAD_FIRST, projectFolder as folder } from "./hire.ts";
+import { HireRefused, LOAD_FIRST, projectFolder as folder, SECURITY } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
 
@@ -137,6 +137,17 @@ test("--override is read wherever it stands before the claude flags, and what fo
   expect(parseWakeArgs(["lead-shop", "--override", "go", "--model", "opus"])).toEqual({ target: "lead-shop", message: "go", override: true, extra: ["--model", "opus"] });
   expect(parseWakeArgs(["lead-shop", "go", "--override"])).toEqual({ target: "lead-shop", message: "go", override: true, extra: [] });
   expect(parseWakeArgs(["lead-shop", "--model", "opus", "--override"])).toEqual({ target: "lead-shop", message: undefined, override: false, extra: ["--model", "opus", "--override"] });
+});
+
+test("a woken --level high Reviewer's note carries the security hold sentence its first prompt carried, and no note carries the load-first sentence", async () => {
+  const rv = stopped("shop.reviewer-review-checkout", "rv-sid", REPO, "done");
+  const high = `/code-review high worktree-checkout${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-shop\n\nbrief`;
+  const medium = "/code-review medium worktree-checkout Report to: lead-shop\n\nbrief";
+  const woken = await plan("shop.reviewer-review-checkout", [lead, rv], { message: "re-review" }, { promptOf: () => high });
+  expect(woken.argv[8]).toBe(`re-review\nReport to: lead-shop${SECURITY}`);
+  expect(woken.argv[8]).not.toContain(LOAD_FIRST.trim());
+  expect((await plan("shop.reviewer-review-checkout", [lead, rv], {}, { promptOf: () => medium })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: lead-shop`);
+  expect((await plan("shop.reviewer-review-checkout", [lead, rv])).argv[8]).not.toContain("security-review");
 });
 
 test("firstPrompt reads the text of the first user line, whether the content is a string or blocks", () => {

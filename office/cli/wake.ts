@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
-import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, type LiveHires } from "./hire.ts";
+import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { head, hires, tail } from "./status.ts";
 
@@ -116,7 +116,8 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const sessionId = String(target.sessionId);
   const first = d.promptOf(cwd, sessionId);
   const reportTo = (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common }));
-  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}`;
+  // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. The sentence that names skills to load is not repeated: the history has them.
+  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${first?.includes(SECURITY) ? SECURITY : ""}`;
   const extra = req.extra ?? [];
   const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : d.modelOf(cwd, sessionId);
   const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];

@@ -1855,6 +1855,17 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   expect(await send("APPROVED shop-1")).toBeNull();
 });
 
+test("a woken --level high Reviewer, whose first prompt is the wake note, is held at APPROVED the same way, and its tools are not held", async () => {
+  start();
+  await hired("rw", `resumed; continue your task\nReport to: lead-a${SECURITY}`, "f1rm:reviewer", "a.reviewer-review-x");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const send = async (message: string) => held(await hook(preToolUse("rw", "SendMessage", { to: "lead-a", message })));
+  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
+  expect(await tryTool("rw", "Bash", { command: "ls" })).toBeNull(); // no skills named to load first
+  await skillLoaded("rw", "security-review");
+  expect(await send("APPROVED shop-1")).toBeNull();
+});
+
 test("a refused security-review read from the transcript does not release a --level high Reviewer's APPROVED", async () => {
   start(undefined, undefined, undefined, { transcriptsDir: transcripts });
   await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
