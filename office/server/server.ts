@@ -411,8 +411,9 @@ export function startServer({
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
     }
-    if ((tool === "Skill" && /^(?:[\w-]+:)?loop$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || tool === "ScheduleWakeup" || tool === "CronCreate") {
-      return refuse("loop", "/loop is refused for every employee: a loop keeps a session working on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
+    // Recurring work: the /loop and /schedule skills and the tools they start it with.
+    if ((tool === "Skill" && /^(?:[\w-]+:)?(?:loop|schedule)$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || ["ScheduleWakeup", "CronCreate", "RemoteTrigger"].includes(tool)) {
+      return refuse("loop", "/loop and /schedule are refused for every employee: recurring work keeps a session going on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
     }
     const starts = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)).flatMap((c) => claudeStart(c) ?? []) : [];
     if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.resume && !s.print))) {

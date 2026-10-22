@@ -1337,12 +1337,12 @@ test("/loop is refused for every company employee, as the Skill call and as the 
   await delegationOffice();
   const run = async (id: string, tool: string, input: object) => held(await hook(preToolUse(id, tool, input)));
   for (const id of ["p", "l", "d"]) {
-    for (const [tool, input] of [["Skill", { skill: "loop", args: "5m /foo" }], ["Skill", { skill: "pstack:loop" }], ["ScheduleWakeup", { delaySeconds: 60, prompt: "x", reason: "x" }], ["CronCreate", { cron: "*/5 * * * *", prompt: "x" }]] as const) {
+    for (const [tool, input] of [["Skill", { skill: "loop", args: "5m /foo" }], ["Skill", { skill: "pstack:loop" }], ["ScheduleWakeup", { delaySeconds: 60, prompt: "x", reason: "x" }], ["CronCreate", { cron: "*/5 * * * *", prompt: "x" }], ["Skill", { skill: "schedule" }], ["Skill", { skill: "/schedule", args: "daily" }], ["Skill", { skill: "x:schedule" }], ["RemoteTrigger", { action: "create" }]] as const) {
       const out = await run(id, tool, input);
       expect([id, tool, out?.permissionDecision]).toEqual([id, tool, "deny"]);
       expect(out.permissionDecisionReason).toContain("/loop");
     }
-    for (const skill of ["tdd", "loops", "mattpocock-skills:tdd"]) expect([id, skill, await run(id, "Skill", { skill })]).toEqual([id, skill, null]);
+    for (const skill of ["tdd", "loops", "scheduler", "schedules", "mattpocock-skills:tdd"]) expect([id, skill, await run(id, "Skill", { skill })]).toEqual([id, skill, null]);
   }
   expect(await run("f", "Skill", { skill: "loop" })).toBeNull();
 });
