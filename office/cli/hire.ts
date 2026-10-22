@@ -201,7 +201,7 @@ export function parseHireFlags(words: string[]) {
     if (args[0] === "--override") override = !!args.shift();
     else if (args[0] === "--report-to") (args.shift(), (reportTo = args.shift()));
     else if (args[0] === "--team") (args.shift(), (team = args.shift()));
-    else if (args[0] === "--skills") (args.shift(), (skills = (args.shift() ?? "").split(",").filter(Boolean)));
+    else if (args[0] === "--skills") (args.shift(), (skills = (args.shift() ?? "").split(",").map((s) => s.trim()).filter(Boolean)));
     else if (args[0] === "--level") (args.shift(), (level = args.shift()));
     else if (args[0] === "--content") content = !!args.shift();
     else break;

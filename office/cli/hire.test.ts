@@ -189,6 +189,17 @@ test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is re
   }
 });
 
+// A space after the comma is trimmed: the gate trims names, so a padded one in the list would hold the hire, and a padded architect would not be the first command.
+test("--skills a, b is split and trimmed: a spaced pstack:tdd is refused and a spaced pstack:architect is the lead's first command", () => {
+  const dev = stubClaude([]);
+  const r = hire(dev, ["--skills", "mattpocock-skills:diagnosing-bugs, pstack:tdd", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]);
+  expect(r.err).toContain("pstack:tdd is not wired inside hires");
+  expect(dev.argv()).toBeNull();
+  const lead = stubClaude([]);
+  hire(lead, ["--skills", "ponytail:ponytail, pstack:architect", ...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir());
+  expect(prompt(lead)).toStartWith("/pstack:architect Before you start, load these with the Skill tool: ponytail:ponytail, f1rm:f1rm-guidelines, f1rm:hire. ");
+});
+
 test("a slash-only --skills named twice, or the dev's own poteto-mode, counts once", () => {
   const dev = stubClaude([]);
   expect(hire(dev, ["--skills", "pstack:poteto-mode", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).code).toBe(0);
