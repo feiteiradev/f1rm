@@ -17,7 +17,7 @@ export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
 // pstack's poteto-mode, architect and how carry disable-model-invocation, so the Skill tool refuses them: each runs only as the first command, and a hire has one.
-// A dev's own first skill is poteto-mode, so no slash-only skill can be added to a dev; architect and how are for a lead.
+// A dev's own first skill is poteto-mode, so no other slash-only skill can be added to a dev; architect and how are for a lead.
 const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.

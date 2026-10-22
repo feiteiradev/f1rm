@@ -729,7 +729,7 @@ test("K3: leads get pstack:architect or pstack:how only as a first command the P
   expect(reviewer).not.toContain("interrogate");
   expect(role("pm").fm.skills).toContain("mattpocock-skills:grilling");
   const playbook = section("Roster and hiring playbook");
-  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only", "a dev's is `/pstack:poteto-mode`", "for a lead only"]) expect(playbook, s).toContain(s);
+  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only", "a dev's is `/pstack:poteto-mode`", "for a lead only", "refuses any other slash-only skill in a dev's `--skills`"]) expect(playbook, s).toContain(s);
 });
 
 test("K3a: a lead started with pstack:architect or pstack:how loads the guidelines with the Skill tool", () => {
