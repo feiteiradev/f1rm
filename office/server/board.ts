@@ -7,7 +7,7 @@ export type BoardRow = { id: string; owner: string; status: string; branch: stri
 export const MAX_BOARD_BYTES = 64 * 1024;
 // ponytail: rows past the cap are dropped silently, so the counts undercount a board that long; raise it or report the overflow if one gets there.
 const MAX_ROWS = 100;
-const MAX_CELL = { id: 16, owner: 60, status: 16, branch: 60, task: 200 };
+export const MAX_CELL = { id: 16, owner: 60, status: 16, branch: 60, task: 200 };
 
 /** The room's repo directory: a git room is its common dir, whose parent is the main working directory (as in the room's name). */
 export const repoDir = (roomId: string) => (basename(roomId) === ".git" ? dirname(roomId) : roomId);
@@ -24,7 +24,7 @@ export const boardFile = (boardsDir: string, roomId: string) => join(boardsDir, 
 export const teamBoardFile = (boardsDir: string, roomId: string, team: string) => boardFile(boardsDir, roomId).replace(/\.md$/, `.team.${team}.md`);
 
 // Control characters and bidi overrides could scramble or spoof what the board seems to say.
-const clip = (s: string, n: number) => {
+export const clip = (s: string, n: number) => {
   s = s.replace(/[\p{Cc}‪-‮⁦-⁩]/gu, " ").trim();
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 };

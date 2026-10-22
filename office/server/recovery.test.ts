@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { recoveryFile } from "../cli/status.ts";
 import { LOAD_FIRST } from "../cli/hire.ts";
 import { planWake } from "../cli/wake.ts";
-import type { BoardRow } from "./board.ts";
+import { parseBoard, type BoardRow } from "./board.ts";
 import { createRecovery, fileStore, resetAt, type Entries } from "./recovery.ts";
 
 setDefaultTimeout(30_000);
@@ -570,4 +570,18 @@ test("a background task finishing or a skill's meta line is no new turn, so a re
   expect(await nudged((now) => [...reported(now), JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: new Date(now - 30 * MIN).toISOString(), content: "<task-notification>x</task-notification>" }), block("msg_p", 25, { type: "text", text: "Done with it." }, now)])).toEqual([]);
   const refused = (now: number) => [tool("r1", 40, "SendMessage", { to: "lead-shop", message: "APPROVED shop-1" }, now), toolResult("r1", 39, now, true), block("msg_p", 25, { type: "text", text: "The gate refused it." }, now)];
   expect(await nudged(refused)).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
+
+test("a Reviewer whose task slug is long matches the branch cell parseBoard clipped", async () => {
+  const slug = "a-very-long-task-slug-".repeat(3).slice(0, 55);
+  const reviewer = `shop.reviewer-review-${slug}`;
+  const o = office();
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(reviewer, "rev-1", REPO)];
+  o.w.transcripts["rev-1"] = [say("reviewing", 3)];
+  // What the office reads from the file: every cell passed through parseBoard, which keeps 60 characters of the branch.
+  const [parsed] = parseBoard(`| T1 | shop.backend-dev-x | review | worktree-${slug} | x |`);
+  expect(parsed.branch).toHaveLength(60);
+  o.w.boards.shop = [parsed];
+  await o.tick();
+  expect(o.w.woke.map((x) => x.name)).toEqual([reviewer]);
 });

@@ -6,7 +6,7 @@ import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, tailAsync, textOf } from "../cli/status.ts";
-import type { BoardRow } from "./board.ts";
+import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, machine } from "./machine.ts";
 import { writePrivate } from "./private.ts";
 
@@ -183,12 +183,12 @@ function madeProgress(tailText: string, since: number, tipBefore: number | null 
   return replies.size >= 2;
 }
 
-/** parseBoard keeps 60 characters of an owner cell and ends a longer one with "…". */
-const owns = (owner: string, name: string) => owner === name || (owner.length === 60 && owner.endsWith("…") && name.startsWith(owner.slice(0, -1)));
-
-/** A row is live when its status cell starts with doing or review: real boards annotate it ("review (live proof waits for the user)"). */
+/**
+ * A row is live when its status cell starts with doing or review (real boards annotate it: "review (live proof waits for the user)") and it is the hire's: parseBoard clips the owner and the branch cell
+ * (to 60 characters, ending a longer one with "…"), so the name and the branch are compared as clipped. Two names that clip to the same 60 characters cannot be told apart on a board: that is the ceiling.
+ */
 const active = (rows: BoardRow[], name: string, h: HireName) =>
-  rows.some((r) => /^(?:doing|review)(?![\w-])/.test(r.status) && (owns(r.owner, name) || (h.reviewer && r.branch === `worktree-${h.task}`)));
+  rows.some((r) => /^(?:doing|review)(?![\w-])/.test(r.status) && (r.owner === clip(name, MAX_CELL.owner) || (h.reviewer && r.branch === clip(`worktree-${h.task}`, MAX_CELL.branch))));
 
 /**
  * The recovery tick. For each registered project, each background hire or lead whose board row is doing or review is judged by its newest session:
