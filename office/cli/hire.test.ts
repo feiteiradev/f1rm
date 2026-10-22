@@ -174,7 +174,7 @@ test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s i
     const stub = stubClaude([]);
     const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
     expect(r.code, `${role} ${skill}`).not.toBe(0);
-    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
   }
 });
@@ -184,7 +184,9 @@ test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is re
   for (const [role, task] of [["backend-dev", "x"], ["lead", "checkout"], ["reviewer", "review-x"]]) {
     const stub = stubClaude([]);
     const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
-    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
+    // setup-pstack is the one pstack skill the Skill tool loads, so the message does not say it refuses the skill.
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
+    expect(r.err, `${role} ${skill}`).not.toContain("the Skill tool refuses it");
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
   }
 });

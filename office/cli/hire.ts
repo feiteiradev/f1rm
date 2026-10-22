@@ -129,7 +129,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
   // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three in SLASH_ONLY can be a first command.
   const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
-  if (unwired) throw new Error(`${unwired} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
+  if (unwired) throw new Error(`${unwired} is not wired inside hires; the user can run it by hand`);
   const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
   if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
   let own = roles.find((r) => r.id === role)!.skills;
