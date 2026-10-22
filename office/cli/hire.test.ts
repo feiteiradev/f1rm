@@ -202,9 +202,22 @@ test.each(["research", "pstack:poteto-mode"])("a code Reviewer is refused --skil
   expect(r.err).toContain(`${skill} is slash-only`);
   expect(r.err).toContain("a code Reviewer's first command is /code-review");
   expect(code.argv()).toBeNull();
+});
+
+test("a content Reviewer takes --skills research as its first command", () => {
   const content = stubClaude([]);
-  hire(content, ["--content", "--skills", skill, ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(prompt(content)).toStartWith(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines. `);
+  hire(content, ["--content", "--skills", "research", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  expect(prompt(content)).toStartWith("/research Before you start, load these with the Skill tool: f1rm:f1rm-guidelines. ");
+});
+
+// poteto-mode runs a dev's playbook flow: for any other role it would replace the role's own work.
+test("--skills pstack:poteto-mode is for the two devs only: a researcher, a designer, a lead and a content Reviewer are refused", () => {
+  for (const [role, task, extra] of [["researcher", "x", []], ["designer", "x", []], ["lead", "checkout", []], ["reviewer", "review-x", ["--content"]]] as const) {
+    const stub = stubClaude([]);
+    const r = hire(stub, [...extra, "--skills", "pstack:poteto-mode", ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
+    expect(r.err, role).toContain("pstack:poteto-mode is for the two devs only");
+    expect(stub.argv(), role).toBeNull();
+  }
 });
 
 // A dev's own first skill, pstack:poteto-mode, is slash-only too, so a second slash-only skill would push it into the Skill-tool list, which refuses it and holds the hire forever.

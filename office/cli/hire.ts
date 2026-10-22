@@ -136,6 +136,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slashes = [...new Set([...own.slice(0, 1), ...added])].filter((s) => SLASH_ONLY.includes(s));
   if (role === "reviewer" && !content && slashes.length) throw new Error(`${slashes[0]} is slash-only, and a code Reviewer's first command is /code-review <level> worktree-<task>: drop it`);
+  if (added.includes("pstack:poteto-mode") && own[0] !== "pstack:poteto-mode") throw new Error(`pstack:poteto-mode is for the two devs only: its playbooks would replace a ${role}'s own work`);
   if (slashes.length > 1) {
     throw new Error(
       SLASH_ONLY.includes(own[0])
