@@ -463,7 +463,14 @@ test("R8b: the three workflows are said once in the guidelines; pm.md and the PM
     expect(text, name).toContain("milestone");
     expect(text, name).not.toContain("one specialist role");
   }
-  expect(pmStep(2)).toContain("Picking the workflow");
+  expect(pmStep(2)).toContain("Load the guidelines");
+  expect(pmStep(3)).toContain("Picking the workflow");
+  const wf = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))!;
+  expect(wf.indexOf("2. Load `f1rm:f1rm-guidelines`")).toBeGreaterThan(-1);
+  expect(wf.indexOf("2. Load `f1rm:f1rm-guidelines`")).toBeLessThan(wf.indexOf("3. Pick the workflow"));
+  const prompt = pmPromptText();
+  expect(prompt.indexOf("f1rm:f1rm-guidelines")).toBeGreaterThan(-1);
+  expect(prompt.indexOf("f1rm:f1rm-guidelines")).toBeLessThan(prompt.indexOf("Picking the workflow"));
 });
 
 test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on its board instead of messaging the PM", () => {

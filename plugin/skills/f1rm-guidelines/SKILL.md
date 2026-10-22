@@ -78,11 +78,12 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
 
 - **pm**
   1. Pick up: read the board, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
-  2. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms.
-  3. Load `f1rm:f1rm-guidelines`, write the board (and, for a milestone, its section in the milestones file), and collect what the user must provide.
-  4. Hire one lead for a simple workflow, one or two for a milestone, with `f1rm hire lead`.
-  5. Wait, with a background watcher on your leads (see Watching and waking). On `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, let the lead go with `f1rm letgo`.
-  6. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
+  2. Load `f1rm:f1rm-guidelines`.
+  3. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms.
+  4. Write the board (and, for a milestone, its section in the milestones file), and collect what the user must provide.
+  5. Hire one lead for a simple workflow, one or two for a milestone, with `f1rm hire lead`.
+  6. Wait, with a background watcher on your leads (see Watching and waking). On `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, let the lead go with `f1rm letgo`.
+  7. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
   1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before you hire; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
