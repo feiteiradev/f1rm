@@ -50,6 +50,17 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
 });
 
+test("the checks wait for a git lookup and transcript readers that answer later, so the office's event loop is never blocked", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  const later = <T>(v: T) => new Promise<T>((resolve) => setTimeout(() => resolve(v), 5));
+  const base = deps([lead, dev]);
+  const p = await planWake({ target: "shop.backend-dev-checkout", cwd: REPO }, {
+    ...base, gitCommonDir: () => later(`${REPO}/.git`), modelOf: () => later("claude-haiku-5-5"), promptOf: () => later("brief\nReport to: lead-elsewhere"),
+  });
+  expect(p.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
+  expect(p.argv).toContain("resumed; continue your task\nReport to: lead-elsewhere");
+});
+
 test("without a message the note says the hire was resumed; the sentence that names the skills to load is never in it", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   const p = await plan("shop.backend-dev-checkout", [lead, dev]);

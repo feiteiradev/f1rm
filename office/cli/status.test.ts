@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { head, hires, ls, parseArgs, status, statusFor, tail, watch, type Hire } from "./status.ts";
+import { head, headAsync, hires, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -558,4 +558,17 @@ test("what the office's recovery noted about a hire shows as its NOTE and as `re
   expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
   writeFileSync(join(dir, "-code-shop.json"), JSON.stringify({ "shop.backend-dev-checkout": { note: 7 } }));
   expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
+});
+
+test("headAsync and tailAsync read what head and tail read, a missing file as empty, and any other error through", async () => {
+  const h = home();
+  const file = join(h, "t.jsonl");
+  const lines = Array.from({ length: 6000 }, (_, i) => JSON.stringify({ type: "assistant", n: i, pad: "x".repeat(60) }));
+  writeFileSync(file, lines.join("\n") + "\n");
+  expect(await tailAsync(file)).toBe(tail(file));
+  expect(await headAsync(file)).toBe(head(file));
+  expect((await tailAsync(file)).split("\n").at(-2)).toContain('"n":5999');
+  expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
+  expect(await headAsync(join(h, "none.jsonl"))).toBe("");
+  await expect(tailAsync(h)).rejects.toThrow(); // a folder where a transcript should be
 });

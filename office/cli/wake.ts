@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { head, hires, tail, textOf } from "./status.ts";
+import { headAsync, hires, tailAsync, textOf } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -29,14 +29,15 @@ export type WakeRequest = {
 export type WakeDeps = {
   /** `claude agents --json`, with `--all` for the finished sessions too; null if it can't say. */
   agents: (all: boolean) => Promise<any[] | null>;
-  gitCommonDir: (cwd: string) => string | null;
+  /** Git's common dir for a folder; the real one asks git without blocking the event loop. */
+  gitCommonDir: (cwd: string) => string | null | Promise<string | null>;
   home: string;
   now: number;
   exists: (path: string) => boolean;
   /** The model a session last answered with, or null when its transcript says none. */
-  modelOf: (cwd: string, sessionId: string) => string | null;
+  modelOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
   /** The text of the session's first prompt, the one `f1rm hire` wrote, or null when its transcript can't be read. */
-  promptOf: (cwd: string, sessionId: string) => string | null;
+  promptOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
 };
 
 /** The text of the first user line that is not meta in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
@@ -82,7 +83,7 @@ const background = (list: any[]) => list.filter((a) => a?.kind === "background" 
  * through the same checks as a hire. Who may wake is the gate's to judge (see mayWake), not this command's: it cannot tell who runs it.
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
-  const common = d.gitCommonDir(req.cwd);
+  const common = await d.gitCommonDir(req.cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
   const tooLong = rootTooLong(common);
@@ -116,14 +117,14 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
 
   // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);
-  const first = d.promptOf(cwd, sessionId);
+  const first = await d.promptOf(cwd, sessionId);
   const reportTo = reportToOf(hire, first, repo);
   // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. A Reviewer whose prompt could not be read carries it too
   // (one extra security-review is cheaper than a missing hold). The sentence that names skills to load is not repeated: the history has them.
   const hold = first === null ? hire.role === "reviewer" : first.includes(SECURITY);
   const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${hold ? SECURITY : ""}`;
   const extra = req.extra ?? [];
-  const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : d.modelOf(cwd, sessionId);
+  const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : await d.modelOf(cwd, sessionId);
   const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];
   if (hire.role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
   return { argv, cwd, name, sessionId };
@@ -142,12 +143,19 @@ export function parseWakeArgs(words: string[]): { target: string | undefined; me
 /** A session's transcript: `<home>/.claude/projects/<its folder>/<session id>.jsonl`. */
 export const transcriptFile = (home: string, cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
 
+/** Git's common dir for `cwd`, or null outside git; the asynchronous twin of `machine.gitCommonDir`. */
+async function gitCommonDir(cwd: string): Promise<string | null> {
+  const proc = Bun.spawn(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(proc.stdout).text();
+  return (await proc.exited) === 0 ? out.trim() : null;
+}
+
 /** The real Claude Code, git, disk and clock, for a wake run now. */
 export function realWakeDeps(home: string): WakeDeps {
   return {
-    agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync,
-    modelOf: (cwd, sessionId) => lastModel(tail(transcriptFile(home, cwd, sessionId))),
-    promptOf: (cwd, sessionId) => firstPrompt(head(transcriptFile(home, cwd, sessionId))),
+    agents, gitCommonDir, home, now: Date.now(), exists: existsSync,
+    modelOf: async (cwd, sessionId) => lastModel(await tailAsync(transcriptFile(home, cwd, sessionId))),
+    promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
   };
 }
 

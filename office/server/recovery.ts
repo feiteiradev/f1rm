@@ -1,10 +1,11 @@
 // The office's recovery tick: wakes the background hires and leads of a registered project whose process ended while their board row is doing/review, once per stop, and says so when it cannot.
 // It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the caps), machine.tell (the inbox), the boards and transcripts.
-import { mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
-import { head, lastTurn, limitUntil, recoveryFile, tail, textOf } from "../cli/status.ts";
+import { headAsync, lastTurn, limitUntil, recoveryFile, tailAsync, textOf } from "../cli/status.ts";
 import type { BoardRow } from "./board.ts";
 import { agents, machine } from "./machine.ts";
 import { writePrivate } from "./private.ts";
@@ -100,16 +101,17 @@ export type RecoveryDeps = {
   now: () => number;
   /** `claude agents --json --all`; null if it can't say. */
   sessions: () => Promise<any[] | null>;
+  // The readers may answer later: the real ones read the disk and ask git without blocking the event loop that serves the hooks.
   /** The end of a session's transcript, "" if there is none. */
-  tail: (cwd: string, sessionId: string) => string;
+  tail: (cwd: string, sessionId: string) => string | Promise<string>;
   /** When a session's transcript was last written (ms), or null. */
-  mtime: (cwd: string, sessionId: string) => number | null;
+  mtime: (cwd: string, sessionId: string) => number | null | Promise<number | null>;
   /** The first prompt `f1rm hire` wrote, or null. */
-  promptOf: (cwd: string, sessionId: string) => string | null;
+  promptOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
   /** The rows of the PM's board (team null) or of a team's. */
   board: (repo: string, team: string | null) => Promise<BoardRow[]>;
   /** The tip's commit time (ms) of a branch of the repo, or null. */
-  commitTime: (repo: string, branch: string) => number | null;
+  commitTime: (repo: string, branch: string) => number | null | Promise<number | null>;
   /** Wakes the hire through `f1rm wake`'s own checks; throws what it refuses with. */
   wake: (repo: string, name: string, note: string) => Promise<void>;
   /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
@@ -190,13 +192,13 @@ export function createRecovery(d: RecoveryDeps) {
         delete e.unreachable;
         continue;
       }
-      const tailText = d.tail(cwd, sid);
+      const tailText = await d.tail(cwd, sid);
       const turn = lastTurn(tailText);
       const said = turn?.type === "assistant" && turn.isApiErrorMessage !== true ? textOf(turn.message?.content) : null;
 
       if (cur.pid) {
         // Live: a stop's note is stale. A nudge that could not be delivered stays until the hire writes again.
-        const mt = d.mtime(cwd, sid);
+        const mt = await d.mtime(cwd, sid);
         const quiet = cur.status === "idle" && mt != null && now - mt >= QUIET_MS && said !== null;
         const key = said !== null ? `${sid}:${turn.uuid ?? turn.timestamp ?? ""}` : null;
         if (!(e.unreachable && quiet && e.unreachable === key)) {
@@ -204,7 +206,7 @@ export function createRecovery(d: RecoveryDeps) {
           delete e.unreachable;
         }
         if (!quiet || reportSent(tailText) || e.nudged === key) continue;
-        if (h.role === "lead" && !teamQuiet(newest, h.team, now)) continue;
+        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) continue;
         e.nudged = key!;
         if (!(await safeTell(repo, name, NUDGE, sid))) {
           e.unreachable = key!;
@@ -215,10 +217,10 @@ export function createRecovery(d: RecoveryDeps) {
 
       // Ended. A stop is handled once; a hire that had reported (its row waits on a review, or an answer) has nothing to continue.
       if (e.wokeFrom === sid || e.told === sid || reportSent(tailText)) continue;
-      const first = d.promptOf(cwd, sid);
+      const first = await d.promptOf(cwd, sid);
       /** A lead and a Reviewer have no branch of their own. */
-      const tipOf = () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
-      const stoppedAt = d.mtime(cwd, sid) ?? now;
+      const tipOf = async () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
+      const stoppedAt = (await d.mtime(cwd, sid)) ?? now;
       const limit = limitUntil(tailText);
       const tell = async (message: string, reason?: string) => {
         e.told = sid;
@@ -234,7 +236,7 @@ export function createRecovery(d: RecoveryDeps) {
         }
         e.wokeAt = now;
         e.wokeFrom = sid;
-        e.tip = tipOf();
+        e.tip = await tipOf();
         delete e.told;
         delete e.note;
       };
@@ -248,7 +250,7 @@ export function createRecovery(d: RecoveryDeps) {
         continue;
       }
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
-      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tipOf())) {
+      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, await tipOf())) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);
         continue;
       }
@@ -261,13 +263,14 @@ export function createRecovery(d: RecoveryDeps) {
   const safeTell = (repo: string, name: string, message: string, sessionId?: string) => d.tell(repo, name, message, sessionId).catch(() => false);
 
   /** A lead is quiet when every member of its team is: idle, and its transcript written 20 minutes ago or more (an ended one counts as quiet). */
-  function teamQuiet(newest: Map<string, any>, team: string | null, now: number): boolean {
-    return [...newest.values()].every((m) => {
+  async function teamQuiet(newest: Map<string, any>, team: string | null, now: number): Promise<boolean> {
+    for (const m of newest.values()) {
       const hm = hireName(m.name);
-      if (!hm || hm.role === "lead" || hm.team !== team || !m.pid) return true;
-      const mt = d.mtime(String(m.cwd), String(m.sessionId ?? m.id));
-      return m.status === "idle" && mt != null && now - mt >= QUIET_MS;
-    });
+      if (!hm || hm.role === "lead" || hm.team !== team || !m.pid) continue;
+      const mt = await d.mtime(String(m.cwd), String(m.sessionId ?? m.id));
+      if (!(m.status === "idle" && mt != null && now - mt >= QUIET_MS)) return false;
+    }
+    return true;
   }
 
   return {
@@ -304,12 +307,13 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
   return {
     now: Date.now,
     sessions: () => agents(true),
-    tail: (cwd, sessionId) => tail(transcriptFile(home, cwd, sessionId)),
-    mtime: (cwd, sessionId) => statSync(transcriptFile(home, cwd, sessionId), { throwIfNoEntry: false })?.mtimeMs ?? null,
-    promptOf: (cwd, sessionId) => firstPrompt(head(transcriptFile(home, cwd, sessionId))),
-    commitTime: (repo, branch) => {
-      const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
-      return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
+    tail: (cwd, sessionId) => tailAsync(transcriptFile(home, cwd, sessionId)),
+    mtime: (cwd, sessionId) => stat(transcriptFile(home, cwd, sessionId)).then((st) => st.mtimeMs, () => null),
+    promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
+    commitTime: async (repo, branch) => {
+      const proc = Bun.spawn(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
+      const out = (await new Response(proc.stdout).text()).trim();
+      return (await proc.exited) === 0 && out ? Number(out) * 1000 : null;
     },
     // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.
     wake: async (repo, name, note) => {

@@ -1,5 +1,6 @@
 // `f1rm status [--json]`: what each hire of this repo is really doing, from its transcript and its branch, never from the status text `claude agents` shows.
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { open as openFile, stat as statFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
 import { agents, machine } from "../server/machine.ts";
@@ -81,6 +82,33 @@ const gone = <T>(f: () => T, empty: T): T => {
 
 // head, tail and ls are exported for the test only.
 export const head = (path: string) => gone(() => read(path, 0, HEAD), "");
+/** `head` and `tail` without blocking the event loop: the office reads transcripts while it serves the hooks. */
+async function readAsync(path: string, from: number, length: number): Promise<string> {
+  const file = await openFile(path, "r");
+  try {
+    const buf = Buffer.alloc(length);
+    return buf.toString("utf8", 0, (await file.read(buf, 0, length, from)).bytesRead);
+  } finally {
+    await file.close();
+  }
+}
+const goneAsync = async <T>(f: () => Promise<T>, empty: T): Promise<T> => {
+  try {
+    return await f();
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty;
+    throw e;
+  }
+};
+export const headAsync = (path: string) => goneAsync(() => readAsync(path, 0, HEAD), "");
+export const tailAsync = (path: string) =>
+  goneAsync(async () => {
+    const size = (await statFile(path)).size;
+    const from = Math.max(0, size - TAIL);
+    const text = await readAsync(path, from, Math.min(size, TAIL));
+    return from > 0 ? text.slice(text.indexOf("\n") + 1) : text;
+  }, "");
+
 /** The session's current name in a piece of its transcript: the last name line, so a rename counts. */
 const lastName = (text: string) => [...text.matchAll(/"(?:agentName|customTitle)":"([^"]+)"/g)].at(-1)?.[1];
 /** The folder the session last ran in, as its lines record it. */

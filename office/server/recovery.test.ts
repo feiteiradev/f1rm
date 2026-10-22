@@ -54,11 +54,12 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
   const make = () => createRecovery({
     now: () => w.now,
     sessions: async () => w.list,
-    tail: (_cwd, sid) => (w.transcripts[sid] ?? []).join("\n"),
-    mtime: (_cwd, sid) => w.mtimes[sid] ?? null,
-    promptOf: (_cwd, sid) => over.prompts?.[sid] ?? null,
+    // The real readers are asynchronous (nothing may block the office's event loop), so the fakes are too.
+    tail: async (_cwd, sid) => (w.transcripts[sid] ?? []).join("\n"),
+    mtime: async (_cwd, sid) => w.mtimes[sid] ?? null,
+    promptOf: async (_cwd, sid) => over.prompts?.[sid] ?? null,
     board: async (_repo, team) => w.boards[team ?? "pm"] ?? [],
-    commitTime: (_repo, branch) => w.commits[branch] ?? null,
+    commitTime: async (_repo, branch) => w.commits[branch] ?? null,
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
     tell: async (_repo, to, message) => (w.told.push({ to, message }), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
