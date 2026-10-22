@@ -1317,10 +1317,10 @@ test("a PM's or lead's landing git commands are refused, past global options; re
   for (const command of landing.filter((c) => !/push|pr merge|gh api/.test(c))) expect(await bash("d", command)).toBeNull();
 });
 
-test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordinary intern, and a specialist's call, are not", async () => {
+test("a company employee's Agent or Task call for an f1rm role is refused; an ordinary intern, and a freelancer's call, are not", async () => {
   await delegationOffice();
   const call = async (id: string, tool: string, subagent_type: string) => held(await hook(preToolUse(id, tool, { description: "x", prompt: "x", subagent_type })));
-  for (const id of ["p", "l"]) {
+  for (const id of ["p", "l", "d"]) {
     for (const tool of ["Agent", "Task"]) {
       const out = await call(id, tool, "f1rm:backend-dev");
       expect([id, tool, out?.permissionDecision]).toEqual([id, tool, "deny"]);
@@ -1329,7 +1329,50 @@ test("a PM's or lead's Agent or Task call for an f1rm role is refused; an ordina
   }
   expect(await call("p", "Agent", "Explore")).toBeNull();
   expect(await call("l", "Task", "general-purpose")).toBeNull();
-  expect(await call("d", "Agent", "f1rm:backend-dev")).toBeNull();
+  expect(await call("d", "Agent", "Explore")).toBeNull();
+  expect(await call("f", "Agent", "f1rm:backend-dev")).toBeNull();
+});
+
+test("/loop is refused for every company employee, as the Skill call and as the tools it schedules with; a freelancer is not held", async () => {
+  await delegationOffice();
+  const run = async (id: string, tool: string, input: object) => held(await hook(preToolUse(id, tool, input)));
+  for (const id of ["p", "l", "d"]) {
+    for (const [tool, input] of [["Skill", { skill: "loop", args: "5m /foo" }], ["Skill", { skill: "pstack:loop" }], ["ScheduleWakeup", { delaySeconds: 60, prompt: "x", reason: "x" }], ["CronCreate", { cron: "*/5 * * * *", prompt: "x" }]] as const) {
+      const out = await run(id, tool, input);
+      expect([id, tool, out?.permissionDecision]).toEqual([id, tool, "deny"]);
+      expect(out.permissionDecisionReason).toContain("/loop");
+    }
+    for (const skill of ["tdd", "loops", "mattpocock-skills:tdd"]) expect([id, skill, await run(id, "Skill", { skill })]).toEqual([id, skill, null]);
+  }
+  expect(await run("f", "Skill", { skill: "loop" })).toBeNull();
+});
+
+// What a raw `claude` session start may be: nothing, except the PM's and a lead's `--bg --resume`, and a second-office proof that sets its own HOME.
+test("a company employee starts no session with claude --bg or claude -p; the PM's and a lead's --bg --resume and a command with its own HOME pass", async () => {
+  await delegationOffice();
+  const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
+  const real = process.env.HOME ?? "/home/me";
+  const refused = ["claude --bg 'do x'", "claude --background x", "claude -p 'x'", "claude --print x", "claude -p --resume abc", "claude --bg --name x", "cd /code/shop && claude --bg x", "nohup claude -p x &", "ls; /usr/local/bin/claude --bg x", "FOO=1 claude -p x", `HOME=${real} claude -p x`, "HOME=$HOME claude -p x", "HOME=~ claude -p x", "HOME= claude -p x", 'HOME="$HOME" claude -p x', "claude --model opus -p x", "env -u FOO claude --bg x"];
+  const allowed = ["claude agents --json", "claude --version", "claude mcp list", "claude", "echo claude --bg", "git commit -m 'run claude -p later'", "grep 'claude -p' README.md", "claude --resume abc", "HOME=/tmp/h-1 claude -p 'x'", `HOME=${real}/Library/Caches/h-1 claude --bg x`, "export HOME=/tmp/h-2; claude -p x", "env HOME=/tmp/h-3 claude -p x", "HOME=/tmp/h-4 F1RM_PORT=4999 bun office/cli/f1rm.ts serve"];
+  const wake = ["claude --bg --resume abc-123", "cd x && claude --resume abc --bg", "claude --bg -r abc"];
+  for (const id of ["p", "l", "d"]) {
+    for (const command of refused) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("f1rm hire");
+    }
+    for (const command of allowed) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  }
+  for (const id of ["p", "l"]) for (const command of wake) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  for (const command of wake) expect([command, (await bash("d", command))?.permissionDecision]).toEqual([command, "deny"]);
+  for (const command of [...refused, ...wake]) expect([command, await bash("f", command)]).toEqual([command, null]);
+});
+
+test("a background shell watcher (Bash with run_in_background) is not held for the PM, a lead or anyone else", async () => {
+  await delegationOffice();
+  for (const id of ["p", "l", "d", "f"]) {
+    expect([id, await held(await hook(preToolUse(id, "Bash", { command: "while :; do sleep 60; done", run_in_background: true })))]).toEqual([id, null]);
+  }
 });
 
 // A PM, the checkout lead, a designer, a Reviewer and a freelancer, for the hire and push rules.
@@ -1903,4 +1946,118 @@ test("a SendMessage refusal is logged with the role, title and rule, and never t
     console.log = log;
   }
   expect(lines).toEqual(["refused backend shop.backend-dev-a SendMessage project", "refused backend shop.backend-dev-a SendMessage project-unknown"]);
+});
+
+// Who talks to whom: in one project a PM, two leads, members of two teams (one a Reviewer) and a freelancer; in another a PM.
+const WHO = { pm: "pm-shop", l1: "lead-checkout", l2: "lead-search", c1: "checkout.backend-dev-a", c2: "checkout.frontend-dev-b", rv: "checkout.reviewer-review-a", s1: "search.backend-dev-c", free: "freelancer", pmb: "pm-blog" } as const;
+async function talkOffice() {
+  start({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
+  const types: Record<string, string | undefined> = { pm: "f1rm:pm", l1: "f1rm:lead", l2: "f1rm:lead", c1: "f1rm:backend-dev", c2: "f1rm:frontend-dev", rv: "f1rm:reviewer", s1: "f1rm:backend-dev", pmb: "f1rm:pm" };
+  const cwd = (id: string) => (id === "pmb" ? "/code/blog" : "/code/shop");
+  for (const [id, title] of Object.entries(WHO)) {
+    await hook({ ...common(id, "UserPromptSubmit"), cwd: cwd(id), prompt: "go", session_title: title, ...(types[id] && { agent_type: types[id] }) });
+  }
+  for (const id of ["pm", "l1", "c1", "s1", "rv"]) await hook({ ...common(id, "SubagentStart"), cwd: cwd(id), agent_id: `i-${id}`, agent_type: "Explore" });
+  await office((s) => Object.keys(s.employees).length === 9 && Object.keys(s.interns).length === 5);
+  return async (id: string, to: string, message = "the contract is ready", extra: object = {}) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message }), cwd: cwd(id), ...extra }));
+}
+
+test("a SendMessage goes only where the table allows: the PM to leads, a lead to the PM, leads and its team, a member to its lead and its team, interns to their parent", async () => {
+  const send = await talkOffice();
+  const names = [...Object.values(WHO).filter((n) => n !== "freelancer"), "main", "@own", "nobody"];
+  const allowed: Record<string, string[]> = {
+    pm: ["lead-checkout", "lead-search", "main", "@own"],
+    l1: ["pm-shop", "lead-search", "checkout.backend-dev-a", "checkout.frontend-dev-b", "checkout.reviewer-review-a", "main", "@own"],
+    c1: ["lead-checkout", "checkout.frontend-dev-b", "checkout.reviewer-review-a", "main", "@own"],
+    s1: ["lead-search", "main", "@own"],
+    rv: ["lead-checkout", "checkout.backend-dev-a", "checkout.frontend-dev-b", "main", "@own"],
+  };
+  for (const [id, ok] of Object.entries(allowed)) {
+    for (const name of names) {
+      if (name === WHO[id as keyof typeof WHO]) continue;
+      const out = await send(id, name === "@own" ? `i-${id}` : name);
+      expect([id, name, out?.permissionDecision ?? null]).toEqual([id, name, ok.includes(name) ? null : "deny"]);
+      if (out) expect(out.permissionDecisionReason).toMatch(/Who talks to whom|Projects are isolated/);
+    }
+  }
+  // An intern's call carries its agent id: it may message only its parent session and "main".
+  for (const name of [...names, "checkout.backend-dev-a"]) {
+    const out = await send("c1", name === "@own" ? "i-c1" : name, "x", { agent_id: "i-c1", agent_type: "Explore" });
+    expect([name, out?.permissionDecision ?? null]).toEqual([name, ["main", "checkout.backend-dev-a"].includes(name) ? null : "deny"]);
+  }
+  // A freelancer is never held; the user is no session.
+  for (const name of names) expect([name, await send("free", name)]).toEqual([name, null]);
+});
+
+test("a refusal names the rule and the way out", async () => {
+  const send = await talkOffice();
+  const toMember = await send("pm", "checkout.backend-dev-a");
+  expect(toMember.permissionDecisionReason).toContain("Who talks to whom");
+  expect(toMember.permissionDecisionReason).toContain("lead-checkout");
+  const otherTeam = await send("c1", "search.backend-dev-c");
+  expect(otherTeam.permissionDecisionReason).toContain("Who talks to whom");
+  expect(otherTeam.permissionDecisionReason).toContain("ask lead-checkout");
+  expect((await send("c1", "pm-shop")).permissionDecisionReason).toContain("ask lead-checkout");
+  expect((await send("l1", "search.backend-dev-c")).permissionDecisionReason).toContain("lead-search");
+  const intern = await send("c1", "lead-checkout", "x", { agent_id: "i-c1", agent_type: "Explore" });
+  expect(intern.permissionDecisionReason).toContain("parent");
+});
+
+test("a formal report from a team member goes to its lead only; the same words to a peer are refused, and free text to a peer passes", async () => {
+  const send = await talkOffice();
+  const reports = ["DONE gate-messaging branch=x commit=y", "APPROVED shop-1", "CHANGES REQUESTED shop-1: fix x", "BLOCKED shop-1 permission", "ESCALATE shop-1", "  DONE: x", "BLOCKED"];
+  for (const message of reports) {
+    for (const id of ["c1", "rv"]) {
+      expect([id, message, await send(id, "lead-checkout", message)]).toEqual([id, message, null]);
+      expect([id, message, await send(id, "main", message)]).toEqual([id, message, null]);
+      const peer = await send(id, id === "c1" ? "checkout.frontend-dev-b" : "checkout.backend-dev-a", message);
+      expect([id, message, peer?.permissionDecision]).toEqual([id, message, "deny"]);
+      expect(peer.permissionDecisionReason).toContain("lead-checkout");
+      expect(peer.permissionDecisionReason).toContain("formal report");
+    }
+  }
+  for (const message of ["the API is DONE on my side", "done", "DONEZO", "Can you review CHANGES in api.ts?", "BLOCKEDx"]) expect([message, await send("c1", "checkout.frontend-dev-b", message)]).toEqual([message, null]);
+  // A lead's own words to a member are not a member's report.
+  expect(await send("l1", "checkout.backend-dev-a", "CHANGES REQUESTED shop-1: fix x")).toBeNull();
+  expect(await send("free", "checkout.backend-dev-a", "DONE x")).toBeNull();
+});
+
+test("outside any door a session may message only one working under the same folder", async () => {
+  start({});
+  const cwds: Record<string, string> = { lx: "/code/a", mx: "/code/a/.claude/worktrees/t", dx: "/code/b", lz: "/code/b", mz: "/code/b" };
+  const titles: Record<string, [string, string]> = { lx: ["lead-x", "f1rm:lead"], mx: ["x.backend-dev-a", "f1rm:backend-dev"], dx: ["x.designer-b", "f1rm:designer"], lz: ["lead-z", "f1rm:lead"], mz: ["z.designer-c", "f1rm:designer"] };
+  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
+  await office((s) => Object.keys(s.employees).length === 5 && Object.values(s.employees).every((e) => e.room === "elsewhere"));
+  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] }));
+  expect(await send("mx", "lead-x")).toBeNull(); // the worktree is under the lead's folder
+  expect(await send("lx", "x.backend-dev-a")).toBeNull();
+  expect(await send("lz", "z.designer-c")).toBeNull(); // the same folder
+  for (const [from, to] of [["lx", "lead-z"], ["lz", "lead-x"], ["dx", "lead-x"], ["lz", "x.designer-b"]]) {
+    const out = await send(from, to);
+    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Elsewhere");
+    expect(out.permissionDecisionReason).toContain("same folder");
+  }
+  expect(await send("lx", "main")).toBeNull();
+});
+
+test("the messaging refusals are logged by rule with the role and title, and never the message or the target", async () => {
+  const send = await talkOffice();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await send("pm", "checkout.backend-dev-a", "SECRET-TEXT");
+    await send("c1", "checkout.frontend-dev-b", "DONE SECRET-TEXT");
+    await send("c1", "lead-checkout", "SECRET-TEXT", { agent_id: "i-c1", agent_type: "Explore" });
+    await send("l1", "SECRET-TARGET", "SECRET-TEXT");
+  } finally {
+    console.log = log;
+  }
+  expect(lines).toEqual([
+    "refused pm pm-shop SendMessage messaging",
+    "refused backend checkout.backend-dev-a SendMessage formal-report",
+    "refused backend checkout.backend-dev-a SendMessage intern-message",
+    "refused lead lead-checkout SendMessage project-unknown",
+  ]);
 });
