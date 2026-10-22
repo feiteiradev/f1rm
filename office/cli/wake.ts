@@ -40,7 +40,7 @@ export type WakeDeps = {
   promptOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
 };
 
-/** The text of the first user line that is not meta in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
+/** The text of the first line that starts a turn (see startsTurn) in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
 export function firstPrompt(start: string): string | null {
   for (const l of start.split("\n")) {
     if (!l.includes('"type":"user"')) continue;

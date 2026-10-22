@@ -719,7 +719,94 @@ const crossSession = (ago: number, now = T0) => JSON.stringify({ type: "user", i
 test("a cross-session message starts a turn: a re-review that ends without a verdict is nudged although the earlier round reported", async () => {
   const o = office();
   idleReviewer(o, "x", 25);
-  o.w.transcripts["rev-1"] = [say("reviewing", 90, o.w.now), ...sent("CHANGES REQUESTED checkout: 2 findings", "Sent.", 80, o.w.now), crossSession(40, o.w.now), tool("w1", 35, "Bash", { command: "bun test" }, o.w.now), toolResult("w1", 34, o.w.now), say("Round 2 looks fine overall.", 25, o.w.now)];
+  o.w.transcripts["rev-1"] = [say("reviewing", 90, o.w.now), ...sent("CHANGES REQUESTED checkout: 2 findings", "Sent.", 80, o.w.now), crossSession(40, o.w.now), say("Round 2 looks fine overall.", 25, o.w.now)];
   await o.tick();
   expect(o.w.told).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
+
+// ── round 4: a record holds only while its session stays ended ─────────────
+test("a lead skipped because a member was still active is judged again when the team goes quiet, although its own transcript did not change", async () => {
+  const o = office();
+  const member = (status: string, ago: number) => live(DEV, "m-1", DEV_CWD, { status });
+  o.w.list = [live("lead-shop", "lead-1", REPO, { status: "idle" }), member("busy", 1)];
+  o.w.transcripts["lead-1"] = [say("Hired the dev; watching.", 30, o.w.now)];
+  o.w.mtimes = { "lead-1": o.w.now - 30 * MIN, "m-1": o.w.now };
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  await o.tick();
+  expect(o.w.told).toEqual([]);
+  // The member writes its last line and goes quiet; the lead's transcript is unchanged.
+  o.w.now += 25 * MIN;
+  o.w.list = [live("lead-shop", "lead-1", REPO, { status: "idle" }), member("idle", 1)];
+  o.w.mtimes = { "lead-1": o.w.now - 55 * MIN, "m-1": o.w.now - 22 * MIN };
+  await o.tick();
+  expect(o.w.told).toEqual([{ to: "lead-shop", message: NUDGE }]);
+});
+
+test("a session resumed in place (it keeps its id) and then ended again without a report is a new stop, whatever was recorded for the first", async () => {
+  const o = office();
+  stoppedDev(o, sent("DONE checkout", "Sent.", 1));
+  await o.tick();
+  expect(o.w.store[REPO][DEV]).toMatchObject({ told: "dev-1", note: "reported; waits on lead-shop" });
+  // The user attaches: the same session id runs again for a tick.
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), live(DEV, "dev-1", DEV_CWD)];
+  await o.tick();
+  expect(o.w.store[REPO][DEV]?.told).toBeUndefined();
+  // It works on and its process ends in the middle of a tool call, with no report.
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD)];
+  o.w.transcripts["dev-1"] = [...sent("DONE checkout", "Sent.", 5), prompt("one more fix", 3), tool("w2", 2, "Bash", { command: "bun test" })];
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
+});
+
+test("a stale wait for a limit is dropped when the session runs again, so a later stop is not woken at the old time with the limit note", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop("8:40pm (Europe/Lisbon)", 0)]);
+  o.w.now = at("2026-10-22T18:30:00Z");
+  await o.tick();
+  expect(o.w.store[REPO][DEV].waitSid).toBe("dev-1");
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), live(DEV, "dev-1", DEV_CWD)]; // resumed in place
+  await o.tick();
+  expect(o.w.store[REPO][DEV]?.waitSid).toBeUndefined();
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD)];
+  o.w.transcripts["dev-1"] = [say("working", 10), tool("w2", 1, "Bash", { command: "bun test" })];
+  o.w.now = at("2026-10-22T18:45:00Z");
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
+});
+
+test("a hung git does not stop the tick: the hire is woken without a tip, the others are decided and saved, and nobody is told twice", async () => {
+  const o = office();
+  const second = "shop.backend-dev-search";
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(second, "dev-2", wt("search"))];
+  o.w.transcripts = { "dev-1": [say("compiling", 1)], "dev-2": [limitStop(null, 0)] };
+  o.w.boards.shop = [row(DEV, "doing", "checkout"), row(second, "doing", "search")];
+  const make = createRecovery({
+    now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null, promptOf: async () => null,
+    board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [],
+    commitTime: async () => { throw new Error("git timed out after 10000 ms"); },
+    wake: async (repo, name, note) => void o.w.woke.push({ repo, name, note }),
+    tell: async (_r, to, message) => (o.w.told.push({ to, message }), true),
+    store: { load: (repo) => structuredClone(o.w.store[repo] ?? {}), save: (repo, e) => void (o.w.store[repo] = structuredClone(e)) },
+  });
+  const logged: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void logged.push(a.join(" "));
+  try {
+    await make.tick([REPO]);
+    await make.tick([REPO]);
+  } finally {
+    console.log = log;
+  }
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
+  expect(o.w.told.map((t) => t.message)).toEqual([`${second} stopped at the session limit; f1rm wake ${second}`]);
+  expect(o.w.store[REPO][DEV]).toMatchObject({ wokeFrom: "dev-1", tip: null });
+  expect(logged.some((l) => l.includes("git timed out"))).toBe(true);
+});
+
+test("the wake time is taken before the wake, so replies written while it starts count as progress", async () => {
+  const o = office({ wake: async () => { o.w.now += 3 * MIN; } });
+  stoppedDev(o, [say("compiling", 1)]);
+  const before = o.w.now;
+  await o.tick();
+  expect(o.w.store[REPO][DEV].wokeAt).toBe(before);
 });

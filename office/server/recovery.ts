@@ -5,9 +5,9 @@ import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
-import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync, textOf } from "../cli/status.ts";
+import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
-import { agents, machine, runAsync } from "./machine.ts";
+import { agents, commitTimeArgs, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
 
 const MIN = 60_000;
@@ -196,16 +196,26 @@ export function createRecovery(d: RecoveryDeps) {
     const boards = new Map<string | null, BoardRow[]>();
     const rowsOf = async (team: string | null) => boards.get(team) ?? (boards.set(team, await d.board(repo, team)), boards.get(team)!);
 
-    for (const [name, cur] of newest) {
+    // One hire's failure is logged and the others are still decided, so the record of what was decided earlier in the tick is saved.
+    const judge = async (name: string, cur: any) => {
       const h = hireName(name)!;
       const e = (entries[name] ??= {});
       const sid = String(cur.sessionId ?? cur.id);
       const cwd = String(cur.cwd);
       const now = d.now();
+      // A record holds only while its session stays ended: one resumed in place (the user's attach, a flagless resume) keeps its id, and its next stop is a new one.
+      if (cur.pid) {
+        if (e.told === sid) delete e.told;
+        if (e.wokeFrom === sid) delete e.wokeFrom;
+        if (e.waitSid === sid) {
+          delete e.waitSid;
+          delete e.wakeAt;
+        }
+      }
       if (!active(await rowsOf(h.role === "lead" ? null : h.team), name, h)) {
         delete e.note;
         delete e.unreachable;
-        continue;
+        return;
       }
 
       if (cur.pid) {
@@ -215,30 +225,47 @@ export function createRecovery(d: RecoveryDeps) {
           delete e.note;
           delete e.unreachable;
           delete e.judged;
-          continue;
+          return;
         }
-        if (e.judged === mt) continue;
+        if (e.judged === mt) return;
         delete e.note;
         delete e.unreachable;
-        e.judged = mt;
         const tailText = await d.tail(cwd, sid);
         const turn = lastTurn(tailText);
-        if (turn?.type !== "assistant" || turn.isApiErrorMessage === true) continue; // the last line is no turn end (a limit stop, a message not yet answered)
+        if (turn?.type !== "assistant" || turn.isApiErrorMessage === true) {
+          e.judged = mt; // the last line is no turn end (a limit stop, a message not yet answered)
+          return;
+        }
         const key = `${sid}:${turn.uuid ?? turn.timestamp ?? ""}`;
-        if (e.nudged === key || endsWithReport(tailText)) continue;
-        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) continue;
+        if (e.nudged === key || endsWithReport(tailText)) {
+          e.judged = mt;
+          return;
+        }
+        // A lead whose members are still active is not judged yet: it is looked at again on the next tick, whatever its own transcript does.
+        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) return;
+        e.judged = mt;
         e.nudged = key;
         if (!(await safeTell(repo, name, NUDGE, sid))) {
           e.unreachable = key;
           e.note = `turn ended without a report ${Math.floor((now - mt) / MIN)}m ago; ${name} has no inbox to nudge`;
         }
-        continue;
+        return;
       }
 
       // Ended. A stop is decided once, recorded, and its transcript is not read again.
-      if (e.wokeFrom === sid || e.told === sid) continue;
-      /** A lead and a Reviewer have no branch of their own. */
-      const tipOf = async () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
+      if (e.wokeFrom === sid || e.told === sid) return;
+      /** The branch tip, asked for only where it is needed; a lead and a Reviewer have no branch, and a git that hangs or fails reads as no tip (logged) instead of stopping the tick. */
+      let tipAsked: Promise<number | null> | undefined;
+      const tipOf = () =>
+        (tipAsked ??= (async () => {
+          if (h.role === "lead" || h.reviewer) return null;
+          try {
+            return await d.commitTime(repo, `worktree-${h.task}`);
+          } catch (err) {
+            console.log(`recovery ${basename(repo)}/${name}: ${(err as Error).message}`);
+            return null;
+          }
+        })());
       const reportTo = async () => reportToOf(h, await d.promptOf(cwd, sid), repo);
       const tell = async (message: string, reason?: string) => {
         e.told = sid;
@@ -250,13 +277,15 @@ export function createRecovery(d: RecoveryDeps) {
         const ok = (await safeTell(repo, to, message, target && String(target.sessionId ?? target.id))) || (target !== undefined && (await safeTell(repo, to, message)));
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
-      const wakeIt = async (note: string, failed: string, tip: number | null) => {
+      const wakeIt = async (note: string, failed: string) => {
+        const wokeAt = d.now(); // before the wake: replies written while it starts count as progress
+        const tip = await tipOf();
         try {
           await d.wake(repo, name, note);
         } catch (err) {
           return tell(failed, (err as Error).message);
         }
-        e.wokeAt = d.now();
+        e.wokeAt = wokeAt;
         e.wokeFrom = sid;
         e.tip = tip;
         delete e.told;
@@ -267,39 +296,39 @@ export function createRecovery(d: RecoveryDeps) {
       const limited = `${name} stopped at the session limit; f1rm wake ${name}`;
 
       if (e.waitSid === sid) {
-        if (now >= e.wakeAt!) await wakeIt(NOTE_LIMIT, limited, await tipOf());
-        continue;
+        if (now >= e.wakeAt!) await wakeIt(NOTE_LIMIT, limited);
+        return;
       }
       const tailText = await d.tail(cwd, sid);
       const turn = lastTurn(tailText);
       const stoppedAt = (await d.mtime(cwd, sid)) ?? now;
       const limit = limitUntil(tailText);
-      const tip = await tipOf();
       // A limit stop is judged on its reset whatever the turn held.
       if (limit !== null) {
         const reset = limit === "unknown" ? null : resetAt(limit, Date.parse(turn?.timestamp) || stoppedAt);
         if (reset === null) await tell(limited, "no reset time");
-        else if (now >= reset + WAKE_AFTER_RESET_MS) await wakeIt(NOTE_LIMIT, limited, tip);
+        else if (now >= reset + WAKE_AFTER_RESET_MS) await wakeIt(NOTE_LIMIT, limited);
         else {
           e.waitSid = sid;
           e.wakeAt = reset + WAKE_AFTER_RESET_MS;
           e.note = `waits for the session limit to lift (resets ${limit})`;
         }
-        continue;
+        return;
       }
       // Any other end skips a hire whose last turn closed with its report (its row waits on a review, or an answer).
       if (endsWithReport(tailText)) {
         e.told = sid;
         e.note = `reported; waits on ${await reportTo()}`;
-        continue;
+        return;
       }
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
-      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tip)) {
+      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, await tipOf())) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);
-        continue;
+        return;
       }
-      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`, tip);
-    }
+      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`);
+    };
+    for (const [name, cur] of newest) await judge(name, cur).catch((err) => console.log(`recovery ${basename(repo)}/${name}: ${(err as Error).message}`));
     for (const [name, e] of Object.entries(entries)) if (!Object.keys(e).length) delete entries[name];
     if (JSON.stringify(entries) !== before) d.store.save(repo, entries);
   }
@@ -355,7 +384,7 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
     mtime: (cwd, sessionId) => stat(transcriptFile(home, cwd, sessionId)).then((st) => st.mtimeMs, () => null),
     promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
     commitTime: async (repo, branch) => {
-      const out = await runAsync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`]);
+      const out = await runAsync(commitTimeArgs(repo, branch));
       return out ? Number(out) * 1000 : null;
     },
     // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.

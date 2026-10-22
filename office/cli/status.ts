@@ -92,7 +92,11 @@ async function slice(path: string, from: number, to: number): Promise<string> {
 }
 export const headAsync = (path: string) => slice(path, 0, HEAD);
 export const tailAsync = async (path: string) => {
-  const size = await Bun.file(path).stat().then((st) => st.size, () => 0); // a missing file reads as empty below
+  // A missing file reads as empty; any other error (EACCES) shows.
+  const size = await Bun.file(path).stat().then((st) => st.size, (e) => {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw e;
+  });
   const from = Math.max(0, size - TAIL);
   const text = await slice(path, from, size);
   return from > 0 ? text.slice(text.indexOf("\n") + 1) : text;
@@ -121,7 +125,7 @@ const TURN_LINE = new RegExp(`"type":"(?:${TURN.join("|")})"`);
 export const textOf = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => String(b?.text ?? "")).join("") : "");
 
 /** A task-notification is the session's own background task finishing, not anyone's message. */
-export const isNotification = (content: unknown) => textOf(content).trimStart().startsWith("<task-notification>");
+const isNotification = (content: unknown) => textOf(content).trimStart().startsWith("<task-notification>");
 
 /**
  * Whether a transcript line starts a turn: a prompt or a delivered message, a cross-session message included (it is logged as an isMeta user line, often with no enqueue before it).
@@ -146,8 +150,7 @@ export function lastTurn(end: string): any {
     if (!TURN_LINE.test(l)) continue;
     try {
       const line = JSON.parse(l);
-      if (!TURN.includes(line.type) || (line.type === "queue-operation" && line.operation !== "enqueue")) continue;
-      if (line.type !== "assistant" && isNotification(line.content ?? line.message?.content)) continue; // one that merely quotes the tag is a message
+      if (!(line.type === "assistant" ? !line.isSidechain : startsTurn(line))) continue; // an assistant line of the conversation, or what starts a turn
       return line;
     } catch {} // a cut or odd line is not a turn
   }

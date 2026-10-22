@@ -1,12 +1,12 @@
 // Seam: `f1rm status`, from a temp HOME's transcripts, an injected `claude agents --json` list, an injected clock and an injected commit lookup.
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { head, headAsync, hires, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
+import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -571,4 +571,32 @@ test("headAsync and tailAsync read what head and tail read, a missing file as em
   expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
   expect(await headAsync(join(h, "none.jsonl"))).toBe("");
   await expect(tailAsync(h)).rejects.toThrow(); // a folder where a transcript should be
+});
+
+test("lastTurn skips what startsTurn says is no turn: a skill's meta body, a tool result and a sidechain line leave a limit stop standing; a cross-session message and a prompt end it", () => {
+  const user = (content: unknown, more: object = {}) => ({ type: "user", message: { role: "user", content }, ...more });
+  const stop = limitStop();
+  const until = (...after: object[]) => {
+    const text = [stop, ...after].map((l) => JSON.stringify(l)).join("\n");
+    return limitUntil(text);
+  };
+  expect(until(user([{ type: "text", text: "Base directory for this skill: /x" }], { isMeta: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user([{ type: "text", text: "<local-command-caveat>Caveat</local-command-caveat>" }], { isMeta: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user([{ type: "tool_result", tool_use_id: "t1", content: "ok" }]))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(talk("a sub-agent talking", { isSidechain: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user('Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/1.sock">resume</cross-session-message>', { isMeta: true }))).toBeNull();
+  expect(until(user("resume"))).toBeNull();
+});
+
+test("tailAsync reads a missing file as empty, and any other error (no permission) shows", async () => {
+  const h = home();
+  const file = join(h, "locked.jsonl");
+  writeFileSync(file, "x\n");
+  chmodSync(file, 0o000);
+  try {
+    if (process.getuid?.() !== 0) await expect(tailAsync(file)).rejects.toThrow();
+  } finally {
+    chmodSync(file, 0o600);
+  }
+  expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
 });
