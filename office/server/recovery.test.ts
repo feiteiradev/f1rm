@@ -146,6 +146,7 @@ test("each stop is woken once: the same ended session, a restart of the office, 
   await o.tick();
   await o.make().tick([REPO]); // a restarted office reads what the first left
   expect(o.w.woke).toHaveLength(1);
+  expect(o.w.told).toEqual([]); // the repeat is no new stop: not even a "stopped again" tell
 });
 
 test("a hire that ends again within 10 minutes of a wake with no progress is not woken again: its Report to is told, once", async () => {
