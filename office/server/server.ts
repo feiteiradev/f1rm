@@ -138,11 +138,25 @@ const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "res
 export const INTERNS = 2;
 // A team member's message that opens with one of these words (past markdown such as `**`, `>`, `-` or `#`) is a formal report: it goes to its lead only.
 const FORMAL_REPORT = /^[\s*_>#`"'(\[+•-]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES REQUESTED)(?![A-Za-z0-9])/;
-/** Whether one cwd is the other's folder or inside it, past symlinks, and the outer folder is no broad one: not `/`, the home folder or a folder that holds it. */
-const sameFolder = (a: string, b: string) => {
-  const [x, y] = [realPath(resolve(a)), realPath(resolve(b))], home = realPath(resolve(process.env.HOME ?? "/"));
+/** Whether one real folder is the other or inside it, and the outer is no broad one: not `/`, the home folder or a folder that holds it. */
+const sameFolder = (x: string, y: string) => {
+  const home = realPath(resolve(process.env.HOME ?? "/"));
   const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(outer, home);
   return holds(x, y) || holds(y, x);
+};
+const leadOf = (team: string | null) => (team ? `lead-${team}` : "your lead (the Report to of your brief)");
+const theirLead = (e: Employee) => (teamOf(e) ? `lead-${teamOf(e)}` : "their lead");
+/** Who talks to whom: for each kind of company employee, the sessions of its project it may message (its own team, when it has one, is `team`) and the way out when a target is refused. */
+const TALK = {
+  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead", wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${theirLead(e)}.` },
+  lead: {
+    allows: (team: string | null, e: Employee) => e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team),
+    wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${theirLead(e)}.`,
+  },
+  member: {
+    allows: (team: string | null, e: Employee) => !!team && teamOf(e) === team,
+    wayOut: (team: string | null) => `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${leadOf(team)}.`,
+  },
 };
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
@@ -345,7 +359,8 @@ export function startServer({
     // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
     // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
-    // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder.
+    // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder, and that folder is not / or the home folder.
+    // "main" is the user's own top-level session, open to everyone, unless a session is titled main: then the checks below apply to it.
     // Within the project, who talks to whom: an intern only to its parent or "main", the PM only to leads, a lead to the PM, leads and its team, a member to its lead and its team,
     // and a member's formal report only to its lead. A sender with no role is never held, and the user is no session.
     if (tool === "SendMessage" && input.to !== undefined) {
@@ -359,24 +374,17 @@ export function startServer({
         const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
         if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
-        if (me.room === ELSEWHERE.id && !answering.every((e) => sameFolder(me.cwd, e.cwd))) {
+        if (me.room === ELSEWHERE.id && !answering.every((e) => sameFolder(realCwd(me.cwd), realCwd(e.cwd)))) {
           return refuse("elsewhere", "Elsewhere is no room: a session outside every project may message only a session working under the same folder. Use `f1rm feedback: <problem> -> <suggestion>` for the user, addressed to no session.");
         }
         if (intern) {
           if (answering.some((e) => e.sessionId !== sessionId && (me.title === undefined || e.title !== me.title))) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
         } else {
-          const team = teamOf(me), lead = team ? `lead-${team}` : "your lead (the Report to of your brief)";
-          const theirs = (e: Employee) => (teamOf(e) ? `lead-${teamOf(e)}` : "their lead");
-          const goes = (e: Employee) => (role === "pm" ? e.role === "lead" : role === "lead" ? e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team) : !!team && teamOf(e) === team);
-          const bad = answering.find((e) => !goes(e));
-          if (bad) {
-            const way = role === "pm" ? `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${theirs(bad)}.`
-              : role === "lead" ? `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${theirs(bad)}.`
-              : `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${lead}.`;
-            return refuse("messaging", `Who talks to whom: ${way}`);
-          }
+          const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : "member"];
+          const bad = answering.find((e) => !talk.allows(team, e));
+          if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad)}`);
           if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "").trimStart()) && answering.some((e) => e.role !== "lead")) {
-            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES, BLOCKED, ESCALATE) goes to your lead only, ${lead}, never to a peer. Tell a peer in plain words.`);
+            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
           }
         }
       }
@@ -446,6 +454,8 @@ export function startServer({
     for (let q = dirname(p); q !== all.at(-1); q = dirname(q)) all.push(q);
     return all;
   };
+  // The real path of a cwd, as roomOf resolved it.
+  const realCwd = (cwd: string) => cwdPaths.get(cwd)?.chain[1] ?? realPath(resolve(cwd));
   const roomOf = (cwd: string): Room => {
     if (!projectsDir) return ELSEWHERE;
     let info = cwdPaths.get(cwd);
