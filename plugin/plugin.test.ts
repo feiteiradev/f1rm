@@ -708,7 +708,7 @@ test("K2: devs start with /pstack:poteto-mode, pick its playbook, skip Opening a
 
 test("K3: leads get pstack:architect or pstack:how only as a first command the PM names with --skills; the Reviewer adds mattpocock-skills:code-review and not interrogate; the PM keeps grilling", () => {
   const lead = role("lead").body;
-  for (const s of ["pstack:architect", "pstack:how", "ask the PM", "Haiku Explore"]) expect(lead, s).toContain(s);
+  for (const s of ["pstack:architect", "pstack:how", "tell the PM", "Haiku Explore"]) expect(lead, s).toContain(s);
   expect(role("lead").fm.skills).toEqual([GUIDELINES, "f1rm:hire"]);
   const reviewer = role("reviewer").body;
   for (const s of ["mattpocock-skills:code-review", "Spec", "the brief"]) expect(reviewer, s).toContain(s);
@@ -729,7 +729,9 @@ test("K3b: a lead says which of pstack:how or a Haiku Explore intern applies, an
   for (const s of [
     "If the PM started you with `pstack:how`, it ran first; otherwise send a Haiku Explore intern", "A running lead cannot gain a first command", "tell the PM, who runs `f1rm letgo lead-<team>` and hires you again with it",
   ]) expect(step3, s).toContain(s);
-  expect(step3).not.toContain("ask the PM.");
+  // The route is said once.
+  expect(step3).not.toContain("ask the PM");
+  expect(step3.split("tell the PM")).toHaveLength(2);
 });
 
 test("K3c: the Reviewer runs the Spec axis inline, with no sub-agents, against worktree-<task> and not the main checkout's HEAD", () => {
