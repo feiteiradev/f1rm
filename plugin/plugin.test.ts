@@ -795,10 +795,8 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   for (const old of ["So is a hire waiting on a reset timer", "judged only for ended and a limit stop", "unless you hold the timer yourself"]) expect(w, old).not.toContain(old);
   // Nothing watches the PM either: one stopped on its own (a no-time error, a weekly limit mid-turn) stays stopped.
   const pmStop = "Nothing watches the PM; if it stops, the user restarts it.";
-  for (const text of [w, decisions]) {
-    expect(text).toContain(known);
-    expect(text).toContain(pmStop);
-  }
+  expect(decisions).toContain(known); // the history keeps what was true then; the guidelines now say the office wakes the leads (R9b)
+  for (const text of [w, decisions]) expect(text).toContain(pmStop);
   // The lead and PM files say the same paths.
   expect(role("lead").body).toContain("`~/.f1rm/evidence/<repo>/lead-<team>/resume.md`");
   expect(role("pm").body).toContain("`~/.f1rm/evidence/<repo>/pm-<repo>/resume.md`");
@@ -818,6 +816,32 @@ test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role
     expect(line, name).toContain("resume.md");
     if (!["pm", "lead", "reviewer"].includes(name)) expect(line, name).toContain("wip commit");
   }
+});
+
+test("R9b: the guidelines say the office wakes first and the watcher is the second line; pm.md and lead.md say what the office does; both READMEs and the decisions log carry it", () => {
+  const w = section("Watching and waking");
+  for (const s of [
+    "**The office wakes first.**", "whose process has ended while their board row is `doing` or `review`", "through the same checks as `f1rm wake`, caps included",
+    "`resumed after the session limit; continue your task`", "a minute after its reset time", "`resumed after your session ended; continue your task`", "(an update, a crash, a shutdown) at once", "Each stop is woken once.",
+    "(no reset time, a cap, an error)", "within 10 minutes of a wake with no new commit and no work beyond the reply", "it tells the session in the hire's `Report to`",
+    "`<name> stopped again after a wake; f1rm wake <name>`", "`<name> stopped at the session limit; f1rm wake <name>`", "NOTE column (`recovery` in `--json`)",
+    "`your turn ended without a report; send your DONE or BLOCKED`", "a first word of `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`",
+    "wakes no interactive session, no PM, no hire that was let go", "no project that is not registered", "The watcher below is the second line",
+    "**Ended**: the office wakes it within a minute", "the office wakes the leads after the reset and the PM waits for the user",
+  ]) expect(w, s).toContain(s);
+  expect(w).not.toContain("nothing wakes them");
+  for (const r of ["pm", "lead"]) {
+    expect(role(r).body, r).toContain("woken by the office within a minute");
+    expect(role(r).body, r).toContain("when `f1rm status` says it could not, run `f1rm wake");
+  }
+  for (const file of [join(REPO, "README.md"), join(PLUGIN, "README.md")]) expect(readFileSync(file, "utf8"), file).toMatch(/office[^|\n]* (?:runs it|also wakes)[^|\n]*by itself/);
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const wakes = entries.find((e) => e.startsWith("2026-10-22 The office wakes limit-stopped hires"));
+  const nudge = entries.find((e) => e.startsWith("2026-10-22 A hire whose turn ended without its report gets one nudge"));
+  for (const part of ["about 1 minute after the parsed reset time", "resumed after the session limit; continue your task", "resumed after your session ended; continue your task", "each stop is woken once", "10 minutes", "stopped again after a wake; f1rm wake", "stopped at the session limit; f1rm wake", "never wakes interactive sessions, the PM, or a let-go hire"]) expect(wakes, part).toContain(part);
+  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE, NEEDS YOU", "once"]) expect(nudge, part).toContain(part);
+  expect(wakes).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
+  expect(nudge).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
 });
 
 test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm status and Self-driving teams entries", () => {
@@ -987,7 +1011,7 @@ test("W1: the guidelines name `f1rm wake` once in Watching and waking, and the E
     "**No live session**", "no live session; f1rm wake <name>", "`f1rm wake <name> \"<the message you meant to send>\"`", "resumes that hire in place", "from its own worktree", "with its history, name and `Report to`",
     "`resumed; continue your task`", "new session id", "counts against the caps like a hire", "refuses a hire that was let go, another project's hire, a live one (message it instead) and an unknown name",
     "The PM wakes leads and a lead wakes the members of its own team (enforced); a specialist wakes nobody.",
-    "**Ended**: run `f1rm wake <name>`", "Re-hire only a hire that was let go or whose wake failed",
+    "**Ended**: the office wakes it within a minute", "a NOTE that says the office could not wake it (or that it stopped again) means you run `f1rm wake <name>`", "Re-hire only a hire that was let go or whose wake failed",
     "**Address a woken or re-hired session**",
   ]) expect(w, s).toContain(s);
   expect(w).not.toContain("**Ended**: run `f1rm letgo");
@@ -1021,9 +1045,9 @@ test("W3: the pm and lead pickup steps wake any doing or review row whose hire h
   for (const s of ["`doing` or `review`", "no live process", "`f1rm status`", "run `f1rm wake <name>`", "Watching and waking"]) expect(read, s).toContain(s);
   for (const r of ["pm", "lead"]) {
     const body = role(r).body;
-    expect(body, r).toMatch(/For an ended (session|lead), run `f1rm wake /);
+    expect(body, r).toMatch(/The office wakes an ended (session|lead) itself; when `f1rm status` says it could not, run `f1rm wake /);
     expect(body, r).toContain("re-hire only a hire that was let go or whose wake failed");
-    expect(body, r).not.toMatch(/For an ended (session|lead), run `f1rm letgo/);
+    expect(body, r).not.toMatch(/run `f1rm letgo/);
     expect(body, r).not.toContain("no live session; f1rm wake"); // the guidelines say it once
   }
 });
