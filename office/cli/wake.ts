@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { head, hires, tail } from "./status.ts";
+import { head, hires, tail, textOf } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -39,15 +39,13 @@ export type WakeDeps = {
   promptOf: (cwd: string, sessionId: string) => string | null;
 };
 
-/** The text of the first user line in the start of a transcript: a string, or the text blocks of a list. */
+/** The text of the first user line that is not meta in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
 export function firstPrompt(start: string): string | null {
   for (const l of start.split("\n")) {
     if (!l.includes('"type":"user"')) continue;
     try {
       const line = JSON.parse(l);
-      if (line.type !== "user") continue;
-      const c = line.message?.content;
-      return typeof c === "string" ? c : Array.isArray(c) ? c.map((b) => String(b?.text ?? "")).join("") : null;
+      if (line.type === "user" && line.isMeta !== true) return textOf(line.message?.content);
     } catch {} // a cut or odd line is no prompt
   }
   return null;
@@ -115,8 +113,10 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const sessionId = String(target.sessionId);
   const first = d.promptOf(cwd, sessionId);
   const reportTo = (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common }));
-  // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. The sentence that names skills to load is not repeated: the history has them.
-  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${first?.includes(SECURITY) ? SECURITY : ""}`;
+  // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. A Reviewer whose prompt could not be read carries it too
+  // (one extra security-review is cheaper than a missing hold). The sentence that names skills to load is not repeated: the history has them.
+  const hold = first === null ? hire.role === "reviewer" : first.includes(SECURITY);
+  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${hold ? SECURITY : ""}`;
   const extra = req.extra ?? [];
   const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : d.modelOf(cwd, sessionId);
   const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];
@@ -128,7 +128,9 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
 export function parseWakeArgs(words: string[]): { target: string | undefined; message: string | undefined; override: boolean; extra: string[] } {
   const at = words.findIndex((a) => a.startsWith("-") && a !== "--override");
   const own = at < 0 ? words : words.slice(0, at);
-  const [target, message] = own.filter((a) => a !== "--override");
+  const positional = own.filter((a) => a !== "--override");
+  if (positional.length > 2) throw new Error(`${USAGE}: quote the message, as one word`);
+  const [target, message] = positional;
   return { target, message, override: own.includes("--override"), extra: at < 0 ? [] : words.slice(at) };
 }
 
