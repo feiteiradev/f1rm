@@ -29,7 +29,7 @@ const LEVELS = ["low", "medium", "high"];
 const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:ponytail-review", "security-review"];
 // The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
-const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
+export const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
 /** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
 export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");

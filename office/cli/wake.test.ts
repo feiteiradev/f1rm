@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
-import { DEFAULT_NOTE, lastModel, mayWake, planWake } from "./wake.ts";
+import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, planWake } from "./wake.ts";
 
 setDefaultTimeout(30_000);
 const made: string[] = [];
@@ -24,13 +24,14 @@ const idle = (name: string, sessionId: string, cwd: string) => running(name, ses
 const stopped = (name: string, sessionId: string, cwd: string, state = "stopped", more: Entry = {}) => entry(name, sessionId, cwd, { state, ...more });
 
 /** What the two `claude agents --json` calls say: --all lists everything, the plain call the sessions that run, and a blocked one (it has no process but holds its slot). */
-const deps = (list: Entry[], more: { home?: string; exists?: (p: string) => boolean; modelOf?: (cwd: string, sessionId: string) => string | null } = {}) => ({
+const deps = (list: Entry[], more: { home?: string; exists?: (p: string) => boolean; modelOf?: (cwd: string, sessionId: string) => string | null; promptOf?: (cwd: string, sessionId: string) => string | null } = {}) => ({
   agents: async (all: boolean) => (all ? list : list.filter((a) => a.pid || a.state === "blocked")),
   gitCommonDir: () => `${REPO}/.git`,
   home: more.home ?? tmp("f1rm-wake-home-"),
   now: NOW,
   exists: more.exists ?? (() => true),
   modelOf: more.modelOf ?? (() => null),
+  promptOf: more.promptOf ?? (() => null),
 });
 const plan = (target: string, list: Entry[], req: { message?: string; override?: boolean; extra?: string[] } = {}, more: Parameters<typeof deps>[1] = {}) =>
   planWake({ target, cwd: REPO, ...req }, deps(list, more));
@@ -95,7 +96,43 @@ test("a lead is woken from the repo itself and reports to the PM; a Reviewer rep
   expect(p.cwd).toBe(REPO);
   const rv = await plan("shop.reviewer-review-checkout", [lead, stopped("shop.reviewer-review-checkout", "rv-sid", REPO, "done")]);
   expect(rv.argv).toContain("f1rm:reviewer");
-  expect(rv.argv.at(-1)).toContain("Report to: lead-shop");
+  expect(rv.argv[8]).toContain("Report to: lead-shop");
+});
+
+test("a woken Reviewer is not counted against the task it reviews: its dev, idle after DONE, does not refuse it", async () => {
+  const dev = idle("shop.backend-dev-checkout", "dev-sid", wt("checkout"));
+  const rv = stopped("shop.reviewer-review-checkout", "rv-sid", REPO, "done");
+  expect((await plan("shop.reviewer-review-checkout", [lead, dev, rv])).sessionId).toBe("rv-sid");
+  // One Reviewer per task still holds: a live one of the same name makes the wake a message instead.
+  const err = await failure(plan("shop.reviewer-review-checkout", [lead, dev, rv, running("shop.reviewer-review-checkout", "rv-live", REPO)]));
+  expect(err?.message).toContain("is live");
+});
+
+test("a woken Reviewer keeps the push block `f1rm hire` gives it, last in the argv, and no other role gets it", async () => {
+  const rv = await plan("shop.reviewer-review-checkout", [lead, stopped("shop.reviewer-review-checkout", "rv-sid", REPO, "done")], { extra: ["--settings", "{}"] }, { modelOf: () => "claude-sonnet-5-5" });
+  expect(rv.argv.slice(-2)).toEqual(["--disallowedTools", "Bash(git push *)"]);
+  expect(rv.argv.slice(-4, -2)).toEqual(["--model", "claude-sonnet-5-5"]);
+  expect(rv.argv).toContain("--settings");
+  expect((await plan("shop.backend-dev-checkout", [lead, stopped("shop.backend-dev-checkout", "d", wt("checkout"))])).argv).not.toContain("--disallowedTools");
+});
+
+test("a woken hire reports to the session its first prompt named, and to the default only when that prompt can't be read", async () => {
+  const promptOf = (prompt: string | null) => () => prompt;
+  const first = (to: string) => `/f1rm:f1rm-guidelines Before you start, load these with the Skill tool: f1rm:hire. Report to: ${to}\n\nbrief`;
+  const gone = stopped("lead-shop", "old-lead", REPO, "done");
+  expect((await plan("lead-shop", [gone], {}, { promptOf: promptOf(first("pm-custom")) })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: pm-custom`);
+  expect((await plan("lead-shop", [gone], {}, { promptOf: promptOf(null) })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: pm-shop`);
+  expect((await plan("lead-shop", [gone], {}, { promptOf: promptOf("no report line here") })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: pm-shop`);
+  const dev = stopped("shop.backend-dev-checkout", "d", wt("checkout"));
+  expect((await plan("shop.backend-dev-checkout", [lead, dev], {}, { promptOf: promptOf(first("lead-shop")) })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: lead-shop`);
+});
+
+test("firstPrompt reads the text of the first user line, whether the content is a string or blocks", () => {
+  const user = (content: unknown) => JSON.stringify({ type: "user", message: { role: "user", content } });
+  const meta = JSON.stringify({ type: "agent-name", agentName: "x" });
+  expect(firstPrompt([meta, user("/cmd Report to: pm-x\n\nbrief"), user("second")].join("\n"))).toBe("/cmd Report to: pm-x\n\nbrief");
+  expect(firstPrompt([meta, user([{ type: "text", text: "one " }, { type: "text", text: "two" }])].join("\n"))).toBe("one two");
+  expect(firstPrompt(`${meta}\n{cut`)).toBeNull();
 });
 
 test("of several ended sessions of one name the newest is resumed", async () => {

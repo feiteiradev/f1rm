@@ -3,9 +3,9 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
-import { checkSlots, HireRefused, pmName, projectFolder, rootTooLong, type LiveHires } from "./hire.ts";
+import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { hires, tail } from "./status.ts";
+import { head, hires, tail } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake [--override] <name|id> [message] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -35,7 +35,23 @@ export type WakeDeps = {
   exists: (path: string) => boolean;
   /** The model a session last answered with, or null when its transcript says none. */
   modelOf: (cwd: string, sessionId: string) => string | null;
+  /** The text of the session's first prompt, the one `f1rm hire` wrote, or null when its transcript can't be read. */
+  promptOf: (cwd: string, sessionId: string) => string | null;
 };
+
+/** The text of the first user line in the start of a transcript: a string, or the text blocks of a list. */
+export function firstPrompt(start: string): string | null {
+  for (const l of start.split("\n")) {
+    if (!l.includes('"type":"user"')) continue;
+    try {
+      const line = JSON.parse(l);
+      if (line.type !== "user") continue;
+      const c = line.message?.content;
+      return typeof c === "string" ? c : Array.isArray(c) ? c.map((b) => String(b?.text ?? "")).join("") : null;
+    } catch {} // a cut or odd line is no prompt
+  }
+  return null;
+}
 
 /**
  * The model of the conversation's last answer in a piece of transcript: an assistant line that is no sub-agent's and no synthetic error line (`<synthetic>`). A resume with no `--model`
@@ -93,14 +109,19 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const live: LiveHires = background(listed)
     .filter((a) => !(a.name === name && !a.pid))
     .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }) }));
-  checkSlots(live, { role: hire.role, name, task: hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override });
+  // A Reviewer's task is review-<task>, as `f1rm hire` names it; hireName gives the task it reviews, whose dev may be idle in its worktree.
+  checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override });
 
-  const reportTo = hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common });
-  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}`;
+  // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);
+  const first = d.promptOf(cwd, sessionId);
+  const reportTo = (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common }));
+  const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}`;
   const extra = req.extra ?? [];
-  const model = extra.includes("--model") ? null : d.modelOf(cwd, sessionId);
-  return { argv: ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])], cwd, name, sessionId };
+  const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : d.modelOf(cwd, sessionId);
+  const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];
+  if (hire.role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
+  return { argv, cwd, name, sessionId };
 }
 
 /** Runs `f1rm wake` and returns the exit code. */
@@ -114,8 +135,10 @@ export async function wake(words: string[]): Promise<number> {
   let plan: WakePlan;
   try {
     const home = process.env.HOME!;
-    const modelOf = (cwd: string, sessionId: string) => lastModel(tail(join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`)));
-    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync, modelOf });
+    const file = (cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
+    const modelOf = (cwd: string, sessionId: string) => lastModel(tail(file(cwd, sessionId)));
+    const promptOf = (cwd: string, sessionId: string) => firstPrompt(head(file(cwd, sessionId)));
+    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync, modelOf, promptOf });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(`${err.message} Do not wake it; tell the session you report to. Only after the user approves this wake in that conversation is it rerun with --override.`);
