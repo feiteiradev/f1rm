@@ -1,6 +1,6 @@
 // Seam 2: the real `f1rm hire`, run against a stub `claude` first on PATH.
-import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { afterAll, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
@@ -116,7 +116,7 @@ test("hire runs exactly claude --bg --agent --name --worktree with the slash com
 
 test("hire without --report-to reports to the PM session of the repo it runs in", () => {
   const stub = stubClaude([]);
-  const repo = join(mkdtempSync(join(tmpdir(), "f1rm-repo-")), "shop");
+  const repo = join(repoDir(), "shop");
   mkdirSync(repo);
   hire(stub, ["backend-dev", "backend-dev-api", "api", BRIEF], repo);
   expect(stub.argv()![7]).toBe(`/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd. Report to: pm-shop\n\n${BRIEF}`);
@@ -379,7 +379,14 @@ test("hire --help prints the syntax", () => {
 });
 
 // Teams: the repo a lead runs in is the folder `f1rm hire` runs in.
-const repoDir = () => realpathSync(mkdtempSync(join(tmpdir(), "f1rm-repo-")));
+// Only the folders this file made are removed, once it is done.
+const repoDirs: string[] = [];
+const repoDir = () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-repo-")));
+  repoDirs.push(dir);
+  return dir;
+};
+afterAll(() => repoDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 const worktree = (repo: string, task: string) => join(repo, ".claude", "worktrees", task);
 
 test("a lead runs as lead-<team> in the repo, with no worktree, starting with the guidelines and reporting to the PM", () => {
