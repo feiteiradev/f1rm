@@ -152,10 +152,14 @@ const ownHome = (prefix: string[]) => {
   const value = unquoted(prefix.findLast((w) => w.startsWith("HOME="))?.slice(5) ?? "");
   return value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![homeKey(process.env.HOME ?? "/"), "/"].includes(homeKey(value)));
 };
-const claudeStart = ({ prefix, words: [program, ...words] }: { prefix: string[]; words: string[] }) => {
-  if (basename(unquoted(program ?? "")) !== "claude") return null;
-  const args = words.map(unquoted);
-  const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "-p" || a === "--print");
+// What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper simpleCommands drops), `npm exec`.
+const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
+const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) => {
+  let i = 0;
+  if (PACKAGE_RUNNERS.has(words[0])) for (i = 1; PACKAGE_RUNNERS.has(words[i]) || words[i]?.startsWith("-"); i++);
+  if (!/^claude(?:-code)?(?:@[\w.-]+)?$/.test(basename(unquoted(words[i] ?? "")))) return null;
+  const args = words.slice(i + 1).map(unquoted);
+  const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
   return bg || print ? { bg, print, resume: args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")), home: ownHome(prefix) } : null;
 };
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
