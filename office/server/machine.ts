@@ -102,7 +102,7 @@ const ASK_PREAMBLE =
   "This is a side question from the user, not a new task. Answer it from this conversation so far. Do not continue or redo the work, and do not change anything. Be brief.\n\n";
 
 /** A session Claude Code lists (`claude agents --json`). */
-export type Session = { id: string; name: string; kind: string; state: string; cwd: string; startedAt?: number; sessionId?: string; pid?: number };
+export type Session = { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number };
 
 /** True if commit `rev` is in the branch checked out in the main working directory `repo`. */
 const inBase = (repo: string, rev: string) =>
@@ -223,7 +223,6 @@ export const machine = {
     return list && list.filter((a) => typeof a?.id === "string").map((a) => ({
       id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""),
       ...(typeof a.sessionId === "string" && { sessionId: a.sessionId }),
-      ...(Number.isFinite(a.startedAt) && { startedAt: a.startedAt as number }),
       ...(Number.isInteger(a.pid) && a.pid > 0 && { pid: a.pid as number }),
     }));
   },

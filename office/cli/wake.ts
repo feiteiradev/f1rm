@@ -94,8 +94,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
     if (hires({ repo, home: d.home, agents: all, now: d.now, commitTime: () => null }).some((h) => h.ended && h.name === name)) throw new Error(`${name} was let go; hire a new one`);
     throw new Error(`no hire named ${name} in this project`);
   }
-  const same = background(all).filter((a) => a.name === name);
-  const mine = same.filter((a) => repoOf(String(a.cwd)) === repo);
+  const mine = background(all).filter((a) => a.name === name && repoOf(String(a.cwd)) === repo);
   if (!mine.length) throw new Error(`${name} belongs to another project: wake it from there`);
   const hire = hireName(name);
   if (!hire) throw new Error(`${name} is not a hire: only a lead or a specialist is woken`);
