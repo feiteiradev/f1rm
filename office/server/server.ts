@@ -1,7 +1,7 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
@@ -30,25 +30,25 @@ const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
 /**
  * The skills a session has tried with the Skill tool, whether it ran them or the tool refused (a skill marked disable-model-invocation, or an unknown one).
  * A refusal fires no hook event at all (Claude Code 2.1.308 fails the call at validation, before any hook), so the session's own transcript is the only trace.
- * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`, the hook's `transcript_path` serving as a hint for the project folder and nothing more.
+ * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`: the session id and the directory are the office's own, and only the project folder comes from the hook's `transcript_path`.
+ * It guards against slips; it is not a security boundary, since the same user can write any line into a transcript.
  * Only the skill names of the session's own (non-sidechain) assistant Skill calls are kept, from the first 8 MB. Anything odd means none: the gate then holds as before.
  */
 function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): Set<string> {
   const tried = new Set<string>();
   try {
-    if (typeof hint !== "string" || !hint) return tried;
+    if (typeof hint !== "string" || hint.split(sep).includes("..")) return tried;
     const path = resolve(hint);
-    const project = dirname(path);
     const realDir = realpathSync(resolve(transcriptsDir));
-    if (basename(path) !== `${sessionId}.jsonl` || ![resolve(transcriptsDir), realDir].includes(dirname(project))) return tried;
     const real = realpathSync(path); // a link that leads elsewhere is not the session's file
-    if (real !== join(realDir, basename(project), basename(path)) || !statSync(real).isFile()) return tried;
-    const fd = openSync(real, "r");
+    if (basename(path) !== `${sessionId}.jsonl` || real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
+    const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a pipe at the path must not hang the office
     let text: string;
     try {
-      const buffer = Buffer.alloc(Math.min(fstatSync(fd).size, TRANSCRIPT_READ_MAX));
+      const info = fstatSync(fd);
+      if (!info.isFile()) return tried;
+      const buffer = Buffer.alloc(Math.min(info.size, TRANSCRIPT_READ_MAX));
       text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
-      if (fstatSync(fd).size > TRANSCRIPT_READ_MAX) text = text.slice(0, text.lastIndexOf("\n") + 1); // the cut line is whole or nothing
     } finally {
       closeSync(fd);
     }

@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { projectFile } from "./editions.ts";
 import { startServer } from "./server.ts";
 import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
@@ -1667,7 +1667,16 @@ test("a Skill try only counts from the session's own transcript, read within lim
   await hire("other"); // other lines and other tools are not a Skill try
   const bash = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }, { type: "text", text: "pstack:architect" }] } };
   const asUser = { type: "user", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "pstack:architect" } }] } };
-  expect(await tryAt("other", transcript("other", [bash, asUser]))).toBe("deny");
+  const mixed = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "impeccable" } }, { type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }] } };
+  expect(await tryAt("other", transcript("other", [bash, asUser, mixed]))).toBe("deny"); // the Skill block on the line is no cover for the Bash one
+  await hire("dots"); // a path that climbs with ".." is refused even where it lands in the right place
+  const dots = transcript("dots", tried);
+  expect(await tryAt("dots", `${dirname(dirname(dots))}/zz/../${basename(dirname(dots))}/dots.jsonl`)).toBe("deny");
+  expect(await tryAt("dots", dots)).toBeNull();
+  await hire("fifo"); // a named pipe at the path must not hang the office
+  mkdirSync(join(transcripts, "pfifo"), { recursive: true });
+  Bun.spawnSync(["mkfifo", join(transcripts, "pfifo", "fifo.jsonl")]);
+  expect(await tryAt("fifo", join(transcripts, "pfifo", "fifo.jsonl"))).toBe("deny");
   await hire("odd"); // not JSON
   const oddPath = transcript("odd", []);
   writeFileSync(oddPath, "{not json\n\u0000\u0001\n[1,2]\nnull\n");
@@ -1685,6 +1694,9 @@ test("a Skill try only counts from the session's own transcript, read within lim
 test("only a session's first prompt arms the gate: a later prompt that quotes the sentence neither arms nor resets it", async () => {
   start();
   const quote = `Re-review. The brief said: ${LOAD_FIRST}not-installed, ghost:skill.${SECURITY} End.`;
+  await hook(sessionStart("seated", "/code/shop")); // an event before the first prompt is no prompt
+  await hired("seated", `/tdd${LOAD_FIRST}impeccable.`);
+  expect(await tryTool("seated", "Bash", { command: "ls" })).toBe("deny");
   await hired("plain", "/tdd start work"); // a first prompt that names nothing arms nothing
   await hired("plain", quote);
   expect(await tryTool("plain", "Bash", { command: "ls" })).toBeNull();
