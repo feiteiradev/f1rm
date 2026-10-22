@@ -119,11 +119,14 @@ export type RecoveryDeps = {
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
 };
 
+const isNotification = (content: unknown) => textOf(content).trimStart().startsWith("<task-notification>");
+
 /**
- * Whether the hire's last turn (everything since the last prompt or delivered message that was not a tool result) reported: a SendMessage whose message starts with a report word, or text that does.
- * Real hires report through SendMessage and close with prose ("I sent APPROVED to lead-shop."), so the last line's text alone says nothing.
+ * The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message. A task-notification (the session's own
+ * background task finishing) and the meta lines a skill writes start no turn, as in lastTurn and firstPrompt.
  */
-function reportSent(tailText: string): boolean {
+function lastTurnLines(tailText: string): any[] {
+  const lines: any[] = [];
   for (const l of tailText.split("\n").reverse()) {
     let line: any;
     try {
@@ -131,17 +134,39 @@ function reportSent(tailText: string): boolean {
     } catch {
       continue; // a cut or odd line
     }
-    if (line?.isSidechain) continue;
-    if (line?.type === "assistant") {
-      for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
-        if (b?.type === "text" && REPORT.test(String(b.text ?? ""))) return true;
-        if (b?.type === "tool_use" && b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? ""))) return true;
+    if (!line || line.isSidechain) continue;
+    if (line.type === "assistant") lines.push(line);
+    else if (line.type === "user") {
+      const content = line.message?.content;
+      if (Array.isArray(content) && content.some((b: any) => b?.type === "tool_result")) lines.push(line);
+      else if (line.isMeta !== true && !isNotification(content)) break; // a prompt: the turn began here
+    } else if (line.type === "queue-operation" && line.operation === "enqueue" && !isNotification(line.content)) break;
+  }
+  return lines.reverse();
+}
+
+/**
+ * What the last turn reported. Real hires report with a SendMessage and close the turn with prose ("I sent APPROVED to lead-shop."), and a report may come mid-turn with the work going on.
+ * `any`: a delivered report (a SendMessage whose message starts with a report word and whose tool result is no error, or text that does) is somewhere in the turn.
+ * `closes`: the last one has nothing but text after it, so the turn ENDS with a report. A send cut before its result, or refused (the gate says "no live session"), was not delivered.
+ */
+function reported(tailText: string): { any: boolean; closes: boolean } {
+  const turn = lastTurnLines(tailText);
+  const failed = new Map<string, boolean>();
+  for (const line of turn) if (line.type === "user") for (const b of line.message.content) if (b?.type === "tool_result") failed.set(String(b.tool_use_id), b.is_error === true);
+  let any = false, closes = false;
+  for (const line of turn) {
+    if (line.type !== "assistant") continue;
+    for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
+      if (b?.type === "text" && REPORT.test(String(b.text ?? ""))) any = closes = true;
+      else if (b?.type === "tool_use") {
+        const delivered = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
+        if (delivered) any = closes = true;
+        else closes = false; // more work after the report (a refused send is work too)
       }
-    } else if (line?.type === "user" ? !(Array.isArray(line.message?.content) && line.message.content.some((b: any) => b?.type === "tool_result")) : line?.type === "queue-operation" && line.operation === "enqueue") {
-      return false; // the turn began here
     }
   }
-  return false;
+  return { any, closes };
 }
 
 /** The progress a woken hire made: a commit on its branch, or more than one assistant message after the wake (the first is its reply; a reply with thinking is several lines of one message id). */
@@ -205,7 +230,7 @@ export function createRecovery(d: RecoveryDeps) {
           delete e.note;
           delete e.unreachable;
         }
-        if (!quiet || reportSent(tailText) || e.nudged === key) continue;
+        if (!quiet || reported(tailText).any || e.nudged === key) continue;
         if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) continue;
         e.nudged = key!;
         if (!(await safeTell(repo, name, NUDGE, sid))) {
@@ -215,8 +240,8 @@ export function createRecovery(d: RecoveryDeps) {
         continue;
       }
 
-      // Ended. A stop is handled once; a hire that had reported (its row waits on a review, or an answer) has nothing to continue.
-      if (e.wokeFrom === sid || e.told === sid || reportSent(tailText)) continue;
+      // Ended. A stop is handled once. A limit stop is judged on its reset whatever the turn held; any other end skips a hire whose last turn closes with its report (its row waits on a review, or an answer).
+      if (e.wokeFrom === sid || e.told === sid) continue;
       const first = await d.promptOf(cwd, sid);
       /** A lead and a Reviewer have no branch of their own. */
       const tipOf = async () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
@@ -249,6 +274,7 @@ export function createRecovery(d: RecoveryDeps) {
         else if (now >= reset + WAKE_AFTER_RESET_MS) await wakeIt(NOTE_LIMIT, message);
         continue;
       }
+      if (reported(tailText).closes) continue;
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
       if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, await tipOf())) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);

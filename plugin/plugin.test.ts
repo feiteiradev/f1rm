@@ -372,7 +372,7 @@ test("B1: no line says a specialist reports to the PM or that the PM lets specia
   expect(section("Who talks to whom")).not.toContain("another specialist");
   expect(section("Handoff via SendMessage")).toContain("A hire reports to the session in its `Report to` and messages only who the Messaging table allows.");
   expect(section("Handoff via SendMessage")).not.toContain("another hire");
-  expect(section("Review and merge flow")).toContain("The team's lead lets them go with `f1rm letgo <name>...`");
+  expect(section("Review and merge flow")).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...`");
   for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Message only who the Messaging table in the guidelines allows.");
 });
 
@@ -752,7 +752,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
     "After `f1rm letgo`, restart the watcher without the names you let go.", "For a wake about a session you already handled (or took a report from) since that watcher started: ignore it, but still restart the watcher.", "When a session sends its report, restart the watcher with it as `name:waiting`.",
     "A message you send to a waiting session counts as a write and makes it plain.", "Until it writes, a waiting name is woken only for ended, missing or a limit stop.",
-    "**Limit stop**", "wait until a minute after that time", "so the watcher does not race it", "Run `f1rm wake <name>` only when its NOTE says the office could not.", "A `resume` sent at the reset time itself reaches no process", "the text after \"resets\"", "send it `resume`", "`resume.md`",
+    "**Limit stop**", "wait until a minute after that time", "so the watcher does not race it", "Run `f1rm wake <name>` when its NOTE says the office could not, and when it is still ended with no NOTE two minutes after the reset or the end (a live session is refused, so racing the office is harmless).", "A `resume` sent at the reset time itself reaches no process", "the text after \"resets\"", "send it `resume`", "`resume.md`",
     "**Limit stop with no time** (`limitUntil` is `unknown`)", "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session",
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
     "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
@@ -834,9 +834,12 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   const closing = section("Teams");
   for (const s of ["marks each task's row `done` on its team board, lets its specialists go", "The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`"]) expect(closing, s).toContain(s);
   expect(role("lead").body).toContain("mark each task's row `done`, let your specialists");
+  expect(guidelines).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...` after `APPROVED`");
+  expect(w).toContain("so does a hire still ended with no NOTE two minutes after the reset or the end");
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("woken by the office within a minute");
-    expect(role(r).body, r).toContain("when `f1rm status` says it could not, run `f1rm wake");
+    expect(role(r).body, r).toContain("when `f1rm status` says it could not, or it is still ended with no NOTE two minutes after the reset or the end, run `f1rm wake");
+    expect(role(r).body, r).toContain("or when it is still ended with no NOTE two minutes after the reset or the end (Watching");
   }
   for (const file of [join(REPO, "README.md"), join(PLUGIN, "README.md")]) expect(readFileSync(file, "utf8"), file).toMatch(/office[^|\n]* (?:runs it|also wakes)[^|\n]*by itself/);
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
@@ -1049,7 +1052,7 @@ test("W3: the pm and lead pickup steps wake any doing or review row whose hire h
   for (const s of ["`doing` or `review`", "no live process", "`f1rm status`", "run `f1rm wake <name>`", "Watching and waking"]) expect(read, s).toContain(s);
   for (const r of ["pm", "lead"]) {
     const body = role(r).body;
-    expect(body, r).toMatch(/The office wakes an ended (session|lead) itself; when `f1rm status` says it could not, run `f1rm wake /);
+    expect(body, r).toMatch(/The office wakes an ended (session|lead) itself; when `f1rm status` says it could not, or it is still ended with no NOTE two minutes after the reset or the end, run `f1rm wake /);
     expect(body, r).toContain("re-hire only a hire that was let go or whose wake failed");
     expect(body, r).not.toMatch(/run `f1rm letgo/);
     expect(body, r).not.toContain("no live session; f1rm wake"); // the guidelines say it once

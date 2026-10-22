@@ -518,3 +518,56 @@ test("a reset time that falls in a spring-forward gap is the first instant at or
   // Ordinary days next to a change are unaffected.
   expect(resetAt("2:30am (America/New_York)", at("2026-03-09T05:00:00Z"))).toBe(at("2026-03-09T06:30:00Z"));
 });
+
+// Round 2: the ended path skips a hire only when its last turn ENDS with a delivered report; a limit stop is judged on its reset first.
+const tool = (id: string, ago: number, name: string, input: any, now = T0) => block(id, ago, { type: "tool_use", id: `t-${id}`, name, input }, now);
+const toolResult = (id: string, ago: number, now = T0, isError = false) =>
+  JSON.stringify({ type: "user", uuid: `tr-${id}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: [{ type: "tool_result", tool_use_id: `t-${id}`, content: isError ? "refused" : "ok", ...(isError && { is_error: true }) }] } });
+const notification = (ago: number, now = T0) => JSON.stringify({ type: "user", uuid: `n${ago}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: "<task-notification>background task finished</task-notification>" } });
+const skillText = (ago: number, now = T0) => JSON.stringify({ type: "user", uuid: `s${ago}`, isMeta: true, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /x" }] } });
+const midReport = (word: string, now = T0) => [say("working", 40, now), ...sent(word, "Carrying on with the rest.", 30, now).slice(0, 2), tool("m2", 20, "Bash", { command: "bun test" }, now), toolResult("m2", 19, now)];
+
+test("a limit stop is judged on its reset first: a report sent mid-turn, followed by more work and the stop, does not hide the hire", async () => {
+  const o = office();
+  stoppedDev(o, [...midReport("BLOCKED checkout: no API key; carrying on").slice(1), limitStop("8:40pm (Europe/Lisbon)", 10)]);
+  o.w.now = at("2026-10-22T19:42:00Z");
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_LIMIT }]);
+  // And one that names no time is told, not skipped.
+  const none = office();
+  stoppedDev(none, [...midReport("BLOCKED checkout: no API key").slice(1), limitStop(null, 10)]);
+  await none.tick();
+  expect(none.w.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped at the session limit; f1rm wake ${DEV}` }]);
+});
+
+test("an ended hire is skipped only when its last turn ends with a delivered report: more tool work after the report, a refused send, or none at all, wakes it", async () => {
+  const woken = async (last: string[]) => {
+    const o = office();
+    stoppedDev(o, last);
+    await o.tick();
+    return o.w.woke.length;
+  };
+  const delivered = (word: string) => [tool("r1", 3, "SendMessage", { to: "lead-shop", message: word }), toolResult("r1", 2.5)];
+  expect(await woken(delivered("DONE checkout"))).toBe(0); // the report closes the turn
+  expect(await woken([...delivered("DONE checkout"), block("msg_c", 1, { type: "text", text: "Sent." })])).toBe(0); // only text after it
+  expect(await woken(midReport("BLOCKED checkout: no key"))).toBe(1); // a crash after a mid-turn report and more work
+  expect(await woken([...delivered("DONE checkout"), tool("w2", 2, "Bash", { command: "git status" })])).toBe(1); // work after it, cut off in the middle
+  expect(await woken([tool("r1", 3, "SendMessage", { to: "lead-shop", message: "DONE checkout" }), toolResult("r1", 2.5, T0, true), block("msg_c", 1, { type: "text", text: "It was refused." })])).toBe(1); // never delivered
+  expect(await woken([tool("r1", 3, "SendMessage", { to: "lead-shop", message: "DONE checkout" })])).toBe(1); // cut before its result
+});
+
+test("a background task finishing or a skill's meta line is no new turn, so a report before it still stands; a refused SendMessage is no report for the nudge either", async () => {
+  const nudged = async (lines: (now: number) => string[]) => {
+    const o = office();
+    idleReviewer(o, "x", 25);
+    o.w.transcripts["rev-1"] = lines(o.w.now);
+    await o.tick();
+    return o.w.told;
+  };
+  const reported = (now: number) => [tool("r1", 40, "SendMessage", { to: "lead-shop", message: "APPROVED shop-1" }, now), toolResult("r1", 39, now)];
+  expect(await nudged((now) => [...reported(now), notification(30, now), block("msg_p", 25, { type: "text", text: "The merge check finished." }, now)])).toEqual([]);
+  expect(await nudged((now) => [...reported(now), skillText(30, now), block("msg_p", 25, { type: "text", text: "Loaded it." }, now)])).toEqual([]);
+  expect(await nudged((now) => [...reported(now), JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: new Date(now - 30 * MIN).toISOString(), content: "<task-notification>x</task-notification>" }), block("msg_p", 25, { type: "text", text: "Done with it." }, now)])).toEqual([]);
+  const refused = (now: number) => [tool("r1", 40, "SendMessage", { to: "lead-shop", message: "APPROVED shop-1" }, now), toolResult("r1", 39, now, true), block("msg_p", 25, { type: "text", text: "The gate refused it." }, now)];
+  expect(await nudged(refused)).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
