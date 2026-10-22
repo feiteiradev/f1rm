@@ -355,12 +355,13 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--model", "haiku"]);
 });
 
-test("at 30 working background sessions, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
+test("at 30 working background sessions, hire refuses with a non-zero exit and tells the lead to ask the user in its own session", () => {
   const stub = stubClaude([...Array(29).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
   expect(r.err).toContain("30 hires are already working (the cap is 30)");
-  expect(r.err).toContain("Tell the session you report to. Only the PM asks the user, and only after the user approves this hire is it rerun with --override.");
+  expect(r.err).toContain("Tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.");
+  expect(r.err).not.toContain("Only the PM asks the user");
   expect(r.err).not.toContain("Tell the user");
   expect(stub.argv()).toBeNull();
 });

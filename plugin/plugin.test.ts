@@ -481,6 +481,12 @@ test("R8b: a spend is a big decision that reaches the user through the lead, not
   expect(role("researcher").body).not.toContain("through the PM");
 });
 
+test("R8b: the hire skill says the lead asks the user in its own session before an override", () => {
+  const skill = readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
+  expect(skill).toContain("The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.");
+  expect(skill).not.toContain("Only the PM asks the user");
+});
+
 test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt, hire.ts and both READMEs", () => {
   for (const [name, text] of Object.entries(WORKFLOW_FILES())) {
     expect(text, name).not.toMatch(/\bPLAN\b/);
