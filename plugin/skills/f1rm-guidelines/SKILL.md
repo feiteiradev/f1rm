@@ -82,14 +82,14 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
   3. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms.
   4. Write the board (and, for a milestone, its section in the milestones file), and collect what the user must provide.
   5. Hire one lead for a simple workflow, one or two for a milestone, with `f1rm hire lead`.
-  6. Wait, with a background watcher on your leads (see Watching and waking). On `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, let the lead go with `f1rm letgo`.
+  6. Wait, with a background watcher on your leads (see Watching and waking). On `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, mark its row `done`, then let the lead go with `f1rm letgo`.
   7. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
   1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before you hire; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
   2. Write the team board, then hire into the team with `f1rm hire --team`, and watch your hires with a background watcher (see Watching and waking). Ask the user a decision as Who talks to whom says.
   3. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
-  4. Write the findings file, let the team go with `f1rm letgo`, then send `DONE <team>`.
+  4. Write the findings file, mark each task's row `done`, let the team go with `f1rm letgo`, then send `DONE <team>`.
 - **designer**
   1. Read the existing UI and tokens.
   2. Run `design-pipeline` to the spec.
@@ -184,7 +184,7 @@ In a Founder project the PM follows this on top of everything else here.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
 6. **A lead starts at once.** It writes its team board and hires, with no plan sent to the PM. A decision only the user can make is asked as Who talks to whom says, and the lead hires nothing for a task that answer could change until it has the answer.
 7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist (one whose session has no live process is woken first: **No live session** in Watching and waking). The Reviewer still signs off and is the only role that merges. Every `CHANGES REQUESTED` goes back to the dev, minor findings too, before the merge (see the review flow).
-8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
+8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, marks each task's row `done` on its team board, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`: the office wakes a hire whose row still says `doing` or `review` once `claude stop` has ended it, so the row is marked first.
 
 ## Watching and waking
 

@@ -121,7 +121,7 @@ test("specialists never hire and answer only their Report to; the PM hires only 
   }
   const pm = role("pm").body;
   expect(pm).toContain("Hire only leads");
-  expect(pm).toContain("After `DONE <team>`, let the lead go");
+  expect(pm).toContain("After `DONE <team>`, mark its row done, then let the lead go");
   const lead = role("lead").body;
   for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "f1rm hire --team <team>", "Who talks to whom"]) expect(lead).toContain(s);
 });
@@ -510,7 +510,7 @@ test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt
   }
   expect(role("lead").body).toContain("`NEEDS YOU <team>: <topic>` and `DONE <team>`");
   expect(role("pm").body).toContain("`NEEDS YOU <team>: <topic>`");
-  expect(role("pm").body).toContain("After `DONE <team>`, let the lead go");
+  expect(role("pm").body).toContain("After `DONE <team>`, mark its row done, then let the lead go");
   expect(section("Workflows")).toContain("`NEEDS YOU <team>: <topic>`");
 });
 
@@ -830,6 +830,10 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
     "**Ended**: the office wakes it within a minute", "the office wakes the leads after the reset and the PM waits for the user",
   ]) expect(w, s).toContain(s);
   expect(w).not.toContain("nothing wakes them");
+  // The row goes done before the session is let go, since the office wakes a hire whose row still says doing or review.
+  const closing = section("Teams");
+  for (const s of ["marks each task's row `done` on its team board, lets its specialists go", "The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`"]) expect(closing, s).toContain(s);
+  expect(role("lead").body).toContain("mark each task's row `done`, let your specialists");
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("woken by the office within a minute");
     expect(role(r).body, r).toContain("when `f1rm status` says it could not, run `f1rm wake");
