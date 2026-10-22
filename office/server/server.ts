@@ -308,7 +308,7 @@ export function startServer({
         for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (skill !== "security-review" && gate.required.includes(skill)) gate.loaded.add(skill);
         missing = missing.filter((r) => !gate.loaded.has(r));
       }
-      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send \`BLOCKED <task>\` as above too.`);
+      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send \`BLOCKED <task>\` with its name to the session in your Report to.`);
       if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }

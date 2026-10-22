@@ -1588,7 +1588,7 @@ test("a hire whose prompt names skills is refused every tool but the reading one
   await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
   const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
   expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send `BLOCKED <task>` as above too.");
+  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
   for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
   // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
@@ -1597,7 +1597,7 @@ test("a hire whose prompt names skills is refused every tool but the reading one
 
   await skillLoaded("h", "code-review"); // another skill that shares the part after the ":" does not count
   await skillLoaded("h", "impeccable:impeccable"); // nor does a prefixed name for an unprefixed one
-  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If");
+  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill");
   await skillLoaded("h", "mattpocock-skills:code-review");
   await skillLoaded("h", "impeccable");
   expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
@@ -1624,7 +1624,7 @@ test("a skill the Skill tool refuses counts as tried, read from the session's ow
   await hired("t1", `/tdd${LOAD_FIRST}pstack:architect, impeccable.`);
   const path = transcript("t1", [skillUse("pstack:architect"), refused]);
   const out = await held(await hook({ ...preToolUse("t1", "Bash", { command: "ls" }), transcript_path: path }));
-  expect(out.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If"); // the refused one is no longer asked for
+  expect(out.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill"); // the refused one is no longer asked for
   await skillLoaded("t1", "impeccable");
   expect(await tryAt("t1", path)).toBeNull();
   // The tries are kept: the next refusal does not need the file again.
@@ -1635,7 +1635,7 @@ test("the gate's way-out says that a skill the Skill tool refuses counts as trie
   start();
   await hired("w", `/tdd${LOAD_FIRST}impeccable.`);
   const out = await held(await hook(preToolUse("w", "Bash", { command: "ls" })));
-  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send `BLOCKED <task>` as above too.");
+  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
 });
 
 test("a Skill try only counts from the session's own transcript, read within limits, and fails closed", async () => {
@@ -1712,7 +1712,7 @@ test("only a session's first prompt arms the gate: a later prompt that quotes th
 
   await hired("held", `/tdd${LOAD_FIRST}impeccable.`);
   await hired("held", `/tdd${LOAD_FIRST}other.`); // a second sentence does not swap the names either
-  expect((await held(await hook(preToolUse("held", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. If");
+  expect((await held(await hook(preToolUse("held", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill");
 
   // `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
   await hired("resumed", "Resume the task where you left off.");
