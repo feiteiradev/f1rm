@@ -825,7 +825,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
     "`resumed after the session limit; continue your task`", "a minute after its reset time", "`resumed after your session ended; continue your task`", "(an update, a crash, a shutdown) at once", "Each stop is woken once.",
     "(no reset time, a cap, an error)", "within 10 minutes of a wake with no new commit and no more than one assistant message after it (the reply to the wake)", "it tells the session in the hire's `Report to`",
     "`<name> stopped again after a wake; f1rm wake <name>`", "`<name> stopped at the session limit; f1rm wake <name>`", "NOTE column (`recovery` in `--json`)",
-    "`your turn ended without a report; send your DONE or BLOCKED`", "no `SendMessage` and no text in that turn whose first word is `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`",
+    "`your turn ended without a report; send your DONE or BLOCKED`", "its last tool call is not a delivered `SendMessage` whose first word is `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`; text never counts",
     "wakes no interactive session, no PM, no hire that was let go", "no project that is not registered", "The watcher below is the second line",
     "**Ended**: the office wakes it within a minute", "the office wakes the leads after the reset and the PM waits for the user",
   ]) expect(w, s).toContain(s);
@@ -836,17 +836,22 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   expect(role("lead").body).toContain("mark each task's row `done`, let your specialists");
   expect(guidelines).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...` after `APPROVED`");
   expect(w).toContain("so does a hire still ended with no NOTE two minutes after the reset or the end");
+  expect(w).toContain("A NOTE that says `reported` needs no wake: send your answer with `f1rm wake <name> \"<answer>\"` when you have one.");
+  // F1: the report is the turn's last tool call, so the checkpoint comes first.
+  expect(section("Handoff via SendMessage")).toContain("The report is the turn's LAST tool call: do the checkpoint (wip commit, `resume.md`) and every other tool call first, then send it, and write only prose after it.");
+  expect(guidelines).toContain("Checkpoint BEFORE the report: the report is the last tool call of the turn (see Handoff).");
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("woken by the office within a minute");
     expect(role(r).body, r).toContain("when `f1rm status` says it could not, or it is still ended with no NOTE two minutes after the reset or the end, run `f1rm wake");
-    expect(role(r).body, r).toContain("or when it is still ended with no NOTE two minutes after the reset or the end (Watching");
+    expect(role(r).body, r).toContain("or when it is still ended with no NOTE two minutes after the reset or the end; a NOTE that says `reported` needs no wake (Watching");
+    expect(role(r).body, r).toContain("A NOTE that says `reported` needs no wake.");
   }
   for (const file of [join(REPO, "README.md"), join(PLUGIN, "README.md")]) expect(readFileSync(file, "utf8"), file).toMatch(/office[^|\n]* (?:runs it|also wakes)[^|\n]*by itself/);
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const wakes = entries.find((e) => e.startsWith("2026-10-22 The office wakes limit-stopped hires"));
   const nudge = entries.find((e) => e.startsWith("2026-10-22 A hire whose turn ended without its report gets one nudge"));
   for (const part of ["about 1 minute after the parsed reset time", "resumed after the session limit; continue your task", "resumed after your session ended; continue your task", "each stop is woken once", "10 minutes", "stopped again after a wake; f1rm wake", "stopped at the session limit; f1rm wake", "never wakes interactive sessions, the PM, or a let-go hire"]) expect(wakes, part).toContain(part);
-  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "no SendMessage or text, since the last prompt, whose first word is DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE or NEEDS YOU", "once"]) expect(nudge, part).toContain(part);
+  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "its last tool call is not a delivered SendMessage whose first word is DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE or NEEDS YOU; text never counts", "once"]) expect(nudge, part).toContain(part);
   expect(wakes).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
   expect(nudge).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
 });
