@@ -179,7 +179,6 @@ test("what hire adds to a brief is the Report to line alone: no PLAN, no GO, and
   const text = prompt(stub);
   expect(text).toEndWith(`Report to: pm-shop\n\n${BRIEF}`);
   expect(text).not.toMatch(/\bPLAN\b|\bGO\b|NEEDS YOU/);
-  expect(readFileSync(join(import.meta.dir, "hire.ts"), "utf8")).not.toMatch(/\bPLAN\b|\bGO\b/);
 });
 
 // arena, swarm and interrogate carry disable-model-invocation too, and no hire is wired to run one as a first command: --skills refuses them, for every role.

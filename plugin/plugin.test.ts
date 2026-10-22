@@ -442,8 +442,6 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
 // R8b: the PM picks the workflow by rule, the user talks to each lead, PLAN and GO are gone, and two tables carry what the gate enforces.
 const WORKFLOW_FILES = () => ({
   guidelines,
-  "pm.md": role("pm").body,
-  "lead.md": role("lead").body,
   prompt: pmPromptText(),
   "plugin README": readFileSync(join(PLUGIN, "README.md"), "utf8"),
   README: readFileSync(join(REPO, "README.md"), "utf8"),
@@ -494,6 +492,12 @@ test("R8b: the hire skill says the lead asks the user in its own session before 
   const skill = readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
   expect(skill).toContain("The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.");
   expect(skill).not.toContain("Only the PM asks the user");
+});
+
+test("R8b: the plugin README says the PM tells the user which lead needs them", () => {
+  const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  expect(readme).toContain("the PM tells you which lead needs you");
+  expect(readme).not.toContain("in the words");
 });
 
 test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt, hire.ts and both READMEs", () => {
