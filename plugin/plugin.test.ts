@@ -548,6 +548,8 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   expect(trows[3]).toContain("only to its lead");
   expect(trows[4]).toContain("parent session");
   expect(trows[5]).toContain("enforced");
+  expect(trows[5]).toContain("A team member never messages another team; leads message each other");
+  expect(trows[5]).not.toContain("Never another team");
   expect(trows[5]).toContain("another team");
   expect(trows[5]).toContain("another project");
   expect(trows[5]).toContain("Elsewhere is no room");
