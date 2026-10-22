@@ -136,8 +136,8 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
-// A team member's message that opens with one of these words (past markdown such as `**`, `>`, `-` or `#`) is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^[\s*_>#`"'(\[+•-]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES REQUESTED)(?![A-Za-z0-9])/;
+// A team member's message that opens with one of these words, after anything that is no letter (markdown, an emoji, a list number, a table bar), is a formal report: it goes to its lead only.
+const FORMAL_REPORT = /^[^A-Za-z]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
 // Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
 const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
