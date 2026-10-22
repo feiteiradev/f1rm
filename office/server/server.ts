@@ -12,7 +12,8 @@ import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten,
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
-import { hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
+import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
+import { mayWake } from "../cli/wake.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -352,8 +353,22 @@ export function startServer({
     if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
   };
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
+  /**
+   * The hire of the sender's project that `name` (its name, session id or short id) points at when no session of that name has a live process: `claude agents --json --all` lists
+   * it done, stopped, failed or blocked on a limit, with no pid. An employee-shaped record in the sender's room, so the same checks apply to it; null for anything else (no project, no such hire,
+   * another project's, or a name that has a live session). A listing that can't be read finds none.
+   */
+  async function endedHire(me: Employee, name: string): Promise<Employee | null> {
+    if (!me || me.room === ELSEWHERE.id) return null;
+    const project = folderOf(me.room);
+    const mine = ((await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? []).filter((s) => s.kind === "background" && hireName(s.name) && repoOf(s.cwd) === project);
+    const found = mine.find((s) => s.name === name || s.sessionId === name || s.id === name);
+    const hire = found && hireName(found.name);
+    if (!found || !hire || mine.some((s) => s.name === found.name && s.pid)) return null;
+    return { sessionId: found.sessionId ?? found.id, name: found.name, role: roleOfAgentType(`f1rm:${hire.role}`) ?? null, title: found.name, status: "offline", activity: "", tool: "", cwd: found.cwd, room: me.room, lastEventAt: 0 } as Employee;
+  }
   /** Why the company's rules stop this tool call, or null to let it run. */
-  function refusal(sessionId: string, payload: Record<string, any>): string | null {
+  async function refusal(sessionId: string, payload: Record<string, any>): Promise<string | null> {
     const role = state.employees[sessionId]?.role;
     if (!role) return null;
     const tool = String(payload.tool_name ?? "");
@@ -387,9 +402,12 @@ export function startServer({
       const to = String(input.to);
       const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
       const socket = /^uds:(.+)$/.exec(name)?.[1];
-      const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
-      const rooms = new Set(answering.map((e) => e.room));
+      let answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
       const intern = !!payload.agent_id;
+      // A hire of the sender's project whose process has ended answers to no employee, and a message to it would be queued and never arrive: it goes through the checks below as the hire it is, then is refused with the way back.
+      const gone = !intern && !socket && !answering.length && to !== "main" ? await endedHire(state.employees[sessionId], name) : null;
+      if (gone) answering = [gone];
+      const rooms = new Set(answering.map((e) => e.room));
       if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {
         const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
@@ -405,6 +423,10 @@ export function startServer({
           if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad)}`);
           if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
             return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
+          }
+          if (gone) {
+            const wakes = mayWake({ role, team }, hireName(gone.title!)!);
+            return refuse("no-live-session", `${gone.title}: no live session; f1rm wake ${gone.title} resumes it in place, with its context. ${wakes ? "Wake it, then message it." : `Only the PM and the lead of its team wake a hire: ask ${role === "lead" ? "the PM" : leadOf(team)}.`} A message to a session that has ended is queued and never arrives.`);
           }
         }
       }
@@ -640,7 +662,7 @@ export function startServer({
           }
           if (event.kind === "PostToolUse" && payload.tool_name === "Skill" && !payload.agent_id) skillGates.get(event.sessionId)?.loaded.add(String(payload.tool_input?.skill ?? ""));
           if (event.kind === "PreToolUse") {
-            const why = refusal(event.sessionId, payload);
+            const why = await refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
           trackSession(event);

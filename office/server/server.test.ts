@@ -69,7 +69,7 @@ const defaultAnswer = async function* () {
 let tellFails = "";
 let letGoFails = "";
 // What `claude agents --json --all` lists, and which branches are merged into the base, for the safety net.
-let sessionList: { id: string; name: string; kind: string; state: string; cwd: string }[] = [];
+let sessionList: { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number }[] = [];
 let mergedBranches = new Set<string>();
 let sessionsGate: Promise<void> | undefined; // a test sets one that never settles: `claude agents` hanging
 let working: number | null = 0;
@@ -2034,6 +2034,59 @@ test("a refusal names the rule and the way out", async () => {
   expect((await send("l1", "search.backend-dev-c")).permissionDecisionReason).toContain("lead-search");
   const intern = await send("c1", "lead-checkout", "x", { agent_id: "i-c1", agent_type: "Explore" });
   expect(intern.permissionDecisionReason).toContain("parent");
+});
+
+// A hire whose process ended (done, stopped, blocked on a limit) is listed by `claude agents --json --all` with no pid; no employee answers to its name.
+const ended = (name: string, cwd = "/code/shop", state = "done") => ({ id: `e-${name}`, sessionId: `sid-${name}`, name, kind: "background", state, cwd });
+
+test("a message to a hire of this project with no live process is refused with the way back, by name, by `name [ref]` and by session id", async () => {
+  const send = await talkOffice();
+  sessionList = [
+    ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old"),
+    ended("checkout.designer-gone", "/code/shop/.claude/worktrees/gone", "stopped"),
+    ended("lead-old"),
+    ended("search.backend-dev-x", "/code/shop/.claude/worktrees/x", "failed"),
+    ended("blog.backend-dev-b", "/code/blog/.claude/worktrees/b"),
+  ];
+  for (const to of ["checkout.backend-dev-old", "checkout.backend-dev-old [36698c]", "sid-checkout.backend-dev-old", "checkout.designer-gone [4e323bd1a0f2]"]) {
+    const out = await send("l1", to);
+    expect([to, out?.permissionDecision]).toEqual([to, "deny"]);
+    expect(out.permissionDecisionReason).toContain(`no live session; f1rm wake ${to.startsWith("sid-") ? "checkout.backend-dev-old" : to.replace(/ \[.*/, "")}`);
+    expect(out.permissionDecisionReason).not.toContain("unknown to the office");
+  }
+  // The PM reaches an ended lead the same way.
+  expect((await send("pm", "lead-old")).permissionDecisionReason).toContain("no live session; f1rm wake lead-old");
+  // A member can't wake: the refusal sends it to its lead.
+  const byMember = await send("c1", "checkout.backend-dev-old");
+  expect(byMember.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-old");
+  expect(byMember.permissionDecisionReason).toContain("lead-checkout");
+  // The table still comes first: the PM does not message a member, a lead not another team's member.
+  expect((await send("pm", "checkout.backend-dev-old")).permissionDecisionReason).toContain("Who talks to whom");
+  expect((await send("l1", "search.backend-dev-x")).permissionDecisionReason).toContain("Who talks to whom");
+  // Another project's ended hire is as unknown as before.
+  expect((await send("l1", "blog.backend-dev-b")).permissionDecisionReason).toContain("unknown to the office");
+  expect((await send("l1", "checkout.backend-dev-nobody")).permissionDecisionReason).toContain("unknown to the office");
+});
+
+test("a hire that finished its turn and whose process ended leaves the office, and its lead is told it has no live session, not that the name is unknown", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  const seat = (id: string, title: string, type: string, cwd = "/code/shop") => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, agent_type: type });
+  await seat("lead", "lead-checkout", "f1rm:lead");
+  await seat("dev", "checkout.backend-dev-a", "f1rm:backend-dev", "/code/shop/.claude/worktrees/a");
+  listing = new Map([["lead", 1], ["dev", 4242]]);
+  deadPids = new Set([4242]);
+  expect((await jumpTo("dev")).status).toBe(410); // the office finds the process gone and drops the employee
+  expect(Object.keys((await office((s) => !("dev" in s.employees))).employees)).toEqual(["lead"]);
+  sessionList = [ended("checkout.backend-dev-a", "/code/shop/.claude/worktrees/a")];
+  const out = await held(await hook({ ...preToolUse("lead", "SendMessage", { to: "checkout.backend-dev-a", message: "one more fix round" }), cwd: "/code/shop" }));
+  expect(out.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-a");
+});
+
+test("a hire that has a live session as well as an ended one is not refused: only a name with no live process is", async () => {
+  const send = await talkOffice();
+  sessionList = [ended("checkout.backend-dev-a"), { ...ended("checkout.backend-dev-a"), id: "live", sessionId: "c1", state: "working", pid: 4242 }];
+  expect(await send("l1", "checkout.backend-dev-a")).toBeNull(); // c1 is online
+  expect(await send("l1", "checkout.backend-dev-a [36698c]")).toBeNull();
 });
 
 test("a formal report from a team member goes to its lead only; the same words to a peer are refused, and free text to a peer passes", async () => {
