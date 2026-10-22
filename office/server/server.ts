@@ -440,22 +440,21 @@ export function startServer({
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
     }
     // `f1rm wake` follows the hire rules: whoever may hire a name may wake it. The target is a name, or a session id the listing resolves to one; an unknown one is the command's own refusal.
-    const wakes = commands.flatMap((c) => hireArgs(c, "wake") ?? []);
-    if (COORDINATORS.has(role) && wakes.length) {
+    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
+      return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
+    }
+    const wakeCalls = COORDINATORS.has(role) ? commands.map((c) => hireArgs(c, "wake")).filter((a): a is string[] => !!a) : [];
+    if (wakeCalls.length) {
       const sessions = (await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? [];
       const me = state.employees[sessionId];
-      for (const c of commands) {
-        const args = hireArgs(c, "wake");
-        const target = args?.find((a) => !a.startsWith("-"));
+      for (const args of wakeCalls) {
+        const target = args.find((a) => !a.startsWith("-"));
         const name = target && (hireName(target) ? target : sessions.find((s) => s.kind === "background" && (s.sessionId === target || s.id === target))?.name);
         const hire = name ? hireName(name) : null;
         if (hire && !mayWake({ role, team: teamOf(me) }, hire)) {
           return refuse("wake", role === "pm" ? "The PM wakes leads; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
         }
       }
-    }
-    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
-      return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
     }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
     if (role === "lead") {
