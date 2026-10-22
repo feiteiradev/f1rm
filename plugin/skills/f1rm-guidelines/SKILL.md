@@ -135,10 +135,10 @@ The mattpocock skills and the pstack skills work side by side. Each row names th
 | Build | `mattpocock-skills:tdd`, loaded second with the Skill tool | `pstack:poteto-mode`, a dev's first command, with its playbook: `feature`, `bug-fix`, `refactoring`, `perf-issue` | The tdd skill is mattpocock's, never pstack's of the same name. Every criterion has a check that fails first. |
 | Diagnose a bug | `mattpocock-skills:diagnosing-bugs`, before tdd (`--skills`) | the `bug-fix` playbook | Diagnose first, then fix test-first. |
 | Review | `/code-review` first, then `mattpocock-skills:code-review` for the Spec axis, inline, against the brief | `pstack:interrogate`, slash-only: the user can run it by hand at `--level high` | `/code-review` stays the Reviewer's first command; the review flow decides the merge. |
-| Parallel work | none | `pstack:arena`, `pstack:swarm` | Only when a brief asks, within the interns cap. |
+| Parallel work | none | `pstack:arena`, `pstack:swarm`, slash-only | Not wired inside hires (the Skill tool refuses them); the user can run them by hand. |
 | Ship | none | the playbooks' Opening a PR, Babysit and Shipping | None of it runs inside a hire. |
 
-Inside a hire: no PR opening, no babysit loops, no `/loop` ticks, no `afk`; `pstack:arena` and `pstack:swarm` only when a brief asks; at most 2 interns; pushing stays the user's. A question poteto-mode would put to the human goes to the session in your `Report to` as `BLOCKED`.
+Inside a hire: no PR opening, no babysit loops, no `/loop` ticks, no `afk`; `pstack:arena` and `pstack:swarm` are not wired inside hires (the user can run them by hand, as `pstack:interrogate`); at most 2 interns; pushing stays the user's. A question a pstack skill would put to the human goes to the session in your `Report to` as `BLOCKED`.
 
 `pstack:architect`, `pstack:how`, `pstack:interrogate`, `pstack:arena` and `pstack:swarm` carry `disable-model-invocation`: the Skill tool refuses them, so only a first slash command runs them. A dev picks its playbook inside poteto-mode; the playbooks are its files, not skills.
 
