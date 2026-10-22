@@ -232,10 +232,10 @@ export function createRecovery(d: RecoveryDeps) {
           return;
         }
         if (e.judged === mt) return;
-        // A lead whose members are still active is not judged yet, and its transcript is not read: it is looked at again on the next tick, whatever its own transcript does.
-        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) return;
         delete e.note;
         delete e.unreachable;
+        // A lead whose members are still active is not judged yet, and its transcript is not read: it is looked at again on the next tick, whatever its own transcript does.
+        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) return;
         const tailText = await d.tail(cwd, sid);
         const turn = lastTurn(tailText);
         if (turn?.type !== "assistant" || turn.isApiErrorMessage === true) {

@@ -959,3 +959,15 @@ test("one hire's failure is logged and the others are still decided and saved", 
   expect(o.w.store[REPO][second]).toMatchObject({ told: "dev-2" });
   expect(logged.some((l) => l.includes(DEV) && l.includes("EACCES"))).toBe(true);
 });
+
+test("a live idle lead whose team is busy loses an old stop NOTE at once, not when the team goes quiet", async () => {
+  const o = office();
+  o.w.list = [live("lead-shop", "lead-1", REPO, { status: "idle" }), live(DEV, "m-1", DEV_CWD, { status: "busy" })];
+  o.w.transcripts["lead-1"] = [say("Hired the dev; watching.", 30, o.w.now)];
+  o.w.mtimes = { "lead-1": o.w.now - 30 * MIN, "m-1": o.w.now };
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  o.w.store[REPO] = { "lead-shop": { note: "lead-shop stopped; f1rm wake lead-shop", judged: o.w.now - 90 * MIN } };
+  await o.tick();
+  expect(o.w.store[REPO]?.["lead-shop"]?.note).toBeUndefined();
+  expect(o.w.told).toEqual([]);
+});
