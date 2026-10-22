@@ -2126,6 +2126,22 @@ test("a hire that finished its turn and whose process ended leaves the office, a
   expect(out.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-a");
 });
 
+test("a member whose own lead has no live session is told the PM wakes the lead, not to ask the lead it cannot reach", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  await hired("m", "go", "f1rm:backend-dev", "team.backend-dev-a");
+  await hired("l2", "go", "f1rm:lead", "lead-other");
+  sessionList = [ended("lead-team"), ended("lead-gone")];
+  const to = async (id: string, name: string) => (await held(await hook({ ...preToolUse(id, "SendMessage", { to: name, message: "a question" }), cwd: "/code/shop" })))?.permissionDecisionReason ?? "";
+  const member = await to("m", "lead-team");
+  expect(member).toContain("no live session; f1rm wake lead-team");
+  expect(member).toContain("The PM wakes a lead");
+  expect(member).toContain("resend after the wake");
+  expect(member).not.toContain("ask lead-team");
+  const lead = await to("l2", "lead-gone");
+  expect(lead).toContain("no live session; f1rm wake lead-gone");
+  expect(lead).toContain("The PM wakes a lead");
+});
+
 test("a message to the sender's own sub-agent never asks `claude agents --json --all`, since the hook gives up long before a slow listing answers", async () => {
   const send = await talkOffice();
   const before = sessionsAsked;

@@ -425,8 +425,9 @@ export function startServer({
             return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
           }
           if (gone) {
-            const wakes = mayWake({ role, team }, hireName(gone.title!)!);
-            return refuse("no-live-session", `${gone.title}: no live session; f1rm wake ${gone.title} resumes it in place, with its context. ${wakes ? "Wake it, then message it." : `Only the PM and the lead of its team wake a hire: ask ${role === "lead" ? "the PM" : leadOf(team)}.`} A message to a session that has ended is queued and never arrives.`);
+            const target = hireName(gone.title!)!;
+            const wayOut = mayWake({ role, team }, target) ? "Wake it, then message it." : target.role === "lead" ? "The PM wakes a lead: resend after the wake." : `Only the lead of its team wakes a member: ask ${leadOf(team)}, and resend after the wake.`;
+            return refuse("no-live-session", `${gone.title}: no live session; f1rm wake ${gone.title} resumes it in place, with its context. ${wayOut} A message to a session that has ended is queued and never arrives.`);
           }
         }
       }
