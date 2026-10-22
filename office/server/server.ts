@@ -1,7 +1,8 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { existsSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
@@ -24,6 +25,44 @@ const MAX_MESSAGE = 4000;
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
+const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
+
+/**
+ * The skills a session has tried with the Skill tool, whether it ran them or the tool refused (a skill marked disable-model-invocation, or an unknown one).
+ * A refusal fires no hook event at all (Claude Code 2.1.308 fails the call at validation, before any hook), so the session's own transcript is the only trace.
+ * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`, the hook's `transcript_path` serving as a hint for the project folder and nothing more.
+ * Only the skill names of the session's own (non-sidechain) assistant Skill calls are kept, from the first 8 MB. Anything odd means none: the gate then holds as before.
+ */
+function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): Set<string> {
+  const tried = new Set<string>();
+  try {
+    if (typeof hint !== "string" || !hint) return tried;
+    const path = resolve(hint);
+    const project = dirname(path);
+    const realDir = realpathSync(resolve(transcriptsDir));
+    if (basename(path) !== `${sessionId}.jsonl` || ![resolve(transcriptsDir), realDir].includes(dirname(project))) return tried;
+    const real = realpathSync(path); // a link that leads elsewhere is not the session's file
+    if (real !== join(realDir, basename(project), basename(path)) || !statSync(real).isFile()) return tried;
+    const fd = openSync(real, "r");
+    let text: string;
+    try {
+      const buffer = Buffer.alloc(Math.min(fstatSync(fd).size, TRANSCRIPT_READ_MAX));
+      text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
+      if (fstatSync(fd).size > TRANSCRIPT_READ_MAX) text = text.slice(0, text.lastIndexOf("\n") + 1); // the cut line is whole or nothing
+    } finally {
+      closeSync(fd);
+    }
+    for (const line of text.split("\n")) {
+      if (!line.includes('"Skill"')) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry?.type !== "assistant" || entry.isSidechain || !Array.isArray(entry.message?.content)) continue;
+        for (const block of entry.message.content) if (block?.type === "tool_use" && block.name === "Skill" && typeof block.input?.skill === "string") tried.add(block.input.skill);
+      } catch {} // a line that is not JSON counts for nothing
+    }
+  } catch {} // missing, unreadable or odd: no skill counts
+  return tried;
+}
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
@@ -159,6 +198,8 @@ type Options = {
   boardsDir?: string;
   /** Where each project's edition file lives (`~/.f1rm/projects`). */
   projectsDir?: string;
+  /** Where Claude Code keeps session transcripts (`~/.claude/projects`): the skill gate reads a refused Skill call from there. */
+  transcriptsDir?: string;
   /** The folders that never get a door: the office's own, Claude's and temp folders. Tests inject them. */
   junkRoots?: string[];
   /** How often the board files are checked for edits. */
@@ -211,6 +252,7 @@ export function startServer({
   dbPath = ":memory:",
   boardsDir,
   projectsDir,
+  transcriptsDir = join(homedir(), ".claude", "projects"),
   junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
   approvalTimeoutMs = DEFAULT_TIMEOUT_S * 1000,
@@ -239,7 +281,10 @@ export function startServer({
   // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
   const subagents = new Map<string, Set<string>>();
   /** Kept for each event the office takes in, live or replayed from the log. */
-  const trackSubagents = (e: F1rmEvent) => {
+  /** The sessions that have had a prompt, live or replayed: only the first one can arm the skill gate. */
+  const prompted = new Set<string>();
+  const trackSession = (e: F1rmEvent) => {
+    if (e.kind === "UserPromptSubmit") prompted.add(e.sessionId);
     if (e.kind === "SubagentStart" && e.intern) subagents.set(e.sessionId, (subagents.get(e.sessionId) ?? new Set()).add(e.intern.id));
     if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
   };
@@ -255,10 +300,18 @@ export function startServer({
     // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
     const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
     if (gate) {
-      const has = (name: string) => gate.loaded.has(name);
-      const missing = gate.required.filter((r) => !has(r));
-      if (missing.length && !READING.has(tool)) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to.`);
-      if (gate.security && !has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
+      // The transcript is read once, and only when this call is about to be held: a refused Skill call leaves no hook event.
+      let read = false;
+      const has = (name: string) => {
+        if (!gate.loaded.has(name) && !read) {
+          read = true;
+          for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) gate.loaded.add(skill);
+        }
+        return gate.loaded.has(name);
+      };
+      const missing = READING.has(tool) ? [] : gate.required.filter((r) => !has(r));
+      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried once you have called it.`);
+      if (gate.security && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED") && !has("security-review")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }
@@ -390,7 +443,7 @@ export function startServer({
         const folder = folderOf(id);
         return e.at < at && (e.room.id === id || ((cwdPaths.get(e.cwd)?.chain ?? [resolve(e.cwd)]).some((c) => inside(folder, c)) && !(e.room.id !== ELSEWHERE.id && folderOf(e.room.id) !== folder && inside(folder, folderOf(e.room.id)))));
       });
-      if (!removed) (state = reduce(state, e), trackSubagents(e));
+      if (!removed) (state = reduce(state, e), trackSession(e));
     } catch {} // a row this build can't read must not stop the office from starting
   }
   dropStaleDoors();
@@ -485,7 +538,9 @@ export function startServer({
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one.
-          if (event.kind === "UserPromptSubmit" && state.employees[event.sessionId]?.role) {
+          // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
+          // A session resumed with `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
+          if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
             const prompt = String(payload.prompt ?? "");
             const at = prompt.indexOf(LOAD_FIRST);
             const required = at < 0 ? [] : prompt.slice(at + LOAD_FIRST.length).split(/\.(?:\s|$)/)[0].split(",").map((s) => s.trim()).filter(Boolean);
@@ -497,7 +552,7 @@ export function startServer({
             const why = refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
-          trackSubagents(event);
+          trackSession(event);
           if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
             pendingInterns.get(event.sessionId)?.shift();
           }
