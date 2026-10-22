@@ -241,7 +241,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 
 ## Who talks to whom
 
-- **Ask the user only for big decisions.** The PM's interview and every question to the user cover only business, product scope (what the software does), design direction, strategy, and irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give. Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules), the caps excepted, are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it). The end-of-milestone report lists them under "Decisions taken without you".
+- **Ask the user only for big decisions.** The PM's interview and every question to the user cover only business, product scope (what the software does), design direction, strategy, irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give. Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules), the caps excepted, are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it). The end-of-milestone report lists them under "Decisions taken without you".
 - **Only the PM talks to the user** and asks the user for those decisions. Everything reaches the user through the PM, and unprompted the PM tells the user only:
   - big decisions;
   - things only the user can do: a permission on a hire's desk, spend, credentials or inputs, a `git push`, a dirty main checkout;

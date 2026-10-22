@@ -677,8 +677,8 @@ test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.
     "**Ask the user only for big decisions.**", "business, product scope (what the software does), design direction, strategy", "irreversible or external actions (push, deploy, spend, data deletion, messaging people)",
     "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", // The delegation gate lets the PM and a lead write no docs/decisions.md: the hire logs a core decision in its own commit.
     "are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it)", "Decisions taken without you",
-    // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say.
-    "irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
+    // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say. One flat list: the cap and the permission are items of it, not the tail of the parenthesis.
+    "design direction, strategy, irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
   ]) expect(who, s).toContain(s);
   expect(who).toMatch(/a cap override[^\n]*goes to the PM as `BLOCKED`/);
   expect(section("Cap rule")).toContain("only after the user has approved exceeding the cap");
