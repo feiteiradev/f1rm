@@ -2089,7 +2089,7 @@ test("a session whose folder is / or the home folder reaches no Elsewhere sessio
   expect(await send("lx", "x.designer-m")).toBeNull();
 });
 
-test("\"main\" is open to everyone only while no online session is titled main; then the table decides", async () => {
+test("\"main\" is open to a top-level sender only while no online session is titled main, then the table decides, and always open to a sub-agent", async () => {
   start({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
   const seat = (id: string, cwd: string, session_title: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title, ...(agent_type && { agent_type }) });
   await seat("m", "/code/shop", "q.backend-dev-a", "f1rm:backend-dev");
@@ -2103,7 +2103,12 @@ test("\"main\" is open to everyone only while no online session is titled main; 
   const out = await send("m");
   expect(out?.permissionDecision).toBe("deny");
   expect(out.permissionDecisionReason).toContain("Who talks to whom");
-  expect((await send("m", "main", { agent_id: "i-m", agent_type: "Explore" }))?.permissionDecision).toBe("deny");
+  // From a sub-agent "main" is its own parent conversation, whatever a session is titled.
+  expect(await send("m", "main", { agent_id: "i-m", agent_type: "Explore" })).toBeNull();
+  await seat("fb", "/code/blog", "main");
+  await office((s) => Object.keys(s.employees).length === 4);
+  expect(await send("m", "main", { agent_id: "i-m", agent_type: "Explore" })).toBeNull();
+  expect((await send("m"))?.permissionDecision).toBe("deny");
   expect(await send("l", "lead-q")).toBeNull();
 });
 

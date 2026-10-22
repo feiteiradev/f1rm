@@ -369,7 +369,7 @@ export function startServer({
     // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
     // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder, and that folder is not / or the home folder.
-    // "main" is the user's own top-level session, open to everyone, unless a session is titled main: then the checks below apply to it.
+    // "main" is the user's own top-level session, open to everyone, unless a session is titled main: then the checks below apply to it. From a sub-agent "main" is its parent conversation, whatever a session is titled.
     // Within the project, who talks to whom: an intern only to its parent or "main", the PM only to leads, a lead to the PM, leads and its team, a member to its lead and its team,
     // and a member's formal report only to its lead. A sender with no role is never held, and the user is no session.
     if (tool === "SendMessage" && input.to !== undefined) {
@@ -379,7 +379,7 @@ export function startServer({
       const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
       const rooms = new Set(answering.map((e) => e.room));
       const intern = !!payload.agent_id;
-      if ((to !== "main" || answering.length > 0) && (intern || !subagents.get(sessionId)?.has(to))) {
+      if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {
         const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
         if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
