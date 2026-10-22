@@ -102,7 +102,7 @@ const ASK_PREAMBLE =
   "This is a side question from the user, not a new task. Answer it from this conversation so far. Do not continue or redo the work, and do not change anything. Be brief.\n\n";
 
 /** A session Claude Code lists (`claude agents --json`). */
-export type Session = { id: string; name: string; kind: string; state: string; cwd: string };
+export type Session = { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number };
 
 /** True if commit `rev` is in the branch checked out in the main working directory `repo`. */
 const inBase = (repo: string, rev: string) =>
@@ -217,10 +217,14 @@ export const machine = {
     if (Bun.spawnSync(["git", "-C", repo, "rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`], { stdout: "ignore" }).success) git("branch", "-d", `worktree-${task}`);
   },
 
-  /** Every session Claude Code lists, finished ones too (`claude agents --json --all`); null if it can't say. */
+  /** Every session Claude Code lists, finished ones too (`claude agents --json --all`); null if it can't say. A session with a live process carries its pid; an ended one (done, stopped, failed, blocked on a limit) has none. */
   async sessions(): Promise<Session[] | null> {
     const list = await agents(true);
-    return list && list.filter((a) => typeof a?.id === "string").map((a) => ({ id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
+    return list && list.filter((a) => typeof a?.id === "string").map((a) => ({
+      id: a.id, name: String(a.name ?? ""), kind: String(a.kind ?? ""), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""),
+      ...(typeof a.sessionId === "string" && { sessionId: a.sessionId }),
+      ...(Number.isInteger(a.pid) && a.pid > 0 && { pid: a.pid as number }),
+    }));
   },
 
   /** The sessions Claude Code lists as live (`claude agents --json`), by id, each with its process id (none if it gives none a signal could use) and its busy/idle status (none for any other); null if it can't say. */

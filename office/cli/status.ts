@@ -85,7 +85,7 @@ const TURN = ["assistant", "user", "queue-operation"];
 const TURN_LINE = new RegExp(`"type":"(?:${TURN.join("|")})"`);
 
 /** The text of a message's content: a string, or the text blocks of a list. */
-const textOf = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => String(b?.text ?? "")).join("") : "");
+export const textOf = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => String(b?.text ?? "")).join("") : "");
 
 /**
  * The last line of the conversation in a piece of transcript: an assistant or user line, or a message put in the queue (an enqueue; the queue emptying or being edited is

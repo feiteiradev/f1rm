@@ -29,7 +29,7 @@ const LEVELS = ["low", "medium", "high"];
 const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:ponytail-review", "security-review"];
 // The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
-const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
+export const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
 /** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
 export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -107,6 +107,31 @@ export type HireRequest = {
   extra?: string[];
 };
 
+/** The live background sessions Claude Code lists, as `machine.backgroundSessions` gives them. */
+export type LiveHires = { name: string; state: string; cwd: string; status?: "busy" | "idle" }[];
+
+/**
+ * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
+ * (30 working on the machine, 2 teams per project, 2 working per team). Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
+ */
+export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean }): void {
+  const lead = role === "lead";
+  const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
+  if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
+  // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
+  if (role === "reviewer" && live.some((s) => s.name === name && s.cwd === cwd)) throw new Error(`a session named "${name}" is already running: one Reviewer per task`);
+  // One specialist per task, whatever the caps say: a second hire there would work the same branch.
+  if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
+  if (!override) {
+    if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
+    const leads = live.filter((s) => s.name.startsWith("lead-") && s.cwd === cwd).length;
+    if (lead && leads >= TEAMS) throw new HireRefused(`this project already has ${leads} teams (the cap is ${TEAMS}).`, busy.length);
+    // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
+    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
+    if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
+  }
+}
+
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
  * and a HireRefused when the cap is full, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
@@ -158,20 +183,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
-  const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
-  if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
-  // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
-  if (role === "reviewer" && live.some((s) => s.name === name && s.cwd === cwd)) throw new Error(`a session named "${name}" is already running: one Reviewer per task`);
-  // One specialist per task, whatever the caps say: a second hire there would work the same branch.
-  if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
-  if (!override) {
-    if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
-    const leads = live.filter((s) => s.name.startsWith("lead-") && s.cwd === cwd).length;
-    if (lead && leads >= TEAMS) throw new HireRefused(`this project already has ${leads} teams (the cap is ${TEAMS}).`, busy.length);
-    // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
-    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
-    if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
-  }
+  checkSlots(live, { role, name, task, team, cwd, override });
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.

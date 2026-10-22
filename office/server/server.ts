@@ -12,7 +12,8 @@ import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten,
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
-import { hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
+import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
+import { mayWake } from "../cli/wake.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -54,9 +55,9 @@ const splitCommands = (command: string) => {
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
 // ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
 const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
-/** The words after `hire` of a simple command that runs `f1rm hire`, unquoted, or null. */
-const hireArgs = (words: string[]) => {
-  const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
+/** The words after `hire` (or another `f1rm` command, `wake`) of a simple command that runs `f1rm hire`, unquoted, or null. */
+const hireArgs = (words: string[], verb = "hire") => {
+  const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === verb);
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
 /** The role and `--team` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
@@ -352,8 +353,22 @@ export function startServer({
     if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
   };
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
+  /**
+   * The hire of the sender's project that `name` (its name, session id or short id) points at when no session of that name has a live process: `claude agents --json --all` lists
+   * it done, stopped, failed or blocked on a limit, with no pid. An employee-shaped record in the sender's room, so the same checks apply to it; null for anything else (no project, no such hire,
+   * another project's, or a name that has a live session). A listing that can't be read finds none.
+   */
+  async function endedHire(me: Employee, name: string): Promise<Employee | null> {
+    if (!me || me.room === ELSEWHERE.id) return null;
+    const project = folderOf(me.room);
+    const mine = ((await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? []).filter((s) => s.kind === "background" && hireName(s.name) && repoOf(s.cwd) === project);
+    const found = mine.find((s) => s.name === name || s.sessionId === name || s.id === name);
+    const hire = found && hireName(found.name);
+    if (!found || !hire || mine.some((s) => s.name === found.name && s.pid)) return null;
+    return { sessionId: found.sessionId ?? found.id, name: found.name, role: roleOfAgentType(`f1rm:${hire.role}`) ?? null, title: found.name, status: "offline", activity: "", tool: "", cwd: found.cwd, room: me.room, lastEventAt: 0 } as Employee;
+  }
   /** Why the company's rules stop this tool call, or null to let it run. */
-  function refusal(sessionId: string, payload: Record<string, any>): string | null {
+  async function refusal(sessionId: string, payload: Record<string, any>): Promise<string | null> {
     const role = state.employees[sessionId]?.role;
     if (!role) return null;
     const tool = String(payload.tool_name ?? "");
@@ -387,9 +402,12 @@ export function startServer({
       const to = String(input.to);
       const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
       const socket = /^uds:(.+)$/.exec(name)?.[1];
-      const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
-      const rooms = new Set(answering.map((e) => e.room));
+      let answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
       const intern = !!payload.agent_id;
+      // A hire of the sender's project whose process has ended answers to no employee, and a message to it would be queued and never arrive: it goes through the checks below as the hire it is, then is refused with the way back.
+      const gone = !intern && !socket && !answering.length && to !== "main" && !subagents.get(sessionId)?.has(to) ? await endedHire(state.employees[sessionId], name) : null;
+      if (gone) answering = [gone];
+      const rooms = new Set(answering.map((e) => e.room));
       if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {
         const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
@@ -406,6 +424,11 @@ export function startServer({
           if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
             return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
           }
+          if (gone) {
+            const target = hireName(gone.title!)!;
+            const wayOut = mayWake({ role, team }, target) ? "Wake it, then message it." : target.role === "lead" ? "The PM wakes a lead: resend after the wake." : `Only the lead of its team wakes a member: ask ${leadOf(team)}, and resend after the wake.`;
+            return refuse("no-live-session", `${gone.title}: no live session; f1rm wake ${gone.title} resumes it in place, with its context. ${wayOut} A message to a session that has ended is queued and never arrives.`);
+          }
         }
       }
     }
@@ -415,6 +438,23 @@ export function startServer({
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
+    }
+    // `f1rm wake` follows the hire rules: whoever may hire a name may wake it. The target is a name, or a session id the listing resolves to one; an unknown one is the command's own refusal.
+    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
+      return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
+    }
+    const wakeCalls = COORDINATORS.has(role) ? commands.map((c) => hireArgs(c, "wake")).filter((a): a is string[] => !!a) : [];
+    if (wakeCalls.length) {
+      const sessions = (await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? [];
+      const me = state.employees[sessionId];
+      for (const args of wakeCalls) {
+        const target = args.find((a) => !a.startsWith("-"));
+        const name = target && (hireName(target) ? target : sessions.find((s) => s.kind === "background" && (s.sessionId === target || s.id === target))?.name);
+        const hire = name ? hireName(name) : null;
+        if (hire && !mayWake({ role, team: teamOf(me) }, hire)) {
+          return refuse("wake", role === "pm" ? "The PM wakes leads; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
+        }
+      }
     }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
     if (role === "lead") {
@@ -630,7 +670,7 @@ export function startServer({
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
-          // A session resumed with its own id (`claude --bg --resume`) has had its first prompt already. One forked on resume (`--fork-session`) is a new session id whose first prompt is the resume note, which re-lists nothing. Neither is armed again.
+          // A session that keeps its id (`claude attach`, or a flagless `claude --bg --resume` that continues it) has had its first prompt already. One woken by `f1rm wake` (or forked on resume) is a new session id whose first prompt is the resume note, which re-lists no skills; it arms only when the note repeats the security sentence, as a woken high-level Reviewer's does, on purpose.
           if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
             const prompt = String(payload.prompt ?? "");
             const at = prompt.indexOf(LOAD_FIRST);
@@ -640,7 +680,7 @@ export function startServer({
           }
           if (event.kind === "PostToolUse" && payload.tool_name === "Skill" && !payload.agent_id) skillGates.get(event.sessionId)?.loaded.add(String(payload.tool_input?.skill ?? ""));
           if (event.kind === "PreToolUse") {
-            const why = refusal(event.sessionId, payload);
+            const why = await refusal(event.sessionId, payload);
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
           trackSession(event);

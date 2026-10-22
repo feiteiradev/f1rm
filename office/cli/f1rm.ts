@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | letgo | status
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | letgo | status
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -10,6 +10,7 @@ import { writePrivate } from "../server/private.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong } from "./hire.ts";
 import { letgo } from "./letgo.ts";
+import { wake } from "./wake.ts";
 import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";
@@ -496,6 +497,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   "": open,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
+  wake: async () => process.exit(await wake(process.argv.slice(3))),
   letgo: async () => {
     const names = process.argv.slice(3);
     if (!names.length) throw new Error("usage: f1rm letgo <name>...");
@@ -510,7 +512,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code; // not process.exit: on a pipe it cuts the output at 64 KB
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | letgo <name>... | status [--json] | status --watch <name>[:waiting]...";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | letgo <name>... | status [--json] | status --watch <name>[:waiting]...";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);
