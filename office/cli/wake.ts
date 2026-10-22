@@ -45,7 +45,7 @@ export function firstPrompt(start: string): string | null {
     if (!l.includes('"type":"user"')) continue;
     try {
       const line = JSON.parse(l);
-      if (line.type === "user" && line.isMeta !== true) return textOf(line.message?.content);
+      if (line.type === "user" && line.isMeta !== true) return textOf(line.message?.content) || null;
     } catch {} // a cut or odd line is no prompt
   }
   return null;
