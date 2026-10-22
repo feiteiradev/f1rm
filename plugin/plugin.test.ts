@@ -680,7 +680,7 @@ test("the Skill stack and Ask-the-user decisions entries and the plugin README s
   expect(ask).not.toContain("logged in `docs/decisions.md`");
   expect(ask).toContain("a core one goes into a brief's Context so the hire logs it");
   // The Where lines name the commits that rewrote the entries.
-  expect(stack).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 24608de, 395e72c, 2359dae/);
+  expect(stack).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 24608de, 395e72c, 2359dae, 57552a6, a20d5b2, c2b220b, f44f850, 634a319\n/);
   expect(ask).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae/);
   const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
   // Both READMEs say which --skills are refused.
