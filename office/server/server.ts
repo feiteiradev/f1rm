@@ -21,7 +21,7 @@ const MAX_MESSAGE = 4000;
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
 // A raw `claude --bg` or `claude -p` is held too (see claudeStart); `bash -c "claude -p …"`, an alias or a script that runs it is not seen.
-// `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
+// `f1rm hire` counts only in command position (see splitCommands), so a command that merely mentions it passes.
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
@@ -51,7 +51,6 @@ const splitCommands = (command: string) => {
     return { prefix: words.slice(0, i), words: words.slice(i) };
   });
 };
-const simpleCommands = (command: string) => splitCommands(command).map((c) => c.words);
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
 // ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
 const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
@@ -148,14 +147,13 @@ const sameFolder = (x: string, y: string) => {
   const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(fold(outer), REAL_HOME);
   return holds(x, y) || holds(y, x);
 };
-const leadOf = (team: string | null) => (team ? `lead-${team}` : "your lead (the Report to of your brief)");
-const theirLead = (e: Employee) => (teamOf(e) ? `lead-${teamOf(e)}` : "their lead");
+const leadOf = (team: string | null, fallback = "your lead (the Report to of your brief)") => (team ? `lead-${team}` : fallback);
 /** Who talks to whom: for each kind of company employee, the sessions of its project it may message (its own team, when it has one, is `team`) and the way out when a target is refused. */
 const TALK = {
-  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead", wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${theirLead(e)}.` },
+  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead", wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${leadOf(teamOf(e), "their lead")}.` },
   lead: {
     allows: (team: string | null, e: Employee) => e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team),
-    wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${theirLead(e)}.`,
+    wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${leadOf(teamOf(e), "their lead")}.`,
   },
   member: {
     allows: (team: string | null, e: Employee) => !!team && teamOf(e) === team,
@@ -172,7 +170,7 @@ const ownHome = (prefix: string[]) => {
   const value = unquoted(prefix[at]?.slice(5) ?? "");
   return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, "/"].includes(homeKey(value))));
 };
-// What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper simpleCommands drops), `npm exec`.
+// What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper splitCommands drops), `npm exec`.
 const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
 const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) => {
   let i = 0;
@@ -398,7 +396,9 @@ export function startServer({
         }
       }
     }
-    const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
+    // The Bash line is split once; `$(mktemp -d)` is one word, so a HOME made of it stays in its command's prefix.
+    const split = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)) : [];
+    const commands = split.map((c) => c.words);
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
@@ -432,7 +432,7 @@ export function startServer({
     if ((tool === "Skill" && /^(?:[\w-]+:)?(?:loop|schedule)$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || ["ScheduleWakeup", "CronCreate", "RemoteTrigger"].includes(tool)) {
       return refuse("loop", "/loop and /schedule are refused for every employee: recurring work keeps a session going on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
     }
-    const starts = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)).flatMap((c) => claudeStart(c) ?? []) : [];
+    const starts = split.flatMap((c) => claudeStart(c) ?? []);
     if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
       return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
     }
