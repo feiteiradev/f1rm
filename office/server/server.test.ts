@@ -1,9 +1,9 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { projectFile } from "./editions.ts";
 import { startServer } from "./server.ts";
 import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
@@ -108,11 +108,11 @@ afterEach(() => {
 const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
-function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string) {
+function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string, extra: { transcriptsDir?: string } = {}) {
   // A door needs a registration, which only `f1rm pm` writes: these repos have one, as if it had run.
   const projectsDir = mkdtempSync(join(tmpdir(), "f1rm-projects-"));
   for (const common of new Set(Object.values(repos ?? {}))) writeFileSync(projectFile(projectsDir, common), "{}\n");
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir, isAlive: (pid) => !deadPids.has(pid) });
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(repos), clientDir, approvalTimeoutMs, boardsDir, projectsDir, isAlive: (pid) => !deadPids.has(pid), ...extra });
   return server;
 }
 const base = () => `http://127.0.0.1:${server.port}`;
@@ -1588,7 +1588,7 @@ test("a hire whose prompt names skills is refused every tool but the reading one
   await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
   const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
   expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If one isn't installed, send `BLOCKED <task>` with its name to the session in your Report to.");
+  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
   for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
   // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
@@ -1597,20 +1597,139 @@ test("a hire whose prompt names skills is refused every tool but the reading one
 
   await skillLoaded("h", "code-review"); // another skill that shares the part after the ":" does not count
   await skillLoaded("h", "impeccable:impeccable"); // nor does a prefixed name for an unprefixed one
-  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. If");
+  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill");
   await skillLoaded("h", "mattpocock-skills:code-review");
   await skillLoaded("h", "impeccable");
   expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
   expect(await tryTool("h", "Edit", { file_path: "/a" })).toBeNull();
 });
 
-test("a failed Skill call does not count as loaded", async () => {
+// A skill the Skill tool refuses (disable-model-invocation, or unknown) fires no hook event at all, not even PostToolUseFailure
+// (measured on Claude Code 2.1.308: a validation error comes before any hook). Its only trace is the session's own transcript.
+const transcripts = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-transcripts-")));
+const skillUse = (skill: string, extra: object = {}) => ({ type: "assistant", isSidechain: false, message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_9", name: "Skill", input: { skill } }] }, ...extra });
+const refused = { type: "user", isSidechain: false, message: { role: "user", content: [{ type: "tool_result", is_error: true, tool_use_id: "toolu_9", content: "<tool_use_error>Skill x cannot be used with Skill tool due to disable-model-invocation.</tool_use_error>" }] } };
+let transcriptCount = 0;
+/** Writes `<transcripts>/<project>/<id>.jsonl` and returns its path. */
+function transcript(id: string, lines: object[], project = `p${++transcriptCount}`) {
+  mkdirSync(join(transcripts, project), { recursive: true });
+  const file = join(transcripts, project, `${id}.jsonl`);
+  writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return file;
+}
+const tryAt = async (id: string, path: string | undefined, tool = "Bash") => (await held(await hook({ ...preToolUse(id, tool, { command: "ls" }), transcript_path: path })))?.permissionDecision ?? null;
+
+test("a skill the Skill tool refuses counts as tried, read from the session's own transcript; a skill never tried still holds", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hired("t1", `/tdd${LOAD_FIRST}pstack:architect, impeccable.`);
+  const path = transcript("t1", [skillUse("pstack:architect"), refused]);
+  const out = await held(await hook({ ...preToolUse("t1", "Bash", { command: "ls" }), transcript_path: path }));
+  expect(out.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill"); // the refused one is no longer asked for
+  await skillLoaded("t1", "impeccable");
+  expect(await tryAt("t1", path)).toBeNull();
+  // The tries are kept: the next refusal does not need the file again.
+  expect(await tryAt("t1", undefined)).toBeNull();
+});
+
+test("the gate's way-out says that a skill the Skill tool refuses counts as tried", async () => {
   start();
-  await hired("h", `/tdd${LOAD_FIRST}impeccable.`);
-  await skillLoaded("h", "impeccable", "PostToolUseFailure");
-  expect(await tryTool("h", "Bash", { command: "ls" })).toBe("deny");
-  await skillLoaded("h", "impeccable");
-  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
+  await hired("w", `/tdd${LOAD_FIRST}impeccable.`);
+  const out = await held(await hook(preToolUse("w", "Bash", { command: "ls" })));
+  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
+});
+
+test("a Skill try only counts from the session's own transcript, read within limits, and fails closed", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  const hire = async (id: string) => hired(id, `/tdd${LOAD_FIRST}pstack:architect.`);
+  const tried = [skillUse("pstack:architect"), refused];
+  // The control: the same lines in the right place count.
+  await hire("ok");
+  expect(await tryAt("ok", transcript("ok", tried))).toBeNull();
+
+  await hire("name"); // a basename that is not the session's own id
+  expect(await tryAt("name", transcript("someone-else", tried))).toBe("deny");
+  await hire("outside"); // a path outside the directory
+  const elsewhere = join(realpathSync(mkdtempSync(join(tmpdir(), "f1rm-elsewhere-"))), "outside.jsonl");
+  writeFileSync(elsewhere, tried.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  expect(await tryAt("outside", elsewhere)).toBe("deny");
+  await hire("depth"); // not <dir>/<project>/<id>.jsonl
+  mkdirSync(join(transcripts, "a", "b"), { recursive: true });
+  writeFileSync(join(transcripts, "a", "b", "depth.jsonl"), tried.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  expect(await tryAt("depth", join(transcripts, "a", "b", "depth.jsonl"))).toBe("deny");
+  await hire("link"); // a symlink that resolves elsewhere
+  mkdirSync(join(transcripts, "plink"), { recursive: true });
+  symlinkSync(elsewhere, join(transcripts, "plink", "link.jsonl"));
+  expect(await tryAt("link", join(transcripts, "plink", "link.jsonl"))).toBe("deny");
+  await hire("big"); // the try sits past the first 8 MB
+  expect(await tryAt("big", transcript("big", [{ type: "user", pad: "x".repeat(8 * 1024 * 1024) }, ...tried]))).toBe("deny");
+  await hire("bigstart"); // a try inside the first 8 MB of a larger file still counts
+  expect(await tryAt("bigstart", transcript("bigstart", [...tried, { type: "user", pad: "x".repeat(8 * 1024 * 1024) }]))).toBeNull();
+  await hire("side"); // tried only inside a sub-agent
+  expect(await tryAt("side", transcript("side", [skillUse("pstack:architect", { isSidechain: true })]))).toBe("deny");
+  await hire("other"); // other lines and other tools are not a Skill try
+  const bash = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }, { type: "text", text: "pstack:architect" }] } };
+  const asUser = { type: "user", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "pstack:architect" } }] } };
+  const mixed = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "impeccable" } }, { type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }] } };
+  expect(await tryAt("other", transcript("other", [bash, asUser, mixed]))).toBe("deny"); // the Skill block on the line is no cover for the Bash one
+  await hire("dots"); // a path that climbs with ".." is refused even where it lands in the right place
+  const dots = transcript("dots", tried);
+  expect(await tryAt("dots", `${dirname(dirname(dots))}/zz/../${basename(dirname(dots))}/dots.jsonl`)).toBe("deny");
+  expect(await tryAt("dots", dots)).toBeNull();
+  await hire("fifo"); // a named pipe at the path must not hang the office
+  mkdirSync(join(transcripts, "pfifo"), { recursive: true });
+  Bun.spawnSync(["mkfifo", join(transcripts, "pfifo", "fifo.jsonl")]);
+  expect(await tryAt("fifo", join(transcripts, "pfifo", "fifo.jsonl"))).toBe("deny");
+  await hire("odd"); // not JSON
+  const oddPath = transcript("odd", []);
+  writeFileSync(oddPath, "{not json\n\u0000\u0001\n[1,2]\nnull\n");
+  expect(await tryAt("odd", oddPath)).toBe("deny");
+  await hire("gone"); // no file
+  expect(await tryAt("gone", join(transcripts, "pgone", "gone.jsonl"))).toBe("deny");
+  expect(await tryAt("gone", undefined)).toBe("deny"); // no path at all
+  await hire("locked"); // unreadable
+  const locked = transcript("locked", tried);
+  chmodSync(locked, 0);
+  expect(await tryAt("locked", locked)).toBe("deny");
+  chmodSync(locked, 0o600);
+});
+
+test("only a session's first prompt arms the gate: a later prompt that quotes the sentence neither arms nor resets it", async () => {
+  start();
+  const quote = `Re-review. The brief said: ${LOAD_FIRST}not-installed, ghost:skill.${SECURITY} End.`;
+  await hook(sessionStart("seated", "/code/shop")); // an event before the first prompt is no prompt
+  await hired("seated", `/tdd${LOAD_FIRST}impeccable.`);
+  expect(await tryTool("seated", "Bash", { command: "ls" })).toBe("deny");
+  await hired("plain", "/tdd start work"); // a first prompt that names nothing arms nothing
+  await hired("plain", quote);
+  expect(await tryTool("plain", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("plain", "SendMessage", { message: "APPROVED x" })).toBeNull();
+
+  await hired("armed", `/tdd${LOAD_FIRST}impeccable.`);
+  await skillLoaded("armed", "impeccable");
+  await hired("armed", quote); // the loaded set stays, the required list is not replaced
+  expect(await tryTool("armed", "Bash", { command: "ls" })).toBeNull();
+  expect(await tryTool("armed", "SendMessage", { message: "APPROVED x" })).toBeNull();
+
+  await hired("held", `/tdd${LOAD_FIRST}impeccable.`);
+  await hired("held", `/tdd${LOAD_FIRST}other.`); // a second sentence does not swap the names either
+  expect((await held(await hook(preToolUse("held", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill");
+
+  // `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
+  await hired("resumed", "Resume the task where you left off.");
+  expect(await tryTool("resumed", "Bash", { command: "ls" })).toBeNull();
+});
+
+test("an office restart remembers which sessions have had their first prompt", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
+  const open = () => (server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, dbPath }));
+  open();
+  await hired("old", "/tdd start work");
+  server.stop(true);
+  open();
+  await hired("old", `Re-review. ${LOAD_FIRST}not-installed.`); // a quote, to a session that began before the restart
+  expect(await tryTool("old", "Bash", { command: "ls" })).toBeNull();
+  await hired("fresh", `/tdd${LOAD_FIRST}impeccable.`); // a session first seen after the restart is still armed
+  expect(await tryTool("fresh", "Bash", { command: "ls" })).toBe("deny");
 });
 
 test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
@@ -1628,6 +1747,29 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
   await skillLoaded("r", "security-review");
   expect(await send("APPROVED shop-1")).toBeNull();
+});
+
+test("a refused security-review read from the transcript does not release a --level high Reviewer's APPROVED", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const path = transcript("rs", [skillUse("ponytail:ponytail-review"), skillUse("security-review"), refused]);
+  const send = async () => held(await hook({ ...preToolUse("rs", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
+  expect(await tryAt("rs", path)).toBeNull(); // the required skill was tried, so the work tools are free
+  expect((await send())?.permissionDecision).toBe("deny"); // the security hold counts only a skill that ran
+  expect((await send())?.permissionDecision).toBe("deny");
+  await skillLoaded("rs", "security-review");
+  expect(await send()).toBeNull();
+});
+
+test("even a first prompt that names security-review does not let a refused try release APPROVED", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hired("rn", `/code-review high${LOAD_FIRST}security-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const path = transcript("rn", [skillUse("security-review"), refused]);
+  expect(await tryAt("rn", path)).toBe("deny"); // the read happens here and must not count it
+  const out = await held(await hook({ ...preToolUse("rn", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
+  expect(out.permissionDecision).toBe("deny");
 });
 
 test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {

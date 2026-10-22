@@ -214,6 +214,8 @@ test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permiss
 test("the guidelines say what each gate holds and the way out, and a cap refusal goes lead to PM to user", () => {
   const gates = section("Gates");
   for (const s of ["skill gate", "delegation gate", "boards, milestones, kept files, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
+  const skillGate = gates.split("\n").find((l) => l.includes("**skill gate**")) ?? "";
+  for (const s of ["Only a session's first prompt arms it", "a later message that quotes that prompt's skill list changes nothing", "forked from one is not armed again", "a skill the Skill tool refuses counts as tried, read from the session's own transcript", "disable-model-invocation, go on without that skill", "Unknown skill, go on and send `BLOCKED <slug>`"]) expect(skillGate, s).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);
@@ -498,6 +500,8 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
   expect(mine).toEqual([...mine].sort((x, y) => x - y));
   expect(titles).toContain("2026-10-21 Idle members free their team slot");
   for (const t of ["Projects are isolated", "Decisions log merges by union", "Project notes live outside memory"]) expect(titles).toContain(`2026-10-21 ${t}`);
+  for (const t of ["The skill gate arms on the first prompt only", "A refused skill counts as tried"]) expect(titles).toContain(`2026-10-22 ${t}`);
+  expect(entries.find((e) => e.startsWith("2026-10-22 A refused skill counts as tried"))).toContain("`security-review` is never taken from a try");
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
