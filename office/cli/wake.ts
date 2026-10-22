@@ -7,7 +7,7 @@ import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, ro
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { head, hires, tail } from "./status.ts";
 
-export const USAGE = "usage: f1rm wake [--override] <name|id> [message] [claude flags...]";
+export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
 
 /** Who may wake a hire follows who may hire it: the PM wakes leads, a lead wakes the members of its own team, a specialist wakes nobody. */
@@ -124,14 +124,19 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   return { argv, cwd, name, sessionId };
 }
 
+/** The words of `f1rm wake`: `--override` anywhere before the first claude flag, then the target and the message, and from the first flag on what goes to claude as given. */
+export function parseWakeArgs(words: string[]): { target: string | undefined; message: string | undefined; override: boolean; extra: string[] } {
+  const at = words.findIndex((a) => a.startsWith("-") && a !== "--override");
+  const own = at < 0 ? words : words.slice(0, at);
+  const [target, message] = own.filter((a) => a !== "--override");
+  return { target, message, override: own.includes("--override"), extra: at < 0 ? [] : words.slice(at) };
+}
+
 /** Runs `f1rm wake` and returns the exit code. */
 export async function wake(words: string[]): Promise<number> {
-  const args = [...words];
-  const override = args[0] === "--override" && !!args.shift();
-  if (args[0] === "--help" || args[0] === "-h") return console.log(USAGE), 0;
-  if (!args[0]) throw new Error(USAGE);
-  const [target, ...rest] = args;
-  const message = rest[0] && !rest[0].startsWith("-") ? rest.shift() : undefined;
+  if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
+  const { target, message, override, extra: rest } = parseWakeArgs(words);
+  if (!target) throw new Error(USAGE);
   let plan: WakePlan;
   try {
     const home = process.env.HOME!;

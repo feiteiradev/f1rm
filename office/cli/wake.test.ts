@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
-import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, planWake } from "./wake.ts";
+import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
 
 setDefaultTimeout(30_000);
 const made: string[] = [];
@@ -77,6 +77,10 @@ test("the woken hire keeps the model it last answered with, unless the caller gi
   expect(given.argv.filter((a) => a === "--model")).toHaveLength(1);
   expect(given.argv.slice(-2)).toEqual(["--model", "opus"]);
   expect((await plan("shop.backend-dev-checkout", [lead, dev])).argv).not.toContain("--model"); // no transcript to read
+  // The `--model=<x>` spelling is a model too: the old one is not appended after it.
+  const equals = await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--model=opus"] }, { modelOf });
+  expect(equals.argv.slice(-1)).toEqual(["--model=opus"]);
+  expect(equals.argv).not.toContain("claude-haiku-5-5");
 });
 
 test("lastModel reads the model of the conversation's last answer, not a sub-agent's, an error line's or a session with none", () => {
@@ -125,6 +129,14 @@ test("a woken hire reports to the session its first prompt named, and to the def
   expect((await plan("lead-shop", [gone], {}, { promptOf: promptOf("no report line here") })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: pm-shop`);
   const dev = stopped("shop.backend-dev-checkout", "d", wt("checkout"));
   expect((await plan("shop.backend-dev-checkout", [lead, dev], {}, { promptOf: promptOf(first("lead-shop")) })).argv[8]).toBe(`${DEFAULT_NOTE}\nReport to: lead-shop`);
+});
+
+test("--override is read wherever it stands before the claude flags, and what follows the first flag goes to claude as given", () => {
+  expect(parseWakeArgs(["lead-shop"])).toEqual({ target: "lead-shop", message: undefined, override: false, extra: [] });
+  expect(parseWakeArgs(["--override", "lead-shop", "go"])).toEqual({ target: "lead-shop", message: "go", override: true, extra: [] });
+  expect(parseWakeArgs(["lead-shop", "--override", "go", "--model", "opus"])).toEqual({ target: "lead-shop", message: "go", override: true, extra: ["--model", "opus"] });
+  expect(parseWakeArgs(["lead-shop", "go", "--override"])).toEqual({ target: "lead-shop", message: "go", override: true, extra: [] });
+  expect(parseWakeArgs(["lead-shop", "--model", "opus", "--override"])).toEqual({ target: "lead-shop", message: undefined, override: false, extra: ["--model", "opus", "--override"] });
 });
 
 test("firstPrompt reads the text of the first user line, whether the content is a string or blocks", () => {
