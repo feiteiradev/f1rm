@@ -1,12 +1,13 @@
 // The office's recovery tick: wakes the background hires and leads of a registered project whose process ended while their board row is doing/review, once per stop, and says so when it cannot.
 // It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the caps), machine.tell (the inbox), the boards and transcripts.
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { head, lastTurn, limitUntil, recoveryFile, tail, textOf } from "../cli/status.ts";
 import type { BoardRow } from "./board.ts";
 import { agents, machine } from "./machine.ts";
+import { writePrivate } from "./private.ts";
 
 const MIN = 60_000;
 const MONTHS =["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -282,7 +283,7 @@ export function fileStore(home: string): RecoveryDeps["store"] {
     save(repo, entries) {
       const file = recoveryFile(home, repo);
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(`${file}.tmp`, JSON.stringify(entries, null, 2) + "\n");
+      writePrivate(`${file}.tmp`, JSON.stringify(entries, null, 2) + "\n");
       renameSync(`${file}.tmp`, file);
     },
   };

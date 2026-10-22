@@ -1,9 +1,13 @@
 // Seam: the office's recovery tick. createRecovery against an injected `claude agents --json --all`, transcripts, boards, store, clock, wake and tell; the real wake code (planWake) for the caps.
 import { expect, setDefaultTimeout, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { recoveryFile } from "../cli/status.ts";
 import { LOAD_FIRST } from "../cli/hire.ts";
 import { planWake } from "../cli/wake.ts";
 import type { BoardRow } from "./board.ts";
-import { createRecovery, resetAt, type Entries } from "./recovery.ts";
+import { createRecovery, fileStore, resetAt, type Entries } from "./recovery.ts";
 
 setDefaultTimeout(30_000);
 const at = (iso: string) => Date.parse(iso);
@@ -483,4 +487,22 @@ test("a board row counts when its status cell starts with doing or review, and w
   expect(clipped).toHaveLength(60);
   expect(await woken("doing", clipped, long)).toBe(1);
   expect(await woken("doing", `${"y".repeat(59)}…`, long)).toBe(0);
+});
+
+test("the file store writes a private file and never follows a link planted at its temp name", () => {
+  const home = mkdtempSync(join(tmpdir(), "f1rm-store-"));
+  const store = fileStore(home);
+  store.save(REPO, { [DEV]: { note: "first" } });
+  const file = recoveryFile(home, REPO);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  expect(store.load(REPO)).toEqual({ [DEV]: { note: "first" } });
+  const victim = join(home, "victim.txt");
+  writeFileSync(victim, "keep");
+  symlinkSync(victim, `${file}.tmp`);
+  store.save(REPO, { [DEV]: { note: "second" } });
+  expect(readFileSync(victim, "utf8")).toBe("keep");
+  expect(store.load(REPO)).toEqual({ [DEV]: { note: "second" } });
+  writeFileSync(file, "{cut");
+  expect(store.load(REPO)).toEqual({});
+  rmSync(home, { recursive: true, force: true });
 });
