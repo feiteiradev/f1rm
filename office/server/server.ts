@@ -2,7 +2,7 @@
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
@@ -20,8 +20,8 @@ const MAX_MESSAGE = 4000;
 // The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
-// ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
-// `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
+// A raw `claude --bg` or `claude -p` is held too (see claudeStart); `bash -c "claude -p …"`, an alias or a script that runs it is not seen.
+// `f1rm hire` counts only in command position (see splitCommands), so a command that merely mentions it passes.
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
@@ -36,7 +36,7 @@ const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", 
 /** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
 // ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
 // so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
-const simpleCommands = (command: string) => {
+const splitCommands = (command: string) => {
   const out: string[][] = [[]];
   for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
@@ -48,7 +48,7 @@ const simpleCommands = (command: string) => {
       else if (wrapper === "timeout") wrapper = ""; // its first word past the options is the duration
       else if (!/^\w+=/.test(w)) break;
     }
-    return words.slice(i);
+    return { prefix: words.slice(0, i), words: words.slice(i) };
   });
 };
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
@@ -135,6 +135,68 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
+// A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
+const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
+// The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
+// Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
+const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
+const homeKey = (path: string) => fold(realPath(resolve(path)));
+const REAL_HOME = homeKey(((): string => { try { return userInfo().homedir; } catch { return homedir(); } })()); // no passwd entry for the uid: HOME decides
+/** Whether one real folder is the other or inside it, and the outer is no broad one: not `/` (which `inside` never says holds anything but itself), the home folder or a folder that holds it. */
+const sameFolder = (x: string, y: string) => {
+  const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(fold(outer), REAL_HOME);
+  return holds(x, y) || holds(y, x);
+};
+const leadOf = (team: string | null, fallback = "your lead (the Report to of your brief)") => (team ? `lead-${team}` : fallback);
+/** Who talks to whom: for each kind of company employee, the sessions of its project it may message (its own team, when it has one, is `team`) and the way out when a target is refused. */
+const TALK = {
+  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead", wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${leadOf(teamOf(e), "their lead")}.` },
+  lead: {
+    allows: (team: string | null, e: Employee) => e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team),
+    wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${leadOf(teamOf(e), "their lead")}.`,
+  },
+  member: {
+    allows: (team: string | null, e: Employee) => !!team && teamOf(e) === team,
+    wayOut: (team: string | null) => `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${leadOf(team)}.`,
+  },
+};
+// A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
+// A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
+// `$(mktemp -d)`, and neither the user's real home (see REAL_HOME) nor the HOME this office runs with (a second office is measured by its own sessions).
+// Text only: a HOME exported by an earlier call is not seen, and an option of an `env` word after the HOME= word that clears it (`-`, `-i`, `--ignore-environment`, `-u HOME`) undoes the prefix.
+const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
+const ownHome = (prefix: string[]) => {
+  // Only the options of an `env` word after the HOME= word can clear it, of every such word; another wrapper's `-i` (`stdbuf -i 0`) does not.
+  // env's own options end at its first other word (`env F1RM_PORT=4999 stdbuf -i 0 …`); `-u` and `--unset` take the next word as their value.
+  const at = prefix.findLastIndex((w) => w.startsWith("HOME="));
+  let cleared = false;
+  for (let env = at + 1; env < prefix.length; env++) {
+    if (unquoted(prefix[env]) !== "env") continue;
+    for (let j = env + 1; j < prefix.length && unquoted(prefix[j]).startsWith("-"); j++) {
+      const option = unquoted(prefix[j]);
+      if (["-", "-i", "--ignore-environment", "-uHOME", "--unset=HOME"].includes(option)) cleared = true;
+      if ((option === "-u" || option === "--unset") && unquoted(prefix[++j] ?? "") === "HOME") cleared = true;
+    }
+  }
+  const value = unquoted(prefix[at]?.slice(5) ?? "");
+  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, homeKey(process.env.HOME || "/"), "/"].includes(homeKey(value))));
+};
+// What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper splitCommands drops), `npm exec`.
+const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
+const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) => {
+  let i = 0;
+  if (PACKAGE_RUNNERS.has(words[0])) for (i = 1; PACKAGE_RUNNERS.has(words[i]) || words[i]?.startsWith("-"); i++);
+  // One leading backslash skips an alias (`\claude`); a version is anything (`@^2`, `@~2.1`); the name's case is ignored (APFS).
+  if (!/^claude(?:-code)?(?:@\S+)?$/i.test(basename(unquoted(words[i] ?? "").replace(/^\\/, "")))) return null;
+  // What follows `--` is another command's (`claude mcp add x -- npx srv -sp 1`), but `npm exec` consumes the first `--` itself and hands claude what follows it.
+  const rest = words.slice(i + 1).map(unquoted);
+  if (words[0] === "npm" && !words.slice(1, i).includes("--") && rest.includes("--")) rest.splice(rest.indexOf("--"), 1); // not when npm used it before the package
+  const args = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : undefined);
+  const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
+  // A wake resumes the session it names; `--fork-session` starts a new one.
+  const wake = args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) && !args.includes("--fork-session");
+  return bg || print ? { bg, print, wake, home: ownHome(prefix) } : null;
+};
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
 /** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
@@ -317,18 +379,39 @@ export function startServer({
     // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
     // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
-    // ponytail: two sessions both outside any door share the Elsewhere room and can message each other; a hire starts in a repo, so refusing Elsewhere could eat legitimate reports.
+    // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder, and that folder is not / or the home folder.
+    // "main" is the user's own top-level session, open to everyone, unless a session is titled main: then the checks below apply to it. From a sub-agent "main" is its parent conversation, whatever a session is titled.
+    // Within the project, who talks to whom: an intern only to its parent or "main", the PM only to leads, a lead to the PM, leads and its team, a member to its lead and its team,
+    // and a member's formal report only to its lead. A sender with no role is never held, and the user is no session.
     if (tool === "SendMessage" && input.to !== undefined) {
       const to = String(input.to);
       const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
       const socket = /^uds:(.+)$/.exec(name)?.[1];
-      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name)).map((e) => e.room));
-      if (to !== "main" && !subagents.get(sessionId)?.has(to)) {
+      const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
+      const rooms = new Set(answering.map((e) => e.room));
+      const intern = !!payload.agent_id;
+      if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {
+        const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
-        if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (me.room === ELSEWHERE.id && !answering.every((e) => sameFolder(realCwd(me.cwd), realCwd(e.cwd)))) {
+          return refuse("elsewhere", "Elsewhere is no room: a session outside every project may message only a session working under the same folder. Use `f1rm feedback: <problem> -> <suggestion>` for the user, addressed to no session.");
+        }
+        if (intern) {
+          if (answering.some((e) => e.sessionId !== sessionId && (me.title === undefined || e.title !== me.title))) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
+        } else {
+          const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : "member"];
+          const bad = answering.find((e) => !talk.allows(team, e));
+          if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad)}`);
+          if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
+            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
+          }
+        }
       }
     }
-    const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
+    // The Bash line is split once; `$(mktemp -d)` is one word, so a HOME made of it stays in its command's prefix.
+    const split = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)) : [];
+    const commands = split.map((c) => c.words);
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
@@ -358,8 +441,16 @@ export function startServer({
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
     }
+    // Recurring work: the /loop and /schedule skills and the tools they start it with.
+    if ((tool === "Skill" && /^(?:[\w-]+:)?(?:loop|schedule)$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || ["ScheduleWakeup", "CronCreate", "RemoteTrigger"].includes(tool)) {
+      return refuse("loop", "/loop and /schedule are refused for every employee: recurring work keeps a session going on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
+    }
+    const starts = split.flatMap((c) => claudeStart(c) ?? []);
+    if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
+      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
+    }
     if (tool === "Agent" || tool === "Task") {
-      if (COORDINATORS.has(role) && String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
+      if (String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
       const now = clock();
       const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
       const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;
@@ -385,6 +476,8 @@ export function startServer({
     for (let q = dirname(p); q !== all.at(-1); q = dirname(q)) all.push(q);
     return all;
   };
+  // The real path of a cwd, as roomOf resolved it.
+  const realCwd = (cwd: string) => cwdPaths.get(cwd)?.chain[1] ?? realPath(resolve(cwd));
   const roomOf = (cwd: string): Room => {
     if (!projectsDir) return ELSEWHERE;
     let info = cwdPaths.get(cwd);
