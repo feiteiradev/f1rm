@@ -166,11 +166,12 @@ const TALK = {
 // Text only: a HOME exported by an earlier call is not seen, and an option of an `env` word after the HOME= word that clears it (`-`, `-i`, `--ignore-environment`, `-u HOME`) undoes the prefix.
 const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
 const ownHome = (prefix: string[]) => {
-  // Only the options of an `env` word after the HOME= word can clear it; another wrapper's `-i` (`stdbuf -i 0`) does not.
-  const at = prefix.findLastIndex((w) => w.startsWith("HOME=")), env = prefix.findIndex((w, j) => j > at && unquoted(w) === "env");
+  // Only the options of an `env` word after the HOME= word can clear it, of every such word; another wrapper's `-i` (`stdbuf -i 0`) does not.
   // env's own options end at its first other word (`env F1RM_PORT=4999 stdbuf -i 0 …`); `-u` and `--unset` take the next word as their value.
+  const at = prefix.findLastIndex((w) => w.startsWith("HOME="));
   let cleared = false;
-  if (env >= 0) {
+  for (let env = at + 1; env < prefix.length; env++) {
+    if (unquoted(prefix[env]) !== "env") continue;
     for (let j = env + 1; j < prefix.length && unquoted(prefix[j]).startsWith("-"); j++) {
       const option = unquoted(prefix[j]);
       if (["-", "-i", "--ignore-environment", "-uHOME", "--unset=HOME"].includes(option)) cleared = true;
