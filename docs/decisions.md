@@ -231,3 +231,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a conflict is the base moving, not the work failing, so it says nothing about whether the task needs re-scoping.
 - Rejected: counting conflicts toward ESCALATE.
 - Where: skill-stack, 1996a7e
+
+## 2026-10-22 The skill gate arms on the first prompt only
+
+- Decision: the office arms a company session's skill gate on that session's first `UserPromptSubmit` and never again; a later prompt or message that quotes the hire sentence neither arms nor resets it, even in a session whose first prompt armed nothing. A session resumed with `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing, so it is not armed. The record of which sessions have had a prompt is rebuilt from the event log on start.
+- Why: arming on every prompt that contained the sentence let a quoted hire prompt (a Reviewer's `/code-review` fork result, a lead's re-review note quoting the brief) re-arm two sessions on 2026-10-21 with names they could not load, and only restarting the office cleared them.
+- Rejected: persisting the gate across restarts (out of scope; it fails open today); a regex that ignores quotes (a quote has no reliable shape).
+- Where: gate-arm, c51f6c6
+
+## 2026-10-22 A refused skill counts as tried
+
+- Decision: the skill gate counts a skill as loaded after one try with the Skill tool, whether the tool ran it or refused it. The office reads the try from the session's own transcript (`<transcripts dir>/<project folder>/<session id>.jsonl`, default `~/.claude/projects`), and only when a call is about to be held: at most the first 8 MB, only the skill names of non-sidechain assistant Skill calls, nothing logged or stored, and any unreadable, missing, linked-away or odd file counts nothing. A skill never tried still holds, and the gate's way-out says a refused skill counts as tried.
+- Why: skills flagged `disable-model-invocation` can never load through the Skill tool, so counting only successes held the hire forever. Measured on Claude Code 2.1.308 in a throwaway `claude -p` with its own hooks: a loadable skill fires PreToolUse then PostToolUse, while a refused one (and an unknown one) fires no hook event at all, not even PostToolUseFailure, because the call fails at validation before any hook; the transcript's Skill `tool_use` is the only trace.
+- Rejected: a hook-based count (no event exists); refusing every such skill in `f1rm hire` for all plugins (hire.ts already refuses pstack ones, other plugins carry the flag too); trusting the hook's `transcript_path` as given (the path is rebuilt from the session id and the directory).
+- Where: gate-arm, c51f6c6
