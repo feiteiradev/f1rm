@@ -42,7 +42,7 @@ function stubClaude(sessions: Session[] | null) {
 function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process.cwd(), env: Record<string, string> = {}) {
   const r = Bun.spawnSync(["bun", CLI, "hire", ...args], {
     cwd,
-    env: { ...process.env, HOME: tmp("f1rm-home-"), PATH: `${stub.bin}:${process.env.PATH}`, ...env },
+    env: { ...process.env, HOME: env.HOME ?? tmp("f1rm-home-"), PATH: `${stub.bin}:${process.env.PATH}`, ...env },
   });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
@@ -199,7 +199,7 @@ test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is re
 // A space after the comma is trimmed: the gate trims names, so a padded one in the list would hold the hire, and a padded architect would not be the first command.
 test("--skills a, b is split and trimmed: a spaced pstack:tdd is refused and a spaced pstack:architect is the lead's first command", () => {
   const dev = stubClaude([]);
-  const r = hire(dev, ["--skills", "mattpocock-skills:diagnosing-bugs, pstack:tdd", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]);
+  const r = hire(dev, ["--skills", "mattpocock-skills:diagnosing-bugs, pstack:tdd", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF], repoDir());
   expect(r.err).toContain("pstack:tdd is not wired inside hires");
   expect(dev.argv()).toBeNull();
   const lead = stubClaude([]);

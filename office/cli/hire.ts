@@ -127,7 +127,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
-  // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three in SLASH_ONLY can be a first command.
+  // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three pstack skills in SLASH_ONLY can be a first command.
   const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
   if (unwired) throw new Error(`${unwired} is not wired inside hires; the user can run it by hand`);
   const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
