@@ -1,9 +1,12 @@
 // Seam 2: the real `f1rm hire`, run against a stub `claude` first on PATH.
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
+
+// Every test spawns real `f1rm hire` processes (up to eight in one test); on a loaded machine that passes 5 s.
+setDefaultTimeout(30_000);
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
