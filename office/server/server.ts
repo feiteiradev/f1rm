@@ -135,13 +135,13 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
-// A team member's message that opens with one of these words, after anything that is no letter (markdown, an emoji, a list number, a table bar), is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^[^A-Za-z]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
+// A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
+const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)]\s*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
 // Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
 const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
 const homeKey = (path: string) => fold(realPath(resolve(path)));
-const REAL_HOME = homeKey(userInfo().homedir);
+const REAL_HOME = homeKey(((): string => { try { return userInfo().homedir; } catch { return homedir(); } })()); // no passwd entry for the uid: HOME decides
 /** Whether one real folder is the other or inside it, and the outer is no broad one: not `/` (which `inside` never says holds anything but itself), the home folder or a folder that holds it. */
 const sameFolder = (x: string, y: string) => {
   const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(fold(outer), REAL_HOME);
@@ -165,20 +165,25 @@ const TALK = {
 // `$(mktemp -d)`, and not the user's real home (see REAL_HOME). Text only: a HOME exported by an earlier call is not seen, and a later `env` option that clears it (`-i`, `-u HOME`) undoes the prefix.
 const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
 const ownHome = (prefix: string[]) => {
-  const at = prefix.findLastIndex((w) => w.startsWith("HOME=")), later = prefix.slice(at + 1);
-  const cleared = later.some((w, j) => w === "-i" || w === "--ignore-environment" || w === "-uHOME" || w === "--unset=HOME" || ((w === "-u" || w === "--unset") && later[j + 1] === "HOME"));
+  // Only the options of an `env` word after the HOME= word can clear it; another wrapper's `-i` (`stdbuf -i 0`) does not.
+  const at = prefix.findLastIndex((w) => w.startsWith("HOME=")), env = prefix.findIndex((w, j) => j > at && unquoted(w) === "env");
+  const options = env < 0 ? [] : prefix.slice(env + 1).map(unquoted);
+  const cleared = options.some((w, j) => ["-", "-i", "--ignore-environment", "-uHOME", "--unset=HOME"].includes(w) || ((w === "-u" || w === "--unset") && options[j + 1] === "HOME"));
   const value = unquoted(prefix[at]?.slice(5) ?? "");
-  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, "/"].includes(homeKey(value))));
+  // Neither the user's real home nor the HOME this office runs with (a second office is measured by its own sessions).
+  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, homeKey(process.env.HOME ?? "/"), "/"].includes(homeKey(value))));
 };
 // What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper splitCommands drops), `npm exec`.
 const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
 const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) => {
   let i = 0;
   if (PACKAGE_RUNNERS.has(words[0])) for (i = 1; PACKAGE_RUNNERS.has(words[i]) || words[i]?.startsWith("-"); i++);
-  // One leading backslash skips an alias (`\claude`); a version is anything (`@^2`, `@~2.1`).
-  if (!/^claude(?:-code)?(?:@\S+)?$/.test(basename(unquoted(words[i] ?? "").replace(/^\\/, "")))) return null;
-  // What follows `--` is another command's (`claude mcp add x -- npx srv -sp 1`).
-  const rest = words.slice(i + 1).map(unquoted), args = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : undefined);
+  // One leading backslash skips an alias (`\claude`); a version is anything (`@^2`, `@~2.1`); the name's case is ignored (APFS).
+  if (!/^claude(?:-code)?(?:@\S+)?$/i.test(basename(unquoted(words[i] ?? "").replace(/^\\/, "")))) return null;
+  // What follows `--` is another command's (`claude mcp add x -- npx srv -sp 1`), but `npm exec` consumes the first `--` itself and hands claude what follows it.
+  const rest = words.slice(i + 1).map(unquoted);
+  if (words[0] === "npm" && rest.includes("--")) rest.splice(rest.indexOf("--"), 1);
+  const args = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : undefined);
   const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
   // A wake resumes the session it names; `--fork-session` starts a new one.
   const wake = args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) && !args.includes("--fork-session");
@@ -390,7 +395,7 @@ export function startServer({
           const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : "member"];
           const bad = answering.find((e) => !talk.allows(team, e));
           if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad)}`);
-          if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "").trimStart()) && answering.some((e) => e.role !== "lead")) {
+          if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
             return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
           }
         }
