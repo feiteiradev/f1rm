@@ -20,8 +20,6 @@ export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A dev's own first skill is poteto-mode, so no slash-only skill can be added to a dev; architect and how are for a lead.
 const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
-// arena, swarm and interrogate are slash-only too, and no hire is wired to run one: the user runs them by hand.
-const NOT_WIRED = ["pstack:arena", "pstack:swarm", "pstack:interrogate"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
@@ -129,7 +127,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
-  const unwired = added.find((s) => NOT_WIRED.includes(s));
+  // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three in SLASH_ONLY can be a first command.
+  const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
   if (unwired) throw new Error(`${unwired} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
   const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
   if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
@@ -137,7 +136,13 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slashes = [...new Set([...own.slice(0, 1), ...added])].filter((s) => SLASH_ONLY.includes(s));
   if (role === "reviewer" && !content && slashes.length) throw new Error(`${slashes[0]} is slash-only, and a code Reviewer's first command is /code-review <level> worktree-<task>: drop it`);
-  if (slashes.length > 1) throw new Error(`${slashes.join(" and ")} are slash-only (the Skill tool refuses them) and a hire has one first command: drop one`);
+  if (slashes.length > 1) {
+    throw new Error(
+      SLASH_ONLY.includes(own[0])
+        ? `${slashes[1]} is slash-only, and a ${role}'s first command is ${own[0]}: drop it`
+        : `${slashes.join(" and ")} are slash-only (the Skill tool refuses them) and a hire has one first command: drop one`,
+    );
+  }
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
     throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` (after \`f1rm pm\` has registered the project) to hire one.`);
@@ -173,7 +178,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const slash = added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = [...new Set([slash ?? own[0], ...added, ...own])];
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
-  const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
+  const command = role === "reviewer" && !content ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
   const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;

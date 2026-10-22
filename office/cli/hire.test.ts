@@ -176,6 +176,16 @@ test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s i
   }
 });
 
+// Every pstack skill but setup-pstack carries disable-model-invocation, so one rule refuses them: any pstack: skill other than poteto-mode, architect and how.
+test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is refused for a dev, a lead and a code Reviewer, with nothing started", (skill) => {
+  for (const [role, task] of [["backend-dev", "x"], ["lead", "checkout"], ["reviewer", "review-x"]]) {
+    const stub = stubClaude([]);
+    const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
+    expect(stub.argv(), `${role} ${skill}`).toBeNull();
+  }
+});
+
 test("a slash-only --skills named twice, or the dev's own poteto-mode, counts once", () => {
   const dev = stubClaude([]);
   expect(hire(dev, ["--skills", "pstack:poteto-mode", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).code).toBe(0);
@@ -203,7 +213,7 @@ test.each(["frontend-dev", "backend-dev"])("a %s is refused a slash-only --skill
     const stub = stubClaude([]);
     const r = hire(stub, ["--skills", skill, ...pmArgs, role, `${role}-x`, "x", BRIEF]);
     expect(r.code, skill).not.toBe(0);
-    expect(r.err, skill).toMatch(skill === "research" ? /pstack:poteto-mode and research are slash-only/ : /for a lead only/);
+    expect(r.err, skill).toMatch(skill === "research" ? new RegExp(`research is slash-only, and a ${role}'s first command is pstack:poteto-mode: drop it`) :/for a lead only/);
     expect(stub.argv(), skill).toBeNull();
   }
 });
