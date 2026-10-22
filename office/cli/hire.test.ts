@@ -139,10 +139,10 @@ const prompt = (stub: ReturnType<typeof stubClaude>) => stub.argv()!.find((a) =>
 test("--skills adds to the list; a slash-only skill becomes the first command and the role's own first skill moves into the list", () => {
   const dev = stubClaude([]);
   hire(dev, ["--skills", "ponytail:ponytail,vercel:nextjs", ...pmArgs, "frontend-dev", "frontend-dev-x", "x", BRIEF]);
-  expect(prompt(dev)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd, ponytail:ponytail, vercel:nextjs. Report to: pm-shop\n\n");
+  expect(prompt(dev)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: ponytail:ponytail, vercel:nextjs, mattpocock-skills:tdd. Report to: pm-shop\n\n");
   const researcher = stubClaude([]);
   hire(researcher, ["--skills", "research,seo-audit", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]);
-  expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research, seo-audit. Report to: pm-shop\n\n");
+  expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: seo-audit, mattpocock-skills:research. Report to: pm-shop\n\n");
   // security-review reads the git state where it runs, so it never runs at the start: --level high puts it after the merge.
   const reviewer = stubClaude([]);
   expect(hire(reviewer, ["--skills", "security-review", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("--level high");
@@ -155,7 +155,7 @@ test("a backend bug loads diagnosing-bugs before tdd: --skills mattpocock-skills
   expect(prompt(bug)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:diagnosing-bugs, mattpocock-skills:tdd. Report to: pm-shop\n\n");
   const stack = stubClaude([]);
   hire(stack, ["--skills", "ponytail:ponytail,mattpocock-skills:diagnosing-bugs", ...pmArgs, "backend-dev", "backend-dev-y", "y", BRIEF]);
-  expect(prompt(stack)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:diagnosing-bugs, mattpocock-skills:tdd, ponytail:ponytail. ");
+  expect(prompt(stack)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: ponytail:ponytail, mattpocock-skills:diagnosing-bugs, mattpocock-skills:tdd.");
 });
 
 // architect and how carry disable-model-invocation, so the Skill tool refuses them: a lead gets one only as its first slash command.
@@ -174,6 +174,27 @@ test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s i
     expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
   }
+});
+
+test("a slash-only --skills named twice, or the dev's own poteto-mode, counts once", () => {
+  const dev = stubClaude([]);
+  expect(hire(dev, ["--skills", "pstack:poteto-mode", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).code).toBe(0);
+  expect(prompt(dev)).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd. ");
+  const twice = stubClaude([]);
+  expect(hire(twice, ["--skills", "research,research", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]).code).toBe(0);
+  expect(prompt(twice)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research. ");
+});
+
+// A code Reviewer's first command is /code-review <level> worktree-<task>: a slash-only skill would take its place.
+test.each(["research", "pstack:poteto-mode"])("a code Reviewer is refused --skills %s, and a content Reviewer takes it as its first command", (skill) => {
+  const code = stubClaude([]);
+  const r = hire(code, ["--skills", skill, ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  expect(r.err).toContain(`${skill} is slash-only`);
+  expect(r.err).toContain("a code Reviewer's first command is /code-review");
+  expect(code.argv()).toBeNull();
+  const content = stubClaude([]);
+  hire(content, ["--content", "--skills", skill, ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  expect(prompt(content)).toStartWith(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines. `);
 });
 
 // A dev's own first skill, pstack:poteto-mode, is slash-only too, so a second slash-only skill would push it into the Skill-tool list, which refuses it and holds the hire forever.
@@ -238,9 +259,6 @@ test("a reviewer's task must be review-<task>, and its /code-review targets the 
   expect(bad.argv()).toBeNull();
   const content = stubClaude([]);
   expect(hire(content, ["--content", ...pmArgs, "reviewer", "reviewer-api", "api", BRIEF]).err).toContain("a Reviewer's task is review-<task>");
-  const ok = stubClaude([]);
-  hire(ok, ["--skills", "research", ...pmArgs, "reviewer", "reviewer-review-checkout-form", "review-checkout-form", BRIEF]);
-  expect(prompt(ok)).toStartWith("/research Before you start"); // a slash --skills still comes first
   const targeted = stubClaude([]);
   hire(targeted, [...pmArgs, "reviewer", "reviewer-review-checkout-form", "review-checkout-form", BRIEF]);
   expect(prompt(targeted)).toStartWith("/code-review medium worktree-checkout-form Before you start");

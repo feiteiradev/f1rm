@@ -22,8 +22,6 @@ const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstac
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
 // arena, swarm and interrogate are slash-only too, and no hire is wired to run one: the user runs them by hand.
 const NOT_WIRED = ["pstack:arena", "pstack:swarm", "pstack:interrogate"];
-// A bug is diagnosed before it is fixed test-first: this added skill loads ahead of the role's own later skills.
-const DIAGNOSE = "mattpocock-skills:diagnosing-bugs";
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
@@ -137,7 +135,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
   let own = roles.find((r) => r.id === role)!.skills;
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
-  const slashes = [...own.slice(0, 1), ...added].filter((s) => SLASH_ONLY.includes(s));
+  const slashes = [...new Set([...own.slice(0, 1), ...added])].filter((s) => SLASH_ONLY.includes(s));
+  if (role === "reviewer" && !content && slashes.length) throw new Error(`${slashes[0]} is slash-only, and a code Reviewer's first command is /code-review <level> worktree-<task>: drop it`);
   if (slashes.length > 1) throw new Error(`${slashes.join(" and ")} are slash-only (the Skill tool refuses them) and a hire has one first command: drop one`);
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
@@ -170,8 +169,9 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
+  // Every added skill loads ahead of the role's later ones (a bug's diagnosing-bugs before tdd).
   const slash = added.find((s) => SLASH_ONLY.includes(s));
-  const [first, ...rest] = [...new Set([slash ?? own[0], ...added.filter((s) => s === DIAGNOSE), ...own, ...added])];
+  const [first, ...rest] = [...new Set([slash ?? own[0], ...added, ...own])];
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
   const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
