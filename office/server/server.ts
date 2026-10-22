@@ -20,7 +20,7 @@ const MAX_MESSAGE = 4000;
 // The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
-// ponytail: only `f1rm hire` is held; a specialist that runs `claude --bg` itself gets past it. Match that too if it shows up.
+// A raw `claude --bg` or `claude -p` is held too (see claudeStart); `bash -c "claude -p …"`, an alias or a script that runs it is not seen.
 // `f1rm hire` counts only in command position (see simpleCommands), so a command that merely mentions it passes.
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
@@ -135,6 +135,26 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
+// A team member's message that opens with one of these words is a formal report: it goes to its lead only.
+const FORMAL_REPORT = /^(?:DONE|APPROVED|CHANGES|BLOCKED|ESCALATE)\b/;
+/** Whether one cwd is the other's folder or inside it, past symlinks. */
+const sameFolder = (a: string, b: string) => {
+  const [x, y] = [realPath(resolve(a)), realPath(resolve(b))];
+  return inside(x, y) || inside(y, x);
+};
+// A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
+const claudeStart = ([program, ...words]: string[]) => {
+  if (basename(unquoted(program ?? "")) !== "claude") return null;
+  const args = words.map(unquoted);
+  const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "-p" || a === "--print");
+  return bg || print ? { bg, print, resume: args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) } : null;
+};
+/** Whether a shell line gives a command a HOME of its own (`HOME=<tmp> claude -p …`, `export HOME=<tmp>; …`): a second-office proof. Text only: a HOME exported by an earlier call is not seen. */
+const ownHome = (command: string) =>
+  [...command.matchAll(/(?:^|[\s;&|(])(?:export\s+)?HOME=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)].some(([, value]) => {
+    const home = unquoted(value);
+    return home !== "" && !/^(?:~|\$HOME|\$\{HOME)/.test(home) && resolve(home) !== resolve(process.env.HOME ?? "/");
+  });
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
 /** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
@@ -317,15 +337,40 @@ export function startServer({
     // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
     // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
     // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
-    // ponytail: two sessions both outside any door share the Elsewhere room and can message each other; a hire starts in a repo, so refusing Elsewhere could eat legitimate reports.
+    // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder.
+    // Within the project, who talks to whom: an intern only to its parent or "main", the PM only to leads, a lead to the PM, leads and its team, a member to its lead and its team,
+    // and a member's formal report only to its lead. A sender with no role is never held, and the user is no session.
     if (tool === "SendMessage" && input.to !== undefined) {
       const to = String(input.to);
       const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
       const socket = /^uds:(.+)$/.exec(name)?.[1];
-      const rooms = new Set(Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name)).map((e) => e.room));
-      if (to !== "main" && !subagents.get(sessionId)?.has(to)) {
+      const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
+      const rooms = new Set(answering.map((e) => e.room));
+      const intern = !!payload.agent_id;
+      if (to !== "main" && (intern || !subagents.get(sessionId)?.has(to))) {
+        const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
-        if (!rooms.has(state.employees[sessionId].room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
+        if (me.room === ELSEWHERE.id && !answering.every((e) => sameFolder(me.cwd, e.cwd))) {
+          return refuse("elsewhere", "Elsewhere is no room: a session outside every project may message only a session working under the same folder. Use `f1rm feedback: <problem> -> <suggestion>` for the user, addressed to no session.");
+        }
+        if (intern) {
+          if (answering.some((e) => e.sessionId !== sessionId && e.title !== me.title)) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
+        } else {
+          const team = teamOf(me), lead = team ? `lead-${team}` : "your lead (the Report to of your brief)";
+          const theirs = (e: Employee) => (teamOf(e) ? `lead-${teamOf(e)}` : "their lead");
+          const goes = (e: Employee) => (role === "pm" ? e.role === "lead" : role === "lead" ? e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team) : !!team && teamOf(e) === team);
+          const bad = answering.find((e) => !goes(e));
+          if (bad) {
+            const way = role === "pm" ? `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${theirs(bad)}.`
+              : role === "lead" ? `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${theirs(bad)}.`
+              : `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${lead}.`;
+            return refuse("messaging", `Who talks to whom: ${way}`);
+          }
+          if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "").trimStart()) && answering.some((e) => e.role !== "lead")) {
+            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES, BLOCKED, ESCALATE) goes to your lead only, ${lead}, never to a peer. Tell a peer in plain words.`);
+          }
+        }
       }
     }
     const commands = tool === "Bash" ? simpleCommands(String(input.command ?? "")) : [];
@@ -358,8 +403,15 @@ export function startServer({
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");
     }
+    if ((tool === "Skill" && /^(?:[\w-]+:)?loop$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || tool === "ScheduleWakeup" || tool === "CronCreate") {
+      return refuse("loop", "/loop is refused for every employee: a loop keeps a session working on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
+    }
+    const starts = commands.flatMap((c) => claudeStart(c) ?? []);
+    if (starts.length && !ownHome(String(input.command ?? "")) && !(COORDINATORS.has(role) && starts.every((s) => s.bg && s.resume && !s.print))) {
+      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof sets its own HOME in the same command.");
+    }
     if (tool === "Agent" || tool === "Task") {
-      if (COORDINATORS.has(role) && String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
+      if (String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
       const now = clock();
       const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
       const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;

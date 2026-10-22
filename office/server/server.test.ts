@@ -1353,7 +1353,7 @@ test("a company employee starts no session with claude --bg or claude -p; the PM
   const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
   const real = process.env.HOME ?? "/home/me";
   const refused = ["claude --bg 'do x'", "claude --background x", "claude -p 'x'", "claude --print x", "claude -p --resume abc", "claude --bg --name x", "cd /code/shop && claude --bg x", "nohup claude -p x &", "ls; /usr/local/bin/claude --bg x", "FOO=1 claude -p x", `HOME=${real} claude -p x`, "HOME=$HOME claude -p x", "HOME=~ claude -p x", "HOME= claude -p x", 'HOME="$HOME" claude -p x', "claude --model opus -p x", "env -u FOO claude --bg x"];
-  const allowed = ["claude agents --json", "claude --version", "claude mcp list", "claude", "echo claude --bg", "git commit -m 'run claude -p later'", "grep 'claude -p' README.md", "claude --resume abc", "HOME=/tmp/h-1 claude -p 'x'", `HOME=${real}/Library/Caches/h-1 claude --bg x`, "export HOME=/tmp/h-2; claude -p x", "env HOME=/tmp/h-3 claude -p x", "HOME=/tmp/h-4 F1RM_PORT=4999 bun office/cli/f1rm.ts serve"];
+  const allowed = ["claude agents --json", "claude --version", "claude mcp list", "claude", "echo claude --bg", "git log --grep 'run claude -p later'", "grep 'claude -p' README.md", "claude --resume abc", "HOME=/tmp/h-1 claude -p 'x'", `HOME=${real}/Library/Caches/h-1 claude --bg x`, "export HOME=/tmp/h-2; claude -p x", "env HOME=/tmp/h-3 claude -p x", "HOME=/tmp/h-4 F1RM_PORT=4999 bun office/cli/f1rm.ts serve"];
   const wake = ["claude --bg --resume abc-123", "cd x && claude --resume abc --bg", "claude --bg -r abc"];
   for (const id of ["p", "l", "d"]) {
     for (const command of refused) {
@@ -1622,7 +1622,7 @@ test("the safety net starts the wait over when a hire works again, and keeps wha
 });
 
 // The skill gate: a hire is held until it loads the skills its first prompt names.
-const hired = (id: string, prompt: string, agent_type = "f1rm:backend-dev") => hook({ ...common(id, "UserPromptSubmit"), prompt, agent_type, session_title: `${id}-title` });
+const hired = (id: string, prompt: string, agent_type = "f1rm:backend-dev", session_title = `${id}-title`) => hook({ ...common(id, "UserPromptSubmit"), prompt, agent_type, session_title });
 const skillLoaded = (id: string, skill: string, hook_event_name = "PostToolUse") => hook({ ...common(id, hook_event_name), tool_name: "Skill", tool_input: { skill }, tool_use_id: "toolu_2" });
 const tryTool = async (id: string, tool: string, input: object = {}) => (await held(await hook(preToolUse(id, tool, input))))?.permissionDecision ?? null;
 
@@ -1777,7 +1777,7 @@ test("an office restart remembers which sessions have had their first prompt", a
 
 test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
   start();
-  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
   await skillLoaded("r", "ponytail:ponytail-review");
   await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" }); // the Report to, in the same project
   const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
@@ -1794,7 +1794,7 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
 
 test("a refused security-review read from the transcript does not release a --level high Reviewer's APPROVED", async () => {
   start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
   await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
   const path = transcript("rs", [skillUse("ponytail:ponytail-review"), skillUse("security-review"), refused]);
   const send = async () => held(await hook({ ...preToolUse("rs", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
@@ -1807,7 +1807,7 @@ test("a refused security-review read from the transcript does not release a --le
 
 test("even a first prompt that names security-review does not let a refused try release APPROVED", async () => {
   start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  await hired("rn", `/code-review high${LOAD_FIRST}security-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hired("rn", `/code-review high${LOAD_FIRST}security-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
   await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
   const path = transcript("rn", [skillUse("security-review"), refused]);
   expect(await tryAt("rn", path)).toBe("deny"); // the read happens here and must not count it
@@ -1842,24 +1842,25 @@ test("the prompt text never reaches the events table", async () => {
 // Projects are isolated: an f1rm role messages only sessions of its own project (room), "main" and its own sub-agents.
 async function projectsOffice() {
   start({ "/code/shop": "/code/shop/.git", "/code/shop/.claude/worktrees/a": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
-  const sockets: Record<string, string> = { "pm-s": "/tmp/cc-socks/1.sock", "pm-b": "/tmp/cc-socks/2.sock", "free": "/tmp/cc-socks/3.sock" };
+  const sockets: Record<string, string> = { "lead-s": "/tmp/cc-socks/1.sock", "pm-b": "/tmp/cc-socks/2.sock", "free": "/tmp/cc-socks/3.sock" };
   const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) }, sockets[id] ? { "x-f1rm-messaging-socket": sockets[id] } : {});
   await seat("b", "/code/shop/.claude/worktrees/a", "shop.backend-dev-a", "f1rm:backend-dev"); // a worktree shares its repo's room
+  await seat("lead-s", "/code/shop", "lead-shop", "f1rm:lead");
   await seat("pm-s", "/code/shop", "pm-shop", "f1rm:pm");
-  await seat("pm-s-mirror", "/code/shop", "pm-shop", "f1rm:pm"); // the same session seen twice (local and Remote Control)
+  await seat("lead-s-mirror", "/code/shop", "lead-shop", "f1rm:lead"); // the same session seen twice (local and Remote Control)
   await seat("pm-b", "/code/blog", "pm-blog", "f1rm:pm");
   await seat("twin-s", "/code/shop", "twin");
   await seat("twin-b", "/code/blog", "twin");
   await seat("free", "/code/blog", "freelancer"); // no role
   await hook({ ...common("b", "SubagentStart"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
-  await office((s) => Object.keys(s.employees).length === 7 && Object.keys(s.interns).length === 1);
+  await office((s) => Object.keys(s.employees).length === 8 && Object.keys(s.interns).length === 1);
   const cwds: Record<string, string> = { b: "/code/shop/.claude/worktrees/a", "pm-b": "/code/blog", free: "/code/blog" };
   return async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] ?? "/code/shop" }));
 }
 
 test("a SendMessage from an f1rm role goes to its own project, 'main' and its own sub-agent, and to no one else", async () => {
   const send = await projectsOffice();
-  for (const to of ["pm-shop", "main", "sub-1"]) expect([to, (await send("b", to))?.permissionDecision ?? null]).toEqual([to, null]);
+  for (const to of ["lead-shop", "main", "sub-1"]) expect([to, (await send("b", to))?.permissionDecision ?? null]).toEqual([to, null]);
   const other = await send("b", "pm-blog");
   expect(other.permissionDecision).toBe("deny");
   expect(other.permissionDecisionReason).toContain("Projects are isolated");
@@ -1887,9 +1888,9 @@ test("a finished sub-agent can still be resumed by its parent, by agent id and n
 test("`name [ref]` is read as the bare name, whatever the ref: one project answers, or the name is unknown", async () => {
   const send = await projectsOffice();
   const allowed = async (to: string) => (await send("b", to))?.permissionDecision ?? null;
-  expect(await allowed("pm-shop")).toBeNull(); // listed twice, but one project
-  expect(await allowed("pm-shop [36698c]")).toBeNull(); // the 6-hex ref Claude Code gives is not a session-id prefix
-  expect(await allowed("pm-shop [4e323bd1a0f2]")).toBeNull();
+  expect(await allowed("lead-shop")).toBeNull(); // listed twice, but one project
+  expect(await allowed("lead-shop [36698c]")).toBeNull(); // the 6-hex ref Claude Code gives is not a session-id prefix
+  expect(await allowed("lead-shop [4e323bd1a0f2]")).toBeNull();
   const other = await send("b", "pm-blog [36698c]");
   expect(other.permissionDecisionReason).toContain("Projects are isolated");
   const two = await send("b", "twin [36698c]"); // two projects run a session of this name
@@ -1900,7 +1901,7 @@ test("`name [ref]` is read as the bare name, whatever the ref: one project answe
 
 test("a `uds:<path>` address resolves to the online session that holds the socket, then gets the same project check", async () => {
   const send = await projectsOffice();
-  expect((await send("b", "uds:/tmp/cc-socks/1.sock"))?.permissionDecision ?? null).toBeNull(); // pm-shop
+  expect((await send("b", "uds:/tmp/cc-socks/1.sock"))?.permissionDecision ?? null).toBeNull(); // lead-shop
   expect((await send("b", "uds:/tmp/cc-socks/2.sock")).permissionDecisionReason).toContain("Projects are isolated"); // pm-blog
   const unknown = await send("b", "uds:/tmp/cc-socks/99.sock");
   expect(unknown.permissionDecisionReason).toContain("unknown to the office");
@@ -1926,12 +1927,12 @@ test("an offline session does not answer to its name, so a name that an online s
   let now = 1_000_000;
   server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }), clientDir, clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e9 });
   const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
-  await seat("twin-b", "/code/blog", "twin");
+  await seat("twin-b", "/code/blog", "lead-twin", "f1rm:lead");
   now += 401;
   await office((s) => s.employees["twin-b"]?.status === "offline");
-  await seat("twin-s", "/code/shop", "twin");
-  await seat("b", "/code/shop", "shop.backend-dev-a", "f1rm:backend-dev");
-  expect((await held(await hook(preToolUse("b", "SendMessage", { to: "twin", message: "x" }))))?.permissionDecision ?? null).toBeNull();
+  await seat("twin-s", "/code/shop", "lead-twin", "f1rm:lead");
+  await seat("b", "/code/shop", "twin.backend-dev-a", "f1rm:backend-dev");
+  expect((await held(await hook(preToolUse("b", "SendMessage", { to: "lead-twin", message: "x" }))))?.permissionDecision ?? null).toBeNull();
 });
 
 test("a SendMessage refusal is logged with the role, title and rule, and never the message or the target", async () => {
@@ -2024,7 +2025,7 @@ test("a formal report from a team member goes to its lead only; the same words t
 
 test("outside any door a session may message only one working under the same folder", async () => {
   start({});
-  const cwds: Record<string, string> = { lx: "/code/a", mx: "/code/a/.claude/worktrees/t", dx: "/code/b", lz: "/code/b", mz: "/code/b" };
+  const cwds: Record<string, string> = { lx: "/code/a", mx: "/code/a/.claude/worktrees/t", dx: "/code/c", lz: "/code/b", mz: "/code/b" };
   const titles: Record<string, [string, string]> = { lx: ["lead-x", "f1rm:lead"], mx: ["x.backend-dev-a", "f1rm:backend-dev"], dx: ["x.designer-b", "f1rm:designer"], lz: ["lead-z", "f1rm:lead"], mz: ["z.designer-c", "f1rm:designer"] };
   for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
   await office((s) => Object.keys(s.employees).length === 5 && Object.values(s.employees).every((e) => e.room === "elsewhere"));
