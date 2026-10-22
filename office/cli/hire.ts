@@ -226,7 +226,7 @@ export async function hire(words: string[]): Promise<number> {
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(
-        `${err.message} Do not hire; leave the task todo. Tell the session you report to. Only the PM asks the user, and only after the user approves this hire is it rerun with --override.`,
+        `${err.message} Do not hire; leave the task todo. Tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.`,
       );
     }
     throw err;

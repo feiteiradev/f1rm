@@ -173,6 +173,14 @@ test.each(["pstack:architect", "pstack:how"])("a lead hired with --skills %s get
   expect(prompt(stub)).toBe(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n${BRIEF}`);
 });
 
+test("what hire adds to a brief is the Report to line alone: no PLAN, no GO, and no PM round trip before the lead hires", () => {
+  const stub = stubClaude([]);
+  expect(hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir()).code).toBe(0);
+  const text = prompt(stub);
+  expect(text).toEndWith(`Report to: pm-shop\n\n${BRIEF}`);
+  expect(text).not.toMatch(/\bPLAN\b|\bGO\b|NEEDS YOU/);
+});
+
 // arena, swarm and interrogate carry disable-model-invocation too, and no hire is wired to run one as a first command: --skills refuses them, for every role.
 test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s is refused with nothing started: the Skill tool refuses it and the user can run it by hand", (skill) => {
   for (const [role, task] of [["lead", "checkout"], ["backend-dev", "x"], ["reviewer", "review-x"]]) {
@@ -346,12 +354,13 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--model", "haiku"]);
 });
 
-test("at 30 working background sessions, hire refuses with a non-zero exit and tells the PM to ask the user", () => {
+test("at 30 working background sessions, hire refuses with a non-zero exit and tells the lead to ask the user in its own session", () => {
   const stub = stubClaude([...Array(29).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
   expect(r.err).toContain("30 hires are already working (the cap is 30)");
-  expect(r.err).toContain("Tell the session you report to. Only the PM asks the user, and only after the user approves this hire is it rerun with --override.");
+  expect(r.err).toContain("Tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.");
+  expect(r.err).not.toContain("Only the PM asks the user");
   expect(r.err).not.toContain("Tell the user");
   expect(stub.argv()).toBeNull();
 });
