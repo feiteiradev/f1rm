@@ -207,6 +207,17 @@ test("--skills a, b is split and trimmed: a spaced pstack:tdd is refused and a s
   expect(prompt(lead)).toStartWith("/pstack:architect Before you start, load these with the Skill tool: ponytail:ponytail, f1rm:f1rm-guidelines, f1rm:hire. ");
 });
 
+// A leading slash is how a skill is typed as a command; the load list and the checks need the bare name.
+test("--skills /name is the bare name: /pstack:tdd is refused on a dev, and /research on a researcher is the first command", () => {
+  const dev = stubClaude([]);
+  const r = hire(dev, ["--skills", "/pstack:tdd", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF], repoDir());
+  expect(r.err).toContain("pstack:tdd is not wired inside hires");
+  expect(dev.argv()).toBeNull();
+  const researcher = stubClaude([]);
+  hire(researcher, ["--skills", "/research", ...pmArgs, "researcher", "researcher-x", "x", BRIEF], repoDir());
+  expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research. ");
+});
+
 test("a slash-only --skills named twice, or the dev's own poteto-mode, counts once", () => {
   const dev = stubClaude([]);
   expect(hire(dev, ["--skills", "pstack:poteto-mode", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).code).toBe(0);
