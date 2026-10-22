@@ -172,10 +172,14 @@ const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "
 const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) => {
   let i = 0;
   if (PACKAGE_RUNNERS.has(words[0])) for (i = 1; PACKAGE_RUNNERS.has(words[i]) || words[i]?.startsWith("-"); i++);
-  if (!/^claude(?:-code)?(?:@[\w.-]+)?$/.test(basename(unquoted(words[i] ?? "")))) return null;
-  const args = words.slice(i + 1).map(unquoted);
+  // One leading backslash skips an alias (`\claude`); a version is anything (`@^2`, `@~2.1`).
+  if (!/^claude(?:-code)?(?:@\S+)?$/.test(basename(unquoted(words[i] ?? "").replace(/^\\/, "")))) return null;
+  // What follows `--` is another command's (`claude mcp add x -- npx srv -sp 1`).
+  const rest = words.slice(i + 1).map(unquoted), args = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : undefined);
   const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
-  return bg || print ? { bg, print, resume: args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")), home: ownHome(prefix) } : null;
+  // A wake resumes the session it names; `--fork-session` starts a new one.
+  const wake = args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) && !args.includes("--fork-session");
+  return bg || print ? { bg, print, wake, home: ownHome(prefix) } : null;
 };
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
@@ -424,7 +428,7 @@ export function startServer({
       return refuse("loop", "/loop and /schedule are refused for every employee: recurring work keeps a session going on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
     }
     const starts = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)).flatMap((c) => claudeStart(c) ?? []) : [];
-    if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.resume && !s.print))) {
+    if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
       return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: `HOME=<tmp> claude …`.");
     }
     if (tool === "Agent" || tool === "Task") {
