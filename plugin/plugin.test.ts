@@ -844,7 +844,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   expect(section("Handoff via SendMessage")).toContain("Checkpoint (wip commit, `resume.md`) before you send it, so the report is the turn's last tool call: the office skips an ended hire whose turn ended with a delivered report, and wakes one that kept working after it. A hire that sent a report and went on working is not nudged for a missing one.");
   expect(section("Handoff via SendMessage")).toContain("Send one `BLOCKED` message that lists every open question, and keep working on the rest.");
   expect(section("Handoff via SendMessage")).not.toContain("end that turn with your");
-  expect(guidelines).toContain("Checkpoint before the report, so that it is the turn's last tool call (see Handoff).");
+  expect(guidelines).toContain("A hire checkpoints before its report, so that it is the turn's last tool call (see Handoff); the PM's report is prose, not this.");
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("woken by the office within a minute");
     expect(role(r).body, r).toContain("when `f1rm status` says it could not, or it is still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported`, run `f1rm wake");
