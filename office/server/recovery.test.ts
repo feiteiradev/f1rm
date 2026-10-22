@@ -22,6 +22,15 @@ const ended = (name: string, sessionId: string, cwd: string, more: Listed = {}) 
 const say = (text: string, ago: number, now = T0) => JSON.stringify({ type: "assistant", uuid: `u${ago}-${text.length}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text }] } });
 const limitStop = (until: string | null, ago: number, now = T0) =>
   JSON.stringify({ type: "assistant", timestamp: new Date(now - ago * MIN).toISOString(), isApiErrorMessage: true, apiError: "usage_limit_reached", message: { role: "assistant", content: [{ type: "text", text: `You've hit your session limit${until ? ` · resets ${until}` : ""}` }] } });
+// The shapes real sessions write: a reply with thinking is several lines sharing one message.id, and a report is a SendMessage tool_use, then its tool_result, then closing prose.
+const block = (id: string, ago: number, content: any, now = T0) => JSON.stringify({ type: "assistant", uuid: `${id}-${content.type}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { id, role: "assistant", content: [content] } });
+const result = (ago: number, now = T0) => JSON.stringify({ type: "user", uuid: `r${ago}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "sent" }] } });
+const prompt = (text: string, ago: number, now = T0) => JSON.stringify({ type: "user", uuid: `p${ago}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: text } });
+const sent = (message: string, closing: string, ago: number, now = T0) => [
+  block("msg_r", ago + 1, { type: "tool_use", id: "t1", name: "SendMessage", input: { to: "lead-shop", message } }, now),
+  result(ago + 0.5, now),
+  block("msg_s", ago, { type: "text", text: closing }, now),
+];
 const row = (owner: string, status: string, task: string): BoardRow => ({ id: "T1", owner, status, branch: `worktree-${task}`, task: "x" });
 
 /** A fake office: the listing, transcripts, boards and clock are set by the test; wakes and tells are recorded. */
@@ -397,4 +406,60 @@ test("a recovered hire, or one that is gone from the listing, loses its note and
   o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" })];
   await o.tick();
   expect(o.w.store[REPO][DEV]).toBeUndefined();
+});
+
+test("a report sent with SendMessage counts, whatever prose closes the turn: an idle Reviewer that sent APPROVED is not nudged, an ended dev that sent DONE is not woken", async () => {
+  for (const word of ["DONE checkout", "APPROVED shop-1", "CHANGES REQUESTED shop-1: fix x", "BLOCKED checkout: no key", "ESCALATE shop-1", "NEEDS YOU shop: a choice"]) {
+    const reviewer = office();
+    idleReviewer(reviewer, "x", 25);
+    reviewer.w.transcripts["rev-1"] = [say("reviewing", 40, reviewer.w.now), ...sent(word, `I sent ${word.split(" ")[0]} to lead-shop.`, 25, reviewer.w.now)];
+    await reviewer.tick();
+    expect([word, reviewer.w.told]).toEqual([word, []]);
+    const dev = office();
+    stoppedDev(dev, sent(word, "I sent my report to lead-shop.", 1));
+    await dev.tick();
+    expect([word, dev.w.woke, dev.w.told]).toEqual([word, [], []]);
+  }
+});
+
+test("a SendMessage that is no report, a report from an earlier turn, and prose that merely mentions one do not count", async () => {
+  const nudged = async (lines: (now: number) => string[]) => {
+    const o = office();
+    idleReviewer(o, "x", 25);
+    o.w.transcripts["rev-1"] = lines(o.w.now);
+    await o.tick();
+    return o.w.told;
+  };
+  const NUDGED = [{ to: REVIEWER, message: NUDGE }];
+  expect(await nudged((now) => [say("reviewing", 40, now), ...sent("Can you check the contract?", "Asked the lead.", 25, now)])).toEqual(NUDGED);
+  // The report is from before the prompt that started this turn (a resume, a fix round): the new turn has not reported.
+  expect(await nudged((now) => [...sent("APPROVED shop-1", "Sent.", 60, now), prompt("one more round", 30, now), say("Looked at it again.", 25, now)])).toEqual(NUDGED);
+  expect(await nudged((now) => [say("I will send APPROVED when the merge is clean.", 25, now)])).toEqual(NUDGED);
+  // A report followed by tool results and more work in the same turn still counts as reported.
+  expect(await nudged((now) => [prompt("review it", 60, now), ...sent("APPROVED shop-1", "Sent.", 40, now), block("msg_t", 30, { type: "text", text: "Cleaning up the scratch worktree." }, now)])).toEqual([]);
+});
+
+test("progress counts assistant messages, not transcript lines: one reply with thinking is two lines and one message", async () => {
+  const run = async (after: (woke: number) => string[]) => {
+    const o = office();
+    stoppedDev(o, [say("compiling", 1)]);
+    o.w.commits["worktree-checkout"] = T0 - 60 * MIN;
+    await o.tick();
+    const woke = o.w.now;
+    o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(DEV, "dev-2", DEV_CWD, { startedAt: 2000 })];
+    o.w.transcripts["dev-2"] = [say("compiling", 1), ...after(woke)];
+    o.w.mtimes["dev-2"] = woke + 4 * MIN;
+    o.w.now = woke + 5 * MIN;
+    await o.tick();
+    return o.w;
+  };
+  // The reply to the wake: thinking, then text, one message id. Nothing else was written, so its Report to is told, not another wake.
+  const reply = (woke: number) => [block("msg_w", -1, { type: "thinking", thinking: "resume" }, woke), block("msg_w", -1, { type: "text", text: "on it" }, woke)];
+  const stuck = await run(reply);
+  expect(stuck.woke).toHaveLength(1);
+  expect(stuck.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped again after a wake; f1rm wake ${DEV}` }]);
+  // A second message (its next step) is progress.
+  const moved = await run((woke) => [...reply(woke), block("msg_x", -2, { type: "tool_use", id: "t9", name: "Bash", input: { command: "bun test" } }, woke)]);
+  expect(moved.woke).toHaveLength(2);
+  expect(moved.told).toEqual([]);
 });

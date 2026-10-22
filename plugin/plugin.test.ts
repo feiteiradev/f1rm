@@ -823,9 +823,9 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   for (const s of [
     "**The office wakes first.**", "whose process has ended while their board row is `doing` or `review`", "through the same checks as `f1rm wake`, caps included",
     "`resumed after the session limit; continue your task`", "a minute after its reset time", "`resumed after your session ended; continue your task`", "(an update, a crash, a shutdown) at once", "Each stop is woken once.",
-    "(no reset time, a cap, an error)", "within 10 minutes of a wake with no new commit and no work beyond the reply", "it tells the session in the hire's `Report to`",
+    "(no reset time, a cap, an error)", "within 10 minutes of a wake with no new commit and no more than one assistant message after it (the reply to the wake)", "it tells the session in the hire's `Report to`",
     "`<name> stopped again after a wake; f1rm wake <name>`", "`<name> stopped at the session limit; f1rm wake <name>`", "NOTE column (`recovery` in `--json`)",
-    "`your turn ended without a report; send your DONE or BLOCKED`", "a first word of `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`",
+    "`your turn ended without a report; send your DONE or BLOCKED`", "no `SendMessage` and no text in that turn whose first word is `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`",
     "wakes no interactive session, no PM, no hire that was let go", "no project that is not registered", "The watcher below is the second line",
     "**Ended**: the office wakes it within a minute", "the office wakes the leads after the reset and the PM waits for the user",
   ]) expect(w, s).toContain(s);
@@ -839,7 +839,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   const wakes = entries.find((e) => e.startsWith("2026-10-22 The office wakes limit-stopped hires"));
   const nudge = entries.find((e) => e.startsWith("2026-10-22 A hire whose turn ended without its report gets one nudge"));
   for (const part of ["about 1 minute after the parsed reset time", "resumed after the session limit; continue your task", "resumed after your session ended; continue your task", "each stop is woken once", "10 minutes", "stopped again after a wake; f1rm wake", "stopped at the session limit; f1rm wake", "never wakes interactive sessions, the PM, or a let-go hire"]) expect(wakes, part).toContain(part);
-  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE, NEEDS YOU", "once"]) expect(nudge, part).toContain(part);
+  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "no SendMessage or text, since the last prompt, whose first word is DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE or NEEDS YOU", "once"]) expect(nudge, part).toContain(part);
   expect(wakes).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
   expect(nudge).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
 });

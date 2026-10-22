@@ -108,18 +108,43 @@ export type RecoveryDeps = {
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
 };
 
-/** The progress a woken hire made: a commit on its branch, or more than the reply to the wake. */
+/**
+ * Whether the hire's last turn (everything since the last prompt or delivered message that was not a tool result) reported: a SendMessage whose message starts with a report word, or text that does.
+ * Real hires report through SendMessage and close with prose ("I sent APPROVED to lead-shop."), so the last line's text alone says nothing.
+ */
+function reportSent(tailText: string): boolean {
+  for (const l of tailText.split("\n").reverse()) {
+    let line: any;
+    try {
+      line = JSON.parse(l);
+    } catch {
+      continue; // a cut or odd line
+    }
+    if (line?.isSidechain) continue;
+    if (line?.type === "assistant") {
+      for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
+        if (b?.type === "text" && REPORT.test(String(b.text ?? ""))) return true;
+        if (b?.type === "tool_use" && b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? ""))) return true;
+      }
+    } else if (line?.type === "user" ? !(Array.isArray(line.message?.content) && line.message.content.some((b: any) => b?.type === "tool_result")) : line?.type === "queue-operation" && line.operation === "enqueue") {
+      return false; // the turn began here
+    }
+  }
+  return false;
+}
+
+/** The progress a woken hire made: a commit on its branch, or more than one assistant message after the wake (the first is its reply; a reply with thinking is several lines of one message id). */
 function madeProgress(tailText: string, since: number, tipBefore: number | null | undefined, tipNow: number | null): boolean {
   if (tipNow != null && (tipBefore == null || tipNow > tipBefore)) return true;
-  let replies = 0;
+  const replies = new Set<string>();
   for (const l of tailText.split("\n")) {
     if (!l.includes('"type":"assistant"')) continue;
     try {
       const line = JSON.parse(l);
-      if (line.type === "assistant" && !line.isSidechain && line.isApiErrorMessage !== true && Date.parse(line.timestamp) > since) replies++;
+      if (line.type === "assistant" && !line.isSidechain && line.isApiErrorMessage !== true && Date.parse(line.timestamp) > since) replies.add(String(line.message?.id ?? line.uuid ?? l));
     } catch {} // a cut or odd line is no answer
   }
-  return replies >= 2;
+  return replies.size >= 2;
 }
 
 const active = (rows: BoardRow[], name: string, h: HireName) =>
@@ -165,7 +190,7 @@ export function createRecovery(d: RecoveryDeps) {
           delete e.note;
           delete e.unreachable;
         }
-        if (!quiet || REPORT.test(said!) || e.nudged === key) continue;
+        if (!quiet || reportSent(tailText) || e.nudged === key) continue;
         if (h.role === "lead" && !teamQuiet(mine, newest, h.team, now)) continue;
         e.nudged = key!;
         if (!(await safeTell(repo, name, NUDGE))) {
@@ -176,7 +201,7 @@ export function createRecovery(d: RecoveryDeps) {
       }
 
       // Ended. A stop is handled once; a hire that had reported (its row waits on a review, or an answer) has nothing to continue.
-      if (e.wokeFrom === sid || e.told === sid || (said !== null && REPORT.test(said))) continue;
+      if (e.wokeFrom === sid || e.told === sid || reportSent(tailText)) continue;
       const first = d.promptOf(cwd, sid);
       const stoppedAt = d.mtime(cwd, sid) ?? now;
       const limit = limitUntil(tailText);
