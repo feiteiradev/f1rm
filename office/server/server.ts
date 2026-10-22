@@ -25,44 +25,6 @@ const MAX_MESSAGE = 4000;
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
 const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
-const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
-
-/**
- * The skills a session has tried with the Skill tool, whether it ran them or the tool refused (a skill marked disable-model-invocation, or an unknown one).
- * A refusal fires no hook event at all (Claude Code 2.1.308 fails the call at validation, before any hook), so the session's own transcript is the only trace.
- * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`: the session id and the directory are the office's own, and only the project folder comes from the hook's `transcript_path`.
- * It guards against slips; it is not a security boundary, since the same user can write any line into a transcript.
- * Only the skill names of the session's own (non-sidechain) assistant Skill calls are kept, from the first 8 MB. Anything odd means none: the gate then holds as before.
- */
-function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): Set<string> {
-  const tried = new Set<string>();
-  try {
-    if (typeof hint !== "string" || hint.split(sep).includes("..")) return tried;
-    const path = resolve(hint);
-    const realDir = realpathSync(resolve(transcriptsDir));
-    const real = realpathSync(path); // a link that leads elsewhere is not the session's file
-    if (basename(path) !== `${sessionId}.jsonl` || real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
-    const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a pipe at the path must not hang the office
-    let text: string;
-    try {
-      const info = fstatSync(fd);
-      if (!info.isFile()) return tried;
-      const buffer = Buffer.alloc(Math.min(info.size, TRANSCRIPT_READ_MAX));
-      text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
-    } finally {
-      closeSync(fd);
-    }
-    for (const line of text.split("\n")) {
-      if (!line.includes('"Skill"')) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type !== "assistant" || entry.isSidechain || !Array.isArray(entry.message?.content)) continue;
-        for (const block of entry.message.content) if (block?.type === "tool_use" && block.name === "Skill" && typeof block.input?.skill === "string") tried.add(block.input.skill);
-      } catch {} // a line that is not JSON counts for nothing
-    }
-  } catch {} // missing, unreadable or odd: no skill counts
-  return tried;
-}
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
@@ -241,6 +203,44 @@ const transcriptMtime = (path?: string) => {
   }
 };
 
+const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
+
+/**
+ * The skills a session has tried with the Skill tool, whether it ran them or the tool refused (a skill marked disable-model-invocation, or an unknown one).
+ * A refusal fires no hook event at all (Claude Code 2.1.308 fails the call at validation, before any hook), so the session's own transcript is the only trace.
+ * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`: the session id and the directory are the office's own, and only the project folder comes from the hook's `transcript_path`.
+ * It guards against slips; it is not a security boundary, since the same user can write any line into a transcript.
+ * Only the skill names of the session's own (non-sidechain) assistant Skill calls are kept, from the first 8 MB. Anything odd means none: the gate then holds as before.
+ */
+function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): Set<string> {
+  const tried = new Set<string>();
+  try {
+    if (typeof hint !== "string" || hint.split(sep).includes("..")) return tried;
+    const path = resolve(hint);
+    const realDir = realpathSync(resolve(transcriptsDir));
+    const real = realpathSync(path); // a link that leads elsewhere is not the session's file
+    if (basename(path) !== `${sessionId}.jsonl` || real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
+    const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a pipe at the path must not hang the office
+    let text: string;
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile()) return tried;
+      const buffer = Buffer.alloc(Math.min(info.size, TRANSCRIPT_READ_MAX));
+      text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
+    } finally {
+      closeSync(fd);
+    }
+    for (const line of text.split("\n")) {
+      if (!line.includes('"Skill"')) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry?.type !== "assistant" || entry.isSidechain || !Array.isArray(entry.message?.content)) continue;
+        for (const block of entry.message.content) if (block?.type === "tool_use" && block.name === "Skill" && typeof block.input?.skill === "string") tried.add(block.input.skill);
+      } catch {} // a line that is not JSON counts for nothing
+    }
+  } catch {} // missing, unreadable or odd: no skill counts
+  return tried;
+}
 /** Constant-time credential check. */
 function same(given: string | null | undefined, expected: string) {
   const a = Buffer.from(given ?? ""), b = Buffer.from(expected);
@@ -280,9 +280,9 @@ export function startServer({
   // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
   // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
   const subagents = new Map<string, Set<string>>();
-  /** Kept for each event the office takes in, live or replayed from the log. */
   /** The sessions that have had a prompt, live or replayed: only the first one can arm the skill gate. */
   const prompted = new Set<string>();
+  /** Kept for each event the office takes in, live or replayed from the log. */
   const trackSession = (e: F1rmEvent) => {
     if (e.kind === "UserPromptSubmit") prompted.add(e.sessionId);
     if (e.kind === "SubagentStart" && e.intern) subagents.set(e.sessionId, (subagents.get(e.sessionId) ?? new Set()).add(e.intern.id));
