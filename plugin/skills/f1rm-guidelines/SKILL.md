@@ -264,7 +264,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - one end-of-milestone report: what landed, how to try it, what is open, "Decisions taken without you" (the decisions-log titles), ending with the `git push` line (see Milestones and decisions for its cleanup lists).
 
   Everything else stays between agents: `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
-- A specialist reports only to the session in its `Report to`, its team's lead. It never messages the user, the PM, another team or another specialist.
+- A specialist reports only to the session in its `Report to`, its team's lead, and messages only who the Messaging table allows.
 - **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `NEEDS YOU <team>: <topic>` and `DONE <team>`. There are no per-task reports, and the watcher is your own (see Watching and waking).
 - **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead tells the PM with `NEEDS YOU <team>: permission for <hire>`. The PM sends the user to that desk and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` what changed (a lead records it on its team board, which the PM reads), so nobody above you is surprised.
@@ -320,7 +320,7 @@ Who may message whom. The gate reads the recipient's role and team from the sess
 
   Evidence files go in `~/.f1rm/evidence/<repo>/<task>/`, and the report points to them. The lead pastes the report into the Reviewer's Inputs.
 - **Working files never enter the repo.** Research notes, plans, proofs and findings live in `~/.f1rm/evidence/<repo>/`. A `DONE` report adds `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. The lead passes those lines on in `DONE <team>`.
-- A hire never messages the user or another hire. It answers the session in its `Report to`, which relays. The one exception is leads, who message each other (see Who talks to whom).
+- A hire reports to the session in its `Report to` and messages only who the Messaging table allows.
 - The PM or the lead answers a `BLOCKED` message with the missing input or a re-scoped task, then updates its board. A `BLOCKED` that needs the user goes to the user through the lead (see Who talks to whom).
 - Messages arrive between tool calls, and a session whose turn has ended wakes when one arrives. A PM or lead waiting on hires stops instead of polling.
 

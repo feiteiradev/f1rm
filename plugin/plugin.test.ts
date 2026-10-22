@@ -368,10 +368,12 @@ test("B1: no line says a specialist reports to the PM or that the PM lets specia
   const stale = [/otherwise the PM/, /the PM or the team's lead/, /the PM or your team's lead/, /your team's lead, or the PM/, /the PM, or its team's lead/, /the specialists, the PM or/];
   const texts = [guidelines, readFileSync(join(PLUGIN, "README.md"), "utf8"), readFileSync(join(REPO, "README.md"), "utf8"), ...Object.keys(ROLES).filter((r) => r !== "pm" && r !== "lead").map((r) => role(r).body)];
   for (const t of texts) for (const re of stale) expect(t).not.toMatch(re);
-  expect(section("Who talks to whom")).toContain("A specialist reports only to the session in its `Report to`, its team's lead.");
-  expect(section("Who talks to whom")).toContain("never messages the user, the PM, another team or another specialist");
+  expect(section("Who talks to whom")).toContain("A specialist reports only to the session in its `Report to`, its team's lead, and messages only who the Messaging table allows.");
+  expect(section("Who talks to whom")).not.toContain("another specialist");
+  expect(section("Handoff via SendMessage")).toContain("A hire reports to the session in its `Report to` and messages only who the Messaging table allows.");
+  expect(section("Handoff via SendMessage")).not.toContain("another hire");
   expect(section("Review and merge flow")).toContain("The team's lead lets them go with `f1rm letgo <name>...`");
-  for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Never message the user, the PM, another team or another specialist.");
+  for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Message only who the Messaging table in the guidelines allows.");
 });
 
 test("the PM resolves a blocked lead, and its cleanup moves and removes files with Bash only after the user replies", () => {
