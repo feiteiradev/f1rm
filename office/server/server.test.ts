@@ -2042,6 +2042,19 @@ test("outside any door a session may message only one working under the same fol
   expect(await send("lx", "main")).toBeNull();
 });
 
+test("an intern whose parent has no title still reaches only its parent, not another untitled session", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  await hook({ ...common("u1", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:backend-dev" });
+  await hook({ ...common("u2", "UserPromptSubmit"), prompt: "go" });
+  await hook({ ...common("u1", "SubagentStart"), agent_id: "i-u1", agent_type: "Explore" });
+  await office((s) => Object.keys(s.employees).length === 2 && Object.keys(s.interns).length === 1);
+  const send = async (to: string) => held(await hook({ ...preToolUse("u1", "SendMessage", { to, message: "x" }), agent_id: "i-u1", agent_type: "Explore" }));
+  expect(await send("u1")).toBeNull(); // the parent, by its session id
+  const other = await send("u2");
+  expect(other?.permissionDecision).toBe("deny");
+  expect(other.permissionDecisionReason).toContain("parent");
+});
+
 test("the messaging refusals are logged by rule with the role and title, and never the message or the target", async () => {
   const send = await talkOffice();
   const lines: string[] = [];

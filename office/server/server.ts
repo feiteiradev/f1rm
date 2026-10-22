@@ -358,7 +358,7 @@ export function startServer({
           return refuse("elsewhere", "Elsewhere is no room: a session outside every project may message only a session working under the same folder. Use `f1rm feedback: <problem> -> <suggestion>` for the user, addressed to no session.");
         }
         if (intern) {
-          if (answering.some((e) => e.sessionId !== sessionId && e.title !== me.title)) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
+          if (answering.some((e) => e.sessionId !== sessionId && (me.title === undefined || e.title !== me.title))) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
         } else {
           const team = teamOf(me), lead = team ? `lead-${team}` : "your lead (the Report to of your brief)";
           const theirs = (e: Employee) => (teamOf(e) ? `lead-${teamOf(e)}` : "their lead");
