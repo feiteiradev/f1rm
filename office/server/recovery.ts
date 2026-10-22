@@ -137,27 +137,31 @@ function lastTurnLines(tailText: string): any[] {
 }
 
 /**
- * Whether the hire's last turn ENDS with a delivered report: its last tool call is a SendMessage whose message starts with a report word and whose tool result is no error (a send cut before its result,
- * or refused by the gate with "no live session", is not delivered). Text never counts: real hires report with SendMessage and close the turn with prose, and a refused send followed by "DONE ..., but the
- * send was refused" has not reported. A report followed by more tool work (a checkpoint) is not the last call, so hires checkpoint first.
+ * What the hire's last turn reported. A report is a delivered SendMessage: its message starts with a report word and its tool result is no error (a send cut before its result, or refused by the gate
+ * with "no live session", is not delivered). Text never counts: real hires report with SendMessage and close the turn with prose, and a refused send followed by "DONE ..., but the send was refused"
+ * has not reported. `any`: the turn delivered a report (the nudge has nothing to ask for). `last`: that report is the turn's last tool call, so the turn ENDED reported (the stop of an ended hire needs no
+ * wake); a hire that kept working after its report (a checkpoint) may have more to do, so hires checkpoint first.
  */
-function endsWithReport(tailText: string): boolean {
+function turnReports(tailText: string): { any: boolean; last: boolean } {
   const turn = lastTurnLines(tailText);
   const failed = new Map<string, boolean>();
   for (const line of turn) if (line.type === "user" && Array.isArray(line.message?.content)) for (const b of line.message.content) if (b?.type === "tool_result") failed.set(String(b.tool_use_id), b.is_error === true);
-  let closes = false;
+  let any = false, last = false;
   for (const line of turn) {
     if (line.type !== "assistant") continue;
     for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
-      if (b?.type === "tool_use") closes = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
+      if (b?.type !== "tool_use") continue;
+      last = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
+      any ||= last;
     }
   }
-  return closes;
+  return { any, last };
 }
 
 /** The progress a woken hire made: a commit on its branch, or more than one assistant message after the wake (the first is its reply; a reply with thinking is several lines of one message id). */
-function madeProgress(tailText: string, since: number, tipBefore: number | null | undefined, tipNow: number | null): boolean {
-  if (tipNow != null && (tipBefore == null || tipNow > tipBefore)) return true;
+function madeProgress(tailText: string, since: number, tipBefore: number | null | undefined, tipNow: number | null | undefined): boolean {
+  // An unknown tip (git failed, then or now: undefined) says nothing; a known one with no earlier tip is a first commit.
+  if (tipNow != null && tipBefore !== undefined && (tipBefore === null || tipNow > tipBefore)) return true;
   const replies = new Set<string>();
   for (const l of tailText.split("\n")) {
     if (!l.includes('"type":"assistant"')) continue;
@@ -228,6 +232,8 @@ export function createRecovery(d: RecoveryDeps) {
           return;
         }
         if (e.judged === mt) return;
+        // A lead whose members are still active is not judged yet, and its transcript is not read: it is looked at again on the next tick, whatever its own transcript does.
+        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) return;
         delete e.note;
         delete e.unreachable;
         const tailText = await d.tail(cwd, sid);
@@ -237,12 +243,10 @@ export function createRecovery(d: RecoveryDeps) {
           return;
         }
         const key = `${sid}:${turn.uuid ?? turn.timestamp ?? ""}`;
-        if (e.nudged === key || endsWithReport(tailText)) {
+        if (e.nudged === key || turnReports(tailText).any) {
           e.judged = mt;
           return;
         }
-        // A lead whose members are still active is not judged yet: it is looked at again on the next tick, whatever its own transcript does.
-        if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) return;
         e.judged = mt;
         e.nudged = key;
         if (!(await safeTell(repo, name, NUDGE, sid))) {
@@ -254,8 +258,8 @@ export function createRecovery(d: RecoveryDeps) {
 
       // Ended. A stop is decided once, recorded, and its transcript is not read again.
       if (e.wokeFrom === sid || e.told === sid) return;
-      /** The branch tip, asked for only where it is needed; a lead and a Reviewer have no branch, and a git that hangs or fails reads as no tip (logged) instead of stopping the tick. */
-      let tipAsked: Promise<number | null> | undefined;
+      /** The branch tip, asked for only where it is needed; a lead and a Reviewer have no branch (null), and a git that hangs or fails leaves the tip unknown (undefined, logged) instead of stopping the tick. */
+      let tipAsked: Promise<number | null | undefined> | undefined;
       const tipOf = () =>
         (tipAsked ??= (async () => {
           if (h.role === "lead" || h.reviewer) return null;
@@ -263,18 +267,18 @@ export function createRecovery(d: RecoveryDeps) {
             return await d.commitTime(repo, `worktree-${h.task}`);
           } catch (err) {
             console.log(`recovery ${basename(repo)}/${name}: ${(err as Error).message}`);
-            return null;
+            return undefined; // unknown, which is not the same as no branch
           }
         })());
       const reportTo = async () => reportToOf(h, await d.promptOf(cwd, sid), repo);
       const tell = async (message: string, reason?: string) => {
-        e.told = sid;
-        delete e.waitSid;
-        delete e.wakeAt;
-        const to = await reportTo();
+        const to = await reportTo(); // before anything is recorded: a stop whose prompt cannot be read stays undecided and is tried again
         // The newest live session of that name first; if its inbox fails (a /clear moved the seat, a row with no session id), any seat with the title.
         const target = liveByName.get(to);
         const ok = (await safeTell(repo, to, message, target && String(target.sessionId ?? target.id))) || (target !== undefined && (await safeTell(repo, to, message)));
+        e.told = sid;
+        delete e.waitSid;
+        delete e.wakeAt;
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
       const wakeIt = async (note: string, failed: string) => {
@@ -316,9 +320,9 @@ export function createRecovery(d: RecoveryDeps) {
         return;
       }
       // Any other end skips a hire whose last turn closed with its report (its row waits on a review, or an answer).
-      if (endsWithReport(tailText)) {
-        e.told = sid;
+      if (turnReports(tailText).last) {
         e.note = `reported; waits on ${await reportTo()}`;
+        e.told = sid;
         return;
       }
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;

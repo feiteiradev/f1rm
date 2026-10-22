@@ -588,15 +588,25 @@ test("lastTurn skips what startsTurn says is no turn: a skill's meta body, a too
   expect(until(user("resume"))).toBeNull();
 });
 
-test("tailAsync reads a missing file as empty, and any other error (no permission) shows", async () => {
+test("tailAsync reads a missing file as empty, and any other error shows: a file nobody may read, and a folder nobody may search (the stat path)", async () => {
   const h = home();
   const file = join(h, "locked.jsonl");
   writeFileSync(file, "x\n");
+  const root = process.getuid?.() === 0;
   chmodSync(file, 0o000);
   try {
-    if (process.getuid?.() !== 0) await expect(tailAsync(file)).rejects.toThrow();
+    if (!root) await expect(tailAsync(file)).rejects.toThrow();
   } finally {
     chmodSync(file, 0o600);
+  }
+  const dir = join(h, "closed");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "t.jsonl"), "x\n");
+  chmodSync(dir, 0o600); // readable and writable, not searchable: stat of a file in it fails with EACCES
+  try {
+    if (!root) await expect(tailAsync(join(dir, "t.jsonl"))).rejects.toThrow();
+  } finally {
+    chmodSync(dir, 0o700);
   }
   expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
 });

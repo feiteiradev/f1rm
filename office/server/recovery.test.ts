@@ -799,7 +799,8 @@ test("a hung git does not stop the tick: the hire is woken without a tip, the ot
   }
   expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
   expect(o.w.told.map((t) => t.message)).toEqual([`${second} stopped at the session limit; f1rm wake ${second}`]);
-  expect(o.w.store[REPO][DEV]).toMatchObject({ wokeFrom: "dev-1", tip: null });
+  expect(o.w.store[REPO][DEV]).toMatchObject({ wokeFrom: "dev-1" });
+  expect(o.w.store[REPO][DEV].tip).toBeUndefined(); // unknown, not "no branch"
   expect(logged.some((l) => l.includes("git timed out"))).toBe(true);
 });
 
@@ -809,4 +810,152 @@ test("the wake time is taken before the wake, so replies written while it starts
   const before = o.w.now;
   await o.tick();
   expect(o.w.store[REPO][DEV].wokeAt).toBe(before);
+});
+
+// ── round 5 ────────────────────────────────────────────────────────────────
+test("the nudge skips a turn that delivered ANY report, even when the hire kept working after it; only the ended-path skip needs the report to be the last tool call", async () => {
+  const nudged = async (lines: (now: number) => string[]) => {
+    const o = office();
+    idleReviewer(o, "x", 25);
+    o.w.transcripts["rev-1"] = lines(o.w.now);
+    await o.tick();
+    return o.w.told;
+  };
+  // BLOCKED mid-turn, then the work goes on and the turn ends in prose: the report was made, no nudge.
+  expect(await nudged((now) => [...midReport("BLOCKED checkout: no key", now), block("msg_e", 25, { type: "text", text: "Carrying on with the rest, nothing else to send." }, now)])).toEqual([]);
+  // The same turn on the ended path: the report is not the last tool call, so the hire is woken.
+  const dev = office();
+  stoppedDev(dev, midReport("BLOCKED checkout: no key"));
+  await dev.tick();
+  expect(dev.w.woke).toHaveLength(1);
+});
+
+test("a throwing promptOf leaves the stop undecided: nothing is recorded as told, and the next tick tells it", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop(null, 0)]);
+  let broken = true;
+  const make = createRecovery({
+    now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null,
+    promptOf: async () => { if (broken) throw new Error("EACCES"); return null; },
+    board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {},
+    tell: async (_r, to, message) => (o.w.told.push({ to, message }), true),
+    store: { load: (repo) => structuredClone(o.w.store[repo] ?? {}), save: (repo, e) => void (o.w.store[repo] = structuredClone(e)) },
+  });
+  const log = console.log;
+  console.log = () => {};
+  try {
+    await make.tick([REPO]);
+  } finally {
+    console.log = log;
+  }
+  expect(o.w.told).toEqual([]);
+  expect(o.w.store[REPO]?.[DEV]?.told).toBeUndefined();
+  broken = false;
+  await make.tick([REPO]);
+  expect(o.w.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped at the session limit; f1rm wake ${DEV}` }]);
+  expect(o.w.store[REPO][DEV]).toMatchObject({ told: "dev-1" });
+  // The same for a report skip: the NOTE is computed before the stop is recorded.
+  const r = office();
+  stoppedDev(r, sent("DONE checkout", "Sent.", 1));
+  const failing = createRecovery({
+    now: () => r.w.now, sessions: async () => r.w.list, tail: async (_c, sid) => (r.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null,
+    promptOf: async () => { throw new Error("EACCES"); },
+    board: async (_r, team) => r.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {}, tell: async () => true,
+    store: { load: (repo) => structuredClone(r.w.store[repo] ?? {}), save: (repo, e) => void (r.w.store[repo] = structuredClone(e)) },
+  });
+  console.log = () => {};
+  try {
+    await failing.tick([REPO]);
+  } finally {
+    console.log = log;
+  }
+  expect(r.w.store[REPO]?.[DEV]?.told).toBeUndefined();
+});
+
+test("a git that failed at the wake leaves the tip unknown, so a real tip later is not counted as a new commit", async () => {
+  const o = office();
+  stoppedDev(o, [say("compiling", 1)]);
+  let failing = true;
+  const make = createRecovery({
+    now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async (_c, sid) => o.w.mtimes[sid] ?? null, promptOf: async () => null,
+    board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [],
+    commitTime: async () => { if (failing) throw new Error("git timed out after 10000 ms"); return T0 - 60 * MIN; },
+    wake: async (repo, name, note) => void o.w.woke.push({ repo, name, note }),
+    tell: async (_r, to, message) => (o.w.told.push({ to, message }), true),
+    store: { load: (repo) => structuredClone(o.w.store[repo] ?? {}), save: (repo, e) => void (o.w.store[repo] = structuredClone(e)) },
+  });
+  const log = console.log;
+  console.log = () => {};
+  try {
+    await make.tick([REPO]);
+  } finally {
+    console.log = log;
+  }
+  expect(o.w.woke).toHaveLength(1);
+  expect(o.w.store[REPO][DEV].tip).toBeUndefined();
+  failing = false;
+  const woke = o.w.now;
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(DEV, "dev-2", DEV_CWD, { startedAt: 2000 })];
+  o.w.transcripts["dev-2"] = [say("compiling", 1), block("msg_w", -1, { type: "text", text: "on it" }, woke)];
+  o.w.mtimes["dev-2"] = woke + 4 * MIN;
+  o.w.now = woke + 5 * MIN;
+  await make.tick([REPO]);
+  expect(o.w.woke).toHaveLength(1);
+  expect(o.w.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped again after a wake; f1rm wake ${DEV}` }]);
+});
+
+test("a lead whose members are active is skipped before its transcript is read", async () => {
+  const o = office();
+  o.w.list = [live("lead-shop", "lead-1", REPO, { status: "idle" }), live(DEV, "m-1", DEV_CWD, { status: "busy" })];
+  o.w.transcripts["lead-1"] = [say("Hired the dev; watching.", 30, o.w.now)];
+  o.w.mtimes = { "lead-1": o.w.now - 30 * MIN, "m-1": o.w.now };
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  await o.tick();
+  await o.tick();
+  expect(o.w.tailCalls).toEqual([]);
+});
+
+test("an office-woken stop whose old session is resumed in place and ends again is woken again", async () => {
+  const o = office();
+  stoppedDev(o, [say("compiling", 1)]);
+  await o.tick();
+  expect(o.w.store[REPO][DEV].wokeFrom).toBe("dev-1");
+  // The woken copy is gone, and the OLD session is attached to by hand: it runs under its own id for a tick.
+  o.w.now += 60 * MIN;
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), live(DEV, "dev-1", DEV_CWD)];
+  await o.tick();
+  expect(o.w.store[REPO][DEV]?.wokeFrom).toBeUndefined();
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD)];
+  o.w.transcripts["dev-1"] = [say("working", 10), tool("w2", 1, "Bash", { command: "bun test" })];
+  o.w.mtimes["dev-1"] = o.w.now;
+  o.w.now += 5 * MIN;
+  await o.tick();
+  expect(o.w.woke).toHaveLength(2);
+});
+
+test("one hire's failure is logged and the others are still decided and saved", async () => {
+  const o = office();
+  const second = "shop.backend-dev-search";
+  o.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(second, "dev-2", wt("search"))];
+  o.w.transcripts = { "dev-1": [say("compiling", 1)], "dev-2": [limitStop(null, 0)] };
+  o.w.boards.shop = [row(DEV, "doing", "checkout"), row(second, "doing", "search")];
+  const make = createRecovery({
+    now: () => o.w.now, sessions: async () => o.w.list,
+    tail: async (_c, sid) => { if (sid === "dev-1") throw new Error("EACCES: permission denied"); return (o.w.transcripts[sid] ?? []).join("\n"); },
+    mtime: async () => null, promptOf: async () => null, board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null,
+    wake: async (repo, name, note) => void o.w.woke.push({ repo, name, note }),
+    tell: async (_r, to, message) => (o.w.told.push({ to, message }), true),
+    store: { load: (repo) => structuredClone(o.w.store[repo] ?? {}), save: (repo, e) => void (o.w.store[repo] = structuredClone(e)) },
+  });
+  const logged: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void logged.push(a.join(" "));
+  try {
+    await make.tick([REPO]);
+  } finally {
+    console.log = log;
+  }
+  expect(o.w.told.map((t) => t.message)).toEqual([`${second} stopped at the session limit; f1rm wake ${second}`]);
+  expect(o.w.store[REPO][second]).toMatchObject({ told: "dev-2" });
+  expect(logged.some((l) => l.includes(DEV) && l.includes("EACCES"))).toBe(true);
 });
