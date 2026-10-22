@@ -998,7 +998,8 @@ test("W1: the guidelines name `f1rm wake` once in Watching and waking, and the E
 test("W2: the Spawning table names `f1rm wake` as the wrapper of `claude --bg --resume`, the Messaging table and the gates carry the refusal row", () => {
   const spawn = section("Spawning table");
   expect(spawn).toMatch(/`claude --bg --resume[^\n]*`f1rm wake` is the sanctioned wrapper/);
-  expect(spawn).toContain("the PM wakes leads, a lead its own team's members, a specialist nobody (enforced)");
+  expect(spawn).toContain("who may wake is in **No live session** in Watching and waking");
+  expect(guidelines.split("a specialist wakes nobody").length - 1).toBe(1); // the who-may-wake rule is said once, in **No live session**
   const talk = section("Messaging table");
   const row = talk.split("\n").find((l) => l.startsWith("| Anyone, to an ended hire"))!;
   expect(row).toContain("no live process");
@@ -1007,7 +1008,9 @@ test("W2: the Spawning table names `f1rm wake` as the wrapper of `claude --bg --
   expect(row).toContain("`name [ref]`");
   const gates = section("Gates");
   expect(gates).toContain("a hire of the project with no live process");
-  expect(gates).toContain("`f1rm wake` follows the same rule");
+  expect(gates).toContain("`f1rm wake` follows the hire rules (**No live session** in Watching and waking)");
+  expect(gates).toMatch(/with no live process \(way out: \*\*No live session\*\* in Watching and waking\)/);
+  expect(gates).not.toContain("else ask your lead");
   expect(gates).toContain("A specialist cannot run `f1rm hire` or `f1rm wake`.");
 });
 
