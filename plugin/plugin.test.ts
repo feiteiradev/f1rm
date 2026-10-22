@@ -561,7 +561,7 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   const talk = section("Messaging table");
   expect(talk).toContain("| Sender | May message | Message types | When | Why |");
   const trows = rowsOf(talk, "| Sender");
-  expect(trows.map((r) => r.split("|")[1].trim())).toEqual(["The user", "PM", "Lead", "Team member", "Intern", "Anyone"]);
+  expect(trows.map((r) => r.split("|")[1].trim())).toEqual(["The user", "PM", "Lead", "Team member", "Intern", "Anyone", "Anyone, to an ended hire"]);
   for (const r of trows.slice(1, 5)) {
     const cells = r.split("|").slice(2, -1);
     expect(cells, r).toHaveLength(4);
@@ -978,4 +978,63 @@ test("K6: docs/decisions.md has the Ask the user only for big decisions and Skil
   for (const t of ["Ask the user only for big decisions", "Skill stack: mattpocock + pstack"]) expect(titles).toContain(`2026-10-21 ${t}`);
   const stack = entries.find((e) => e.startsWith("2026-10-21 Skill stack: mattpocock + pstack"))!;
   for (const s of ["disable-model-invocation", "architect", "interrogate", "arena", "swarm", "Opening a PR", "afk"]) expect(stack, s).toContain(s);
+});
+
+// R9a: `f1rm wake` resumes an ended hire in place; the gate says so when a message goes to one with no live process.
+test("W1: the guidelines name `f1rm wake` once in Watching and waking, and the Ended rule wakes instead of letting go and re-hiring", () => {
+  const w = section("Watching and waking");
+  for (const s of [
+    "**No live session**", "no live session; f1rm wake <name>", "`f1rm wake <name> \"<the message you meant to send>\"`", "resumes that hire in place", "from its own worktree", "with its history, name and `Report to`",
+    "`resumed; continue your task`", "new session id", "counts against the caps like a hire", "refuses a hire that was let go, another project's hire, a live one (message it instead) and an unknown name",
+    "The PM wakes leads and a lead wakes the members of its own team (enforced); a specialist wakes nobody.",
+    "**Ended**: run `f1rm wake <name>`", "Re-hire only a hire that was let go or whose wake failed",
+    "**Address a woken or re-hired session**",
+  ]) expect(w, s).toContain(s);
+  expect(w).not.toContain("**Ended**: run `f1rm letgo");
+  expect(w.split("no live session; f1rm wake <name>").length - 1).toBe(1); // said once
+  expect(section("Teams")).toMatch(/sends the work back to the same specialist[^\n]*\*\*No live session\*\* in Watching and waking/);
+});
+
+test("W2: the Spawning table names `f1rm wake` as the wrapper of `claude --bg --resume`, the Messaging table and the gates carry the refusal row", () => {
+  const spawn = section("Spawning table");
+  expect(spawn).toMatch(/`claude --bg --resume[^\n]*`f1rm wake` is the sanctioned wrapper/);
+  expect(spawn).toContain("the PM wakes leads, a lead its own team's members, a specialist nobody (enforced)");
+  const talk = section("Messaging table");
+  const row = talk.split("\n").find((l) => l.startsWith("| Anyone, to an ended hire"))!;
+  expect(row).toContain("no live process");
+  expect(row).toContain("`no live session; f1rm wake <name>`");
+  expect(row).toContain("(enforced)");
+  expect(row).toContain("`name [ref]`");
+  const gates = section("Gates");
+  expect(gates).toContain("a hire of the project with no live process");
+  expect(gates).toContain("`f1rm wake` follows the same rule");
+  expect(gates).toContain("A specialist cannot run `f1rm hire` or `f1rm wake`.");
+});
+
+test("W3: the pm and lead pickup steps wake any doing or review row whose hire has no live process, and their watcher rules wake an ended session", () => {
+  const pick = /^1\. \*\*Pick up\.\*\*.*$/m.exec(role("pm").body)?.[0] ?? "";
+  for (const s of ["no live process", "`f1rm status`", "run `f1rm wake <name>`", "Watching and waking"]) expect(pick, s).toContain(s);
+  const read = /^2\. \*\*Read the brief and the board\.\*\*.*$/m.exec(role("lead").body)?.[0] ?? "";
+  for (const s of ["`doing` or `review`", "no live process", "`f1rm status`", "run `f1rm wake <name>`", "Watching and waking"]) expect(read, s).toContain(s);
+  for (const r of ["pm", "lead"]) {
+    const body = role(r).body;
+    expect(body, r).toMatch(/For an ended (session|lead), run `f1rm wake /);
+    expect(body, r).toContain("re-hire only a hire that was let go or whose wake failed");
+    expect(body, r).not.toMatch(/For an ended (session|lead), run `f1rm letgo/);
+    expect(body, r).not.toContain("no live session; f1rm wake"); // the guidelines say it once
+  }
+});
+
+test("W4: docs/decisions.md has the entries f1rm wake and A message to a hire with no live process says so", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const wake = entries.find((e) => e.startsWith("2026-10-22 f1rm wake\n"))!;
+  const gate = entries.find((e) => e.startsWith("2026-10-22 A message to a hire with no live process says so\n"))!;
+  for (const s of ["claude --bg --resume <session-id> --agent f1rm:<role> --name <name>", "same cap code", "was let go; hire a new one", "is live: message it instead", "claude attach"]) expect(wake, s).toContain(s);
+  for (const s of ["no live session; f1rm wake <name>", "name [ref]", "unknown to the office", "root cause"]) expect(gate, s).toContain(s);
+  for (const e of [wake, gate]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+});
+
+test("W5: both READMEs list f1rm wake", () => {
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm wake` \|/m);
+  expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm wake <name|id> [message]`");
 });
