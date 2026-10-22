@@ -77,7 +77,7 @@ The PM picks the workflow by this rule before it plans, and says it in one line:
 Each role's steps, and the skill or command at each step. Every dev and specialist ends with a `DONE` report that has the evidence block (see Handoff) and lists the skills used.
 
 - **pm**
-  1. Pick up: read the board, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
+  1. Pick up: read the board, the team boards, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
   2. Load `f1rm:f1rm-guidelines`.
   3. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms.
   4. Write the board (and, for a milestone, its section in the milestones file), and collect what the user must provide.
@@ -172,7 +172,7 @@ In a Founder project the PM follows this on top of everything else here.
 
 - Founder roles draft. They never post, publish, send, schedule or spend. The user puts everything out.
 - Connectors are fine for drafts, for example a Canva design or a Gmail draft. The office's hook blocks a Founder role's connector tools whose names say send, publish, post or schedule.
-- Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the lead asks the user for each spend in its own session, records the answer on its team board and passes it down.
+- Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the lead asks the user for each spend as Who talks to whom says, records the answer on its team board and passes it down.
 - When the Reviewer approves founder work that is meant to go out, the lead marks its team-board row `publish` and sends the PM `NEEDS YOU <team>: publish`, because only the user can put it out. The PM tells the user. When the user says it is out, the PM tells the lead, who marks the row `done`.
 
 ## Teams
@@ -256,7 +256,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - The PM then tells the user: "lead-<team> needs you about <topic>: Jump to lead-<team> in the office". It names the session, never an id or a `claude attach` command, and the same goes for a permission desk and any other session the user must open. For a permission it says "approve in the office" once the permission card exists, and "Jump to <name> in the office" until then.
   - The PM helps the user decide when asked, and writes the end-of-milestone report.
 - **The PM and a lead exchange only** `NEEDS YOU <team>: <topic>`, `DONE <team>`, and the PM's `resume` and answers. A lead messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead.
-- **In ops and the simple workflow the PM stays the user's contact.** On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM answers a decision or an input itself from the team board; a cap or a permission still goes to that session.
+- **In ops and the simple workflow the PM stays the user's contact.** On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM asks the user the question on the team board and answers the lead; a cap or a permission still goes to that session.
 - **Unprompted, the PM tells the user only:**
   - big decisions;
   - that a lead needs them (`NEEDS YOU`), worded as above;
@@ -279,7 +279,7 @@ Who may start what. **Enforced** means the gate or the hire command refuses a br
 | PM | Leads only (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
 | Lead | Specialists and Reviewers of its own team, never a lead (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
 | Specialist or Reviewer | Nothing (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | A check or a dev server only (rule only: none is refused) | Never (enforced: the forms the gate reads) |
-| Intern | Nothing (enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's (the gate holds an intern as its parent)) | Counts against its parent's 2 (enforced) | Never (enforced) | A check only (rule only: none is refused) | Never (enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's (the gate holds an intern as its parent)) |
+| Intern | Nothing (enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)) | Counts against its parent's 2 (enforced) | Never (enforced) | A check only (rule only: none is refused) | Never (enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)) |
 
 - `/loop` and `/schedule` mean the two skills, with or without a plugin prefix, and the `ScheduleWakeup`, `CronCreate` and `RemoteTrigger` tools they start recurring work with.
 - The one other `claude --bg` or `claude -p` is a second office whose command sets its own temporary HOME (a literal absolute path or `$(mktemp -d)`, never the user's home). `--resume` with `--fork-session` starts a new session, so it is no wake.
@@ -291,7 +291,7 @@ Who may message whom. The gate reads the recipient's role and team from the sess
 
 | Sender | May message | Message types | When | Why |
 | :- | :- | :- | :- | :- |
-| The user | Anyone, from the office (Jump, Ask, Tell): not held, the user is no session | Ask (read-only side question), Tell (an instruction; act, then tell your `Report to` what changed) | Any time | The user decides |
+| The user | Anyone, from the office (Jump, Ask, Tell): not held, the user is no session | Ask (read-only side question), Tell (an instruction; act, then tell your `Report to` what changed (a lead records it on its team board)) | Any time | The user decides |
 | PM | Leads of its project only (enforced) | Answers to a lead and `resume` (rule only); the lead's `NEEDS YOU` and `DONE <team>` come to the PM | After a lead's `NEEDS YOU` or `DONE <team>`, and on a wake | The PM's chat stays free of hire traffic |
 | Lead | The PM, other leads and the members of its own team (enforced) | To the PM: `NEEDS YOU <team>: <topic>` the moment it needs the user, and `DONE <team>` at the end (rule only). To leads: contracts, shared files, handoff order. To its team: briefs, answers, `resume`, `CHANGES REQUESTED` back to a dev (rule only) | As the work needs | The lead owns its team and filters traffic for the PM |
 | Team member | Its own lead and the members of its own team (enforced). Formal reports `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` only to its lead (enforced for a message that opens with one of those words; a report in other words is rule only) | Formal reports to the lead; plain words to peers (rule only) | Once when done, once if blocked; a peer when the work needs it | The lead scrutinizes every report |

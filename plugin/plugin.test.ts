@@ -478,11 +478,14 @@ test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on
   expect(role("lead").body).not.toContain("tell the PM what changed");
   expect(section("Who talks to whom")).toContain("(a lead records it on its team board, which the PM reads)");
   expect(section("Who talks to whom")).not.toContain("(a lead tells the PM)");
+  expect(pmStep(1)).toContain("`~/.f1rm/boards/<repo>.team.<team>.md`");
+  expect(pmStep(1)).toContain("team boards");
+  expect(section("Workflows")).toContain("read the board, the team boards, the milestones file");
   expect(role("pm").body).toContain("Work handed to you, other than ops (see Picking the workflow), including a slash command, becomes a board task for a hire.");
 });
 
 test("R8b: a spend is a big decision that reaches the user through the lead, not a PM relay", () => {
-  expect(section("Drafts only")).toContain("the lead asks the user for each spend in its own session, records the answer on its team board and passes it down");
+  expect(section("Drafts only")).toContain("the lead asks the user for each spend as Who talks to whom says, records the answer on its team board and passes it down");
   expect(section("Drafts only")).not.toContain("the PM asks the user for each spend");
   expect(role("pm").body).not.toContain("Ask the user before any spend");
   expect(role("researcher").body).not.toContain("through the PM");
@@ -518,7 +521,7 @@ test("R8b: the talk rules are stated once in the guidelines and pointed to from 
     "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
     "approve in the office", "Jump to <name> in the office", "helps the user decide when asked", "writes the end-of-milestone report",
     "In ops and the simple workflow the PM stays the user's contact", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
-    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM answers a decision or an input itself from the team board; a cap or a permission still goes to that session.",
+    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM asks the user the question on the team board and answers the lead; a cap or a permission still goes to that session.",
   ]) expect(talk, s).toContain(s);
   expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
   expect(guidelines).not.toMatch(/claude attach <id>/);
@@ -545,9 +548,9 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   for (const r of srows) {
     const cells = r.split("|").slice(2, -1);
     expect(cells, r).toHaveLength(5);
-    for (const c of cells) expect(c, `${r} :: ${c}`).toMatch(/\((enforced|rule only)[;:)]|enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's \(the gate holds an intern as its parent\)/);
+    for (const c of cells) expect(c, `${r} :: ${c}`).toMatch(/\((enforced|rule only)[;:) ]/);
   }
-  const held = "enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's (the gate holds an intern as its parent)";
+  const held = "enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)";
   expect(srows[3].split("|")[2]).toContain(held);
   expect(srows[3].split("|")[6]).toContain(held);
   expect(srows[0]).toContain("Leads only (enforced)");
@@ -567,6 +570,7 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   }
   expect(trows[0]).toContain("Ask");
   expect(trows[0]).toContain("Tell");
+  expect(trows[0]).toContain("(a lead records it on its team board)");
   expect(trows[1]).toContain("Leads of its project only (enforced)");
   for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "`resume`"]) expect(talk, s).toContain(s);
   expect(trows[2]).toContain("The PM, other leads and the members of its own team");
