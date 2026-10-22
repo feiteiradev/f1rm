@@ -752,7 +752,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
     "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
     "After `f1rm letgo`, restart the watcher without the names you let go.", "For a wake about a session you already handled (or took a report from) since that watcher started: ignore it, but still restart the watcher.", "When a session sends its report, restart the watcher with it as `name:waiting`.",
     "A message you send to a waiting session counts as a write and makes it plain.", "Until it writes, a waiting name is woken only for ended, missing or a limit stop.",
-    "**Limit stop**", "wait until a minute after that time", "so the watcher does not race it", "Run `f1rm wake <name>` when its NOTE says the office could not, and when it is still ended two minutes after the reset or the end, unless its NOTE says `reported` (the office may have stopped after writing its NOTE; a live session is refused, so racing it is harmless).", "A `resume` sent at the reset time itself reaches no process", "the text after \"resets\"", "send it `resume`", "`resume.md`",
+    "**Limit stop**", "wait until a minute after that time", "so the watcher does not race it", "Run `f1rm wake <name>` when its NOTE says the office could not, and when it is still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported` (the office may have stopped after writing its NOTE; a live session is refused, so racing it is harmless).", "A `resume` sent at the reset time itself reaches no process", "the text after \"resets\"", "send it `resume`", "`resume.md`",
     "**Limit stop with no time** (`limitUntil` is `unknown`)", "wait a few minutes with a background `sleep` whose exit wakes you, then send it `resume` as for an idle session",
     "**Missing or no activity time**", "keep it in the names; if the next wake still finds it so, treat it as ended",
     "**Ended**", "`f1rm letgo <name>`", "resume brief", "before the original brief", "merged commits", "branch tip", "stale scratch worktrees", "remaining specs", "new task slug", "old tip",
@@ -814,7 +814,9 @@ test("S3: pm.md and lead.md carry the watcher and the wake rules, and every role
     const line = /^- \*\*Checkpoint\.\*\*[^\n]*|^Checkpoint:[^\n]*/m.exec(role(name).body)?.[0];
     expect(line, name).toContain("`~/.f1rm/evidence/<repo>/");
     expect(line, name).toContain("resume.md");
-    expect(line, name).toContain("before the report (the report is the turn's last tool call: see Handoff in the guidelines)");
+    // The PM's report is prose to the user, which the office never reads; every other role reports with SendMessage.
+    if (name === "pm") expect(line, name).not.toContain("before the report");
+    else expect(line, name).toContain("before the report (the report is the turn's last tool call: see Handoff in the guidelines)");
     if (!["pm", "lead", "reviewer"].includes(name)) expect(line, name).toContain("wip commit");
   }
 });
@@ -826,7 +828,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
     "`resumed after the session limit; continue your task`", "a minute after its reset time", "`resumed after your session ended; continue your task`", "(an update, a crash, a shutdown) at once", "Each stop is woken once.",
     "(no reset time, a cap, an error)", "within 10 minutes of a wake with no new commit and no more than one assistant message after it (the reply to the wake)", "it tells the session in the hire's `Report to`",
     "`<name> stopped again after a wake; f1rm wake <name>`", "`<name> stopped at the session limit; f1rm wake <name>`", "NOTE column (`recovery` in `--json`)",
-    "`your turn ended without a report; send your DONE or BLOCKED`", "its last tool call is not a delivered `SendMessage` whose first word is `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`; text never counts",
+    "`your turn ended without a report; send your DONE or BLOCKED`", "the turn delivered no `SendMessage` whose first word is `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` or `NEEDS YOU`; text never counts",
     "wakes no interactive session, no PM, no hire that was let go", "no project that is not registered", "The watcher below is the second line",
     "**Ended**: the office wakes it within a minute", "the office wakes the leads after the reset and the PM waits for the user",
   ]) expect(w, s).toContain(s);
@@ -836,16 +838,17 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   for (const s of ["marks each task's row `done` on its team board, lets its specialists go", "The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`"]) expect(closing, s).toContain(s);
   expect(role("lead").body).toContain("mark each task's row `done`, let your specialists");
   expect(guidelines).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...` after `APPROVED`");
-  expect(w).toContain("so does a hire still ended two minutes after the reset or the end, unless its NOTE says `reported`");
+  expect(w).toContain("so does a hire still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported`");
   expect(w).toContain("A NOTE that says `reported` needs no wake: send your answer with `f1rm wake <name> \"<answer>\"` when you have one.");
   // F1: the report is the turn's last tool call, so the checkpoint comes first.
-  expect(section("Handoff via SendMessage")).toContain("The report is the turn's LAST tool call: do the checkpoint (wip commit, `resume.md`) and every other tool call first, then send it, and write only prose after it.");
-  expect(section("Handoff via SendMessage")).toContain("end that turn with your `DONE` or a new `BLOCKED`, since the report is the turn's last tool call");
-  expect(guidelines).toContain("Checkpoint BEFORE the report: the report is the last tool call of the turn (see Handoff).");
+  expect(section("Handoff via SendMessage")).toContain("Checkpoint (wip commit, `resume.md`) before you send it, so the report is the turn's last tool call: the office skips an ended hire whose turn ended with a delivered report, and wakes one that kept working after it. A hire that sent a report and went on working is not nudged for a missing one.");
+  expect(section("Handoff via SendMessage")).toContain("Send one `BLOCKED` message that lists every open question, and keep working on the rest.");
+  expect(section("Handoff via SendMessage")).not.toContain("end that turn with your");
+  expect(guidelines).toContain("Checkpoint before the report, so that it is the turn's last tool call (see Handoff).");
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("woken by the office within a minute");
-    expect(role(r).body, r).toContain("when `f1rm status` says it could not, or it is still ended two minutes after the reset or the end, unless its NOTE says `reported`, run `f1rm wake");
-    expect(role(r).body, r).toContain("or when it is still ended two minutes after the reset or the end, unless its NOTE says `reported` (Watching");
+    expect(role(r).body, r).toContain("when `f1rm status` says it could not, or it is still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported`, run `f1rm wake");
+    expect(role(r).body, r).toContain("or when it is still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported` (Watching");
     expect(role(r).body, r).toContain("A NOTE that says `reported` needs no wake.");
   }
   for (const file of [join(REPO, "README.md"), join(PLUGIN, "README.md")]) expect(readFileSync(file, "utf8"), file).toMatch(/office[^|\n]* (?:runs it|also wakes)[^|\n]*by itself/);
@@ -853,7 +856,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   const wakes = entries.find((e) => e.startsWith("2026-10-22 The office wakes limit-stopped hires"));
   const nudge = entries.find((e) => e.startsWith("2026-10-22 A hire whose turn ended without its report gets one nudge"));
   for (const part of ["about 1 minute after the parsed reset time", "resumed after the session limit; continue your task", "resumed after your session ended; continue your task", "each stop is woken once", "10 minutes", "stopped again after a wake; f1rm wake", "stopped at the session limit; f1rm wake", "never wakes interactive sessions, the PM, or a let-go hire"]) expect(wakes, part).toContain(part);
-  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "its last tool call is not a delivered SendMessage whose first word is DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE or NEEDS YOU; text never counts", "once"]) expect(nudge, part).toContain(part);
+  for (const part of ["20 minutes", "your turn ended without a report; send your DONE or BLOCKED", "it delivered no SendMessage whose first word is DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE or NEEDS YOU; text never counts", "once"]) expect(nudge, part).toContain(part);
   expect(wakes).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
   expect(nudge).toMatch(/- Where: office-recovery, [0-9a-f]{7,}/);
 });
@@ -1059,7 +1062,7 @@ test("W3: the pm and lead pickup steps wake any doing or review row whose hire h
   for (const s of ["`doing` or `review`", "no live process", "`f1rm status`", "run `f1rm wake <name>`", "Watching and waking"]) expect(read, s).toContain(s);
   for (const r of ["pm", "lead"]) {
     const body = role(r).body;
-    expect(body, r).toMatch(/The office wakes an ended (session|lead) itself; when `f1rm status` says it could not, or it is still ended two minutes after the reset or the end, unless its NOTE says `reported`, run `f1rm wake /);
+    expect(body, r).toMatch(/The office wakes an ended (session|lead) itself; when `f1rm status` says it could not, or it is still ended two minutes after the reset \(a limit stop\) or after the end \(any other stop\), unless its NOTE says `reported`, run `f1rm wake /);
     expect(body, r).toContain("re-hire only a hire that was let go or whose wake failed");
     expect(body, r).not.toMatch(/run `f1rm letgo/);
     expect(body, r).not.toContain("no live session; f1rm wake"); // the guidelines say it once
