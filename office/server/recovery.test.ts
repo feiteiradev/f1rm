@@ -48,6 +48,7 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     commits: {} as Record<string, number>,
     woke: [] as { repo: string; name: string; note: string }[],
     told: [] as { to: string; message: string }[],
+    toldSession: [] as (string | undefined)[],
     inbox: true,
     store: {} as Record<string, Entries>,
   };
@@ -61,7 +62,7 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     board: async (_repo, team) => w.boards[team ?? "pm"] ?? [],
     commitTime: async (_repo, branch) => w.commits[branch] ?? null,
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
-    tell: async (_repo, to, message) => (w.told.push({ to, message }), w.inbox),
+    tell: async (_repo, to, message, sessionId) => (w.told.push({ to, message }), w.toldSession.push(sessionId), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
   });
   const rec = make();
@@ -584,4 +585,13 @@ test("a Reviewer whose task slug is long matches the branch cell parseBoard clip
   o.w.boards.shop = [parsed];
   await o.tick();
   expect(o.w.woke.map((x) => x.name)).toEqual([reviewer]);
+});
+
+test("the Report to is told through its newest live session, not whichever seat comes first", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop(null, 0)]);
+  o.w.list = [...o.w.list, live("lead-shop", "lead-new", REPO, { startedAt: 5000, status: "idle" }), ended("lead-shop", "lead-gone", REPO, { startedAt: 9 })];
+  await o.tick();
+  expect(o.w.told.map((t) => t.to)).toEqual(["lead-shop"]);
+  expect(o.w.toldSession).toEqual(["lead-new"]);
 });

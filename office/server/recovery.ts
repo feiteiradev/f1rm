@@ -250,7 +250,10 @@ export function createRecovery(d: RecoveryDeps) {
       const tell = async (message: string, reason?: string) => {
         e.told = sid;
         const to = reportToOf(h, first, repo);
-        const ok = await safeTell(repo, to, message);
+        // The newest live session of that name, as the nudge names its hire: an older seat with the same title may hold a dead socket or be another session.
+        const live = all.filter((a) => a?.name === to && a.pid && typeof a.cwd === "string" && repoOf(a.cwd) === repo);
+        const newestLive = live.reduce<any>((best, a) => (!best || (a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best), undefined);
+        const ok = await safeTell(repo, to, message, newestLive && String(newestLive.sessionId ?? newestLive.id));
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
       const wakeIt = async (note: string, failed: string) => {
