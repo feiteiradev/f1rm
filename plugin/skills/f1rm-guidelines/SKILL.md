@@ -255,7 +255,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - The PM then tells the user: "lead-<team> needs you about <topic>: Jump to lead-<team> in the office". It names the session, never an id or a `claude attach` command, and the same goes for a permission desk and any other session the user must open. For a permission it says "approve in the office" once the permission card exists, and "Jump to <name> in the office" until then.
   - The PM helps the user decide when asked, and writes the end-of-milestone report.
 - **The PM and a lead exchange only** `NEEDS YOU <team>: <topic>`, `DONE <team>`, and the PM's `resume` and answers. A lead messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead.
-- **Without teams (ops or the simple workflow)** the PM is the lead and talks to the user as before: it answers a simple workflow's `NEEDS YOU` from the question on the team board, and the user never needs a Jump.
+- **In ops and the simple workflow the PM stays the user's contact.** On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM answers a decision or an input itself from the team board; a cap or a permission still goes to that session.
 - **Unprompted, the PM tells the user only:**
   - big decisions;
   - that a lead needs them (`NEEDS YOU`), worded as above;

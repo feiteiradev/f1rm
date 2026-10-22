@@ -483,10 +483,17 @@ test("R8b: the talk rules are stated once in the guidelines and pointed to from 
     "The user talks to each lead directly", "in the lead's own session (the office's Jump)", "a numbered round", "its recommended answer", '"yes to all"', "open question on its team board",
     "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
     "approve in the office", "Jump to <name> in the office", "helps the user decide when asked", "writes the end-of-milestone report",
-    "Without teams (ops or the simple workflow)", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
+    "In ops and the simple workflow the PM stays the user's contact", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
+    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM answers a decision or an input itself from the team board; a cap or a permission still goes to that session.",
   ]) expect(talk, s).toContain(s);
   expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
   expect(guidelines).not.toMatch(/claude attach <id>/);
+  expect(talk).not.toContain("never needs a Jump");
+  expect(role("pm").body).not.toContain("including when a lead tells you");
+  expect(role("pm").body).not.toContain("lead the work yourself");
+  expect(role("pm").body).toContain("In ops and the simple workflow you stay the user's contact");
+  expect(pmStep(6)).toContain("send the user where Who talks to whom in the guidelines says");
+  expect(pmStep(6)).not.toContain("ask the user the question on the team board yourself");
   for (const [name, text] of [["pm.md", role("pm").body], ["lead.md", role("lead").body], ["prompt", pmPromptText()]] as const) {
     expect(text, name).toContain("Who talks to whom");
     expect(text, name).not.toContain("claude attach");
