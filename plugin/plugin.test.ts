@@ -474,6 +474,13 @@ test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on
   expect(role("pm").body).toContain("Work handed to you, other than ops (see Picking the workflow), including a slash command, becomes a board task for a hire.");
 });
 
+test("R8b: a spend is a big decision that reaches the user through the lead, not a PM relay", () => {
+  expect(section("Drafts only")).toContain("the lead asks the user for each spend in its own session, records the answer on its team board and passes it down");
+  expect(section("Drafts only")).not.toContain("the PM asks the user for each spend");
+  expect(role("pm").body).not.toContain("Ask the user before any spend");
+  expect(role("researcher").body).not.toContain("through the PM");
+});
+
 test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt, hire.ts and both READMEs", () => {
   for (const [name, text] of Object.entries(WORKFLOW_FILES())) {
     expect(text, name).not.toMatch(/\bPLAN\b/);

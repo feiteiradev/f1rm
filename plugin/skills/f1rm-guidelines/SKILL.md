@@ -171,7 +171,7 @@ In a Founder project the PM follows this on top of everything else here.
 
 - Founder roles draft. They never post, publish, send, schedule or spend. The user puts everything out.
 - Connectors are fine for drafts, for example a Canva design or a Gmail draft. The office's hook blocks a Founder role's connector tools whose names say send, publish, post or schedule.
-- Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the PM asks the user for each spend and passes the answer down.
+- Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the lead asks the user for each spend in its own session, records the answer on its team board and passes it down.
 - When the Reviewer approves founder work that is meant to go out, the lead marks its team-board row `publish` and sends the PM `NEEDS YOU <team>: publish`, because only the user can put it out. The PM tells the user. When the user says it is out, the PM tells the lead, who marks the row `done`.
 
 ## Teams
