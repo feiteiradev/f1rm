@@ -67,6 +67,11 @@ export function lastModel(end: string): string | null {
   return null;
 }
 
+/** The session a hire reports to: the one its first prompt named, else its lead (a member) or the PM (a lead). */
+export function reportToOf(hire: HireName, first: string | null, repo: string): string {
+  return (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => join(repo, ".git") }));
+}
+
 export type WakePlan = { argv: string[]; cwd: string; name: string; sessionId: string };
 
 const background = (list: any[]) => list.filter((a) => a?.kind === "background" && typeof a.name === "string");
@@ -112,7 +117,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);
   const first = d.promptOf(cwd, sessionId);
-  const reportTo = (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common }));
+  const reportTo = reportToOf(hire, first, repo);
   // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. A Reviewer whose prompt could not be read carries it too
   // (one extra security-review is cheaper than a missing hold). The sentence that names skills to load is not repeated: the history has them.
   const hold = first === null ? hire.role === "reviewer" : first.includes(SECURITY);
@@ -134,6 +139,18 @@ export function parseWakeArgs(words: string[]): { target: string | undefined; me
   return { target, message, override: own.includes("--override"), extra: at < 0 ? [] : words.slice(at) };
 }
 
+/** A session's transcript: `<home>/.claude/projects/<its folder>/<session id>.jsonl`. */
+export const transcriptFile = (home: string, cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
+
+/** The real Claude Code, git, disk and clock, for a wake run now. */
+export function realWakeDeps(home: string): WakeDeps {
+  return {
+    agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync,
+    modelOf: (cwd, sessionId) => lastModel(tail(transcriptFile(home, cwd, sessionId))),
+    promptOf: (cwd, sessionId) => firstPrompt(head(transcriptFile(home, cwd, sessionId))),
+  };
+}
+
 /** Runs `f1rm wake` and returns the exit code. */
 export async function wake(words: string[]): Promise<number> {
   if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
@@ -141,11 +158,7 @@ export async function wake(words: string[]): Promise<number> {
   if (!target) throw new Error(USAGE);
   let plan: WakePlan;
   try {
-    const home = process.env.HOME!;
-    const file = (cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
-    const modelOf = (cwd: string, sessionId: string) => lastModel(tail(file(cwd, sessionId)));
-    const promptOf = (cwd: string, sessionId: string) => firstPrompt(head(file(cwd, sessionId)));
-    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync, modelOf, promptOf });
+    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, realWakeDeps(process.env.HOME!));
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(`${err.message} Do not wake it; tell the session you report to. Only after the user approves this wake in that conversation is it rerun with --override.`);

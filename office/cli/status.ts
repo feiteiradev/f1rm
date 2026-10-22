@@ -1,6 +1,7 @@
 // `f1rm status [--json]`: what each hire of this repo is really doing, from its transcript and its branch, never from the status text `claude agents` shows.
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { repoKey } from "../server/board.ts";
 import { agents, machine } from "../server/machine.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
@@ -21,6 +22,8 @@ export type Hire = {
   ended: boolean;
   /** When the limit stop the transcript ends on lifts, as its text gives it after "resets" (see limitUntil below); "unknown" if it names none; else null. */
   limitUntil: string | null;
+  /** What the office's recovery noted about it (it stopped again after a wake, it could not be woken, its turn ended without a report); null if it noted nothing. */
+  recovery: string | null;
 };
 
 export type HiresDeps = {
@@ -33,6 +36,19 @@ export type HiresDeps = {
   /** The tip's commit time (ms) of a branch in the repo, or null. */
   commitTime: (branch: string) => number | null;
 };
+
+/** Where the office keeps what its recovery tick remembers of a project's hires: `~/.f1rm/recovery/<repo>.json`, written by the office and read here. */
+export const recoveryFile = (home: string, repo: string) => join(home, ".f1rm", "recovery", `${repoKey(repo)}.json`);
+
+/** The notes the office left on this project's hires, by name; none when the file is missing, cut or of another shape. */
+function recoveryNotes(home: string, repo: string): Record<string, string> {
+  try {
+    const entries = JSON.parse(readFileSync(recoveryFile(home, repo), "utf8"));
+    return Object.fromEntries(Object.entries(entries).flatMap(([name, e]) => (typeof (e as any)?.note === "string" ? [[name, (e as any).note as string]] : [])));
+  } catch {
+    return {};
+  }
+}
 
 /** An ended hire older than this is history, not something to wake. */
 const ENDED_WINDOW_MS = 24 * 60 * 60_000;
@@ -91,7 +107,7 @@ export const textOf = (content: unknown): string => (typeof content === "string"
  * The last line of the conversation in a piece of transcript: an assistant or user line, or a message put in the queue (an enqueue; the queue emptying or being edited is
  * no message), past whatever bookkeeping Claude Code writes after a turn. A task-notification is the session's own background task finishing, not anyone's message.
  */
-function lastTurn(end: string): any {
+export function lastTurn(end: string): any {
   for (const l of end.split("\n").reverse()) {
     if (!TURN_LINE.test(l)) continue;
     try {
@@ -108,7 +124,7 @@ function lastTurn(end: string): any {
  * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
  * names none; null unless the last line of the conversation is an API error about a limit, so a delivered `resume` or a reply clears it.
  */
-function limitUntil(end: string): string | null {
+export function limitUntil(end: string): string | null {
   const line = lastTurn(end);
   if (line?.type !== "assistant" || line.isApiErrorMessage !== true) return null;
   const text = textOf(line.message?.content);
@@ -153,6 +169,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   const listedIds = new Set(listed.map((a) => a?.sessionId));
   const files = transcripts(home, repo, listedIds, now);
   const byId = new Map(files.map((t) => [t.id, t]));
+  const notes = recoveryNotes(home, repo);
   const make = (name: string, sessionId: string, t: Transcript | undefined, a?: any): Hire => {
     const { role, team, task, reviewer } = hireName(name)!;
     const commit = role === "lead" || reviewer ? null : commitTime(`worktree-${task}`);
@@ -165,6 +182,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
       lastCommit: commit == null ? null : new Date(commit).toISOString(),
       ended: !a,
       limitUntil: t ? limitUntil(tailOf(t)) : null,
+      recovery: notes[name] ?? null,
     };
   };
 
@@ -210,7 +228,7 @@ export function parseArgs(argv: string[]): Args {
 }
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
-const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : ""].filter(Boolean).join(", ");
+const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : "", h.recovery ?? ""].filter(Boolean).join(", ");
 
 function table(list: Hire[], now: number): string {
   if (!list.length) return "no hires\n";

@@ -46,7 +46,7 @@ test("a live hire shows its name, role, team, agents status, transcript activity
   expect(one).toEqual({
     name: "shop.backend-dev-checkout", role: "backend-dev", team: "shop", sessionId: "aaaa1111", status: "busy", state: "working",
     lastActivity: new Date(NOW - 5 * MIN).toISOString(), idleMinutes: 5, lastCommit: new Date(NOW - 90 * MIN).toISOString(),
-    ended: false, limitUntil: null,
+    ended: false, limitUntil: null, recovery: null,
   } satisfies Hire);
 });
 
@@ -535,4 +535,27 @@ test("a named watch gets past the length check at 150 characters, and is refused
   } finally {
     repos.cleanup();
   }
+});
+
+test("what the office's recovery noted about a hire shows as its NOTE and as `recovery` in --json; a hire it noted nothing about shows none", async () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "aaaa1111", [talk("working on it")], 5);
+  transcript(h, `${REPO}/.claude/worktrees/landing`, "cccc3333", [talk("working on it")], 5);
+  const dir = join(h, ".f1rm", "recovery");
+  mkdirSync(dir, { recursive: true });
+  const note = "shop.backend-dev-checkout stopped again after a wake; f1rm wake shop.backend-dev-checkout";
+  writeFileSync(join(dir, "-code-shop.json"), JSON.stringify({ "shop.backend-dev-checkout": { note, wokeAt: 1 }, "shop.designer-landing": { wokeAt: 2 } }));
+  const list = [live("shop.backend-dev-checkout", "aaaa1111", cwd), live("shop.designer-landing", "cccc3333", `${REPO}/.claude/worktrees/landing`)];
+  const [dev, designer] = hires(base(h, list));
+  expect([dev.recovery, designer.recovery]).toEqual([note, null]);
+  const deps = { home: h, now: () => NOW, loadAgents: async () => list, sleep: async () => {}, commitTime: () => null };
+  const text = await statusFor(parseArgs([]), REPO, deps);
+  expect(text.out.split("\n")[1]).toContain(note);
+  expect(JSON.parse((await statusFor(parseArgs(["--json"]), REPO, deps)).out)[0].recovery).toBe(note);
+  // A file that is not JSON, or an entry of another shape, shows nothing and breaks nothing.
+  writeFileSync(join(dir, "-code-shop.json"), "{cut");
+  expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
+  writeFileSync(join(dir, "-code-shop.json"), JSON.stringify({ "shop.backend-dev-checkout": { note: 7 } }));
+  expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
 });

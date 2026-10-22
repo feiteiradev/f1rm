@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { networkInterfaces, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { projectFile } from "./editions.ts";
-import { startServer } from "./server.ts";
+import { GATE_LISTING_MS, startServer } from "./server.ts";
 import { LOAD_FIRST, SECURITY } from "../cli/hire.ts";
 import { machine } from "./machine.ts";
 import type { OfficeState } from "./office.ts";
@@ -110,7 +110,7 @@ afterEach(() => {
 const clientDir = mkdtempSync(join(tmpdir(), "f1rm-client-"));
 writeFileSync(join(clientDir, "index.html"), "<!doctype html><title>f1rm</title>");
 
-function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string, extra: { transcriptsDir?: string } = {}) {
+function start(repos?: Record<string, string>, approvalTimeoutMs?: number, boardsDir?: string, extra: Partial<Parameters<typeof startServer>[0]> = {}) {
   // A door needs a registration, which only `f1rm pm` writes: these repos have one, as if it had run.
   const projectsDir = mkdtempSync(join(tmpdir(), "f1rm-projects-"));
   for (const common of new Set(Object.values(repos ?? {}))) writeFileSync(projectFile(projectsDir, common), "{}\n");
@@ -2271,4 +2271,60 @@ test("the messaging refusals are logged by rule with the role and title, and nev
     "refused backend checkout.backend-dev-a SendMessage intern-message",
     "refused lead lead-checkout SendMessage project-unknown",
   ]);
+});
+
+test("a message to a name no session answers to is refused as unknown when `claude agents --json --all` is too slow, since the hook gives up after 5 s and would let it through", async () => {
+  expect(GATE_LISTING_MS).toBeLessThan(5000);
+  start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { gateListingMs: 150 });
+  await hired("l1", "go", "f1rm:lead", "lead-checkout");
+  sessionList = [ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old")];
+  sessionsGate = new Promise((resolve) => setTimeout(resolve, 2500));
+  const began = Date.now();
+  const out = await held(await hook({ ...preToolUse("l1", "SendMessage", { to: "checkout.backend-dev-old", message: "x" }), cwd: "/code/shop" }));
+  expect(Date.now() - began).toBeLessThan(1500);
+  expect(out.permissionDecision).toBe("deny");
+  expect(out.permissionDecisionReason).toContain("unknown to the office");
+  // A listing that answers in time still finds the ended hire.
+  sessionsGate = undefined;
+  const found = await held(await hook({ ...preToolUse("l1", "SendMessage", { to: "checkout.backend-dev-old", message: "x" }), cwd: "/code/shop" }));
+  expect(found.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-old");
+});
+
+test("the recovery tick runs for the registered projects only, reads their boards, and tells the session a hire reports to through that session's inbox", async () => {
+  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
+  const woke: string[] = [];
+  const stored: Record<string, unknown> = {};
+  const wt = "/code/shop/.claude/worktrees";
+  const gone = (name: string, id: string, cwd: string) => ({ id: id.slice(0, 8), kind: "background", name, sessionId: id, cwd, state: "stopped", startedAt: 1 });
+  const row = (owner: string) => `| T1 | ${owner} | doing | worktree-a | x |\n`;
+  const head = "| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n";
+  writeFileSync(join(boards, "-code-shop.team.checkout.md"), head + row("checkout.backend-dev-a") + row("checkout.backend-dev-b"));
+  writeFileSync(join(boards, "-code-blog.team.checkout.md"), head + row("checkout.backend-dev-z"));
+  const transcripts: Record<string, string> = {
+    "sid-a": JSON.stringify({ type: "assistant", isApiErrorMessage: true, message: { content: [{ type: "text", text: "You've hit your session limit" }] } }),
+    "sid-b": JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "compiling" }] } }),
+    "sid-z": "",
+  };
+  start({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }, undefined, boards, {
+    recovery: {
+      everyMs: 40,
+      deps: {
+        now: Date.now,
+        sessions: async () => [gone("checkout.backend-dev-a", "sid-a", `${wt}/a`), gone("checkout.backend-dev-b", "sid-b", `${wt}/b`), gone("checkout.backend-dev-z", "sid-z", "/code/blog/.claude/worktrees/z"), gone("checkout.backend-dev-q", "sid-q", "/code/quiet/.claude/worktrees/q")],
+        tail: (_cwd, sid) => transcripts[sid] ?? "",
+        mtime: () => null,
+        promptOf: () => null,
+        commitTime: () => null,
+        wake: async (repo, name) => void woke.push(`${repo} ${name}`),
+        store: { load: (repo) => (stored[repo] as any) ?? {}, save: (repo, entries) => void (stored[repo] = structuredClone(entries)) },
+      },
+    },
+  });
+  // Shop and blog are registered and have a lead in the office; /code/quiet is not registered at all.
+  await hook({ ...common("lb", "UserPromptSubmit"), cwd: "/code/blog", prompt: "go", session_title: "lead-checkout", agent_type: "f1rm:lead" }, { "x-f1rm-messaging-socket": "/tmp/cc-socks/blog.sock" });
+  await hook({ ...common("l1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", session_title: "lead-checkout", agent_type: "f1rm:lead" }, { "x-f1rm-messaging-socket": "/tmp/cc-socks/lead.sock" });
+  for (let i = 0; i < 100 && !(woke.length > 1 && calls.some((c) => c.startsWith("tell "))); i++) await Bun.sleep(20);
+  expect(woke.sort()).toEqual(["/code/blog checkout.backend-dev-z", "/code/shop checkout.backend-dev-b"]);
+  expect(calls.filter((c) => c.startsWith("tell "))).toEqual(["tell /tmp/cc-socks/lead.sock l1 checkout.backend-dev-a stopped at the session limit; f1rm wake checkout.backend-dev-a"]);
+  expect(Object.keys(stored).sort()).toEqual(["/code/blog", "/code/shop"]);
 });
