@@ -165,6 +165,17 @@ test.each(["pstack:architect", "pstack:how"])("a lead hired with --skills %s get
   expect(prompt(stub)).toBe(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n${BRIEF}`);
 });
 
+// arena, swarm and interrogate carry disable-model-invocation too, and no hire is wired to run one as a first command: --skills refuses them, for every role.
+test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s is refused with nothing started: the Skill tool refuses it and the user can run it by hand", (skill) => {
+  for (const [role, task] of [["lead", "checkout"], ["backend-dev", "x"], ["reviewer", "review-x"]]) {
+    const stub = stubClaude([]);
+    const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
+    expect(r.code, `${role} ${skill}`).not.toBe(0);
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
+    expect(stub.argv(), `${role} ${skill}`).toBeNull();
+  }
+});
+
 // A dev's own first skill, pstack:poteto-mode, is slash-only too, so a second slash-only skill would push it into the Skill-tool list, which refuses it and holds the hire forever.
 test.each(["frontend-dev", "backend-dev"])("a %s is refused a slash-only --skills (research, architect, how): its own first command is pstack:poteto-mode", (role) => {
   for (const skill of ["research", "pstack:architect", "pstack:how"]) {

@@ -20,6 +20,8 @@ export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A dev's own first skill is poteto-mode, so no slash-only skill can be added to a dev; architect and how are for a lead.
 const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
+// arena, swarm and interrogate are slash-only too, and no hire is wired to run one: the user runs them by hand.
+const NOT_WIRED = ["pstack:arena", "pstack:swarm", "pstack:interrogate"];
 // A bug is diagnosed before it is fixed test-first: this added skill loads ahead of the role's own later skills.
 const DIAGNOSE = "mattpocock-skills:diagnosing-bugs";
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
@@ -129,6 +131,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
+  const unwired = added.find((s) => NOT_WIRED.includes(s));
+  if (unwired) throw new Error(`${unwired} is not wired inside hires (the Skill tool refuses it); the user can run it by hand`);
   const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
   if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
   let own = roles.find((r) => r.id === role)!.skills;
