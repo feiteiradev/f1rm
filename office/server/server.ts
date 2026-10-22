@@ -36,7 +36,7 @@ const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", 
 /** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
 // ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
 // so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
-const simpleCommands = (command: string) => {
+const splitCommands = (command: string) => {
   const out: string[][] = [[]];
   for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
@@ -48,9 +48,10 @@ const simpleCommands = (command: string) => {
       else if (wrapper === "timeout") wrapper = ""; // its first word past the options is the duration
       else if (!/^\w+=/.test(w)) break;
     }
-    return words.slice(i);
+    return { prefix: words.slice(0, i), words: words.slice(i) };
   });
 };
+const simpleCommands = (command: string) => splitCommands(command).map((c) => c.words);
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
 // ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
 const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
@@ -143,18 +144,20 @@ const sameFolder = (a: string, b: string) => {
   return inside(x, y) || inside(y, x);
 };
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
-const claudeStart = ([program, ...words]: string[]) => {
+// A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
+// `$(mktemp -d)`, and not the real HOME once links, `/System/Volumes/Data` and letter case are put aside. Text only: a HOME exported by an earlier call is not seen.
+const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
+const homeKey = (path: string) => realPath(resolve(path)).replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
+const ownHome = (prefix: string[]) => {
+  const value = unquoted(prefix.findLast((w) => w.startsWith("HOME="))?.slice(5) ?? "");
+  return value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![homeKey(process.env.HOME ?? "/"), "/"].includes(homeKey(value)));
+};
+const claudeStart = ({ prefix, words: [program, ...words] }: { prefix: string[]; words: string[] }) => {
   if (basename(unquoted(program ?? "")) !== "claude") return null;
   const args = words.map(unquoted);
   const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "-p" || a === "--print");
-  return bg || print ? { bg, print, resume: args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) } : null;
+  return bg || print ? { bg, print, resume: args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")), home: ownHome(prefix) } : null;
 };
-/** Whether a shell line gives a command a HOME of its own (`HOME=<tmp> claude -p …`, `export HOME=<tmp>; …`): a second-office proof. Text only: a HOME exported by an earlier call is not seen. */
-const ownHome = (command: string) =>
-  [...command.matchAll(/(?:^|[\s;&|(])(?:export\s+)?HOME=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)].some(([, value]) => {
-    const home = unquoted(value);
-    return home !== "" && !/^(?:~|\$HOME|\$\{HOME)/.test(home) && resolve(home) !== resolve(process.env.HOME ?? "/");
-  });
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
 /** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
@@ -406,9 +409,9 @@ export function startServer({
     if ((tool === "Skill" && /^(?:[\w-]+:)?loop$/.test(String(input.skill ?? "").trim().replace(/^\//, ""))) || tool === "ScheduleWakeup" || tool === "CronCreate") {
       return refuse("loop", "/loop is refused for every employee: a loop keeps a session working on the shared usage limit. Do the step once and report, or watch with a background shell command (Bash with run_in_background).");
     }
-    const starts = commands.flatMap((c) => claudeStart(c) ?? []);
-    if (starts.length && !ownHome(String(input.command ?? "")) && !(COORDINATORS.has(role) && starts.every((s) => s.bg && s.resume && !s.print))) {
-      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof sets its own HOME in the same command.");
+    const starts = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)).flatMap((c) => claudeStart(c) ?? []) : [];
+    if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.resume && !s.print))) {
+      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: `HOME=<tmp> claude …`.");
     }
     if (tool === "Agent" || tool === "Task") {
       if (String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
