@@ -1662,6 +1662,8 @@ test("a Skill try only counts from the session's own transcript, read within lim
   expect(await tryAt("link", join(transcripts, "plink", "link.jsonl"))).toBe("deny");
   await hire("big"); // the try sits past the first 8 MB
   expect(await tryAt("big", transcript("big", [{ type: "user", pad: "x".repeat(8 * 1024 * 1024) }, ...tried]))).toBe("deny");
+  await hire("bigstart"); // a try inside the first 8 MB of a larger file still counts
+  expect(await tryAt("bigstart", transcript("bigstart", [...tried, { type: "user", pad: "x".repeat(8 * 1024 * 1024) }]))).toBeNull();
   await hire("side"); // tried only inside a sub-agent
   expect(await tryAt("side", transcript("side", [skillUse("pstack:architect", { isSidechain: true })]))).toBe("deny");
   await hire("other"); // other lines and other tools are not a Skill try
@@ -1758,6 +1760,16 @@ test("a refused security-review read from the transcript does not release a --le
   expect((await send())?.permissionDecision).toBe("deny");
   await skillLoaded("rs", "security-review");
   expect(await send()).toBeNull();
+});
+
+test("even a first prompt that names security-review does not let a refused try release APPROVED", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hired("rn", `/code-review high${LOAD_FIRST}security-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const path = transcript("rn", [skillUse("security-review"), refused]);
+  expect(await tryAt("rn", path)).toBe("deny"); // the read happens here and must not count it
+  const out = await held(await hook({ ...preToolUse("rn", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
+  expect(out.permissionDecision).toBe("deny");
 });
 
 test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {

@@ -194,7 +194,7 @@ export const processRuns = (pid: number) => {
 // How often `claude agents --json` is asked for the pids of employees whose pid is not known yet.
 const PID_REFRESH_MS = 30_000;
 
-// A stat and never a parse: the transcript format isn't a public contract, and its mtime is all liveness needs.
+// Liveness takes a stat and never a parse: the transcript format isn't a public contract, and its mtime is all it needs. (The skill gate's read, skillsTried, parses only Skill tool_use names and fails closed.)
 const transcriptMtime = (path?: string) => {
   try {
     return path ? statSync(path).mtimeMs : 0;
@@ -217,9 +217,10 @@ function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): 
   try {
     if (typeof hint !== "string" || hint.split(sep).includes("..")) return tried;
     const path = resolve(hint);
+    if (basename(path) !== `${sessionId}.jsonl`) return tried; // before any disk access
     const realDir = realpathSync(resolve(transcriptsDir));
     const real = realpathSync(path); // a link that leads elsewhere is not the session's file
-    if (basename(path) !== `${sessionId}.jsonl` || real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
+    if (real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
     const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a pipe at the path must not hang the office
     let text: string;
     try {
@@ -301,10 +302,10 @@ export function startServer({
     const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
     if (gate) {
       // A refused Skill call leaves no hook event, so a call about to be held looks in the transcript for a try of the skills the first prompt named.
-      // The security hold counts only a skill that ran (its PostToolUse), never a try.
+      // The security hold counts only a skill that ran (its PostToolUse), never a try: security-review is never taken from the transcript.
       let missing = READING.has(tool) ? [] : gate.required.filter((r) => !gate.loaded.has(r));
       if (missing.length) {
-        for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (gate.required.includes(skill)) gate.loaded.add(skill);
+        for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (skill !== "security-review" && gate.required.includes(skill)) gate.loaded.add(skill);
         missing = missing.filter((r) => !gate.loaded.has(r));
       }
       if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried after one call: if it answers that the skill is reserved for the user, go on without it; if it answers that the skill is unknown, send \`BLOCKED <task>\` as above too.`);
@@ -534,7 +535,7 @@ export function startServer({
           // The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
           push();
-          // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one.
+          // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
           // A session resumed with its own id (`claude --bg --resume`) has had its first prompt already. One forked on resume (`--fork-session`) is a new session id whose first prompt is the resume note, which re-lists nothing. Neither is armed again.
           if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
