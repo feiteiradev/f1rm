@@ -8,6 +8,11 @@ import { longRepos } from "./long-repo.test-helper.ts";
 // Every test spawns real `f1rm hire` processes (up to eight in one test); on a loaded machine that passes 5 s.
 setDefaultTimeout(30_000);
 
+// Every temp folder this file makes goes in one list, removed once the file is done.
+const made: string[] = [];
+const tmp = (prefix: string) => (made.push(mkdtempSync(join(tmpdir(), prefix))), made[made.length - 1]);
+afterAll(() => made.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
 const CLI = join(import.meta.dir, "f1rm.ts");
 const BRIEF = "Task: landing: build the page\nAcceptance criteria:\n- it renders";
 
@@ -16,7 +21,7 @@ const bg = (state: string, name = "elsewhere-x", cwd = "/elsewhere"): Session =>
 
 /** `claude agents --json` prints `sessions` (or fails when null); any other call records its argv (NUL-separated, so a multi-line prompt survives) and env. */
 function stubClaude(sessions: Session[] | null) {
-  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const bin = tmp("f1rm-bin-");
   const log = join(bin, "argv.log");
   const envLog = join(bin, "env.log");
   const agents = join(bin, "agents.json");
@@ -37,7 +42,7 @@ function stubClaude(sessions: Session[] | null) {
 function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process.cwd(), env: Record<string, string> = {}) {
   const r = Bun.spawnSync(["bun", CLI, "hire", ...args], {
     cwd,
-    env: { ...process.env, HOME: mkdtempSync(join(tmpdir(), "f1rm-home-")), PATH: `${stub.bin}:${process.env.PATH}`, ...env },
+    env: { ...process.env, HOME: tmp("f1rm-home-"), PATH: `${stub.bin}:${process.env.PATH}`, ...env },
   });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
@@ -395,14 +400,7 @@ test("hire --help prints the syntax", () => {
 });
 
 // Teams: the repo a lead runs in is the folder `f1rm hire` runs in.
-// Only the folders this file made are removed, once it is done.
-const repoDirs: string[] = [];
-const repoDir = () => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-repo-")));
-  repoDirs.push(dir);
-  return dir;
-};
-afterAll(() => repoDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+const repoDir = () => realpathSync(tmp("f1rm-repo-"));
 const worktree = (repo: string, task: string) => join(repo, ".claude", "worktrees", task);
 
 test("a lead runs as lead-<team> in the repo, with no worktree, starting with the guidelines and reporting to the PM", () => {
@@ -495,7 +493,7 @@ test("one specialist per task: a task a live session works in is refused, even w
 
 test("a founder role is refused in a Work project, or one with no edition, and hired in a Founder project", async () => {
   const { projectFile, writeEdition } = await import("../server/editions.ts");
-  const home = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-home-"))), repo = repoDir();
+  const home = realpathSync(tmp("f1rm-home-")), repo = repoDir();
   const marketer = [...pmArgs, "marketer", "marketer-launch", "launch", BRIEF];
   const unset = stubClaude([]);
   const r = hire(unset, marketer, repo, { HOME: home });

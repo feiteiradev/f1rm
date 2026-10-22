@@ -1,5 +1,5 @@
 // Seam 2: the real f1rm CLI, run with a temporary HOME.
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +11,13 @@ import { longRepos } from "./long-repo.test-helper.ts";
 
 const CLI = join(import.meta.dir, "f1rm.ts");
 
+// Every temp folder this file makes goes in one list, removed once the file is done.
+const made: string[] = [];
+const tmp = (prefix: string) => (made.push(mkdtempSync(join(tmpdir(), prefix))), made[made.length - 1]);
+afterAll(() => made.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
 function tempHome(settings?: object) {
-  const home = mkdtempSync(join(tmpdir(), "f1rm-home-"));
+  const home = tmp("f1rm-home-");
   mkdirSync(join(home, ".claude"));
   if (settings) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings, null, 2));
   return home;
@@ -503,7 +508,7 @@ test("install refuses to touch a settings file it cannot parse", () => {
 // A stub `claude` first on PATH records its argv and the session-identifying part of its env.
 /** `claude agents --json` lists `sessions`; any other call is logged. */
 function stubClaude(exitCode = 0, sessions: object[] = []) {
-  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const bin = tmp("f1rm-bin-");
   const log = join(bin, "claude.log");
   writeFileSync(join(bin, "agents.json"), JSON.stringify(sessions));
   writeFileSync(
@@ -535,7 +540,7 @@ function pmIn(cwd: string, extraEnv: Record<string, string>, stub: ReturnType<ty
 }
 
 const repoDir = (name: string) => {
-  const dir = join(mkdtempSync(join(tmpdir(), "f1rm-repo-")), name);
+  const dir = join(tmp("f1rm-repo-"), name);
   mkdirSync(dir);
   return dir;
 };
@@ -613,7 +618,7 @@ test("pm scrubs the Claude Code session variables it inherited", () => {
 });
 
 function stubBin() {
-  const bin = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const bin = tmp("f1rm-bin-");
   for (const tool of ["launchctl", "open"]) writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $@" >> "${bin}/calls.log"\n`, { mode: 0o755 });
   const calls = () => (existsSync(join(bin, "calls.log")) ? readFileSync(join(bin, "calls.log"), "utf8").trim().split("\n") : []);
   const run = (home: string, ...args: string[]) => {
@@ -1032,7 +1037,7 @@ test("status is a command: it lists this repo's hires from claude agents, never 
   expect(plain.code).toBe(0);
   expect(plain.out).toContain("lead-shop");
   expect(plain.out).not.toContain("lead-other");
-  const broken = mkdtempSync(join(tmpdir(), "f1rm-bin-"));
+  const broken = tmp("f1rm-bin-");
   writeFileSync(join(broken, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   const unreadable = await f1rmIn(repo, home, broken, "status");
   expect(unreadable.code).toBe(1);
@@ -1080,7 +1085,7 @@ const git = (cwd: string, ...args: string[]) => {
 };
 /** A repo on main with two hires' worktrees: `done` merged into main, `open` with a commit main lacks. */
 function repoWithHires() {
-  const repo = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-letgo-")));
+  const repo = realpathSync(tmp("f1rm-letgo-"));
   git(repo, "init", "-b", "main");
   git(repo, "commit", "--allow-empty", "-m", "start");
   for (const task of ["done", "open"]) {
