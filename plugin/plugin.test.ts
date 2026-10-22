@@ -671,6 +671,19 @@ test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm stat
   for (const t of ["f1rm status", "Self-driving teams"]) expect(titles).toContain(`2026-10-21 ${t}`);
 });
 
+test("the Skill stack and Ask-the-user decisions entries and the plugin README state the fixed rules: arena and swarm not wired, every pstack skill but setup flagged, hires log the core decisions", () => {
+  const entry = (title: string) => readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).find((e) => e.startsWith(`2026-10-21 ${title}\n`))!;
+  const stack = entry("Skill stack: mattpocock + pstack");
+  expect(stack).not.toContain("only when a brief asks");
+  for (const s of ["`pstack:arena` and `pstack:swarm` are not wired inside hires", "every pstack skill but `setup-pstack` carries `disable-model-invocation`", "`f1rm hire` refuses any other `pstack:` skill in `--skills`"]) expect(stack, s).toContain(s);
+  const ask = entry("Ask the user only for big decisions");
+  expect(ask).not.toContain("logged in `docs/decisions.md`");
+  expect(ask).toContain("a core one goes into a brief's Context so the hire logs it");
+  const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  expect(readme).not.toContain("made and logged for you");
+  expect(readme).toContain("technical choices are made by the PM or the lead, and the hires log the core ones");
+});
+
 test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.md point to it by name, and the report gains the decisions line", () => {
   const who = section("Who talks to whom");
   for (const s of [
