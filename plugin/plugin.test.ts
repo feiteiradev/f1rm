@@ -675,7 +675,8 @@ test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.
   const who = section("Who talks to whom");
   for (const s of [
     "**Ask the user only for big decisions.**", "business, product scope (what the software does), design direction, strategy", "irreversible or external actions (push, deploy, spend, data deletion, messaging people)",
-    "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", "logged in `docs/decisions.md` with their why", "Decisions taken without you",
+    "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", // The delegation gate lets the PM and a lead write no docs/decisions.md: the hire logs a core decision in its own commit.
+    "are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it)", "Decisions taken without you",
     // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say.
     "irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
   ]) expect(who, s).toContain(s);
@@ -685,6 +686,8 @@ test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.
   for (const r of ["pm", "lead"]) {
     expect(role(r).body, r).toContain("Ask the user only for big decisions");
     expect(role(r).body, r).not.toContain("product scope (what the software does)");
+    expect(role(r).body, r).toContain("so the hire logs it (see Who writes it");
+    expect(role(r).body, r).not.toMatch(/\blog them\b|logged in `docs\/decisions\.md`/);
   }
   expect(role("pm").body).toContain("Decisions taken without you");
   expect(role("pm").body).not.toContain("questions that need the user's decision");
