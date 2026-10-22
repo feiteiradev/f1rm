@@ -670,7 +670,7 @@ export function startServer({
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
-          // A session resumed with its own id (`claude --bg --resume`) has had its first prompt already. One woken by `f1rm wake` (or forked on resume) is a new session id whose first prompt is the resume note, which re-lists no skills; it arms only when the note repeats the security sentence, as a woken high-level Reviewer's does, on purpose.
+          // A session that keeps its id (`claude attach`, or a flagless `claude --bg --resume` that continues it) has had its first prompt already. One woken by `f1rm wake` (or forked on resume) is a new session id whose first prompt is the resume note, which re-lists no skills; it arms only when the note repeats the security sentence, as a woken high-level Reviewer's does, on purpose.
           if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
             const prompt = String(payload.prompt ?? "");
             const at = prompt.indexOf(LOAD_FIRST);
