@@ -1040,10 +1040,11 @@ export function startServer({
   const recovering = recovery && createRecovery({
     ...recovery.deps,
     board: async (repo, team) => (boardsDir ? readBoard(team ? teamBoardFile(boardsDir, repo, team) : boardFile(boardsDir, repo)) : []),
-    tell: async (repo, name, message) => {
-      const to = Object.values(state.employees).find((e) => e.title === name && e.status !== "offline" && e.room !== ELSEWHERE.id && folderOf(e.room) === repo && e.socket);
-      if (!to) return false;
-      return machine.tell(to.socket!, to.sessionId, message).then(() => true, () => false);
+    // Every live seat of the name in this project is tried until one takes it (a stale copy keeps a dead socket); a nudge names the hire's own session, since an interactive session may wear its title.
+    tell: async (repo, name, message, sessionId) => {
+      const seats = Object.values(state.employees).filter((e) => e.title === name && e.status !== "offline" && e.room !== ELSEWHERE.id && folderOf(e.room) === repo && e.socket && (!sessionId || e.sessionId === sessionId));
+      for (const seat of seats) if (await machine.tell(seat.socket!, seat.sessionId, message).then(() => true, () => false)) return true;
+      return false;
     },
   });
   let recoveringNow = false;

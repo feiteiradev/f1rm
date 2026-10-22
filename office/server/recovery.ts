@@ -112,8 +112,8 @@ export type RecoveryDeps = {
   commitTime: (repo: string, branch: string) => number | null;
   /** Wakes the hire through `f1rm wake`'s own checks; throws what it refuses with. */
   wake: (repo: string, name: string, note: string) => Promise<void>;
-  /** Puts a message into the inbox of the live session of this name in the project; false if it has none or the write fails. */
-  tell: (repo: string, name: string, message: string) => Promise<boolean>;
+  /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
+  tell: (repo: string, name: string, message: string, sessionId?: string) => Promise<boolean>;
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
 };
 
@@ -206,7 +206,7 @@ export function createRecovery(d: RecoveryDeps) {
         if (!quiet || reportSent(tailText) || e.nudged === key) continue;
         if (h.role === "lead" && !teamQuiet(newest, h.team, now)) continue;
         e.nudged = key!;
-        if (!(await safeTell(repo, name, NUDGE))) {
+        if (!(await safeTell(repo, name, NUDGE, sid))) {
           e.unreachable = key!;
           e.note = `turn ended without a report ${Math.floor((now - mt!) / MIN)}m ago; ${name} has no inbox to nudge`;
         }
@@ -258,7 +258,7 @@ export function createRecovery(d: RecoveryDeps) {
     if (JSON.stringify(entries) !== before) d.store.save(repo, entries);
   }
 
-  const safeTell = (repo: string, name: string, message: string) => d.tell(repo, name, message).catch(() => false);
+  const safeTell = (repo: string, name: string, message: string, sessionId?: string) => d.tell(repo, name, message, sessionId).catch(() => false);
 
   /** A lead is quiet when every member of its team is: idle, and its transcript written 20 minutes ago or more (an ended one counts as quiet). */
   function teamQuiet(newest: Map<string, any>, team: string | null, now: number): boolean {

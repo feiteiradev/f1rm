@@ -43,7 +43,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   openVsCode: async (folder: string) => void calls.push(`code ${folder}`),
   tell: async (socket: string, sessionId: string, message: string) => {
     calls.push(`tell ${socket} ${sessionId} ${message}`);
-    if (tellFails) throw new Error(tellFails);
+    if (tellFails || socket.includes("dead")) throw new Error(tellFails || "its inbox socket is gone, so the session has ended");
   },
   workingHires: async () => working,
   backgroundSessions: async () => (working === null ? null : Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" }))),
@@ -2327,4 +2327,39 @@ test("the recovery tick runs for the registered projects only, reads their board
   expect(woke.sort()).toEqual(["/code/blog checkout.backend-dev-z", "/code/shop checkout.backend-dev-b"]);
   expect(calls.filter((c) => c.startsWith("tell "))).toEqual(["tell /tmp/cc-socks/lead.sock l1 checkout.backend-dev-a stopped at the session limit; f1rm wake checkout.backend-dev-a"]);
   expect(Object.keys(stored).sort()).toEqual(["/code/blog", "/code/shop"]);
+});
+
+test("the office tells a hire by its own session id, never another session that shares its title, and tries each live seat of a Report to until one answers", async () => {
+  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
+  const head = "| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n";
+  writeFileSync(join(boards, "-code-shop.team.checkout.md"), head + "| T1 | checkout.backend-dev-a | doing | worktree-a | x |\n| T2 | checkout.backend-dev-b | doing | worktree-b | x |\n");
+  const gone = { id: "bbbbbbbb", kind: "background", name: "checkout.backend-dev-b", sessionId: "sid-b", cwd: "/code/shop/.claude/worktrees/b", state: "stopped", startedAt: 1 };
+  const idle = { id: "aaaaaaaa", kind: "background", name: "checkout.backend-dev-a", sessionId: "h1", cwd: "/code/shop/.claude/worktrees/a", pid: 4242, state: "working", status: "idle", startedAt: 1 };
+  const text = (t: string) => JSON.stringify({ type: "assistant", uuid: "u1", message: { id: "m1", content: [{ type: "text", text: t }] } });
+  start({ "/code/shop": "/code/shop/.git" }, undefined, boards, {
+    recovery: {
+      everyMs: 40,
+      deps: {
+        now: Date.now,
+        sessions: async () => [idle, gone],
+        tail: (_cwd, sid) => (sid === "h1" ? text("Looked at it.") : JSON.stringify({ type: "assistant", isApiErrorMessage: true, message: { content: [{ type: "text", text: "You've hit your session limit" }] } })),
+        mtime: (_cwd, sid) => (sid === "h1" ? Date.now() - 30 * 60_000 : null),
+        promptOf: () => null,
+        commitTime: () => null,
+        wake: async () => {},
+        store: { load: () => ({}), save: () => {} },
+      },
+    },
+  });
+  const seat = (id: string, title: string, socket: string) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", session_title: title }, { "x-f1rm-messaging-socket": socket });
+  // An interactive session wearing the hire's title is seated first; a stale copy of the lead (dead socket) before the live one.
+  await seat("imp", "checkout.backend-dev-a", "/tmp/cc-socks/imp.sock");
+  await seat("h1", "checkout.backend-dev-a", "/tmp/cc-socks/h1.sock");
+  await seat("l-old", "lead-checkout", "/tmp/cc-socks/dead-lead.sock");
+  await seat("l-live", "lead-checkout", "/tmp/cc-socks/live-lead.sock");
+  for (let i = 0; i < 100 && calls.filter((c) => c.startsWith("tell ")).length < 3; i++) await Bun.sleep(20);
+  const told = calls.filter((c) => c.startsWith("tell "));
+  expect(told).toContain("tell /tmp/cc-socks/h1.sock h1 your turn ended without a report; send your DONE or BLOCKED");
+  expect(told.some((c) => c.includes("imp.sock"))).toBe(false);
+  expect(told).toContain("tell /tmp/cc-socks/live-lead.sock l-live checkout.backend-dev-b stopped at the session limit; f1rm wake checkout.backend-dev-b");
 });
