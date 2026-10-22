@@ -766,7 +766,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
-  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "ponytail:ponytail-review"]);
+  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "ponytail:ponytail-review", "mattpocock-skills:code-review"]);
   expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
@@ -1468,7 +1468,7 @@ test("a Founder project lists and hires the founder roles; a Work project, or on
   expect((await ids()).some((r) => founder.includes(r))).toBe(false);
   const marketer = { ...ASSIGN, role: "marketer" };
   const refused = await hireOf(marketer);
-  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` to hire one."]);
+  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` (after `f1rm pm` has registered the project) to hire one."]);
 
   const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
   expect((await setEdition("founder")).status).toBe(200);

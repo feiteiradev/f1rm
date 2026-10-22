@@ -16,14 +16,17 @@ export const CAP = 30;
 export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
-const SLASH_ONLY = ["research"];
+// pstack's poteto-mode, architect and how carry disable-model-invocation, so the Skill tool refuses them: each runs only as the first command, and a hire has one.
+// A dev's own first skill is poteto-mode, so no other slash-only skill can be added to a dev; architect and how are for a lead.
+const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
+const LEAD_ONLY = ["pstack:architect", "pstack:how"];
 // /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
 export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
 const LEVELS = ["low", "medium", "high"];
 /** What a content review (no code) drops from the reviewer's skills. */
-const CODE_REVIEW = ["code-review", "ponytail:ponytail-review", "security-review"];
+const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:ponytail-review", "security-review"];
 // The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
 const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
@@ -124,9 +127,26 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
   if (level != null && content) throw new Error("--level is for a code review, and --content has none");
   if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
+  // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three pstack skills in SLASH_ONLY can be a first command.
+  const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
+  if (unwired) throw new Error(`${unwired} is not wired inside hires; the user can run it by hand`);
+  const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
+  if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
+  let own = roles.find((r) => r.id === role)!.skills;
+  if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
+  const slashes = [...new Set([...own.slice(0, 1), ...added])].filter((s) => SLASH_ONLY.includes(s));
+  if (role === "reviewer" && !content && slashes.length) throw new Error(`${slashes[0]} is slash-only, and a code Reviewer's first command is /code-review <level> worktree-<task>: drop it`);
+  if (added.includes("pstack:poteto-mode") && own[0] !== "pstack:poteto-mode") throw new Error(`pstack:poteto-mode is for the two devs only: its playbooks would replace a ${role}'s own work`);
+  if (slashes.length > 1) {
+    throw new Error(
+      SLASH_ONLY.includes(own[0])
+        ? `${slashes[1]} is slash-only, and a ${role}'s first command is ${own[0]}: drop it`
+        : `${slashes.join(" and ")} are slash-only (the Skill tool refuses them) and a hire has one first command: drop one`,
+    );
+  }
   const known = roleOfAgentType(`f1rm:${role}`);
   if (known && FOUNDER_ONLY.has(known) && req.edition !== "founder") {
-    throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` to hire one.`);
+    throw new Error(`${role} is a Founder role and this is a Work project. Switch it with \`f1rm edition founder\` (after \`f1rm pm\` has registered the project) to hire one.`);
   }
   const lead = role === "lead";
   const name = lead ? `lead-${task}` : team ? `${team}.${role}-${task}` : `${role}-${task}`;
@@ -155,12 +175,11 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
-  let own = roles.find((r) => r.id === role)!.skills;
-  if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
+  // Every added skill loads ahead of the role's later ones (a bug's diagnosing-bugs before tdd).
   const slash = added.find((s) => SLASH_ONLY.includes(s));
-  const [first, ...rest] = slash ? [slash, ...own, ...added.filter((s) => s !== slash)] : [...own, ...added];
+  const [first, ...rest] = [...new Set([slash ?? own[0], ...added, ...own])];
   // The branch under review is named, so the review reads it and not the main checkout's working tree.
-  const command = role === "reviewer" && !content && !slash ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
+  const command = role === "reviewer" && !content ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
   const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
   const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
   const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
@@ -182,7 +201,7 @@ export function parseHireFlags(words: string[]) {
     if (args[0] === "--override") override = !!args.shift();
     else if (args[0] === "--report-to") (args.shift(), (reportTo = args.shift()));
     else if (args[0] === "--team") (args.shift(), (team = args.shift()));
-    else if (args[0] === "--skills") (args.shift(), (skills = (args.shift() ?? "").split(",").filter(Boolean)));
+    else if (args[0] === "--skills") (args.shift(), (skills = (args.shift() ?? "").split(",").map((s) => s.trim().replace(/^\//, "")).filter(Boolean)));
     else if (args[0] === "--level") (args.shift(), (level = args.shift()));
     else if (args[0] === "--content") content = !!args.shift();
     else break;

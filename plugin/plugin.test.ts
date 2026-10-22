@@ -14,9 +14,9 @@ const ROLES: Record<string, string[]> = {
   pm: ["mattpocock-skills:grilling", GUIDELINES],
   lead: [GUIDELINES, "f1rm:hire"],
   designer: ["design-pipeline"],
-  "frontend-dev": ["mattpocock-skills:tdd"],
-  "backend-dev": ["mattpocock-skills:tdd"],
-  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review"],
+  "frontend-dev": ["pstack:poteto-mode", "mattpocock-skills:tdd"],
+  "backend-dev": ["pstack:poteto-mode", "mattpocock-skills:tdd"],
+  reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review", "mattpocock-skills:code-review"],
   researcher: ["mattpocock-skills:research"],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
@@ -404,7 +404,7 @@ test("pickup keeps status internal: the PM updates the rows and says nothing unt
   expect(pmStep(1)).toContain('answer when the user asks "status?"');
   expect(pickup[1]).toContain('answer when the user asks "status?"');
   expect(pmPromptText()).toContain('answer when I ask "status?"');
-  expect(pmPromptText()).toContain("Speak to me only for");
+  expect(pmPromptText()).toContain("Ask me only as");
 });
 
 test("three gates, the README's hiring line, and the content checklist match the new rules", () => {
@@ -421,7 +421,7 @@ test("three gates, the README's hiring line, and the content checklist match the
 
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
-  for (const s of ["questions that need the user's decision", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
+  for (const s of ["big decisions;", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
   expect(talk).toMatch(/lead receives all of its team's messages/);
   expect(talk).toMatch(/sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`/);
   expect(section("Team brief")).toMatch(/Report: PLAN before hiring, BLOCKED[^\n]*DONE/);
@@ -433,7 +433,7 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
   for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
   expect(pm).toContain("`GO <team>` without telling the user");
-  for (const s of ["questions that need the user's decision", "git push"]) expect(pm, s).toContain(s);
+  for (const s of ["big decisions", "git push"]) expect(pm, s).toContain(s);
   expect(pmPromptText()).toContain("GO <team>");
 });
 
@@ -669,4 +669,157 @@ test("S4: both READMEs list f1rm status, and docs/decisions.md has the f1rm stat
   expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm status");
   const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
   for (const t of ["f1rm status", "Self-driving teams"]) expect(titles).toContain(`2026-10-21 ${t}`);
+});
+
+test("the Skill stack and Ask-the-user decisions entries and the plugin README state the fixed rules: arena and swarm not wired, every pstack skill but setup flagged, hires log the core decisions", () => {
+  const entry = (title: string) => readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).find((e) => e.startsWith(`2026-10-21 ${title}\n`))!;
+  const stack = entry("Skill stack: mattpocock + pstack");
+  expect(stack).not.toContain("only when a brief asks");
+  for (const s of ["`pstack:arena` and `pstack:swarm` are not wired inside hires", "every pstack skill but `setup-pstack` carries `disable-model-invocation`", "`f1rm hire` refuses any other `pstack:` skill in `--skills`"]) expect(stack, s).toContain(s);
+  const ask = entry("Ask the user only for big decisions");
+  expect(ask).not.toContain("logged in `docs/decisions.md`");
+  expect(ask).toContain("a core one goes into a brief's Context so the hire logs it");
+  // The Where lines name the commits that rewrote the entries.
+  expect(stack).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 24608de, 395e72c, 2359dae, 57552a6, a20d5b2, c2b220b, f44f850, 634a319\n/);
+  expect(ask).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae/);
+  const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
+  // Both READMEs say which --skills are refused.
+  const refusals = "any `pstack:` skill other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only) is refused, and a code Reviewer refuses a slash-only skill";
+  for (const text of [readme, readFileSync(join(REPO, "README.md"), "utf8")]) expect(text).toContain(refusals);
+  expect(readme).not.toContain("made and logged for you");
+  expect(readme).toContain("technical choices are made by the PM or the lead, and the hires log the core ones");
+});
+
+test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.md point to it by name, and the report gains the decisions line", () => {
+  const who = section("Who talks to whom");
+  for (const s of [
+    "**Ask the user only for big decisions.**", "business, product scope (what the software does), design direction, strategy", "irreversible or external actions (push, deploy, spend, data deletion, messaging people)",
+    "Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules)", // The delegation gate lets the PM and a lead write no docs/decisions.md: the hire logs a core decision in its own commit.
+    "are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it)", "Decisions taken without you",
+    // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say. One flat list: the cap and the permission are items of it, not the tail of the parenthesis.
+    "design direction, strategy, irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
+  ]) expect(who, s).toContain(s);
+  expect(who).toMatch(/a cap override[^\n]*goes to the PM as `BLOCKED`/);
+  expect(section("Cap rule")).toContain("only after the user has approved exceeding the cap");
+  expect(guidelines.split("product scope (what the software does)")).toHaveLength(2);
+  for (const r of ["pm", "lead"]) {
+    expect(role(r).body, r).toContain("Ask the user only for big decisions");
+    expect(role(r).body, r).not.toContain("product scope (what the software does)");
+    expect(role(r).body, r).toContain("so the hire logs it (see Who writes it");
+    expect(role(r).body, r).not.toMatch(/\blog them\b|logged in `docs\/decisions\.md`/);
+  }
+  expect(role("pm").body).toContain("Decisions taken without you");
+  expect(role("pm").body).not.toContain("questions that need the user's decision");
+});
+
+test("K2: devs start with /pstack:poteto-mode, pick its playbook, skip Opening a PR, and load tdd second; a backend bug loads diagnosing-bugs first", () => {
+  for (const r of ["frontend-dev", "backend-dev"]) {
+    const body = role(r).body;
+    for (const s of ["/pstack:poteto-mode", "`feature`", "`bug-fix`", "`refactoring`", "`perf-issue`", "Opening a PR", "mattpocock-skills:tdd"]) expect(body, `${r}: ${s}`).toContain(s);
+    expect(body, r).not.toMatch(/pstack:tdd|pstack's tdd/);
+  }
+  expect(role("backend-dev").body).toMatch(/diagnosing-bugs[^\n]*before[^\n]*tdd|first[^\n]*diagnosing-bugs/);
+  const flows = section("Workflows");
+  const entry = (r: string) => flows.split(/^- \*\*/m).find((e) => e.startsWith(`${r}**`))!;
+  for (const r of ["frontend-dev", "backend-dev"]) expect(entry(r), r).toContain("pstack:poteto-mode");
+  expect(entry("backend-dev").indexOf("diagnosing-bugs")).toBeLessThan(entry("backend-dev").indexOf("mattpocock-skills:tdd"));
+});
+
+test("K3: leads get pstack:architect or pstack:how only as a first command the PM names with --skills; the Reviewer adds mattpocock-skills:code-review and not interrogate; the PM keeps grilling", () => {
+  const lead = role("lead").body;
+  for (const s of ["pstack:architect", "pstack:how", "tell the PM", "Haiku Explore"]) expect(lead, s).toContain(s);
+  expect(role("lead").fm.skills).toEqual([GUIDELINES, "f1rm:hire"]);
+  const reviewer = role("reviewer").body;
+  for (const s of ["mattpocock-skills:code-review", "Spec", "the brief"]) expect(reviewer, s).toContain(s);
+  expect(reviewer).toMatch(/first command stays `\/code-review`|`\/code-review` stays first/);
+  expect(reviewer).not.toContain("interrogate");
+  expect(role("pm").fm.skills).toContain("mattpocock-skills:grilling");
+  const playbook = section("Roster and hiring playbook");
+  for (const s of ["`--skills pstack:architect`", "`--skills pstack:how`", "slash-only", "a dev's is `/pstack:poteto-mode`", "for a lead only", "refuses any other slash-only skill in a dev's `--skills`"]) expect(playbook, s).toContain(s);
+});
+
+test("K3a: a lead started with pstack:architect or pstack:how loads the guidelines with the Skill tool", () => {
+  const step1 = /^1\. \*\*Load the rules\.\*\*.*$/m.exec(role("lead").body)?.[0] ?? "";
+  for (const s of ["unless the PM started you with `pstack:architect` or `pstack:how`", "load the guidelines with the Skill tool"]) expect(step1, s).toContain(s);
+});
+
+test("K3b: a lead says which of pstack:how or a Haiku Explore intern applies, and that a running lead gets architect or how only through letgo and a re-hire by the PM", () => {
+  const step3 = /^3\. \*\*Plan\.\*\*.*$/m.exec(role("lead").body)?.[0] ?? "";
+  for (const s of [
+    "If the PM started you with `pstack:how`, it ran first; otherwise send a Haiku Explore intern", "A running lead cannot gain a first command", "tell the PM, who runs `f1rm letgo lead-<team>` and hires you again with it",
+  ]) expect(step3, s).toContain(s);
+  // The route is said once.
+  expect(step3).not.toContain("ask the PM");
+  expect(step3.split("tell the PM")).toHaveLength(2);
+});
+
+test("K3c: the Reviewer runs the Spec axis inline, with no sub-agents, against worktree-<task> and not the main checkout's HEAD", () => {
+  const line = /^- Your first command stays.*$/m.exec(role("reviewer").body)?.[0] ?? "";
+  for (const s of ["inline, with no sub-agents", "`<base>...worktree-<task>`, not the main checkout's HEAD"]) expect(line, s).toContain(s);
+  expect(section("Skill stack")).toContain("`mattpocock-skills:code-review` for the Spec axis, inline, against the brief");
+});
+
+test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
+  const md = section("Skill stack");
+  expect(md).toContain("| Phase | mattpocock skill | pstack skill | Rule that wins |");
+  const rows = md.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Phase") && !l.startsWith("| :-"));
+  expect(rows.length).toBeGreaterThanOrEqual(6);
+  for (const r of rows) expect(r.split("|").length, r).toBe(6); // four cells
+  for (const s of [
+    "`mattpocock-skills:grilling`", "`mattpocock-skills:tdd`", "`mattpocock-skills:diagnosing-bugs`", "`mattpocock-skills:code-review`", "`pstack:poteto-mode`", "`pstack:architect`", "`pstack:how`", "`pstack:interrogate`",
+    "`feature`, `bug-fix`, `refactoring`, `perf-issue`", "slash-only", "disable-model-invocation", "/code-review", "the user can run it by hand",
+  ]) expect(md, s).toContain(s);
+  for (const s of ["no PR opening", "no babysit loops", "no `/loop` ticks", "no `afk`", "`pstack:arena` and `pstack:swarm` are not wired inside hires", "at most 2 interns", "pushing stays the user's"]) expect(md, s).toContain(s);
+  // arena and swarm can't be run inside a hire (the Skill tool refuses them): the Parallel work row says the user runs them by hand, and a brief never asks for them.
+  expect(rows.find((r) => r.startsWith("| Parallel work"))).toContain("Not wired inside hires (the Skill tool refuses them); the user can run them by hand");
+  expect(md).not.toContain("when a brief asks");
+  // Every pstack skill but its setup skill carries disable-model-invocation, so `f1rm hire` refuses all the others in --skills; a lead learns it before the refusal.
+  const rule = "refuses any `pstack:` skill in `--skills` other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only)";
+  expect(md).toContain("Every pstack skill but its setup skill carries `disable-model-invocation`");
+  expect(md).toContain(`\`f1rm hire\` ${rule}`);
+  const bullet = /^   - `--skills a,b`.*$/m.exec(section("Roster and hiring playbook"))?.[0] ?? "";
+  for (const s of [rule, "`pstack:poteto-mode` (devs only)", "A code Reviewer refuses any slash-only skill"]) expect(bullet, s).toContain(s);
+  // Any pstack skill's question to the human is routed, not only poteto-mode's (a lead started with architect or how follows the same rule).
+  expect(md).toContain("A question a pstack skill would put to the human goes to the session in your `Report to` as `BLOCKED`");
+  // Only pstack skills that exist are named.
+  const real = ["poteto-mode", "architect", "how", "interrogate", "arena", "swarm"];
+  for (const m of guidelines.matchAll(/pstack:([a-z-]+)/g)) expect(real, m[0]).toContain(m[1]);
+  expect(section("Brief format")).toContain("names the pstack playbook that fits the task (see Skill stack)");
+});
+
+test("K5: `f1rm edition` sets the edition only once `f1rm pm` has registered the project, wherever a line says so", () => {
+  const cli = ["hire.ts", "f1rm.ts"].map((f) => join(REPO, "office", "cli", f));
+  const files = [join(PLUGIN, "README.md"), join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), ...Object.keys(ROLES).map((r) => join(PLUGIN, "agents", `${r}.md`)), ...cli];
+  let seen = 0;
+  for (const f of files) {
+    // The code writes its backticks escaped (\`), so a few characters may sit around `f1rm pm`.
+    for (const line of readFileSync(f, "utf8").split("\n").filter((l) => /`f1rm edition (work\|founder|work|founder)\\?`/.test(l))) {
+      seen++;
+      expect(line, f).toMatch(/(once|after) .{0,3}f1rm pm.{0,3} has registered the (project|repo)/);
+    }
+  }
+  expect(seen).toBeGreaterThanOrEqual(4);
+  expect(readFileSync(cli[0], "utf8")).toMatch(/after \\?`f1rm pm\\?` has registered the project/);
+});
+
+test("K7: a conflict round never counts toward ESCALATE; the review flow says so once and the Handoff line and reviewer.md point to it", () => {
+  const rule = "A round whose only item is `CHANGES REQUESTED conflict` never counts toward ESCALATE. A round with a conflict and a blocking finding counts once, for the finding.";
+  expect(/^4\. .*$/m.exec(section("Review and merge flow"))?.[0]).toContain(rule);
+  expect(guidelines.split(rule)).toHaveLength(2);
+  const line = /^ *- `ESCALATE <slug>`.*$/m.exec(section("Handoff via SendMessage"))?.[0] ?? "";
+  expect(line).toContain("(see the review flow)");
+  expect(line).not.toContain("only item");
+  expect(role("reviewer").body).toMatch(/conflict round never counts[^\n]*review flow/);
+  expect(role("reviewer").body).not.toContain("only item");
+  expect(role("lead").body).not.toContain("only item");
+  const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
+  expect(titles).toContain("2026-10-21 Conflict rounds do not count toward ESCALATE");
+});
+
+test("K6: docs/decisions.md has the Ask the user only for big decisions and Skill stack entries, the second recording why pstack skills are slash-only", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const titles = entries.map((e) => e.split("\n")[0]);
+  for (const t of ["Ask the user only for big decisions", "Skill stack: mattpocock + pstack"]) expect(titles).toContain(`2026-10-21 ${t}`);
+  const stack = entries.find((e) => e.startsWith("2026-10-21 Skill stack: mattpocock + pstack"))!;
+  for (const s of ["disable-model-invocation", "architect", "interrogate", "arena", "swarm", "Opening a PR", "afk"]) expect(stack, s).toContain(s);
 });
