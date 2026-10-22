@@ -10,6 +10,7 @@ import { agents, machine } from "./machine.ts";
 import { writePrivate } from "./private.ts";
 
 const MIN = 60_000;
+const DAY = 24 * 60 * MIN;
 const MONTHS =["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*,\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
@@ -21,14 +22,24 @@ function wall(t: number, tz: string) {
   return { year: n("year"), month: n("month") - 1, day: n("day"), hour: n("hour"), minute: n("minute"), second: n("second") };
 }
 
-/** The instant at which the wall clock of `tz` reads the given date and time; day may run past the month (Date.UTC carries it). */
+/** The wall clock of `tz` at instant `t`, as a number comparable with Date.UTC of the same parts. */
+const wallMs = (t: number, tz: string) => {
+  const w = wall(t, tz);
+  return Date.UTC(w.year, w.month, w.day, w.hour, w.minute, w.second);
+};
+
+/**
+ * The instant at which the wall clock of `tz` reads the given date and time (day may run past the month; Date.UTC carries it). An hour that happens twice (clocks going back) gives the later,
+ * when a limit has surely lifted; a time that does not exist (clocks going forward) gives the first instant after the gap.
+ */
 function instant(tz: string, year: number, month: number, day: number, hour: number, minute: number): number {
   const asUtc = Date.UTC(year, month, day, hour, minute);
-  let t = asUtc;
-  for (let i = 0; i < 2; i++) {
-    const w = wall(t, tz);
-    t = asUtc - (Date.UTC(w.year, w.month, w.day, w.hour, w.minute, w.second) - Math.floor(t / 1000) * 1000);
-  }
+  // The zone's offset a day before and a day after the stated time, wherever it changes in between.
+  const offsets = [-DAY, DAY].map((d) => wallMs(asUtc + d, tz) - (asUtc + d));
+  const exact = offsets.map((o) => asUtc - o).filter((t) => wallMs(t, tz) === asUtc);
+  if (exact.length) return Math.max(...exact);
+  let t = Math.min(...offsets.map((o) => asUtc - o));
+  for (let i = 0; i < 24 * 60 && wallMs(t, tz) < asUtc; i++) t += MIN;
   return t;
 }
 
@@ -52,22 +63,19 @@ export function resetAt(text: string, stoppedAt: number): number | null {
   try {
     const tz = zone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
     const now = wall(stoppedAt, tz);
-    const first = (year: number, mo: number, day: number, step: number, count: number, ok: (t: number, dayIndex: number) => boolean) => {
-      for (let i = 0; i < count; i++) {
-        const t = instant(tz, year, mo, day + i * step, hour, minute);
-        if (t > stoppedAt && ok(t, i)) return t;
-      }
-      return null;
-    };
     if (month >= 0) {
       const day = Number(dayOfMonth);
-      const t = instant(tz, now.year, month, day, hour, minute);
       if (new Date(Date.UTC(now.year, month, day)).getUTCMonth() !== month) return null; // Oct 40, Feb 31
+      const t = instant(tz, now.year, month, day, hour, minute);
       return t > stoppedAt ? t : instant(tz, now.year + 1, month, day, hour, minute);
     }
-    // The day the instant falls on in the zone is read back from the instant itself, so a day that Date.UTC carried over a month end still counts.
-    const today = (t: number) => new Date(Date.UTC(wall(t, tz).year, wall(t, tz).month, wall(t, tz).day)).getUTCDay();
-    return first(now.year, now.month, now.day, 1, 8, (t) => weekday < 0 || today(t) === weekday);
+    // Today and the next seven days: the first moment after the stop, on the stated weekday if one is.
+    for (let i = 0; i < 8; i++) {
+      const t = instant(tz, now.year, now.month, now.day + i, hour, minute);
+      const w = wall(t, tz);
+      if (t > stoppedAt && (weekday < 0 || new Date(Date.UTC(w.year, w.month, w.day)).getUTCDay() === weekday)) return t;
+    }
+    return null;
   } catch {
     return null; // a zone Intl does not know
   }
