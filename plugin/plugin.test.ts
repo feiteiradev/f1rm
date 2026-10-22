@@ -754,6 +754,12 @@ test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, psta
   // arena and swarm can't be run inside a hire (the Skill tool refuses them): the Parallel work row says the user runs them by hand, and a brief never asks for them.
   expect(rows.find((r) => r.startsWith("| Parallel work"))).toContain("Not wired inside hires (the Skill tool refuses them); the user can run them by hand");
   expect(md).not.toContain("when a brief asks");
+  // Every pstack skill but its setup skill carries disable-model-invocation, so `f1rm hire` refuses all the others in --skills; a lead learns it before the refusal.
+  const rule = "refuses any `pstack:` skill in `--skills` other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only)";
+  expect(md).toContain("Every pstack skill but its setup skill carries `disable-model-invocation`");
+  expect(md).toContain(`\`f1rm hire\` ${rule}`);
+  const bullet = /^   - `--skills a,b`.*$/m.exec(section("Roster and hiring playbook"))?.[0] ?? "";
+  for (const s of [rule, "`pstack:poteto-mode` (devs only)", "A code Reviewer refuses any slash-only skill"]) expect(bullet, s).toContain(s);
   // Any pstack skill's question to the human is routed, not only poteto-mode's (a lead started with architect or how follows the same rule).
   expect(md).toContain("A question a pstack skill would put to the human goes to the session in your `Report to` as `BLOCKED`");
   // Only pstack skills that exist are named.

@@ -49,7 +49,7 @@ Playbook:
    - `<name>` and `<task>` follow rule 6. The task slug becomes the worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`.
    - `<brief>` is one quoted argument in the brief format below, without the `Report to` line. `f1rm hire` adds it.
    - Flags after the brief go to `claude`, for example `--model haiku`.
-   - `--skills a,b` before the role adds skills to the brief for this task, for example a stack skill, or `mattpocock-skills:diagnosing-bugs` for a bug. The office holds the hire until it has loaded them (see Gates). `--skills research` makes `/research` the first command, for a question about what the community does. `--skills security-review` is refused.
+   - `--skills a,b` before the role adds skills to the brief for this task, for example a stack skill, or `mattpocock-skills:diagnosing-bugs` for a bug. The office holds the hire until it has loaded them (see Gates). `--skills research` makes `/research` the first command, for a question about what the community does. `--skills security-review` is refused. `f1rm hire` refuses any `pstack:` skill in `--skills` other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only). A code Reviewer refuses any slash-only skill.
    - `--level low|medium|high` sets the Reviewer's `/code-review` level, `medium` by default. Use `high` for authentication, user data, secrets, shell execution or money: that Reviewer also runs security-review on the merge.
    - `--content` hires a Sonnet Reviewer for a branch with no code. It skips `/code-review` and uses only the content checklist.
    - `--report-to <session>` before the role overrides the PM session name. It defaults to `pm-<repo basename>`.
@@ -140,7 +140,7 @@ The mattpocock skills and the pstack skills work side by side. Each row names th
 
 Inside a hire: no PR opening, no babysit loops, no `/loop` ticks, no `afk`; `pstack:arena` and `pstack:swarm` are not wired inside hires (the user can run them by hand, as `pstack:interrogate`); at most 2 interns; pushing stays the user's. A question a pstack skill would put to the human goes to the session in your `Report to` as `BLOCKED`.
 
-`pstack:architect`, `pstack:how`, `pstack:interrogate`, `pstack:arena` and `pstack:swarm` carry `disable-model-invocation`: the Skill tool refuses them, so only a first slash command runs them. A dev picks its playbook inside poteto-mode; the playbooks are its files, not skills.
+Every pstack skill but its setup skill carries `disable-model-invocation`: the Skill tool refuses it, so only a first slash command runs one. `f1rm hire` refuses any `pstack:` skill in `--skills` other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only); the user can run the rest, such as `pstack:interrogate`, `pstack:arena` and `pstack:swarm`, by hand. A dev picks its playbook inside poteto-mode; the playbooks are its files, not skills.
 
 ## Editions
 
