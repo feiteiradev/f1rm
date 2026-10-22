@@ -511,11 +511,11 @@ test("the file store writes a private file and never follows a link planted at i
   rmSync(home, { recursive: true, force: true });
 });
 
-test("a reset time that falls in a spring-forward gap is the first instant at or after it, never an hour before; an hour that happens twice is the later one", () => {
-  // New York 2026-03-08: 02:00 EST jumps to 03:00 EDT (07:00Z), so 2:30am does not exist.
-  expect(resetAt("2:30am (America/New_York)", at("2026-03-08T05:00:00Z"))).toBe(at("2026-03-08T07:00:00Z"));
-  // Lisbon 2027-03-28: 01:00 WET jumps to 02:00 WEST (01:00Z).
-  expect(resetAt("1:30am (Europe/Lisbon)", at("2027-03-27T12:00:00Z"))).toBe(at("2027-03-28T01:00:00Z"));
+test("a reset time that falls in a spring-forward gap is the stated time plus the gap (JS Date's own rule), never an hour before; an hour that happens twice is the later one", () => {
+  // New York 2026-03-08: 02:00 EST jumps to 03:00 EDT (07:00Z), so 2:30am does not exist: it reads as 03:30 EDT.
+  expect(resetAt("2:30am (America/New_York)", at("2026-03-08T05:00:00Z"))).toBe(at("2026-03-08T07:30:00Z"));
+  // Lisbon 2027-03-28: 01:00 WET jumps to 02:00 WEST (01:00Z): 1:30am reads as 02:30 WEST.
+  expect(resetAt("1:30am (Europe/Lisbon)", at("2027-03-27T12:00:00Z"))).toBe(at("2027-03-28T01:30:00Z"));
   // Lisbon 2026-10-25: 02:00 WEST falls back to 01:00 WET, so 1:30am happens at 00:30Z and again at 01:30Z; the later is when the limit has surely lifted.
   expect(resetAt("1:30am (Europe/Lisbon)", at("2026-10-24T23:00:00Z"))).toBe(at("2026-10-25T01:30:00Z"));
   // Ordinary days next to a change are unaffected.

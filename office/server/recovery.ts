@@ -31,17 +31,16 @@ const wallMs = (t: number, tz: string) => {
 
 /**
  * The instant at which the wall clock of `tz` reads the given date and time (day may run past the month; Date.UTC carries it). An hour that happens twice (clocks going back) gives the later,
- * when a limit has surely lifted; a time that does not exist (clocks going forward) gives the first instant after the gap.
+ * when a limit has surely lifted; a time that does not exist (clocks going forward) reads with the offset from before the gap, as JS Date does (2:30am becomes 3:30am).
+ * ponytail: Claude Code prints its reset from a real instant, so a time in a gap is hypothetical; no search for the first instant after it.
  */
 function instant(tz: string, year: number, month: number, day: number, hour: number, minute: number): number {
   const asUtc = Date.UTC(year, month, day, hour, minute);
   // The zone's offset a day before and a day after the stated time, wherever it changes in between.
   const offsets = [-DAY, DAY].map((d) => wallMs(asUtc + d, tz) - (asUtc + d));
-  const exact = offsets.map((o) => asUtc - o).filter((t) => wallMs(t, tz) === asUtc);
-  if (exact.length) return Math.max(...exact);
-  let t = Math.min(...offsets.map((o) => asUtc - o));
-  for (let i = 0; i < 24 * 60 && wallMs(t, tz) < asUtc; i++) t += MIN;
-  return t;
+  const candidates = offsets.map((o) => asUtc - o);
+  const exact = candidates.filter((t) => wallMs(t, tz) === asUtc);
+  return Math.max(...(exact.length ? exact : candidates));
 }
 
 /**
