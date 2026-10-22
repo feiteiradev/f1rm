@@ -405,7 +405,7 @@ export function startServer({
       let answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
       const intern = !!payload.agent_id;
       // A hire of the sender's project whose process has ended answers to no employee, and a message to it would be queued and never arrive: it goes through the checks below as the hire it is, then is refused with the way back.
-      const gone = !intern && !socket && !answering.length && to !== "main" ? await endedHire(state.employees[sessionId], name) : null;
+      const gone = !intern && !socket && !answering.length && to !== "main" && !subagents.get(sessionId)?.has(to) ? await endedHire(state.employees[sessionId], name) : null;
       if (gone) answering = [gone];
       const rooms = new Set(answering.map((e) => e.room));
       if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {

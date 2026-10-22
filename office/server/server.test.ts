@@ -35,7 +35,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     calls.push(`letgo ${id}`);
     if (letGoFails) throw new Error(letGoFails);
   },
-  sessions: async () => (await sessionsGate, sessionList),
+  sessions: async () => (sessionsAsked++, await sessionsGate, sessionList),
   mergedBranch: (_repo: string, branch: string) => mergedBranches.has(branch),
   removeWorktree: (repo: string, task: string) => void calls.push(`remove ${repo} ${task}`),
   focusIterm: async (id: string) => (calls.push(`iterm ${id}`), openTabs.has(id)),
@@ -71,6 +71,7 @@ let letGoFails = "";
 // What `claude agents --json --all` lists, and which branches are merged into the base, for the safety net.
 let sessionList: { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number }[] = [];
 let mergedBranches = new Set<string>();
+let sessionsAsked = 0; // how many times the server asked `claude agents --json --all`
 let sessionsGate: Promise<void> | undefined; // a test sets one that never settles: `claude agents` hanging
 let working: number | null = 0;
 let spawnFails = "";
@@ -95,6 +96,7 @@ afterEach(() => {
   sessionList = [];
   mergedBranches = new Set();
   sessionsGate = undefined;
+  sessionsAsked = 0;
   working = 0;
   spawnFails = "";
   pmFails = "";
@@ -2122,6 +2124,17 @@ test("a hire that finished its turn and whose process ended leaves the office, a
   sessionList = [ended("checkout.backend-dev-a", "/code/shop/.claude/worktrees/a")];
   const out = await held(await hook({ ...preToolUse("lead", "SendMessage", { to: "checkout.backend-dev-a", message: "one more fix round" }), cwd: "/code/shop" }));
   expect(out.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-a");
+});
+
+test("a message to the sender's own sub-agent never asks `claude agents --json --all`, since the hook gives up long before a slow listing answers", async () => {
+  const send = await talkOffice();
+  const before = sessionsAsked;
+  expect(await send("c1", "i-c1")).toBeNull(); // its own intern
+  expect(await send("l1", "i-l1")).toBeNull();
+  expect(sessionsAsked).toBe(before);
+  sessionList = [ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old")];
+  await send("l1", "checkout.backend-dev-old");
+  expect(sessionsAsked).toBe(before + 1); // a name no employee answers is the one case that asks
 });
 
 test("a hire that has a live session as well as an ended one is not refused: only a name with no live process is", async () => {
