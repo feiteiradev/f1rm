@@ -2006,7 +2006,7 @@ test("a refusal names the rule and the way out", async () => {
 
 test("a formal report from a team member goes to its lead only; the same words to a peer are refused, and free text to a peer passes", async () => {
   const send = await talkOffice();
-  const reports = ["DONE gate-messaging branch=x commit=y", "APPROVED shop-1", "CHANGES REQUESTED shop-1: fix x", "BLOCKED shop-1 permission", "ESCALATE shop-1", "  DONE: x", "BLOCKED"];
+  const reports = ["**DONE** x", "> APPROVED x", "- BLOCKED x", "`ESCALATE` x", "# CHANGES REQUESTED shop-1", "_DONE_ x", "(BLOCKED) x", "\n\n**APPROVED shop-1**", "DONE gate-messaging branch=x commit=y", "APPROVED shop-1", "CHANGES REQUESTED shop-1: fix x", "BLOCKED shop-1 permission", "ESCALATE shop-1", "  DONE: x", "BLOCKED"];
   for (const message of reports) {
     for (const id of ["c1", "rv"]) {
       expect([id, message, await send(id, "lead-checkout", message)]).toEqual([id, message, null]);
@@ -2017,7 +2017,7 @@ test("a formal report from a team member goes to its lead only; the same words t
       expect(peer.permissionDecisionReason).toContain("formal report");
     }
   }
-  for (const message of ["the API is DONE on my side", "done", "DONEZO", "Can you review CHANGES in api.ts?", "BLOCKEDx"]) expect([message, await send("c1", "checkout.frontend-dev-b", message)]).toEqual([message, null]);
+  for (const message of ["the API is DONE on my side", "done", "DONEZO", "Can you review CHANGES in api.ts?", "BLOCKEDx", "CHANGES to the API: add a field", "CHANGES REQUESTEDLY", "- done: x"]) expect([message, await send("c1", "checkout.frontend-dev-b", message)]).toEqual([message, null]);
   // A lead's own words to a member are not a member's report.
   expect(await send("l1", "checkout.backend-dev-a", "CHANGES REQUESTED shop-1: fix x")).toBeNull();
   expect(await send("free", "checkout.backend-dev-a", "DONE x")).toBeNull();

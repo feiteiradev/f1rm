@@ -136,8 +136,8 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
-// A team member's message that opens with one of these words is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^(?:DONE|APPROVED|CHANGES|BLOCKED|ESCALATE)\b/;
+// A team member's message that opens with one of these words (past markdown such as `**`, `>`, `-` or `#`) is a formal report: it goes to its lead only.
+const FORMAL_REPORT = /^[\s*_>#`"'(\[+•-]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES REQUESTED)(?![A-Za-z0-9])/;
 /** Whether one cwd is the other's folder or inside it, past symlinks. */
 const sameFolder = (a: string, b: string) => {
   const [x, y] = [realPath(resolve(a)), realPath(resolve(b))];
