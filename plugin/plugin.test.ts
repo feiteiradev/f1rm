@@ -466,6 +466,10 @@ test("R8b: the three workflows are said once in the guidelines; pm.md and the PM
   expect(pmStep(2)).toContain("Picking the workflow");
 });
 
+test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on its board instead of messaging the PM", () => {
+  expect(role("pm").body).toContain("Work handed to you, other than ops (see Picking the workflow), including a slash command, becomes a board task for a hire.");
+});
+
 test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt, hire.ts and both READMEs", () => {
   for (const [name, text] of Object.entries(WORKFLOW_FILES())) {
     expect(text, name).not.toMatch(/\bPLAN\b/);
