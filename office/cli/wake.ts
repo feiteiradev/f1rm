@@ -2,7 +2,7 @@
 // A session whose process ended is resumed as a NEW session (new id, the old history copied, the old transcript untouched); name and folder are kept only because they are passed here.
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, tailAsync, textOf } from "./status.ts";
@@ -143,17 +143,10 @@ export function parseWakeArgs(words: string[]): { target: string | undefined; me
 /** A session's transcript: `<home>/.claude/projects/<its folder>/<session id>.jsonl`. */
 export const transcriptFile = (home: string, cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
 
-/** Git's common dir for `cwd`, or null outside git; the asynchronous twin of `machine.gitCommonDir`. */
-async function gitCommonDir(cwd: string): Promise<string | null> {
-  const proc = Bun.spawn(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
-  return (await proc.exited) === 0 ? out.trim() : null;
-}
-
 /** The real Claude Code, git, disk and clock, for a wake run now. */
 export function realWakeDeps(home: string): WakeDeps {
   return {
-    agents, gitCommonDir, home, now: Date.now(), exists: existsSync,
+    agents, gitCommonDir: gitCommonDirAsync, home, now: Date.now(), exists: existsSync,
     modelOf: async (cwd, sessionId) => lastModel(await tailAsync(transcriptFile(home, cwd, sessionId))),
     promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
   };

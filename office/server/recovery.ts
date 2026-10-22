@@ -7,7 +7,7 @@ import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from 
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, tailAsync, textOf } from "../cli/status.ts";
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
-import { agents, machine } from "./machine.ts";
+import { agents, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
 
 const MIN = 60_000;
@@ -340,9 +340,8 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
     mtime: (cwd, sessionId) => stat(transcriptFile(home, cwd, sessionId)).then((st) => st.mtimeMs, () => null),
     promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
     commitTime: async (repo, branch) => {
-      const proc = Bun.spawn(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
-      const out = (await new Response(proc.stdout).text()).trim();
-      return (await proc.exited) === 0 && out ? Number(out) * 1000 : null;
+      const out = await runAsync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`]);
+      return out ? Number(out) * 1000 : null;
     },
     // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.
     wake: async (repo, name, note) => {

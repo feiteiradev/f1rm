@@ -104,6 +104,26 @@ const ASK_PREAMBLE =
 /** A session Claude Code lists (`claude agents --json`). */
 export type Session = { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number };
 
+/**
+ * Runs `argv` without blocking the event loop (the office serves its hooks on it) and answers its trimmed output, or null if it fails or is killed after `timeoutMs` (logged: a hung git must not hold
+ * the recovery tick, whose next run waits for this one).
+ */
+export async function runAsync(argv: string[], timeoutMs = 10_000): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", timeout: timeoutMs });
+    const out = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    if (proc.signalCode) console.log(`${argv[0]} timed out after ${timeoutMs} ms`);
+    return code === 0 ? out.trim() : null;
+  } catch {
+    return null; // no such command
+  }
+}
+
+const commonDirArgs = (cwd: string) => ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"];
+/** `machine.gitCommonDir` without blocking the event loop. */
+export const gitCommonDirAsync = (cwd: string) => runAsync(commonDirArgs(cwd));
+
 /** True if commit `rev` is in the branch checked out in the main working directory `repo`. */
 const inBase = (repo: string, rev: string) =>
   Bun.spawnSync(["git", "-C", repo, "merge-base", "--is-ancestor", rev, "HEAD"], { stdout: "ignore", stderr: "ignore" }).success;
@@ -187,7 +207,7 @@ export const machine = {
 
   /** Absolute git common dir for `cwd` (shared by a repo and all its worktrees), or null outside git. */
   gitCommonDir(cwd: string): string | null {
-    const r = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    const r = Bun.spawnSync(commonDirArgs(cwd), {
       stderr: "ignore",
     });
     return r.success ? r.stdout.toString().trim() : null;

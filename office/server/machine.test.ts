@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { machine as realMachine, shellQuote } from "./machine.ts";
+import { gitCommonDirAsync, machine as realMachine, runAsync, shellQuote } from "./machine.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "f1rm-machine-"));
 const log = join(dir, "calls.log");
@@ -319,4 +319,26 @@ test("letGo refuses an id that could be read as a flag or a shell word, and runs
     const r = await letGo(bad, 1);
     expect([bad, r.value, r.calls]).toEqual([bad, { threw: "bad background session id" }, []]);
   }
+});
+
+test("runAsync answers with a command's trimmed output, null for a failure, and null (logged) for one that outlives its timeout, so a hung git cannot hold the office's recovery", async () => {
+  expect(await runAsync(["echo", "  hello  "])).toBe("hello");
+  expect(await runAsync(["false"])).toBeNull();
+  expect(await runAsync(["no-such-command-f1rm"])).toBeNull();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  const began = Date.now();
+  try {
+    expect(await runAsync(["sleep", "5"], 150)).toBeNull();
+  } finally {
+    console.log = log;
+  }
+  expect(Date.now() - began).toBeLessThan(3000);
+  expect(lines).toEqual(["sleep timed out after 150 ms"]);
+});
+
+test("gitCommonDirAsync answers what the synchronous lookup answers", async () => {
+  expect(await gitCommonDirAsync(process.cwd())).toBe(realMachine.gitCommonDir(process.cwd()));
+  expect(await gitCommonDirAsync(tmpdir())).toBe(realMachine.gitCommonDir(tmpdir()));
 });
