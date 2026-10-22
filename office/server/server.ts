@@ -300,18 +300,15 @@ export function startServer({
     // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
     const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
     if (gate) {
-      // The transcript is read once, and only when this call is about to be held: a refused Skill call leaves no hook event.
-      let read = false;
-      const has = (name: string) => {
-        if (!gate.loaded.has(name) && !read) {
-          read = true;
-          for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) gate.loaded.add(skill);
-        }
-        return gate.loaded.has(name);
-      };
-      const missing = READING.has(tool) ? [] : gate.required.filter((r) => !has(r));
+      // A refused Skill call leaves no hook event, so a call about to be held looks in the transcript for a try of the skills the first prompt named.
+      // The security hold counts only a skill that ran (its PostToolUse), never a try.
+      let missing = READING.has(tool) ? [] : gate.required.filter((r) => !gate.loaded.has(r));
+      if (missing.length) {
+        for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (gate.required.includes(skill)) gate.loaded.add(skill);
+        missing = missing.filter((r) => !gate.loaded.has(r));
+      }
       if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. If one isn't installed, send \`BLOCKED <task>\` with its name to the session in your Report to. A skill the Skill tool refuses counts as tried once you have called it.`);
-      if (gate.security && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED") && !has("security-review")) {
+      if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }

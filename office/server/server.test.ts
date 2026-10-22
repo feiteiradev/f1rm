@@ -1729,8 +1729,23 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   expect(out.permissionDecisionReason).toBe("Run security-review with the Skill tool on the merge before you send APPROVED.");
   expect(await send("CHANGES shop-1: fix x")).toBeNull();
   expect(await tryTool("r", "Bash", { command: "git merge --no-ff x" })).toBeNull();
+  await skillLoaded("r", "security-review", "PostToolUseFailure");
+  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
   await skillLoaded("r", "security-review");
   expect(await send("APPROVED shop-1")).toBeNull();
+});
+
+test("a refused security-review read from the transcript does not release a --level high Reviewer's APPROVED", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const path = transcript("rs", [skillUse("ponytail:ponytail-review"), skillUse("security-review"), refused]);
+  const send = async () => held(await hook({ ...preToolUse("rs", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
+  expect(await tryAt("rs", path)).toBeNull(); // the required skill was tried, so the work tools are free
+  expect((await send())?.permissionDecision).toBe("deny"); // the security hold counts only a skill that ran
+  expect((await send())?.permissionDecision).toBe("deny");
+  await skillLoaded("rs", "security-review");
+  expect(await send()).toBeNull();
 });
 
 test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {
