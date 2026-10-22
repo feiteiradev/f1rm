@@ -2,7 +2,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
-import { networkInterfaces, tmpdir } from "node:os";
+import { networkInterfaces, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { projectFile } from "./editions.ts";
 import { startServer } from "./server.ts";
@@ -1366,6 +1366,35 @@ test("a company employee starts no session with claude --bg or claude -p; the PM
   for (const id of ["p", "l"]) for (const command of wake) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   for (const command of wake) expect([command, (await bash("d", command))?.permissionDecision]).toEqual([command, "deny"]);
   for (const command of [...refused, ...wake]) expect([command, await bash("f", command)]).toEqual([command, null]);
+});
+
+test("in a second office, whose own HOME is a temp folder, the user's real home still counts as the real one, for claude starts and for Elsewhere", async () => {
+  await delegationOffice();
+  const second = mkdtempSync(join(tmpdir(), "f1rm-home-"));
+  const real = userInfo().homedir;
+  const home = process.env.HOME;
+  process.env.HOME = second;
+  afterEachRestore = () => void (home === undefined ? delete process.env.HOME : (process.env.HOME = home));
+  const bash = async (id: string, command: string) => (await held(await hook(preToolUse(id, "Bash", { command }))))?.permissionDecision ?? null;
+  for (const command of [`HOME=${real} claude -p x`, `HOME=${real.toUpperCase()} claude -p x`, `HOME=/System/Volumes/Data${real} claude -p x`]) expect([command, await bash("p", command)]).toEqual([command, "deny"]);
+  for (const command of [`HOME=${second}/h claude -p x`, "HOME=/tmp/x env -i HOME=/tmp/y claude -p x"]) expect([command, await bash("p", command)]).toEqual([command, null]);
+  // A later `env` option that clears HOME undoes the prefix; one before it does not.
+  const cleared = ["HOME=/tmp/x env -u HOME claude -p x", "HOME=/tmp/x env -i claude -p x", "HOME=/tmp/x env --ignore-environment claude -p x", "HOME=/tmp/x env --unset=HOME claude -p x", "HOME=/tmp/x env --unset HOME claude -p x", "HOME=/tmp/x env -uHOME claude -p x"];
+  for (const command of cleared) expect([command, await bash("p", command)]).toEqual([command, "deny"]);
+  for (const command of ["env -i HOME=/tmp/x claude -p x", "env -u FOO HOME=/tmp/x claude -p x", "HOME=/tmp/x env -u FOO claude -p x"]) expect([command, await bash("p", command)]).toEqual([command, null]);
+  const out = await held(await hook(preToolUse("p", "Bash", { command: "claude -p x" })));
+  expect(out.permissionDecisionReason).toContain("a literal absolute path or exactly `$(mktemp -d)`");
+  // Elsewhere: the user's real home is broad whatever HOME the office runs with, and two sessions at / do not reach each other.
+  const cwds: Record<string, string> = { lh: real, mh: `${real}/proj`, la: "/", lb: "/" };
+  const titles: Record<string, [string, string]> = { lh: ["lead-h", "f1rm:lead"], mh: ["h.designer-m", "f1rm:designer"], la: ["lead-a", "f1rm:lead"], lb: ["lead-b", "f1rm:lead"] };
+  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
+  await office((s) => ["lh", "mh", "la", "lb"].every((id) => s.employees[id]?.room === "elsewhere"));
+  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "x" }), cwd: cwds[id] }));
+  for (const [from, to] of [["lh", "h.designer-m"], ["mh", "lead-h"], ["la", "lead-b"], ["lb", "lead-a"]]) {
+    const out = await send(from, to);
+    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Elsewhere");
+  }
 });
 
 test("a background shell watcher (Bash with run_in_background) is not held for the PM, a lead or anyone else", async () => {

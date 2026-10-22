@@ -2,7 +2,7 @@
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
@@ -138,10 +138,14 @@ const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "res
 export const INTERNS = 2;
 // A team member's message that opens with one of these words (past markdown such as `**`, `>`, `-` or `#`) is a formal report: it goes to its lead only.
 const FORMAL_REPORT = /^[\s*_>#`"'(\[+•-]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES REQUESTED)(?![A-Za-z0-9])/;
-/** Whether one real folder is the other or inside it, and the outer is no broad one: not `/`, the home folder or a folder that holds it. */
+// The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
+// Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
+const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
+const homeKey = (path: string) => fold(realPath(resolve(path)));
+const REAL_HOME = homeKey(userInfo().homedir);
+/** Whether one real folder is the other or inside it, and the outer is no broad one: not `/` (which `inside` never says holds anything but itself), the home folder or a folder that holds it. */
 const sameFolder = (x: string, y: string) => {
-  const home = realPath(resolve(process.env.HOME ?? "/"));
-  const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(outer, home);
+  const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(fold(outer), REAL_HOME);
   return holds(x, y) || holds(y, x);
 };
 const leadOf = (team: string | null) => (team ? `lead-${team}` : "your lead (the Report to of your brief)");
@@ -160,12 +164,13 @@ const TALK = {
 };
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
-// `$(mktemp -d)`, and not the real HOME once links, `/System/Volumes/Data` and letter case are put aside. Text only: a HOME exported by an earlier call is not seen.
+// `$(mktemp -d)`, and not the user's real home (see REAL_HOME). Text only: a HOME exported by an earlier call is not seen, and a later `env` option that clears it (`-i`, `-u HOME`) undoes the prefix.
 const MKTEMP = "$(mktemp -d)", MKTEMP_WORD = "\u0001mktemp";
-const homeKey = (path: string) => realPath(resolve(path)).replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
 const ownHome = (prefix: string[]) => {
-  const value = unquoted(prefix.findLast((w) => w.startsWith("HOME="))?.slice(5) ?? "");
-  return value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![homeKey(process.env.HOME ?? "/"), "/"].includes(homeKey(value)));
+  const at = prefix.findLastIndex((w) => w.startsWith("HOME=")), later = prefix.slice(at + 1);
+  const cleared = later.some((w, j) => w === "-i" || w === "--ignore-environment" || w === "-uHOME" || w === "--unset=HOME" || ((w === "-u" || w === "--unset") && later[j + 1] === "HOME"));
+  const value = unquoted(prefix[at]?.slice(5) ?? "");
+  return !cleared && (value === MKTEMP_WORD || (/^\/[^\s$`~\\*?{}]*$/.test(value) && ![REAL_HOME, "/"].includes(homeKey(value))));
 };
 // What can run `claude` for another command: `npx`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x` (`bun` itself is a wrapper simpleCommands drops), `npm exec`.
 const PACKAGE_RUNNERS = new Set(["npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "dlx", "exec", "x"]);
@@ -429,7 +434,7 @@ export function startServer({
     }
     const starts = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)).flatMap((c) => claudeStart(c) ?? []) : [];
     if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
-      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: `HOME=<tmp> claude …`.");
+      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
     }
     if (tool === "Agent" || tool === "Task") {
       if (String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
