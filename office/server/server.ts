@@ -355,7 +355,7 @@ export function startServer({
       const answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
       const rooms = new Set(answering.map((e) => e.room));
       const intern = !!payload.agent_id;
-      if (to !== "main" && (intern || !subagents.get(sessionId)?.has(to))) {
+      if ((to !== "main" || answering.length > 0) && (intern || !subagents.get(sessionId)?.has(to))) {
         const me = state.employees[sessionId];
         if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
         if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
