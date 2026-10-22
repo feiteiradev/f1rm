@@ -595,6 +595,16 @@ test("the PM's first prompt points to the guidelines' decision policy by name an
   for (const restated of ["architecture", "libraries", "irreversible"]) expect(prompt).not.toContain(restated);
 });
 
+test("the PM's first prompt points to the workflow rule and the talk rules by name, carries the one-line form, and has no PLAN or GO", () => {
+  const stub = stubClaude();
+  pmIn(repoDir("shop"), {}, stub);
+  const prompt = stub.args()[4];
+  for (const s of ["Picking the workflow", "Simple workflow: <what, which role>", "milestone", "Who talks to whom", "NEEDS YOU <team>: <topic>"]) expect(prompt).toContain(s);
+  expect(prompt).not.toMatch(/\bPLAN\b|\bGO\b/);
+  expect(prompt).not.toContain("claude attach");
+  for (const restated of ["one specialist role", "a numbered round", "recommended answer"]) expect(prompt).not.toContain(restated);
+});
+
 test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
   const repo = repoDir("shop");
   Bun.spawnSync(["git", "init", "-q", repo]);

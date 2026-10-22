@@ -28,7 +28,7 @@ Hierarchy: the user, then one PM per repo. The PM hires only leads, one or two p
 
 Playbook:
 
-1. **Interview first.** Plan only after the user confirms a shared understanding.
+1. **Pick the workflow, then interview.** The PM picks by rule (see Picking the workflow). In a milestone, plan only after the user confirms a shared understanding.
 2. **One task, one hire, one worktree.** A task that needs two roles is two tasks.
 3. **Order by dependency.**
    - Researcher before any task whose approach depends on facts you lack.
@@ -64,24 +64,31 @@ Playbook:
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
 9. **Checkpoint.** Before a long step (a full check run, a build) and whenever it stops, every hire makes a wip commit on its branch and writes `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A lead's is `lead-<team>/resume.md` and the PM's `pm-<repo>/resume.md`: each lives in a folder named after the session. They have no branch to commit to, and a Reviewer merges instead, so those three write only the file. A session that stopped is resumed or replaced from it (see Watching and waking).
 
+## Picking the workflow
+
+The PM picks the workflow by this rule before it plans, and says it in one line: `Simple workflow: <what, which role>`. The user upgrades it by saying "milestone".
+
+- **Ops** is work with no file changes (run, start, open, install, status). The PM does it at once, with no interview, board row or hire.
+- **Simple** is one deliverable, one specialist role, no business, product-scope, design or strategy decision, and it fits one session. The PM asks at most one clarifying question, writes no milestone section, adds one board row and hires one lead with a short team brief. Its specialist and the Reviewer run the same gates as in a milestone.
+- **Milestone** is anything else: 2 or more tasks or roles, a big decision, research needed, or the user says "milestone" or "grill". It gets the full interview and teams (see Teams).
+
 ## Workflows
 
 Each role's steps, and the skill or command at each step. Every dev and specialist ends with a `DONE` report that has the evidence block (see Handoff) and lists the skills used.
 
 - **pm**
   1. Pick up: read the board, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
-  2. Interview with `mattpocock-skills:grilling` until the user confirms.
-  3. Load `f1rm:f1rm-guidelines`, write the board and the milestone's section in the milestones file, and collect what the user must provide.
-  4. Hire one or two leads with `f1rm hire lead`, and answer each `PLAN <team>` with `GO <team>`.
-  5. Wait, with a background watcher on your leads (see Watching and waking). Tell the user only what the Who talks to whom rules allow. After `DONE <team>`, let the lead go with `f1rm letgo`.
+  2. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms.
+  3. Load `f1rm:f1rm-guidelines`, write the board (and, for a milestone, its section in the milestones file), and collect what the user must provide.
+  4. Hire one lead for a simple workflow, one or two for a milestone, with `f1rm hire lead`.
+  5. Wait, with a background watcher on your leads (see Watching and waking). On `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, let the lead go with `f1rm letgo`.
   6. At the end of the milestone, send the one report with its Persist and Delete lists, then run the milestone cleanup after the user replies.
   - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
 - **lead**
-  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before PLAN; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
-  2. Write the team board and send `PLAN <team>`.
-  3. After `GO <team>`, hire into the team with `f1rm hire --team`, and watch your hires with a background watcher (see Watching and waking).
-  4. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
-  5. Write the findings file, let the team go with `f1rm letgo`, then send `DONE <team>`.
+  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before you hire; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
+  2. Write the team board, then hire into the team with `f1rm hire --team`, and watch your hires with a background watcher (see Watching and waking). Ask the user a decision as Who talks to whom says.
+  3. Check each specialist's `DONE` against its brief and rerun its checks, then hire a Reviewer for each branch that passes.
+  4. Write the findings file, let the team go with `f1rm letgo`, then send `DONE <team>`.
 - **designer**
   1. Read the existing UI and tokens.
   2. Run `design-pipeline` to the spec.
@@ -130,7 +137,7 @@ The mattpocock skills and the pstack skills work side by side. Each row names th
 | Phase | mattpocock skill | pstack skill | Rule that wins |
 | :- | :- | :- | :- |
 | Interview | `mattpocock-skills:grilling`, the PM's first command | none | Ask the user only for big decisions. |
-| Plan a cross-team contract or new module | none | `pstack:architect`, slash-only: a lead's first command, which the PM names with `--skills pstack:architect` | PLAN, then GO, before any hire. |
+| Plan a cross-team contract or new module | none | `pstack:architect`, slash-only: a lead's first command, which the PM names with `--skills pstack:architect` | Sketch first, then hire. |
 | Questions about existing code | none | `pstack:how`, slash-only like architect (`--skills pstack:how`) | A lead not started with it sends a Haiku Explore intern. |
 | Build | `mattpocock-skills:tdd`, loaded second with the Skill tool | `pstack:poteto-mode`, a dev's first command, with its playbook: `feature`, `bug-fix`, `refactoring`, `perf-issue` | The tdd skill is mattpocock's, never pstack's of the same name. Every criterion has a check that fails first. |
 | Diagnose a bug | `mattpocock-skills:diagnosing-bugs`, before tdd (`--skills`) | the `bug-fix` playbook | Diagnose first, then fix test-first. |
@@ -165,16 +172,16 @@ In a Founder project the PM follows this on top of everything else here.
 - Founder roles draft. They never post, publish, send, schedule or spend. The user puts everything out.
 - Connectors are fine for drafts, for example a Canva design or a Gmail draft. The office's hook blocks a Founder role's connector tools whose names say send, publish, post or schedule.
 - Generating with paid credits (Higgsfield video, for example) counts as spending. Ask the session in your `Report to`; the PM asks the user for each spend and passes the answer down.
-- When the Reviewer approves founder work that is meant to go out, the lead marks its team-board row `publish` and sends the PM `BLOCKED <team> publish`, because only the user can put it out. The PM tells the user. When the user says it is out, the PM tells the lead, who marks the row `done`.
+- When the Reviewer approves founder work that is meant to go out, the lead marks its team-board row `publish` and sends the PM `NEEDS YOU <team>: publish`, because only the user can put it out. The PM tells the user. When the user says it is out, the PM tells the lead, who marks the row `done`.
 
 ## Teams
 
-1. **Every milestone runs through one or two teams**, even a milestone of one task. The PM hires only leads, so hire traffic stays out of its chat with the user. Its own Haiku Explore interns are the one exception.
+1. **Every milestone runs through one or two teams**, even a milestone of one task, and a simple workflow through one lead. The PM hires only leads, so hire traffic stays out of its chat with the user. Its own Haiku Explore interns are the one exception.
 2. **What a team owns.** One vertical slice of the milestone, end to end (design, frontend, backend), with its own acceptance criteria. Name the team after its slice, for example `checkout`.
 3. **At most 2 teams** work in a project at once. Every task of a milestone goes through a team.
 4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists, only into its own team.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
-6. **PLAN before hiring.** A lead writes its team board, then sends the PM `PLAN <team>` with its tasks and the hires it intends. The PM checks the plan against the milestone and the caps and answers `GO <team>` without telling the user, unless the plan changes agreed scope or a decision; then it asks the user first. If the plan needs changes, the PM answers with them. The lead hires nothing before `GO`.
+6. **A lead starts at once.** It writes its team board and hires, with no plan sent to the PM. A decision only the user can make is asked as Who talks to whom says, and the lead hires nothing for a task that answer could change until it has the answer.
 7. **Scrutiny.** A lead checks each specialist's `DONE` against its brief and reruns its checks before it hires the Reviewer. If anything is missing, it sends the work back to the same specialist. The Reviewer still signs off and is the only role that merges. Every `CHANGES REQUESTED` goes back to the dev, minor findings too, before the merge (see the review flow).
 8. **Closing.** When every task of the team is approved and merged, the lead writes its findings (what it found, and each one's outcome: fixed before the merge, or a ponytail-review finding left open) to `~/.f1rm/evidence/<repo>/findings.md`, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then lets the lead go with `f1rm letgo lead-<team>` and marks the team's row `done`.
 
@@ -183,7 +190,7 @@ In a Founder project the PM follows this on top of everything else here.
 The PM watches its leads and each lead watches its own hires, so a session that stopped is found without the user. Judge by real activity, never by status text: `claude agents` and `claude logs` read "working" for hours on a session that hit the subscription limit. `f1rm status --json` lists this repo's hires, judged by their transcripts and branches: `idleMinutes` (since the transcript was last written), `lastCommit`, `ended` (`claude agents` no longer lists the session) and `limitUntil` (when the last line of the conversation is a limit stop of any kind, session or weekly: the text after "resets" as the stop gives it, such as `8:40pm (Europe/Lisbon)` or `Monday 9:00 (Europe/Lisbon)`; `unknown` if it names no time).
 
 1. **Watch.** After hiring, run `f1rm status --watch <names>` in the background (`run_in_background`); its exit wakes you. It polls once a minute and prints each stalled name with its reason: idle for 20 minutes, ended, on a limit stop, missing from the list or without an activity time. It exits 1 when `claude agents --json` can't be read. A lead counts as stalled only when it and every hire of its team have been quiet, so a lead waiting on active hires is not. It only reads, so the delegation gate lets it through.
-   - Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`: a waiting name is judged only for ended, missing or a limit stop, never for being quiet, and a waiting name is watched as a plain name as soon as it writes again, so an approval at the hire's desk (which no message reports) puts it back without you. A message you send to a waiting session counts as a write and makes it plain. Until it writes, a waiting name is woken only for ended, missing or a limit stop.
+   - Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `NEEDS YOU` or `DONE <team>`) as `name:waiting`: a waiting name is judged only for ended, missing or a limit stop, never for being quiet, and a waiting name is watched as a plain name as soon as it writes again, so an approval at the hire's desk (which no message reports) puts it back without you. A message you send to a waiting session counts as a write and makes it plain. Until it writes, a waiting name is woken only for ended, missing or a limit stop.
    - Leave out a hire waiting on a reset timer you hold.
    - When you answer a session's report (and it works again), restart the watcher with it as a plain name.
    - Start no watcher when no name is left; the reset timers wake you.
@@ -234,7 +241,7 @@ Contracts: <the contracts already fixed between teams, or "none">
 Acceptance criteria:
 - <criterion> (proved by: <the check>)
 Out of scope: <what to leave to other teams or later>
-Report: PLAN before hiring, BLOCKED for what needs the user, DONE when the slice is merged. Nothing else goes to the PM.
+Report: NEEDS YOU <team>: <topic> for what needs the user, DONE <team> when the slice is merged. Nothing else goes to the PM.
 ```
 
 A lead writes its specialists' briefs in the task brief format above. Every brief's Context names the installed skills, slash commands and plugins that fit the task, beyond the role's own skills that `f1rm hire` adds.
@@ -242,17 +249,55 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
 ## Who talks to whom
 
 - **Ask the user only for big decisions.** The PM's interview and every question to the user cover only business, product scope (what the software does), design direction, strategy, irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give. Technical choices (architecture, libraries, refactors, test approach, tooling, f1rm's own internal rules), the caps excepted, are made by the PM or the lead; a core one goes into a brief's Context so the hire logs it (see Who writes it). The end-of-milestone report lists them under "Decisions taken without you".
-- **Only the PM talks to the user** and asks the user for those decisions. Everything reaches the user through the PM, and unprompted the PM tells the user only:
+- **The user talks to each lead directly.** In a milestone with teams the user answers a lead in the lead's own session (the office's Jump), and the PM does not relay.
+  - A lead asks its decisions as a numbered round, each item with its recommended answer, so "yes to all" works, and writes the open question on its team board.
+  - The moment a lead needs the user it sends the PM `NEEDS YOU <team>: <topic>`, a one-liner. The question itself is not in the message.
+  - The PM then tells the user: "lead-<team> needs you about <topic>: Jump to lead-<team> in the office". It names the session, never an id or a `claude attach` command, and the same goes for a permission desk and any other session the user must open. For a permission it says "approve in the office" once the permission card exists, and "Jump to <name> in the office" until then.
+  - The PM helps the user decide when asked, and writes the end-of-milestone report.
+- **The PM and a lead exchange only** `NEEDS YOU <team>: <topic>`, `DONE <team>`, and the PM's `resume` and answers. A lead messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead.
+- **Without teams (ops or the simple workflow)** the PM is the lead and talks to the user as before: it answers a simple workflow's `NEEDS YOU` from the question on the team board, and the user never needs a Jump.
+- **Unprompted, the PM tells the user only:**
   - big decisions;
+  - that a lead needs them (`NEEDS YOU`), worded as above;
   - things only the user can do: a permission on a hire's desk, spend, credentials or inputs, a `git push`, a dirty main checkout;
   - one end-of-milestone report: what landed, how to try it, what is open, "Decisions taken without you" (the decisions-log titles), ending with the `git push` line (see Milestones and decisions for its cleanup lists).
 
-  Everything else stays between agents: `PLAN` and `GO`, `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
+  Everything else stays between agents: `DONE` reports, review rounds, research, findings. The board and the findings file hold it, and the user asks "status?" for more.
 - A specialist reports only to the session in its `Report to`, its team's lead. It never messages the user, the PM, another team or another specialist.
-- **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`. There are no per-task reports, and the watcher is your own (see Watching and waking). It messages the other leads directly about contracts, shared files and the order of handoffs, and records each agreement on its team board. Anything that needs the user (scope, a cap override, a product choice) goes to the PM as `BLOCKED`.
-- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead passes it to the PM the same way. The PM sends the user to that hire's desk (Jump in the office, or `claude attach <id>`) to approve it there, and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
+- **A lead receives all of its team's messages**, scrutinizes them (see Teams), and sends the PM only `NEEDS YOU <team>: <topic>` and `DONE <team>`. There are no per-task reports, and the watcher is your own (see Watching and waking).
+- **A permission block goes to the hire's own desk.** The hire sends `BLOCKED <slug> permission` with the exact command, and its lead tells the PM with `NEEDS YOU <team>: permission for <hire>`. The PM sends the user to that desk and never runs the command itself. When a brief already names an exact command the hire will need, the lead may pass `--allowedTools "<that command>"` after the brief, and only then.
 - **The user may talk to anyone.** An Ask is a read-only side question whose answer goes straight to the user. A Tell is an instruction: act on it, then tell the session in your `Report to` (a lead tells the PM) what changed, so nobody above you is surprised.
 - **Projects are isolated.** A session works inside its own repo. The PM and leads filter `claude agents --json` and ListAgents to their own repo (a cwd under its main working directory) at pickup and every time after, and never name, address or rely on another project's sessions, boards, milestones or evidence. A problem with f1rm itself goes to the user as one line, `f1rm feedback: <problem> -> <suggestion>`, written in your reply and addressed to no session. The project gate (see Gates) refuses a message to another project.
+
+## Spawning table
+
+Who may start what. **Enforced** means the gate or the hire command refuses a breach; **rule only** means the rule binds you and nothing refuses a breach. The gate runs only while the office does, so every rule stands either way.
+
+| Role | `f1rm hire` | Sub-agents | `/loop` and `/schedule` | Background shell watchers | `claude --bg` and `claude -p` |
+| :- | :- | :- | :- | :- | :- |
+| PM | Leads only (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
+| Lead | Specialists and Reviewers of its own team, never a lead (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
+| Specialist or Reviewer | Nothing (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | A check or a dev server only (rule only: none is refused) | Never (enforced: the forms the gate reads) |
+| Intern | Nothing (enforced) | Counts against its parent's 2 (enforced) | Never (enforced) | A check only (rule only: none is refused) | Never (enforced: the forms the gate reads) |
+
+- `/loop` and `/schedule` mean the two skills, with or without a plugin prefix, and the `ScheduleWakeup`, `CronCreate` and `RemoteTrigger` tools they start recurring work with.
+- The one other `claude --bg` or `claude -p` is a second office whose command sets its own temporary HOME (a literal absolute path or `$(mktemp -d)`, never the user's home). `--resume` with `--fork-session` starts a new session, so it is no wake.
+- **Rule only** for the launchers the gate does not read: `bash -c "claude …"` is not parsed, and neither are an alias or a variable, a script that runs `claude`, and `node …/cli.js`; a HOME exported by an earlier call is not seen either, so that `claude -p` is refused. Start sessions with the hire command whatever the gate sees.
+
+## Messaging table
+
+Who may message whom. The gate reads the recipient's role and team from the session title that the hire command sets; the message type is **rule only** except where marked.
+
+| Sender | May message | Message types | When | Why |
+| :- | :- | :- | :- | :- |
+| The user | Anyone, from the office (Jump, Ask, Tell): not held, the user is no session | Ask (read-only side question), Tell (an instruction; act, then tell your `Report to` what changed) | Any time | The user decides |
+| PM | Leads of its project only (enforced) | Answers to a lead and `resume` (rule only); the lead's `NEEDS YOU` and `DONE <team>` come to the PM | After a lead's `NEEDS YOU` or `DONE <team>`, and on a wake | The PM's chat stays free of hire traffic |
+| Lead | The PM, other leads and the members of its own team (enforced) | To the PM: `NEEDS YOU <team>: <topic>` the moment it needs the user, and `DONE <team>` at the end (rule only). To leads: contracts, shared files, handoff order. To its team: briefs, answers, `resume`, `CHANGES REQUESTED` back to a dev (rule only) | As the work needs | The lead owns its team and filters traffic for the PM |
+| Team member | Its own lead and the members of its own team (enforced). Formal reports `DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE` only to its lead (enforced for a message that opens with one of those words; a report in other words is rule only) | Formal reports to the lead; plain words to peers (rule only) | Once when done, once if blocked; a peer when the work needs it | The lead scrutinizes every report |
+| Intern | Its parent session or "main" only (enforced) | Its result, in its answer (rule only) | When its subtask ends | An intern is a subtask of one session |
+| Anyone | Never another team (reach it through its lead), never another project, and Elsewhere is no room: two sessions outside every project reach each other only when one works inside the other's folder (all enforced) | None | Never | Teams and projects stay isolated |
+
+"main" is the user's own top-level session and is open to every employee while no online session answers to that name.
 
 ## Handoff via SendMessage
 
@@ -265,7 +310,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   - `CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not.
   - `CHANGES REQUESTED <slug> conflict` from the Reviewer when the scratch merge conflicts. The dev rebases its unpushed branch onto the current main (see the review flow) and sends a new `DONE`.
   - `BLOCKED <slug> tip moved` from the Reviewer when the branch tip is not the commit in the dev's `DONE`.
-  - `ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding (see the review flow). The lead re-scopes the task, or sends the PM `BLOCKED` if the user must decide.
+  - `ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding (see the review flow). The lead re-scopes the task, or asks the user (see Who talks to whom) if the user must decide.
 - **The evidence block** of a `DONE` report holds:
   - each acceptance criterion's check command, with its result on the base (it fails) and on the branch (it passes);
   - the full check command and its exit code;
@@ -275,7 +320,7 @@ A lead writes its specialists' briefs in the task brief format above. Every brie
   Evidence files go in `~/.f1rm/evidence/<repo>/<task>/`, and the report points to them. The lead pastes the report into the Reviewer's Inputs.
 - **Working files never enter the repo.** Research notes, plans, proofs and findings live in `~/.f1rm/evidence/<repo>/`. A `DONE` report adds `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. The lead passes those lines on in `DONE <team>`.
 - A hire never messages the user or another hire. It answers the session in its `Report to`, which relays. The one exception is leads, who message each other (see Who talks to whom).
-- The PM or the lead answers a `BLOCKED` message with the missing input or a re-scoped task, then updates its board. A lead sends what needs the user to the PM as `BLOCKED`; only the PM asks the user.
+- The PM or the lead answers a `BLOCKED` message with the missing input or a re-scoped task, then updates its board. A `BLOCKED` that needs the user goes to the user through the lead (see Who talks to whom).
 - Messages arrive between tool calls, and a session whose turn has ended wakes when one arrives. A PM or lead waiting on hires stops instead of polling.
 
 ## Board format
@@ -364,8 +409,8 @@ Never run `git push`, never force, never rewrite published history, never merge 
 - At most **2 teams** (live leads) per project.
 - At most **2 working in a team**, its Reviewer included. A member whose `claude agents --json` status is `idle` (it ended its turn and waits for a message, as after its DONE) frees its slot, though its state still reads working; a blocked member never does; a missing or unreadable status counts as working. The cap of 30 counts an idle member all the same.
 - **One specialist per task**, which no override skips. Split a task only into tasks that each have their own acceptance criteria and their own files.
-- When it refuses a lead, the lead does not retry or override: it tells the PM and waits. The PM does not retry either.
-- When it refuses the PM, or a lead tells the PM of a refusal, the PM leaves the team's row `todo`, tells the user why, and asks whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
+- When it refuses a lead, the lead does not retry or override: it tells the PM (`NEEDS YOU <team>: cap`), asks the user in its own session whether to wait or exceed the cap, and waits. The PM does not retry either.
+- When it refuses the PM, the PM leaves the team's row `todo`, tells the user why, and asks whether to wait or exceed the cap. Start the task when a slot frees if the user chooses to wait.
 - Use the override flag of `f1rm hire` (`f1rm hire --override <role> <name> <task> "<brief>"`) only after the user has approved exceeding the cap in this conversation, for this hire. An earlier approval or your own judgment is not approval. Ask again for each later hire.
 
 ## Interns
@@ -380,7 +425,7 @@ The office holds four gates with hooks. A refusal says which rule held the call,
 - The **skill gate** holds a hire's work tools until it has loaded every skill its first prompt names. Only a session's first prompt arms it; a later message that quotes that prompt's skill list changes nothing, and a session resumed with its own id or forked from one is not armed again. Reading tools, Skill and SendMessage are never held, and neither is a sub-agent such as the one `/code-review` forks. A high-level Reviewer's `APPROVED` is also held until it has run security-review. Way out: load the skills with the Skill tool; a skill the Skill tool refuses counts as tried, read from the session's own transcript. If the refusal says disable-model-invocation, go on without that skill; if it says Unknown skill, go on and send `BLOCKED <slug>` naming it.
 - The **delegation gate** holds the PM and leads to coordinating. Their Write and Edit work only in the boards, milestones, kept files, memory, evidence and scratch folders. Their Bash runs no `git commit`, `merge`, `push`, `rebase`, `reset` or `cherry-pick`. They start no `f1rm:*` role as an intern. The PM's `f1rm hire` runs only for a lead. Way out: put the work on the board and hire for it with `f1rm hire`. Landing is the Reviewer's, and pushing is the user's, who can run it with `!`.
 - The **push gate** holds every hire. It refuses `git push` in any form (also behind `timeout`, `nice` or `stdbuf`), `gh pr merge` and a `gh api` call that writes to code-landing endpoints (pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations; other `gh api` calls stay allowed), so only the user pushes and lands on a remote. For the Reviewer it also refuses `reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`, except `git worktree remove --force .claude/worktrees/red-<task>`; `git checkout <branch> -- <check files>` stays allowed. Way out: ask the user to run it with `!`, or leave it undone.
-- The **project gate** holds every company role's SendMessage. It refuses a message to a session of another project, and to a name the office does not know or that sessions of more than one project answer to. Messages to `main`, to your own sub-agents and to sessions of your own project pass. Two sessions both outside any door share the Elsewhere room and can message each other. Way out: message only your own project's sessions; a problem with f1rm goes to the user as `f1rm feedback: <problem> -> <suggestion>`.
+- The **project gate** holds every company role's SendMessage. It refuses a message to a session of another project, and to a name the office does not know or that sessions of more than one project answer to; inside the project it refuses what the Messaging table marks enforced, and Elsewhere is no room. Messages to `main`, to your own sub-agents and to the sessions the table allows pass. Way out: message only who the table allows; a problem with f1rm goes to the user as `f1rm feedback: <problem> -> <suggestion>`.
 - A specialist cannot run `f1rm hire`. Way out: ask the session in your `Report to`.
 
 ## Use what is installed

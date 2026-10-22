@@ -173,6 +173,15 @@ test.each(["pstack:architect", "pstack:how"])("a lead hired with --skills %s get
   expect(prompt(stub)).toBe(`/${skill} Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n${BRIEF}`);
 });
 
+test("what hire adds to a brief is the Report to line alone: no PLAN, no GO, and no PM round trip before the lead hires", () => {
+  const stub = stubClaude([]);
+  expect(hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repoDir()).code).toBe(0);
+  const text = prompt(stub);
+  expect(text).toEndWith(`Report to: pm-shop\n\n${BRIEF}`);
+  expect(text).not.toMatch(/\bPLAN\b|\bGO\b|NEEDS YOU/);
+  expect(readFileSync(join(import.meta.dir, "hire.ts"), "utf8")).not.toMatch(/\bPLAN\b|\bGO\b/);
+});
+
 // arena, swarm and interrogate carry disable-model-invocation too, and no hire is wired to run one as a first command: --skills refuses them, for every role.
 test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s is refused with nothing started: the Skill tool refuses it and the user can run it by hand", (skill) => {
   for (const [role, task] of [["lead", "checkout"], ["backend-dev", "x"], ["reviewer", "review-x"]]) {

@@ -98,11 +98,11 @@ test("the guidelines cover every item the spec lists", () => {
   expect(section("Definition of done")).toContain("Reviewer has signed off");
 });
 
-test("the guidelines run teams: when to form them, the team brief, PLAN/GO/DONE, who talks to whom, the caps, interns, team boards and installed skills", () => {
+test("the guidelines run teams: when to form them, the team brief, NEEDS YOU/DONE, who talks to whom, the caps, interns, team boards and installed skills", () => {
   for (const h of ["Teams", "Team brief", "Who talks to whom", "Interns", "Use what is installed"]) expect(section(h).trim().length).toBeGreaterThan(100);
   const teams = section("Teams");
-  for (const s of ["Every milestone runs through one or two teams", "At most 2 teams", "hires only leads", "No nested teams", "`PLAN <team>`", "`GO <team>`", "`DONE <team>`"]) expect(teams).toContain(s);
-  expect(section("Who talks to whom")).toContain("Only the PM talks to the user");
+  for (const s of ["Every milestone runs through one or two teams", "At most 2 teams", "hires only leads", "No nested teams", "`DONE <team>`"]) expect(teams).toContain(s);
+  expect(section("Who talks to whom")).toContain("The user talks to each lead directly");
   expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
   const caps = section("Cap rule");
   for (const s of ["**30 background sessions working at once**", "**2 teams**", "**2 working in a team**", "**One specialist per task**"]) expect(caps).toContain(s);
@@ -123,7 +123,7 @@ test("specialists never hire and answer only their Report to; the PM hires only 
   expect(pm).toContain("Hire only leads");
   expect(pm).toContain("After `DONE <team>`, let the lead go");
   const lead = role("lead").body;
-  for (const s of ["`PLAN <team>`", "`GO <team>`", "`DONE <team>`", "f1rm hire --team <team>", "Only the PM talks to the user"]) expect(lead).toContain(s);
+  for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "f1rm hire --team <team>", "Who talks to whom"]) expect(lead).toContain(s);
 });
 
 test("the guidelines run editions: Work and Founder, the founder playbook, drafts only, the content checklist and publish", () => {
@@ -384,15 +384,15 @@ test("the PM resolves a blocked lead, and its cleanup moves and removes files wi
 
 test("founder work meant to go out is marked publish on the lead's team board, and the lead tells the PM, who tells the user", () => {
   const drafts = section("Drafts only");
-  for (const s of ["the lead marks its team-board row `publish`", "`BLOCKED <team> publish`", "The PM tells the user", "the PM tells the lead, who marks the row `done`"]) expect(drafts, s).toContain(s);
+  for (const s of ["the lead marks its team-board row `publish`", "`NEEDS YOU <team>: publish`", "The PM tells the user", "the PM tells the lead, who marks the row `done`"]) expect(drafts, s).toContain(s);
   expect(drafts).not.toContain("the PM marks its board row");
   expect(section("Board format")).toContain("On a team board the lead sets `publish` and `done`");
   const pm = role("pm").body, lead = role("lead").body;
   expect(pm).toContain("keep the `publish` list");
-  expect(pm).toContain("`BLOCKED <team> publish`");
+  expect(pm).toContain("`NEEDS YOU <team>: publish`");
   expect(pm).toContain("tell the lead");
   expect(pm).not.toContain("mark approved founder work");
-  expect(lead).toContain("`BLOCKED <team> publish`");
+  expect(lead).toContain("`NEEDS YOU <team>: publish`");
   expect(lead).toContain("mark its row `publish`");
   expect(lead).toContain("mark the row `done`");
 });
@@ -425,18 +425,120 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
   const talk = section("Who talks to whom");
   for (const s of ["big decisions;", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
   expect(talk).toMatch(/lead receives all of its team's messages/);
-  expect(talk).toMatch(/sends the PM only `PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`/);
-  expect(section("Team brief")).toMatch(/Report: PLAN before hiring, BLOCKED[^\n]*DONE/);
+  expect(talk).toMatch(/sends the PM only `NEEDS YOU <team>: <topic>` and `DONE <team>`/);
+  expect(section("Team brief")).toContain("Report: NEEDS YOU <team>: <topic> for what needs the user, DONE <team> when the slice is merged. Nothing else goes to the PM.");
   for (const text of [guidelines, role("lead").body]) expect(text).not.toMatch(/status report/i);
   const teams = section("Teams");
-  expect(teams).toMatch(/`GO <team>` without telling the user, unless the plan changes agreed scope or a decision/);
   for (const s of ["checks each specialist's `DONE` against its brief", "reruns its checks before it hires the Reviewer", "sends the work back", "~/.f1rm/evidence/<repo>/findings.md", "5-line summary", "only role that merges"]) expect(teams, s).toContain(s);
   const lead = role("lead").body;
-  for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`PLAN <team>`, `BLOCKED` for what needs the user, and `DONE <team>`"]) expect(lead, s).toContain(s);
+  for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`NEEDS YOU <team>: <topic>` and `DONE <team>`"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
-  expect(pm).toContain("`GO <team>` without telling the user");
   for (const s of ["big decisions", "git push"]) expect(pm, s).toContain(s);
-  expect(pmPromptText()).toContain("GO <team>");
+  expect(pmPromptText()).toContain("NEEDS YOU <team>");
+});
+
+// R8b: the PM picks the workflow by rule, the user talks to each lead, PLAN and GO are gone, and two tables carry what the gate enforces.
+const WORKFLOW_FILES = () => ({
+  guidelines,
+  "pm.md": role("pm").body,
+  "lead.md": role("lead").body,
+  prompt: pmPromptText(),
+  "plugin README": readFileSync(join(PLUGIN, "README.md"), "utf8"),
+  README: readFileSync(join(REPO, "README.md"), "utf8"),
+  hire: readFileSync(join(REPO, "office", "cli", "hire.ts"), "utf8"),
+  ...Object.fromEntries(Object.keys(ROLES).map((r) => [`${r}.md`, role(r).body])),
+});
+
+test("R8b: the three workflows are said once in the guidelines; pm.md and the PM prompt point to them by name and carry the one-line form", () => {
+  const w = section("Picking the workflow");
+  for (const s of [
+    "`Simple workflow: <what, which role>`", 'saying "milestone"', "**Ops**", "no file changes (run, start, open, install, status)", "at once",
+    "**Simple**", "one deliverable", "one specialist role", "no business, product-scope, design or strategy decision", "fits one session", "at most one clarifying question", "no milestone section", "one board row", "one lead with a short team brief",
+    "**Milestone**", "2 or more tasks or roles", "a big decision", "research needed", '"milestone" or "grill"', "the full interview and teams",
+  ]) expect(w, s).toContain(s);
+  expect(guidelines.split("no business, product-scope, design or strategy decision")).toHaveLength(2);
+  for (const [name, text] of [["pm.md", role("pm").body], ["prompt", pmPromptText()]] as const) {
+    expect(text, name).toContain("Picking the workflow");
+    expect(text, name).toContain("Simple workflow:");
+    expect(text, name).toContain("milestone");
+    expect(text, name).not.toContain("one specialist role");
+  }
+  expect(pmStep(2)).toContain("Picking the workflow");
+});
+
+test("R8b: PLAN and GO are gone from every role file, the guidelines, the prompt, hire.ts and both READMEs", () => {
+  for (const [name, text] of Object.entries(WORKFLOW_FILES())) {
+    expect(text, name).not.toMatch(/\bPLAN\b/);
+    expect(text, name).not.toMatch(/\bGO\b/);
+  }
+  expect(role("lead").body).toContain("`NEEDS YOU <team>: <topic>` and `DONE <team>`");
+  expect(role("pm").body).toContain("`NEEDS YOU <team>: <topic>`");
+  expect(role("pm").body).toContain("After `DONE <team>`, let the lead go");
+  expect(section("Workflows")).toContain("`NEEDS YOU <team>: <topic>`");
+});
+
+test("R8b: the talk rules are stated once in the guidelines and pointed to from pm.md, lead.md and the prompt", () => {
+  const talk = section("Who talks to whom");
+  for (const s of [
+    "The user talks to each lead directly", "in the lead's own session (the office's Jump)", "a numbered round", "its recommended answer", '"yes to all"', "open question on its team board",
+    "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
+    "approve in the office", "Jump to <name> in the office", "helps the user decide when asked", "writes the end-of-milestone report",
+    "Without teams (ops or the simple workflow)", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
+  ]) expect(talk, s).toContain(s);
+  expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
+  expect(guidelines).not.toMatch(/claude attach <id>/);
+  for (const [name, text] of [["pm.md", role("pm").body], ["lead.md", role("lead").body], ["prompt", pmPromptText()]] as const) {
+    expect(text, name).toContain("Who talks to whom");
+    expect(text, name).not.toContain("claude attach");
+    expect(text, name).not.toContain("a numbered round");
+  }
+  expect(role("pm").body).toContain("needs you about <topic>: Jump to");
+});
+
+test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell marked enforced or rule only, matching the gate", () => {
+  const rowsOf = (md: string, head: string) => md.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith(head) && !l.startsWith("| :-"));
+  const spawn = section("Spawning table");
+  expect(spawn).toContain("| Role | `f1rm hire` | Sub-agents | `/loop` and `/schedule` | Background shell watchers | `claude --bg` and `claude -p` |");
+  const srows = rowsOf(spawn, "| Role");
+  expect(srows.map((r) => r.split("|")[1].trim())).toEqual(["PM", "Lead", "Specialist or Reviewer", "Intern"]);
+  for (const r of srows) {
+    const cells = r.split("|").slice(2, -1);
+    expect(cells, r).toHaveLength(5);
+    for (const c of cells) expect(c, `${r} :: ${c}`).toMatch(/\((enforced|rule only)[;:)]/);
+  }
+  expect(srows[0]).toContain("Leads only (enforced)");
+  expect(srows[1]).toContain("own team, never a lead (enforced)");
+  expect(srows[2]).toContain("Nothing (enforced)");
+  for (const s of ["At most 2", "never an `f1rm:*` role", "Never (enforced)", "`--bg --resume`", "temporary HOME", "bash -c", "not parsed"]) expect(spawn, s).toContain(s);
+  expect(srows[2].split("|")[5]).toContain("rule only");
+  const talk = section("Messaging table");
+  expect(talk).toContain("| Sender | May message | Message types | When | Why |");
+  const trows = rowsOf(talk, "| Sender");
+  expect(trows.map((r) => r.split("|")[1].trim())).toEqual(["The user", "PM", "Lead", "Team member", "Intern", "Anyone"]);
+  for (const r of trows.slice(1, 5)) {
+    const cells = r.split("|").slice(2, -1);
+    expect(cells, r).toHaveLength(4);
+    expect(r, r).toContain("enforced");
+    expect(r, r).toContain("rule only");
+  }
+  expect(trows[0]).toContain("Ask");
+  expect(trows[0]).toContain("Tell");
+  expect(trows[1]).toContain("Leads of its project only (enforced)");
+  for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "`resume`"]) expect(talk, s).toContain(s);
+  expect(trows[2]).toContain("The PM, other leads and the members of its own team");
+  expect(trows[3]).toContain("`DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE`");
+  expect(trows[3]).toContain("only to its lead");
+  expect(trows[4]).toContain("parent session");
+  expect(trows[5]).toContain("enforced");
+  expect(trows[5]).toContain("another team");
+  expect(trows[5]).toContain("another project");
+  expect(trows[5]).toContain("Elsewhere is no room");
+  expect(talk).toContain("rule only");
+});
+
+test("R8b: docs/decisions.md has the entries PM picks the workflow and Who talks to whom", () => {
+  const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
+  for (const t of ["PM picks the workflow", "Who talks to whom"]) expect(titles).toContain(`2026-10-22 ${t}`);
 });
 
 test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and retries an index.lock", () => {
@@ -550,8 +652,8 @@ test("P1: projects are isolated: the PM and leads filter to their own repo, addr
   for (const r of ["pm", "lead"]) {
     for (const s of ["claude agents --json", "own repo", "another project's", "`f1rm feedback: <problem> -> <suggestion>`", "addressed to no session"]) expect(role(r).body, `${r}: ${s}`).toContain(s);
   }
-  expect(section("Gates")).toContain("Two sessions both outside any door share the Elsewhere room and can message each other.");
-  expect(guidelines.split("Elsewhere room").length - 1).toBe(1);
+  expect(section("Gates")).toContain("Elsewhere is no room");
+  expect(guidelines.split("Elsewhere room").length - 1).toBe(0); // Elsewhere is no room: the old shared-room sentence is gone
   const sentence = (r: string) => /Stay in your own repo: filter[^\n]*?(at pickup and every time after)\./.exec(role(r).body)?.[1];
   expect([sentence("pm"), sentence("lead")]).toEqual(["at pickup and every time after", "at pickup and every time after"]);
 });
@@ -594,7 +696,7 @@ test("S1: the guidelines state the watcher, the real-activity rule, and what to 
   for (const s of [
     "never by status text", "`f1rm status --json`", "`idleMinutes`", "`limitUntil`", "`ended`", "`f1rm status --watch <names>`", "`name:waiting`", "`run_in_background`", "its exit wakes you",
     "idle for 20 minutes", "exits 1 when `claude agents --json` can't be read", "only when it and every hire of its team",
-    "Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `PLAN`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `DONE <team>`) as `name:waiting`",
+    "Pass a session waiting for an answer to its report (`DONE`, `BLOCKED`, `CHANGES REQUESTED`, `ESCALATE`, `APPROVED`, or a lead's `NEEDS YOU` or `DONE <team>`) as `name:waiting`",
     "a waiting name is judged only for ended, missing or a limit stop, never for being quiet",
     "When you answer a session's report (and it works again), restart the watcher with it as a plain name.", "a waiting name is watched as a plain name as soon as it writes again",
     "Leave out a hire waiting on a reset timer you hold.", "Start no watcher when no name is left; the reset timers wake you.",
@@ -703,7 +805,7 @@ test("K1: the decision policy is stated once, in the guidelines; pm.md and lead.
     // The caps and permissions stay the user's, as the cap rule and the lead's BLOCKED rule say. One flat list: the cap and the permission are items of it, not the tail of the parenthesis.
     "design direction, strategy, irreversible or external actions (push, deploy, spend, data deletion, messaging people), exceeding a cap, and a permission only the user can give", "the caps excepted",
   ]) expect(who, s).toContain(s);
-  expect(who).toMatch(/a cap override[^\n]*goes to the PM as `BLOCKED`/);
+  expect(who).toMatch(/a cap override reach the user through the lead/);
   expect(section("Cap rule")).toContain("only after the user has approved exceeding the cap");
   expect(guidelines.split("product scope (what the software does)")).toHaveLength(2);
   for (const r of ["pm", "lead"]) {
