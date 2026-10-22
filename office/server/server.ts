@@ -55,9 +55,9 @@ const splitCommands = (command: string) => {
 // A `f1rm`/`f1rm.ts` word followed by `hire` at any position, so `bun run f1rm.ts hire` and `npx f1rm hire` count; a quoted message is one word, so it doesn't.
 // ponytail: `bash -c "f1rm hire …"` is one quoted word and is not seen.
 const unquoted = (word: string) => word.replace(/^(["'])(.*)\1$/, "$2");
-/** The words after `hire` of a simple command that runs `f1rm hire`, unquoted, or null. */
-const hireArgs = (words: string[]) => {
-  const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === "hire");
+/** The words after `hire` (or another `f1rm` command, `wake`) of a simple command that runs `f1rm hire`, unquoted, or null. */
+const hireArgs = (words: string[], verb = "hire") => {
+  const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === verb);
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
 /** The role and `--team` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
@@ -437,6 +437,24 @@ export function startServer({
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
+    }
+    // `f1rm wake` follows the hire rules: whoever may hire a name may wake it. The target is a name, or a session id the listing resolves to one; an unknown one is the command's own refusal.
+    const wakes = commands.flatMap((c) => hireArgs(c, "wake") ?? []);
+    if (COORDINATORS.has(role) && wakes.length) {
+      const sessions = (await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? [];
+      const me = state.employees[sessionId];
+      for (const c of commands) {
+        const args = hireArgs(c, "wake");
+        const target = args?.find((a) => !a.startsWith("-"));
+        const name = target && (hireName(target) ? target : sessions.find((s) => s.kind === "background" && (s.sessionId === target || s.id === target))?.name);
+        const hire = name ? hireName(name) : null;
+        if (hire && !mayWake({ role, team: teamOf(me) }, hire)) {
+          return refuse("wake", role === "pm" ? "The PM wakes leads; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
+        }
+      }
+    }
+    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
+      return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
     }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
     if (role === "lead") {

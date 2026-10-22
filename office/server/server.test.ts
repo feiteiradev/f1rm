@@ -1254,6 +1254,37 @@ test("`f1rm hire` is held only as a command; a command that merely mentions it p
   }
 });
 
+test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member of its own team, a specialist nobody; a name or a session id both count", async () => {
+  await talkOffice();
+  sessionList = [
+    ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old"),
+    ended("search.backend-dev-x", "/code/shop/.claude/worktrees/x"),
+    ended("lead-old"),
+  ];
+  const run = async (id: string, command: string) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: "/code/shop" }));
+  const decision = async (id: string, command: string) => (await run(id, command))?.permissionDecision ?? null;
+  for (const command of ["f1rm wake checkout.backend-dev-old", "bun office/cli/f1rm.ts wake checkout.backend-dev-old 'more'", "f1rm wake lead-checkout"]) {
+    const out = await run("c1", command); // a specialist
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Only the PM and team leads wake");
+  }
+  expect(await decision("rv", "f1rm wake checkout.backend-dev-old")).toBe("deny");
+  for (const command of ["f1rm wake checkout.backend-dev-old", "f1rm wake sid_checkout.backend-dev-old", "f1rm wake e_checkout.backend-dev-old", "f1rm wake --override checkout.backend-dev-old 'one more round' --model haiku", "ls && f1rm wake checkout.backend-dev-old", "f1rm wake checkout.backend-dev-gone"]) {
+    expect([command, await decision("l1", command)]).toEqual([command, null]); // the last is unknown: the command itself refuses it
+  }
+  for (const command of ["f1rm wake search.backend-dev-x", "f1rm wake sid_search.backend-dev-x", "f1rm wake lead-old", "f1rm wake lead-search"]) {
+    const out = await run("l1", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toMatch(/A lead wakes only the members of its own team|PM wakes leads/);
+  }
+  expect(await decision("pm", "f1rm wake lead-old")).toBeNull();
+  expect(await decision("pm", "f1rm wake lead-search")).toBeNull();
+  expect(await decision("pm", "f1rm wake checkout.backend-dev-old")).toBe("deny");
+  expect(await decision("pm", "f1rm wake sid_checkout.backend-dev-old")).toBe("deny");
+  expect(await decision("free", "f1rm wake checkout.backend-dev-old")).toBeNull(); // the user's own session
+  for (const command of ['git commit -m "mentions f1rm wake x"', 'grep "f1rm wake" README.md', "f1rm woke"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
+});
+
 // A PM, a lead, a designer and a freelancer, to see which of the delegation rules reach whom.
 async function delegationOffice(boardsDir?: string) {
   start(undefined, undefined, boardsDir);
@@ -2037,7 +2068,7 @@ test("a refusal names the rule and the way out", async () => {
 });
 
 // A hire whose process ended (done, stopped, blocked on a limit) is listed by `claude agents --json --all` with no pid; no employee answers to its name.
-const ended = (name: string, cwd = "/code/shop", state = "done") => ({ id: `e-${name}`, sessionId: `sid-${name}`, name, kind: "background", state, cwd });
+const ended = (name: string, cwd = "/code/shop", state = "done") => ({ id: `e_${name}`, sessionId: `sid_${name}`, name, kind: "background", state, cwd });
 
 test("a message to a hire of this project with no live process is refused with the way back, by name, by `name [ref]` and by session id", async () => {
   const send = await talkOffice();
@@ -2048,10 +2079,10 @@ test("a message to a hire of this project with no live process is refused with t
     ended("search.backend-dev-x", "/code/shop/.claude/worktrees/x", "failed"),
     ended("blog.backend-dev-b", "/code/blog/.claude/worktrees/b"),
   ];
-  for (const to of ["checkout.backend-dev-old", "checkout.backend-dev-old [36698c]", "sid-checkout.backend-dev-old", "checkout.designer-gone [4e323bd1a0f2]"]) {
+  for (const to of ["checkout.backend-dev-old", "checkout.backend-dev-old [36698c]", "sid_checkout.backend-dev-old", "checkout.designer-gone [4e323bd1a0f2]"]) {
     const out = await send("l1", to);
     expect([to, out?.permissionDecision]).toEqual([to, "deny"]);
-    expect(out.permissionDecisionReason).toContain(`no live session; f1rm wake ${to.startsWith("sid-") ? "checkout.backend-dev-old" : to.replace(/ \[.*/, "")}`);
+    expect(out.permissionDecisionReason).toContain(`no live session; f1rm wake ${to.startsWith("sid_") ? "checkout.backend-dev-old" : to.replace(/ \[.*/, "")}`);
     expect(out.permissionDecisionReason).not.toContain("unknown to the office");
   }
   // The PM reaches an ended lead the same way.
