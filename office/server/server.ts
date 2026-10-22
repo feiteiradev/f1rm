@@ -138,10 +138,11 @@ const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "res
 export const INTERNS = 2;
 // A team member's message that opens with one of these words (past markdown such as `**`, `>`, `-` or `#`) is a formal report: it goes to its lead only.
 const FORMAL_REPORT = /^[\s*_>#`"'(\[+•-]*(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES REQUESTED)(?![A-Za-z0-9])/;
-/** Whether one cwd is the other's folder or inside it, past symlinks. */
+/** Whether one cwd is the other's folder or inside it, past symlinks, and the outer folder is no broad one: not `/`, the home folder or a folder that holds it. */
 const sameFolder = (a: string, b: string) => {
-  const [x, y] = [realPath(resolve(a)), realPath(resolve(b))];
-  return inside(x, y) || inside(y, x);
+  const [x, y] = [realPath(resolve(a)), realPath(resolve(b))], home = realPath(resolve(process.env.HOME ?? "/"));
+  const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(outer, home);
+  return holds(x, y) || holds(y, x);
 };
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or

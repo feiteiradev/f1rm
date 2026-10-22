@@ -2042,6 +2042,24 @@ test("outside any door a session may message only one working under the same fol
   expect(await send("lx", "main")).toBeNull();
 });
 
+test("a session whose folder is / or the home folder reaches no Elsewhere session, and none reaches it", async () => {
+  start({});
+  const home = process.env.HOME ?? "/home/me";
+  const cwds: Record<string, string> = { lh: home, mh: `${home}/proj`, lr: "/", lx: "/code/a", mx: "/code/a/w" };
+  const titles: Record<string, [string, string]> = { lh: ["lead-h", "f1rm:lead"], mh: ["h.designer-m", "f1rm:designer"], lr: ["lead-r", "f1rm:lead"], lx: ["lead-x", "f1rm:lead"], mx: ["x.designer-m", "f1rm:designer"] };
+  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
+  await office((s) => Object.keys(s.employees).length === 5 && Object.values(s.employees).every((e) => e.room === "elsewhere"));
+  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "x" }), cwd: cwds[id] }));
+  for (const [from, to] of [["lh", "h.designer-m"], ["mh", "lead-h"], ["lh", "lead-x"], ["lx", "lead-h"], ["lr", "lead-x"], ["lx", "lead-r"], ["lr", "lead-h"], ["lr", "x.designer-m"], ["mx", "lead-r"]]) {
+    const out = await send(from, to);
+    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Elsewhere");
+  }
+  // A worktree under a project folder still reports up to the lead whose folder holds it, and the lead down to it.
+  expect(await send("mx", "lead-x")).toBeNull();
+  expect(await send("lx", "x.designer-m")).toBeNull();
+});
+
 test("an intern whose parent has no title still reaches only its parent, not another untitled session", async () => {
   start({ "/code/shop": "/code/shop/.git" });
   await hook({ ...common("u1", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:backend-dev" });
