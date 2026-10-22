@@ -504,8 +504,11 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   for (const r of srows) {
     const cells = r.split("|").slice(2, -1);
     expect(cells, r).toHaveLength(5);
-    for (const c of cells) expect(c, `${r} :: ${c}`).toMatch(/\((enforced|rule only)[;:)]/);
+    for (const c of cells) expect(c, `${r} :: ${c}`).toMatch(/\((enforced|rule only)[;:)]|enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's \(the gate holds an intern as its parent\)/);
   }
+  const held = "enforced for a specialist's or a Reviewer's intern; rule only for a PM's or a lead's (the gate holds an intern as its parent)";
+  expect(srows[3].split("|")[2]).toContain(held);
+  expect(srows[3].split("|")[6]).toContain(held);
   expect(srows[0]).toContain("Leads only (enforced)");
   expect(srows[1]).toContain("own team, never a lead (enforced)");
   expect(srows[2]).toContain("Nothing (enforced)");
