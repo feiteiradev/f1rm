@@ -204,7 +204,7 @@ export function createRecovery(d: RecoveryDeps) {
           delete e.unreachable;
         }
         if (!quiet || reportSent(tailText) || e.nudged === key) continue;
-        if (h.role === "lead" && !teamQuiet(mine, newest, h.team, now)) continue;
+        if (h.role === "lead" && !teamQuiet(newest, h.team, now)) continue;
         e.nudged = key!;
         if (!(await safeTell(repo, name, NUDGE))) {
           e.unreachable = key!;
@@ -216,6 +216,8 @@ export function createRecovery(d: RecoveryDeps) {
       // Ended. A stop is handled once; a hire that had reported (its row waits on a review, or an answer) has nothing to continue.
       if (e.wokeFrom === sid || e.told === sid || reportSent(tailText)) continue;
       const first = d.promptOf(cwd, sid);
+      /** A lead and a Reviewer have no branch of their own. */
+      const tipOf = () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
       const stoppedAt = d.mtime(cwd, sid) ?? now;
       const limit = limitUntil(tailText);
       const tell = async (message: string, reason?: string) => {
@@ -232,7 +234,7 @@ export function createRecovery(d: RecoveryDeps) {
         }
         e.wokeAt = now;
         e.wokeFrom = sid;
-        e.tip = h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`);
+        e.tip = tipOf();
         delete e.told;
         delete e.note;
       };
@@ -246,7 +248,7 @@ export function createRecovery(d: RecoveryDeps) {
         continue;
       }
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
-      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`))) {
+      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tipOf())) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);
         continue;
       }
@@ -259,7 +261,7 @@ export function createRecovery(d: RecoveryDeps) {
   const safeTell = (repo: string, name: string, message: string) => d.tell(repo, name, message).catch(() => false);
 
   /** A lead is quiet when every member of its team is: idle, and its transcript written 20 minutes ago or more (an ended one counts as quiet). */
-  function teamQuiet(_mine: any[], newest: Map<string, any>, team: string | null, now: number): boolean {
+  function teamQuiet(newest: Map<string, any>, team: string | null, now: number): boolean {
     return [...newest.values()].every((m) => {
       const hm = hireName(m.name);
       if (!hm || hm.role === "lead" || hm.team !== team || !m.pid) return true;
