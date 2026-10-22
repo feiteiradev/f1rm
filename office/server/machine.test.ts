@@ -321,21 +321,13 @@ test("letGo refuses an id that could be read as a flag or a shell word, and runs
   }
 });
 
-test("runAsync answers with a command's trimmed output, null for a failure, and null (logged) for one that outlives its timeout, so a hung git cannot hold the office's recovery", async () => {
+test("runAsync answers with a command's trimmed output, null for a failure, and throws for one that outlives its timeout, so a hung git cannot hold the office's recovery or read as 'not a repo'", async () => {
   expect(await runAsync(["echo", "  hello  "])).toBe("hello");
   expect(await runAsync(["false"])).toBeNull();
   expect(await runAsync(["no-such-command-f1rm"])).toBeNull();
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
   const began = Date.now();
-  try {
-    expect(await runAsync(["sleep", "5"], 150)).toBeNull();
-  } finally {
-    console.log = log;
-  }
+  await expect(runAsync(["sleep", "5"], 150)).rejects.toThrow("sleep timed out after 150 ms");
   expect(Date.now() - began).toBeLessThan(3000);
-  expect(lines).toEqual(["sleep timed out after 150 ms"]);
 });
 
 test("gitCommonDirAsync answers what the synchronous lookup answers", async () => {

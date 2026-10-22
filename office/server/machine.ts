@@ -105,20 +105,24 @@ const ASK_PREAMBLE =
 export type Session = { id: string; name: string; kind: string; state: string; cwd: string; sessionId?: string; pid?: number };
 
 /**
- * Runs `argv` without blocking the event loop (the office serves its hooks on it) and answers its trimmed output, or null if it fails or is killed after `timeoutMs` (logged: a hung git must not hold
- * the recovery tick, whose next run waits for this one).
+ * Runs `argv` without blocking the event loop (the office serves its hooks on it) and answers its trimmed output, or null if it fails or does not exist. A command killed after `timeoutMs`
+ * throws instead, saying so: a hung git must not hold the recovery tick (whose next run waits for this one) and must not read as "not a repo".
  */
 export async function runAsync(argv: string[], timeoutMs = 10_000): Promise<string | null> {
+  let proc;
   try {
-    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", timeout: timeoutMs });
-    const out = await new Response(proc.stdout).text();
-    const code = await proc.exited;
-    if (proc.signalCode) console.log(`${argv[0]} timed out after ${timeoutMs} ms`);
-    return code === 0 ? out.trim() : null;
+    proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", timeout: timeoutMs });
   } catch {
     return null; // no such command
   }
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+  if (proc.signalCode) throw new Error(`${argv[0]} timed out after ${timeoutMs} ms`);
+  return code === 0 ? out.trim() : null;
 }
+
+/** The argv that gives the commit time (epoch seconds) of a branch's tip, for `f1rm status` (sync) and the recovery tick (async). */
+export const commitTimeArgs = (repo: string, branch: string) => ["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`];
 
 const commonDirArgs = (cwd: string) => ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"];
 /** `machine.gitCommonDir` without blocking the event loop. */

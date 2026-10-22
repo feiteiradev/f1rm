@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { headAsync, hires, tailAsync, textOf } from "./status.ts";
+import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -46,7 +46,7 @@ export function firstPrompt(start: string): string | null {
     if (!l.includes('"type":"user"')) continue;
     try {
       const line = JSON.parse(l);
-      if (line.type === "user" && line.isMeta !== true) return textOf(line.message?.content) || null;
+      if (line.type === "user" && startsTurn(line)) return textOf(line.message?.content) || null;
     } catch {} // a cut or odd line is no prompt
   }
   return null;

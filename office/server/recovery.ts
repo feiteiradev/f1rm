@@ -5,7 +5,7 @@ import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
-import { headAsync, lastTurn, limitUntil, recoveryFile, tailAsync, textOf } from "../cli/status.ts";
+import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync, textOf } from "../cli/status.ts";
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
@@ -91,9 +91,10 @@ export const NUDGE = "your turn ended without a report; send your DONE or BLOCKE
 
 /**
  * What the office remembers of one hire, per project, in `~/.f1rm/recovery/<repo>.json` so a restart keeps it and `f1rm status` can show it.
- * `wokeFrom` is the session id of the stop that was woken, and `told` the one whose Report to was told: a stop is handled once. `note` is what `f1rm status` shows.
+ * A stop is decided once per session id and recorded here with a `note`, which is what `f1rm status` shows: `wokeFrom` (woken), `told` (its Report to was told, or it had reported), `waitSid` with `wakeAt` (waiting
+ * for its limit to lift). `judged` is the transcript write a live idle hire was last judged at, and `nudged` the turn that got its nudge. Later ticks read none of these transcripts again.
  */
-export type Entry = { wokeAt?: number; wokeFrom?: string; tip?: number | null; told?: string; nudged?: string; unreachable?: string; note?: string };
+export type Entry = { wokeAt?: number; wokeFrom?: string; tip?: number | null; told?: string; waitSid?: string; wakeAt?: number; judged?: number; nudged?: string; unreachable?: string; note?: string };
 export type Entries = Record<string, Entry>;
 
 export type RecoveryDeps = {
@@ -118,12 +119,7 @@ export type RecoveryDeps = {
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
 };
 
-const isNotification = (content: unknown) => textOf(content).trimStart().startsWith("<task-notification>");
-
-/**
- * The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message. A task-notification (the session's own
- * background task finishing) and the meta lines a skill writes start no turn, as in lastTurn and firstPrompt.
- */
+/** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
 function lastTurnLines(tailText: string): any[] {
   const lines: any[] = [];
   for (const l of tailText.split("\n").reverse()) {
@@ -134,38 +130,29 @@ function lastTurnLines(tailText: string): any[] {
       continue; // a cut or odd line
     }
     if (!line || line.isSidechain) continue;
-    if (line.type === "assistant") lines.push(line);
-    else if (line.type === "user") {
-      const content = line.message?.content;
-      if (Array.isArray(content) && content.some((b: any) => b?.type === "tool_result")) lines.push(line);
-      else if (line.isMeta !== true && !isNotification(content)) break; // a prompt: the turn began here
-    } else if (line.type === "queue-operation" && line.operation === "enqueue" && !isNotification(line.content)) break;
+    if (startsTurn(line)) break;
+    if (line.type === "assistant" || line.type === "user") lines.push(line);
   }
   return lines.reverse();
 }
 
 /**
- * What the last turn reported. Real hires report with a SendMessage and close the turn with prose ("I sent APPROVED to lead-shop."), and a report may come mid-turn with the work going on.
- * `any`: a delivered report (a SendMessage whose message starts with a report word and whose tool result is no error, or text that does) is somewhere in the turn.
- * `closes`: the last one has nothing but text after it, so the turn ENDS with a report. A send cut before its result, or refused (the gate says "no live session"), was not delivered.
+ * Whether the hire's last turn ENDS with a delivered report: its last tool call is a SendMessage whose message starts with a report word and whose tool result is no error (a send cut before its result,
+ * or refused by the gate with "no live session", is not delivered). Text never counts: real hires report with SendMessage and close the turn with prose, and a refused send followed by "DONE ..., but the
+ * send was refused" has not reported. A report followed by more tool work (a checkpoint) is not the last call, so hires checkpoint first.
  */
-function reported(tailText: string): { any: boolean; closes: boolean } {
+function endsWithReport(tailText: string): boolean {
   const turn = lastTurnLines(tailText);
   const failed = new Map<string, boolean>();
-  for (const line of turn) if (line.type === "user") for (const b of line.message.content) if (b?.type === "tool_result") failed.set(String(b.tool_use_id), b.is_error === true);
-  let any = false, closes = false;
+  for (const line of turn) if (line.type === "user" && Array.isArray(line.message?.content)) for (const b of line.message.content) if (b?.type === "tool_result") failed.set(String(b.tool_use_id), b.is_error === true);
+  let closes = false;
   for (const line of turn) {
     if (line.type !== "assistant") continue;
     for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
-      if (b?.type === "text" && REPORT.test(String(b.text ?? ""))) any = closes = true;
-      else if (b?.type === "tool_use") {
-        const delivered = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
-        if (delivered) any = closes = true;
-        else closes = false; // more work after the report (a refused send is work too)
-      }
+      if (b?.type === "tool_use") closes = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
     }
   }
-  return { any, closes };
+  return closes;
 }
 
 /** The progress a woken hire made: a commit on its branch, or more than one assistant message after the wake (the first is its reply; a reply with thinking is several lines of one message id). */
@@ -199,8 +186,12 @@ export function createRecovery(d: RecoveryDeps) {
     const entries = d.store.load(repo);
     const before = JSON.stringify(entries);
     const mine = all.filter((a) => a?.kind === "background" && typeof a.name === "string" && typeof a.cwd === "string" && hireName(a.name) && repoOf(a.cwd) === repo);
+    const newer = (a: any, best: any) => !best || (a.startedAt ?? 0) > (best.startedAt ?? 0);
     const newest = new Map<string, any>();
-    for (const a of mine) if (!newest.has(a.name) || (a.startedAt ?? 0) > (newest.get(a.name).startedAt ?? 0)) newest.set(a.name, a);
+    for (const a of mine) if (newer(a, newest.get(a.name))) newest.set(a.name, a);
+    // The newest live session of each name in the project: a message goes to it, since an older seat of the same title may hold a dead socket or be another session.
+    const liveByName = new Map<string, any>();
+    for (const a of all) if (a?.pid && typeof a.name === "string" && typeof a.cwd === "string" && repoOf(a.cwd) === repo && newer(a, liveByName.get(a.name))) liveByName.set(a.name, a);
     for (const name of Object.keys(entries)) if (!newest.has(name)) delete entries[name];
     const boards = new Map<string | null, BoardRow[]>();
     const rowsOf = async (team: string | null) => boards.get(team) ?? (boards.set(team, await d.board(repo, team)), boards.get(team)!);
@@ -218,74 +209,96 @@ export function createRecovery(d: RecoveryDeps) {
       }
 
       if (cur.pid) {
-        const tailText = await d.tail(cwd, sid);
-        const turn = lastTurn(tailText);
-        const said = turn?.type === "assistant" && turn.isApiErrorMessage !== true ? textOf(turn.message?.content) : null;
-        // Live: a stop's note is stale. A nudge that could not be delivered stays until the hire writes again.
+        // Live: a stop's note is stale. A nudge that could not be delivered stays until the hire writes again. Only an idle hire that has been quiet since a write not yet judged has its transcript read.
         const mt = await d.mtime(cwd, sid);
-        const quiet = cur.status === "idle" && mt != null && now - mt >= QUIET_MS && said !== null;
-        const key = said !== null ? `${sid}:${turn.uuid ?? turn.timestamp ?? ""}` : null;
-        if (!(e.unreachable && quiet && e.unreachable === key)) {
+        if (cur.status !== "idle" || mt == null || now - mt < QUIET_MS) {
           delete e.note;
           delete e.unreachable;
+          delete e.judged;
+          continue;
         }
-        if (!quiet || reported(tailText).any || e.nudged === key) continue;
+        if (e.judged === mt) continue;
+        delete e.note;
+        delete e.unreachable;
+        e.judged = mt;
+        const tailText = await d.tail(cwd, sid);
+        const turn = lastTurn(tailText);
+        if (turn?.type !== "assistant" || turn.isApiErrorMessage === true) continue; // the last line is no turn end (a limit stop, a message not yet answered)
+        const key = `${sid}:${turn.uuid ?? turn.timestamp ?? ""}`;
+        if (e.nudged === key || endsWithReport(tailText)) continue;
         if (h.role === "lead" && !(await teamQuiet(newest, h.team, now))) continue;
-        e.nudged = key!;
+        e.nudged = key;
         if (!(await safeTell(repo, name, NUDGE, sid))) {
-          e.unreachable = key!;
-          e.note = `turn ended without a report ${Math.floor((now - mt!) / MIN)}m ago; ${name} has no inbox to nudge`;
+          e.unreachable = key;
+          e.note = `turn ended without a report ${Math.floor((now - mt) / MIN)}m ago; ${name} has no inbox to nudge`;
         }
         continue;
       }
 
-      // Ended. A stop is handled once. A limit stop is judged on its reset whatever the turn held; any other end skips a hire whose last turn closes with its report (its row waits on a review, or an answer).
-      if (e.wokeFrom === sid || e.told === sid) continue; // before the 256 KB tail is read
-      const tailText = await d.tail(cwd, sid);
-      const turn = lastTurn(tailText);
-      const first = await d.promptOf(cwd, sid);
+      // Ended. A stop is decided once, recorded, and its transcript is not read again.
+      if (e.wokeFrom === sid || e.told === sid) continue;
       /** A lead and a Reviewer have no branch of their own. */
       const tipOf = async () => (h.role === "lead" || h.reviewer ? null : d.commitTime(repo, `worktree-${h.task}`));
-      const stoppedAt = (await d.mtime(cwd, sid)) ?? now;
-      const limit = limitUntil(tailText);
+      const reportTo = async () => reportToOf(h, await d.promptOf(cwd, sid), repo);
       const tell = async (message: string, reason?: string) => {
         e.told = sid;
-        const to = reportToOf(h, first, repo);
-        // The newest live session of that name, as the nudge names its hire: an older seat with the same title may hold a dead socket or be another session.
-        const live = all.filter((a) => a?.name === to && a.pid && typeof a.cwd === "string" && repoOf(a.cwd) === repo);
-        const newestLive = live.reduce<any>((best, a) => (!best || (a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best), undefined);
-        const ok = await safeTell(repo, to, message, newestLive && String(newestLive.sessionId ?? newestLive.id));
+        delete e.waitSid;
+        delete e.wakeAt;
+        const to = await reportTo();
+        // The newest live session of that name first; if its inbox fails (a /clear moved the seat, a row with no session id), any seat with the title.
+        const target = liveByName.get(to);
+        const ok = (await safeTell(repo, to, message, target && String(target.sessionId ?? target.id))) || (target !== undefined && (await safeTell(repo, to, message)));
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
-      const wakeIt = async (note: string, failed: string, tip?: number | null) => {
+      const wakeIt = async (note: string, failed: string, tip: number | null) => {
         try {
           await d.wake(repo, name, note);
         } catch (err) {
           return tell(failed, (err as Error).message);
         }
-        e.wokeAt = now;
+        e.wokeAt = d.now();
         e.wokeFrom = sid;
-        e.tip = tip === undefined ? await tipOf() : tip;
+        e.tip = tip;
         delete e.told;
+        delete e.waitSid;
+        delete e.wakeAt;
         delete e.note;
       };
+      const limited = `${name} stopped at the session limit; f1rm wake ${name}`;
 
-      if (limit !== null) {
-        const stopTime = Date.parse(turn?.timestamp) || stoppedAt;
-        const reset = limit === "unknown" ? null : resetAt(limit, stopTime);
-        const message = `${name} stopped at the session limit; f1rm wake ${name}`;
-        if (reset === null) await tell(message, "no reset time");
-        else if (now >= reset + WAKE_AFTER_RESET_MS) await wakeIt(NOTE_LIMIT, message);
+      if (e.waitSid === sid) {
+        if (now >= e.wakeAt!) await wakeIt(NOTE_LIMIT, limited, await tipOf());
         continue;
       }
-      if (reported(tailText).closes) continue;
+      const tailText = await d.tail(cwd, sid);
+      const turn = lastTurn(tailText);
+      const stoppedAt = (await d.mtime(cwd, sid)) ?? now;
+      const limit = limitUntil(tailText);
+      const tip = await tipOf();
+      // A limit stop is judged on its reset whatever the turn held.
+      if (limit !== null) {
+        const reset = limit === "unknown" ? null : resetAt(limit, Date.parse(turn?.timestamp) || stoppedAt);
+        if (reset === null) await tell(limited, "no reset time");
+        else if (now >= reset + WAKE_AFTER_RESET_MS) await wakeIt(NOTE_LIMIT, limited, tip);
+        else {
+          e.waitSid = sid;
+          e.wakeAt = reset + WAKE_AFTER_RESET_MS;
+          e.note = `waits for the session limit to lift (resets ${limit})`;
+        }
+        continue;
+      }
+      // Any other end skips a hire whose last turn closed with its report (its row waits on a review, or an answer).
+      if (endsWithReport(tailText)) {
+        e.told = sid;
+        e.note = `reported; waits on ${await reportTo()}`;
+        continue;
+      }
       const soon = e.wokeAt !== undefined && stoppedAt - e.wokeAt <= AGAIN_MS;
-      const tipNow = soon ? await tipOf() : undefined; // asked once: it is also the tip the next wake is judged against
-      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tipNow ?? null)) {
+      if (soon && !madeProgress(tailText, e.wokeAt!, e.tip, tip)) {
         await tell(`${name} stopped again after a wake; f1rm wake ${name}`);
         continue;
       }
-      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`, tipNow);
+      await wakeIt(NOTE_ENDED, `${name} stopped; f1rm wake ${name}`, tip);
     }
     for (const [name, e] of Object.entries(entries)) if (!Object.keys(e).length) delete entries[name];
     if (JSON.stringify(entries) !== before) d.store.save(repo, entries);

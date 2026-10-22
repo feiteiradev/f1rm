@@ -2,7 +2,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
-import { agents, machine } from "../server/machine.ts";
+import { agents, commitTimeArgs, machine } from "../server/machine.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
 
@@ -92,7 +92,7 @@ async function slice(path: string, from: number, to: number): Promise<string> {
 }
 export const headAsync = (path: string) => slice(path, 0, HEAD);
 export const tailAsync = async (path: string) => {
-  const size = Bun.file(path).size;
+  const size = await Bun.file(path).stat().then((st) => st.size, () => 0); // a missing file reads as empty below
   const from = Math.max(0, size - TAIL);
   const text = await slice(path, from, size);
   return from > 0 ? text.slice(text.indexOf("\n") + 1) : text;
@@ -120,6 +120,23 @@ const TURN_LINE = new RegExp(`"type":"(?:${TURN.join("|")})"`);
 /** The text of a message's content: a string, or the text blocks of a list. */
 export const textOf = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => String(b?.text ?? "")).join("") : "");
 
+/** A task-notification is the session's own background task finishing, not anyone's message. */
+export const isNotification = (content: unknown) => textOf(content).trimStart().startsWith("<task-notification>");
+
+/**
+ * Whether a transcript line starts a turn: a prompt or a delivered message, a cross-session message included (it is logged as an isMeta user line, often with no enqueue before it).
+ * Not a tool result, a task-notification, or the other isMeta bodies (a skill's, a local command's caveat, an image note).
+ */
+export function startsTurn(line: any): boolean {
+  if (line?.isSidechain) return false;
+  if (line?.type === "queue-operation") return line.operation === "enqueue" && !isNotification(line.content);
+  if (line?.type !== "user") return false;
+  const content = line.message?.content;
+  if (Array.isArray(content) && content.some((b: any) => b?.type === "tool_result")) return false;
+  if (isNotification(content)) return false;
+  return line.isMeta !== true || /^\s*(?:Another Claude session sent a message|<cross-session-message)/.test(textOf(content));
+}
+
 /**
  * The last line of the conversation in a piece of transcript: an assistant or user line, or a message put in the queue (an enqueue; the queue emptying or being edited is
  * no message), past whatever bookkeeping Claude Code writes after a turn. A task-notification is the session's own background task finishing, not anyone's message.
@@ -130,7 +147,7 @@ export function lastTurn(end: string): any {
     try {
       const line = JSON.parse(l);
       if (!TURN.includes(line.type) || (line.type === "queue-operation" && line.operation !== "enqueue")) continue;
-      if (line.type !== "assistant" && textOf(line.content ?? line.message?.content).trimStart().startsWith("<task-notification>")) continue; // one that merely quotes the tag is a message
+      if (line.type !== "assistant" && isNotification(line.content ?? line.message?.content)) continue; // one that merely quotes the tag is a message
       return line;
     } catch {} // a cut or odd line is not a turn
   }
@@ -349,7 +366,7 @@ export async function statusFor(args: Args, repoOrLookup: string | null | (() =>
     loadAgents: () => agents(false),
     sleep: (ms) => Bun.sleep(ms),
     commitTime: (branch) => {
-      const r = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%ct", `refs/heads/${branch}`], { stdout: "pipe", stderr: "ignore" });
+      const r = Bun.spawnSync(commitTimeArgs(repo, branch), { stdout: "pipe", stderr: "ignore" });
       return r.success && r.stdout.toString().trim() ? Number(r.stdout.toString()) * 1000 : null;
     },
     ...deps,

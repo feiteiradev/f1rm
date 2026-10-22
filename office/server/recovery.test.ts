@@ -313,7 +313,7 @@ test("it never wakes an interactive session, the PM, a let-go hire, a stop whose
   await pm.tick();
   expect(pm.w.woke).toEqual([]);
   for (const report of ["DONE checkout", "APPROVED", "CHANGES REQUESTED round 2", "BLOCKED checkout: no key", "ESCALATE x", "NEEDS YOU shop: a choice"]) {
-    expect([report, (await stopped((o) => (o.w.transcripts["dev-1"] = [say("working", 30), say(report, 1)]))).woke]).toEqual([report, []]);
+    expect([report, (await stopped((o) => (o.w.transcripts["dev-1"] = [say("working", 30), ...sent(report, "Sent.", 1)]))).woke]).toEqual([report, []]);
   }
   expect((await stopped((o) => (o.w.transcripts["dev-1"] = [say("working", 30), say("Not DONE yet, compiling", 1)]))).woke).toHaveLength(1);
 });
@@ -362,7 +362,7 @@ test("no nudge for a hire that is busy, quiet for less than 20 minutes, reported
   expect(await none(() => {}, "Review complete.", 19)).toEqual([]);
   expect(await none((o) => (o.w.list[1].status = "busy"))).toEqual([]);
   for (const status of ["done", "todo", "blocked"]) expect([status, await none((o) => (o.w.boards.shop = [row(DEV, status, "checkout")]))]).toEqual([status, []]);
-  for (const report of ["APPROVED abc123", "CHANGES REQUESTED: 2 findings", "DONE review", "BLOCKED review", "ESCALATE", "NEEDS YOU shop: x"]) expect([report, await none(() => {}, report)]).toEqual([report, []]);
+  for (const report of ["APPROVED abc123", "CHANGES REQUESTED: 2 findings", "DONE review", "BLOCKED review", "ESCALATE", "NEEDS YOU shop: x"]) expect([report, await none((o) => (o.w.transcripts["rev-1"] = [say("reviewing", 40, o.w.now), ...sent(report, "Sent.", 25, o.w.now)]))]).toEqual([report, []]);
   expect(await none((o) => (o.w.transcripts["rev-1"] = [say("reviewing", 40, o.w.now), limitStop("8pm", 25, o.w.now)]))).toEqual([]); // a limit stop is no turn end
   expect(await none((o) => (o.w.list = [o.w.list[0]]))).toEqual([]); // not listed
 });
@@ -618,4 +618,108 @@ test("an ended session already woken or told is not read again, and the branch t
   await o.tick();
   expect(o.w.woke).toHaveLength(2);
   expect(o.w.commitCalls).toBe(1);
+});
+
+// ── round 3: one rule ─────────────────────────────────────────────────────
+test("only a delivered SendMessage that is the turn's last tool call is a report: text never is, and a refused send followed by 'DONE ...' text is still a nudge", async () => {
+  const nudged = async (lines: (now: number) => string[]) => {
+    const o = office();
+    idleReviewer(o, "x", 25);
+    o.w.transcripts["rev-1"] = lines(o.w.now);
+    await o.tick();
+    return o.w.told.length;
+  };
+  expect(await nudged((now) => [say("reviewing", 40, now), say("DONE checkout", 25, now)])).toBe(1);
+  expect(await nudged((now) => [tool("r1", 40, "SendMessage", { to: "lead-shop", message: "DONE checkout" }, now), toolResult("r1", 39, now, true), say("DONE checkout, but the send was refused", 25, now)])).toBe(1);
+  const woken = async (last: string[]) => {
+    const o = office();
+    stoppedDev(o, last);
+    await o.tick();
+    return o.w.woke.length;
+  };
+  expect(await woken([say("DONE checkout", 1)])).toBe(1);
+  expect(await woken([tool("r1", 3, "SendMessage", { to: "lead-shop", message: "DONE checkout" }), toolResult("r1", 2.5, T0, true), say("DONE checkout, but the send was refused", 1)])).toBe(1);
+  expect(await woken([tool("r1", 3, "SendMessage", { to: "lead-shop", message: "DONE checkout" }), toolResult("r1", 2.5), block("msg_w", 2, { type: "text", text: "Sent." })])).toBe(0);
+});
+
+test("a stop the office skips because the turn closed with a report is recorded once, with a NOTE, and its transcript is not read again", async () => {
+  const o = office({ prompts: { "dev-1": "brief\nReport to: lead-shop" } });
+  stoppedDev(o, sent("DONE checkout", "Sent.", 1));
+  await o.tick();
+  expect(o.w.woke).toEqual([]);
+  expect(o.w.store[REPO][DEV]).toMatchObject({ told: "dev-1", note: "reported; waits on lead-shop" });
+  o.w.tailCalls.length = 0;
+  await o.tick();
+  await o.tick();
+  expect(o.w.tailCalls.filter((sid) => sid === "dev-1")).toEqual([]);
+  expect(o.w.told).toEqual([]); // it reported; nobody is told it stopped
+});
+
+test("a limit stop that is not due yet is recorded once with its wake time and a NOTE, and woken from the store when due, without reading the transcript again", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop("8:40pm (Europe/Lisbon)", 0)]);
+  o.w.now = at("2026-10-22T18:30:00Z");
+  await o.tick();
+  expect(o.w.store[REPO][DEV]).toMatchObject({ waitSid: "dev-1", wakeAt: at("2026-10-22T19:41:00Z") });
+  expect(o.w.store[REPO][DEV].note).toContain("waits for the session limit");
+  o.w.tailCalls.length = 0;
+  o.w.now = at("2026-10-22T19:00:00Z");
+  await o.tick();
+  expect(o.w.tailCalls.filter((sid) => sid === "dev-1")).toEqual([]);
+  expect(o.w.woke).toEqual([]);
+  o.w.now = at("2026-10-22T19:41:00Z");
+  await o.tick();
+  expect(o.w.tailCalls.filter((sid) => sid === "dev-1")).toEqual([]);
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_LIMIT }]);
+  expect(o.w.store[REPO][DEV]).toMatchObject({ wokeFrom: "dev-1" });
+  expect(o.w.store[REPO][DEV].waitSid).toBeUndefined();
+  expect(o.w.store[REPO][DEV].note).toBeUndefined();
+});
+
+test("a live hire that is busy, or idle and already judged at this write, has its transcript left unread", async () => {
+  const busy = office();
+  idleReviewer(busy, "Review complete.", 25, { status: "busy" });
+  await busy.tick();
+  expect(busy.w.tailCalls).toEqual([]);
+  const o = office();
+  idleReviewer(o, "Review complete.", 25);
+  await o.tick();
+  expect(o.w.tailCalls).toEqual(["rev-1"]);
+  expect(o.w.told).toHaveLength(1);
+  await o.tick();
+  await o.tick();
+  expect(o.w.tailCalls).toEqual(["rev-1"]);
+  expect(o.w.told).toHaveLength(1);
+  // A new write is a new judgement.
+  o.w.now += 60 * MIN;
+  o.w.transcripts["rev-1"].push(say("Looked again.", 30, o.w.now));
+  o.w.mtimes["rev-1"] = o.w.now - 30 * MIN;
+  await o.tick();
+  expect(o.w.tailCalls).toEqual(["rev-1", "rev-1"]);
+  expect(o.w.told).toHaveLength(2);
+});
+
+test("when the tell to the newest session fails, the Report to is tried again by its title", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop(null, 0)]);
+  const tried: (string | undefined)[] = [];
+  const make = createRecovery({
+    now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null, promptOf: async () => null,
+    board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {},
+    tell: async (_r, _to, _m, sessionId) => (tried.push(sessionId), sessionId === undefined),
+    store: { load: (repo) => structuredClone(o.w.store[repo] ?? {}), save: (repo, e) => void (o.w.store[repo] = structuredClone(e)) },
+  });
+  await make.tick([REPO]);
+  expect(tried).toEqual(["lead-sid", undefined]);
+  expect(o.w.store[REPO][DEV].note).not.toContain("no inbox");
+});
+
+// A cross-session message is logged as an isMeta user line with no enqueue before it, and it starts a turn.
+const crossSession = (ago: number, now = T0) => JSON.stringify({ type: "user", isMeta: true, uuid: `x${ago}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: 'Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="lead-shop">Re-review please</cross-session-message>' } });
+test("a cross-session message starts a turn: a re-review that ends without a verdict is nudged although the earlier round reported", async () => {
+  const o = office();
+  idleReviewer(o, "x", 25);
+  o.w.transcripts["rev-1"] = [say("reviewing", 90, o.w.now), ...sent("CHANGES REQUESTED checkout: 2 findings", "Sent.", 80, o.w.now), crossSession(40, o.w.now), tool("w1", 35, "Bash", { command: "bun test" }, o.w.now), toolResult("w1", 34, o.w.now), say("Round 2 looks fine overall.", 25, o.w.now)];
+  await o.tick();
+  expect(o.w.told).toEqual([{ to: REVIEWER, message: NUDGE }]);
 });
