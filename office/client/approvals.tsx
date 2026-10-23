@@ -1,8 +1,8 @@
 // The permission card: a raised hand with the full request and its answers. It shows in the top-bar tray and on the hire's desk, both from the same state and through the same component.
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
-import { cardOf, handsOf } from "./approvals.ts";
+import { cardOf, handsOf, type Anchor } from "./approvals.ts";
 import { post } from "./post.ts";
 import "./approvals.css";
 
@@ -45,9 +45,18 @@ export function HandCard({ state, approval: a }: { state: OfficeState; approval:
 }
 
 /** The card on a hire's desk: opens on a click of the raised-hand character, closes on Escape (the page's key handler) or a click outside. Focus moves into it and returns to where it was. */
-export function DeskCard({ state, id, at, onClose }: { state: OfficeState; id: string; at: { x: number; y: number }; onClose: () => void }) {
+export function DeskCard({ state, id, at, onClose }: { state: OfficeState; id: string; at: Anchor; onClose: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const hands = handsOf(state, id);
+  // Under the desk; over it when that is where it fits; else slid up over the desks' fronts, so the heads stay in view and the scene never grows to hold the card.
+  const [top, setTop] = useState(at.below);
+  useLayoutEffect(() => {
+    const el = root.current!;
+    const host = el.offsetParent as HTMLElement;
+    const h = el.offsetHeight;
+    const bottom = host.scrollTop + host.clientHeight;
+    setTop(at.below + h <= bottom ? at.below : at.above - h >= host.scrollTop ? at.above - h : Math.max(host.scrollTop + 8, bottom - h - 8));
+  }, [at.below, at.above, hands.length, state]);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     root.current?.focus();
@@ -60,7 +69,7 @@ export function DeskCard({ state, id, at, onClose }: { state: OfficeState; id: s
   }, []);
   const who = state.employees[id]?.name ?? "Someone";
   return (
-    <div className="desk-card" ref={root} tabIndex={-1} role="dialog" aria-label={`Permission request from ${who}`} style={{ "--x": `${at.x}px`, top: at.y } as CSSProperties}>
+    <div className="desk-card" ref={root} tabIndex={-1} role="dialog" aria-label={`Permission request from ${who}`} style={{ "--x": `${at.x}px`, top } as CSSProperties}>
       {hands.map((a) => <HandCard key={a.id} state={state} approval={a} />)}
     </div>
   );

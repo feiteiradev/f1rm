@@ -567,6 +567,12 @@ test("a lead that waits on the user carries a labelled needs-you tag that goes w
   expect(needsYouTag(employee("b", "r", { role: "backend", needsYou: true }))).toBeNull();
 });
 
+test("a project's slice carries the raised hands of its own hires, and none at all for a recording", () => {
+  const state = { ...office(["a", "b"], [employee("s1", "a"), employee("s2", "b")]), approvals: [hand({ id: "x", sessionId: "s1" }), hand({ id: "y", sessionId: "s2" })] };
+  expect(projectState(state, "a").approvals?.map((h) => h.id)).toEqual(["x"]);
+  expect(projectState(office(["a"], [employee("s1", "a")]), "a").approvals).toBeUndefined();
+});
+
 test("an answer posts to its own route, and a gone request or one with no rule shows the office's short reason", async () => {
   const real = { fetch: globalThis.fetch, location: globalThis.location };
   const calls: string[] = [];

@@ -28,6 +28,9 @@ export function cardOf(state: OfficeState, a: Approval) {
 /** The raised hands of one hire, oldest first. */
 export const handsOf = (state: OfficeState, sessionId: string) => (state.approvals ?? []).filter((a) => a.sessionId === sessionId);
 
+/** Where a hire's card hangs, in the scene's scrolling frame: the horizontal centre of the desk, the pixel under its name, and the pixel over its raised-hand bubble. */
+export type Anchor = { x: number; below: number; above: number };
+
 export const NEEDS_YOU = "NEEDS YOU";
 
 /** The tag over a lead that waits on the user, with the words a screen reader says for it. Only a lead wears it. */

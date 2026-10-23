@@ -4,13 +4,12 @@ import type { OfficeState } from "../server/office.ts";
 import { internSeed, seedFor } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, LEAD_TAG, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
-import { needsYouTag } from "./approvals.ts";
+import { needsYouTag, type Anchor } from "./approvals.ts";
 import { showsLeadTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
 import { buildTeamSign, buildWhiteboard, teamSignLabel, whiteboardCount } from "./whiteboard.ts";
 
-/** `anchorOf` is where a hire's card hangs: the pixel under its name, in the scene's own scrolling frame. */
-export type Scene = { update(state: OfficeState, selected: string | null): void; anchorOf(id: string): { x: number; y: number } | null; destroy(): void };
+export type Scene = { update(state: OfficeState, selected: string | null): void; anchorOf(id: string): Anchor | null; destroy(): void };
 
 type Person = { art: DeskArt; name: Text; tag?: Text; need?: Container; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
 /** An intern walking out from its parent's seat (`born`), or back to it once stopped (`left`); times are performance.now() ms. */
@@ -243,7 +242,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       const p = people.get(id);
       if (!p) return null;
       const scale = world.scale.x;
-      return { x: (p.art.root.x + CELL.w / 2) * scale, y: (p.art.root.y + (p.table ? TABLE.h : 57)) * scale + 20 };
+      return { x: (p.art.root.x + CELL.w / 2) * scale, below: (p.art.root.y + (p.table ? TABLE.h : 57)) * scale + 20, above: p.art.root.y * scale - 46 };
     },
     destroy() {
       resize.disconnect();

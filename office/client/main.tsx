@@ -7,7 +7,7 @@ import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
 import { canRemove, DOOR, hashFor, isProject, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { DeskCard, Tray } from "./approvals.tsx";
-import { handsOf, needsYouTag } from "./approvals.ts";
+import { handsOf, needsYouTag, type Anchor } from "./approvals.ts";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
@@ -119,7 +119,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
   const [selected, setSelected] = useState<string | null>(null);
   const [pmNote, setPmNote] = useState<string | null>(null);
   // The hire whose permission card is open on its desk, and where the scene hangs it.
-  const [card, setCard] = useState<{ id: string; at: { x: number; y: number } | null } | null>(null);
+  const [card, setCard] = useState<{ id: string; at: Anchor | null } | null>(null);
   const starting = useRef(false);
   const hasPm = Object.values(state.employees).some((e) => e.role === "pm");
   useEffect(() => {
@@ -192,7 +192,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     if (!handsOf(state, cardId).length) return setCard(null);
     const move = () => {
       const at = scene.current?.anchorOf(cardId) ?? null;
-      setCard((c) => (c && (c.at?.x !== at?.x || c.at?.y !== at?.y) ? { ...c, at } : c));
+      setCard((c) => (c && (c.at?.x !== at?.x || c.at?.below !== at?.below || c.at?.above !== at?.above) ? { ...c, at } : c));
     };
     move();
     addEventListener("resize", move);
