@@ -1,10 +1,11 @@
 // The office's recovery tick: wakes the background hires and leads of a registered project whose process ended while their board row is doing/review, once per stop, and says so when it cannot.
 // It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the caps), machine.tell (the inbox), the boards and transcripts.
 import { mkdirSync, readFileSync, renameSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
+import { parseReport, reportFile, reportSlug } from "../cli/report.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, commitTimeArgs, machine, runAsync } from "./machine.ts";
@@ -112,6 +113,8 @@ export type RecoveryDeps = {
   board: (repo: string, team: string | null) => Promise<BoardRow[]>;
   /** The tip's commit time (ms) of a branch of the repo, or null. */
   commitTime: (repo: string, branch: string) => number | null | Promise<number | null>;
+  /** When (ms) the hire last ran `f1rm report`, from its report.json; null if it never did. */
+  reportAt?: (repo: string, name: string) => number | null | Promise<number | null>;
   /** Wakes the hire through `f1rm wake`'s own checks; throws what it refuses with. */
   wake: (repo: string, name: string, note: string) => Promise<void>;
   /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
@@ -203,6 +206,12 @@ export function createRecovery(d: RecoveryDeps) {
     // One hire's failure is logged and the others are still decided, so the record of what was decided earlier in the tick is saved.
     const judge = async (name: string, cur: any) => {
       const h = hireName(name)!;
+      /** The hire's own report.json, written since its last turn began, is a delivered report: a lost SendMessage does not make it silent. */
+      const wroteReport = async (tailText: string) => {
+        const began = Date.parse(lastTurnLines(tailText)[0]?.timestamp);
+        const at = await d.reportAt?.(repo, name);
+        return at != null && at >= began;
+      };
       const e = (entries[name] ??= {});
       const sid = String(cur.sessionId ?? cur.id);
       const cwd = String(cur.cwd);
@@ -243,7 +252,7 @@ export function createRecovery(d: RecoveryDeps) {
           return;
         }
         const key = `${sid}:${turn.uuid ?? turn.timestamp ?? ""}`;
-        if (e.nudged === key || turnReports(tailText).any) {
+        if (e.nudged === key || turnReports(tailText).any || (await wroteReport(tailText))) {
           e.judged = mt;
           return;
         }
@@ -320,7 +329,7 @@ export function createRecovery(d: RecoveryDeps) {
         return;
       }
       // Any other end skips a hire whose last turn closed with its report (its row waits on a review, or an answer).
-      if (turnReports(tailText).last) {
+      if (turnReports(tailText).last || (await wroteReport(tailText))) {
         e.note = `reported; waits on ${await reportTo()}`;
         e.told = sid;
         return;
@@ -390,6 +399,12 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
     commitTime: async (repo, branch) => {
       const out = await runAsync(commitTimeArgs(repo, branch));
       return out ? Number(out) * 1000 : null;
+    },
+    reportAt: async (repo, name) => {
+      const slug = reportSlug(name);
+      if (!slug) return null;
+      const r = parseReport(await readFile(reportFile(home, basename(repo), slug), "utf8").catch(() => ""));
+      return r ? Date.parse(r.at) : null;
     },
     // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.
     wake: async (repo, name, note) => {

@@ -35,7 +35,7 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 
 ## Handoff
 
-Report to the session named in your brief's `Report to`: `APPROVED` with the merged commit, or `CHANGES REQUESTED` with the blocking findings (`CHANGES REQUESTED <slug> conflict` for a merge conflict), or `BLOCKED <slug> tip moved`.
+Report to the session named in your brief's `Report to`: `APPROVED` with the merged commit, or `CHANGES REQUESTED` with the blocking findings (`CHANGES REQUESTED <slug> conflict` for a merge conflict), or `BLOCKED <slug> tip moved`. Before each report, run `f1rm report <KIND> review-<task> --commit <sha>` with `KIND` `APPROVED`, `CHANGES`, `BLOCKED` or `ESCALATE`, and then send the message (Every report is also a file, in Handoff in the guidelines).
 
 ## Rules
 

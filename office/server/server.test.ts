@@ -1406,6 +1406,16 @@ test("`f1rm hire` is held only as a command; a command that merely mentions it p
   }
 });
 
+test("`f1rm report` is no hire, wake, push or session start: a specialist and a Reviewer run it, even with those words in the note", async () => {
+  await delegationOffice();
+  const run = async (id: string, command: string) => (await held(await hook(preToolUse(id, "Bash", { command }))))?.permissionDecision ?? null;
+  for (const id of ["d", "v"]) {
+    for (const command of ["f1rm report DONE checkout --commit abc1234", 'f1rm report BLOCKED checkout --note "f1rm hire a lead; git push; claude --bg"', "cd /code/shop && bun office/cli/f1rm.ts report CHANGES review-checkout --commit abc1234"]) {
+      expect([id, command, await run(id, command)]).toEqual([id, command, null]);
+    }
+  }
+});
+
 test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member of its own team, a specialist nobody; a name or a session id both count", async () => {
   await talkOffice();
   sessionList = [

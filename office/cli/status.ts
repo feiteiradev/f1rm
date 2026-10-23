@@ -1,10 +1,12 @@
 // `f1rm status [--json]`: what each hire of this repo is really doing, from its transcript and its branch, never from the status text `claude agents` shows.
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
 import { agents, commitTimeArgs, machine } from "../server/machine.ts";
+import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
+import { readReport, reportFile, reportSlug } from "./report.ts";
 
 export type Hire = {
   name: string;
@@ -24,6 +26,8 @@ export type Hire = {
   limitUntil: string | null;
   /** What the office's recovery noted about it (it stopped again after a wake, it could not be woken, its turn ended without a report); null if it noted nothing. */
   recovery: string | null;
+  /** The last `f1rm report` the hire wrote (see report.ts); null if it wrote none. */
+  report: { kind: string; seq: number; at: string } | null;
 };
 
 export type HiresDeps = {
@@ -48,6 +52,28 @@ function recoveryNotes(home: string, repo: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/** The hire's report file, read; null for a name that has no slug or no file. */
+const reportOf = (home: string, repo: string, name: string) => {
+  const slug = reportSlug(name);
+  return slug ? readReport(reportFile(home, basename(repo), slug)) : null;
+};
+
+/** Where the watcher keeps the report `seq` it announced for each name, so each report wakes a lead once: `~/.f1rm/watch/<repo>.json`. */
+const watchFile = (home: string, repo: string) => join(home, ".f1rm", "watch", `${repoKey(repo)}.json`);
+function announced(home: string, repo: string): Record<string, number> {
+  try {
+    return JSON.parse(readFileSync(watchFile(home, repo), "utf8")) ?? {};
+  } catch {
+    return {};
+  }
+}
+function saveAnnounced(home: string, repo: string, seqs: Record<string, number>) {
+  const file = watchFile(home, repo);
+  mkdirSync(dirname(file), { recursive: true });
+  writePrivate(`${file}.tmp`, JSON.stringify(seqs, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
 }
 
 /** An ended hire older than this is history, not something to wake. */
@@ -220,6 +246,7 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
       ended: !a,
       limitUntil: t ? limitUntil(tailOf(t)) : null,
       recovery: notes[name] ?? null,
+      report: ((r) => (r ? { kind: r.kind, seq: r.seq, at: r.at } : null))(reportOf(home, repo, name)),
     };
   };
 
@@ -265,14 +292,15 @@ export function parseArgs(argv: string[]): Args {
 }
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
+const lastReport = (h: Hire, now: number) => (h.report ? `${h.report.kind} #${h.report.seq} ${ago(Math.max(0, Math.floor((now - Date.parse(h.report.at)) / 60_000)))}` : "-");
 const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : "", h.recovery ?? ""].filter(Boolean).join(", ");
 
 function table(list: Hire[], now: number): string {
   if (!list.length) return "no hires\n";
-  const rows = [["NAME", "ROLE", "TEAM", "AGENTS", "ACTIVITY", "COMMIT", "NOTE"]].concat(
+  const rows = [["NAME", "ROLE", "TEAM", "AGENTS", "ACTIVITY", "COMMIT", "REPORT", "NOTE"]].concat(
     list.map((h) => [
       h.name, h.role, h.team ?? "-", [h.state, h.status].filter(Boolean).join("/") || "-", ago(h.idleMinutes),
-      h.lastCommit ? ago(Math.max(0, Math.floor((now - Date.parse(h.lastCommit)) / 60_000))) : "-", note(h),
+      h.lastCommit ? ago(Math.max(0, Math.floor((now - Date.parse(h.lastCommit)) / 60_000))) : "-", lastReport(h, now), note(h),
     ]),
   );
   const width = rows[0].map((_, i) => Math.max(...rows.map((r) => r[i].length)));
@@ -345,7 +373,16 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
       if (!seen.has(n.name)) seen.set(n.name, now);
       else if (now != null && now > (seen.get(n.name) ?? -Infinity)) plain.add(n.name);
     }
-    const out = names.flatMap((n) => { const why = stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; });
+    // A report the watcher has not announced wakes it, a waiting name too; the seq is kept so the same report never wakes twice, whether or not the SendMessage also arrived.
+    const seqs = announced(deps.home, deps.repo);
+    const reported = names.flatMap((n) => {
+      const r = reportOf(deps.home, deps.repo, n.name);
+      if (!r || r.seq <= (seqs[n.name] ?? 0)) return [];
+      seqs[n.name] = r.seq;
+      return [`${n.name}: reported ${r.kind === "CHANGES" ? "CHANGES REQUESTED" : r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
+    });
+    if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
+    const out = [...reported, ...names.flatMap((n) => { const why = stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; })];
     if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
   }
 }
