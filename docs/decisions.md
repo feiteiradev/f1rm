@@ -301,3 +301,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a Reviewer ended its turn after its review without sending a verdict and the team stood still for 20 minutes.
 - Rejected: nudging in a loop (one nudge per turn end; a hire that ignores it is the lead's to judge); nudging a hire that is busy or waiting on a report it already sent.
 - Where: office-recovery, a6685ae (the nudge), d331b01 (a SendMessage report counts), f5686e9 (nudge by the hire's own session id), 2622559 (the nudge skips any delivered report), b34f19e (prose), 561f050 (a lead with a busy team drops an old NOTE)
+
+## 2026-10-23 Permissions are answered in the office
+
+- Decision: the office holds a hire's PermissionRequest for at least 30 minutes (`DEFAULT_TIMEOUT_S` 1800; `f1rm install` writes the hook with `timeout` 3600 and `curl -m 3600`, and `serve` still refuses an `F1RM_APPROVAL_TIMEOUT` the hook would not outlast). An Approval carries `why` (the hire's last assistant text, text blocks only, cut to 300 characters, read from the tail of its own transcript and read again for 3 s because Claude Code writes it just after the hook fires) and `canAlways`. A third answer, `POST /<ui token>/always/<id>`, returns `updatedPermissions` in the hook's decision: an `addRules` allow rule with destination `localSettings`, the repo's `.claude/settings.local.json`. A plain Bash command gets `<program> <subcommand> *`, or exactly the command when it has no subcommand; a chained, piped or redirected line and any other tool get only what Claude Code's own `permission_suggestions` offer, else `canAlways` is false. Claude Code supports it (its hooks reference, and a live run on a second office: a Haiku hire in a worktree was answered Always for `npm run proofa` and `touch permproof-c.txt`; the next `npm run proofb` and the identical `touch` ran with no prompt, and the rules landed in the main repo's `.claude/settings.local.json`). Only the user's browser answers: every route stays under the UI token, and the gate refuses a Bash command of any company role that names this office's approve, deny or always route (by its port, its link key or the saved link). The PM, leads and hires say "approve <name>'s request in the office", never a session id or a `claude attach` command.
+- Why: permissions were answered at the hire's desk or never, and hires sat blocked for hours.
+- Rejected: exit code 2 (the hook ignores it); a longer default in the terminal prompt; letting a session answer; a rule for a whole tool or a bare program (`rm *`).
+- Where: permission-server, 7f1d4f8
+
+## 2026-10-23 The office tags a lead that waits on the user
+
+- Decision: the state carries `employees[sessionId].needsYou: true` for a lead whose own permission request is held, or whose team board (`~/.f1rm/boards/<repo>.team.<team>.md`) holds an open question for the user: one line under an `## Open question for the user` heading, or after it on the same line, replaced with `none` once answered. A hire's request tags nobody, because the lead waits on the hire and not on the user. The server adds the tag when it builds the snapshot and the reducer never sees it; the office client reads it.
+- Why: the user should see which lead needs them without opening each session.
+- Rejected: a push message to the user; the lead's `claude agents` state `blocked` as the signal (it also holds for reasons that are not the user's, and the held request already says it); tagging the lead for its hire's request.
+- Where: permission-server, 7f1d4f8
