@@ -176,6 +176,9 @@ test("openQuestion on the shapes a real team board has: an older bullet, a dated
   // An older answered bullet, then the lead's later heading with a date: the heading's question counts, the bullet does not.
   const older = "- Open question for the user: none.\n\n## Open question for the user (2026-10-22, R9b live proof)\nPick 1 or 2?\n";
   expect(openQuestion(older)).toBe("Pick 1 or 2?");
+  // The live heading and its question, then a later log bullet that mentions the heading: the bullet must not take over (round 1's loose heading regex read it as the last one and cleared the tag).
+  const logged = "## Open question for the user (2026-10-23)\nShip A or B?\n\n## Log\n- 2026-10-22: Open question for the user: none.\n- Open question for the user answered by the PM.\n  Open question for the user: none\n";
+  expect(openQuestion(logged)).toBe("Ship A or B?");
   // A bullet saying a question is open is no heading either.
   expect(openQuestion("- Open question for the user: ship A?\n")).toBe("");
   // The text on the heading's own line is not the question, so answering means replacing the next line.
