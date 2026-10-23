@@ -6,7 +6,9 @@ import { reduce, type Employee, type F1rmEvent, type OfficeState } from "../serv
 import { CELL, CORNER, layoutOffice, POD, ROOM, rosterOf } from "./layout.ts";
 import { decodeLook, nameFor, ROLES, ROLE_IDS, internSeed, roleOfAgentType, seedFor, type RoleId } from "../people.ts";
 import { DOOR, doorsOf, hashFor, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
-import { argsText } from "./approvals.ts";
+import { alwaysNote, argsText, cardOf, handsOf, NEEDS_YOU, needsYouTag } from "./approvals.ts";
+import type { Approval } from "../server/approvals.ts";
+import { post } from "./post.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
 import { TASK_NAME, taskFrom } from "./hire.ts";
 import { showsLeadTag } from "./lead.ts";
@@ -526,4 +528,56 @@ test("only a team lead gets the LEAD tag, not a specialist or a freelancer", () 
 
 test("the LEAD tag sits over the head: the sprite's centre, one art pixel above its top", () => {
   expect(LEAD_TAG).toEqual({ x: 23, y: 10 });
+});
+
+const hand = (over: Partial<Approval> = {}): Approval => ({ id: "h1", sessionId: "s1", tool: "Bash", input: { command: "npm run build" }, at: 0, why: "", canAlways: false, rule: "", ...over });
+
+test("the card shows who asks, the tool, the whole command and, once it arrives, the hire's why", () => {
+  const state = office(["f1rm"], [employee("s1", "f1rm", { name: "Aino" })]);
+  const bare = cardOf(state, hand());
+  expect(bare).toEqual({ who: "Aino", project: "f1rm", tool: "Bash", args: "npm run build", why: null, always: null });
+  const said = cardOf(state, hand({ why: "I need to see the build pass." }));
+  expect(said.why).toBe("I need to see the build pass.");
+  const long = "x".repeat(900);
+  expect(cardOf(state, hand({ input: { command: long } })).args).toBe(long);
+  expect(cardOf(office([], []), hand())).toMatchObject({ who: "Someone", project: "" });
+});
+
+test("Always for this project is on the card only with a rule, and it says exactly what it grants", () => {
+  const state = office(["f1rm"], [employee("s1", "f1rm", { name: "Aino" })]);
+  expect(cardOf(state, hand({ canAlways: false, rule: "" })).always).toBeNull();
+  expect(cardOf(state, hand({ canAlways: true, rule: "" })).always).toBeNull();
+  const card = cardOf(state, hand({ canAlways: true, rule: "Bash(npm run *)" }));
+  expect(card.always).toEqual({ rule: "Bash(npm run *)", note: "Allow Bash(npm run *) for every hire of this project" });
+  expect(alwaysNote("Bash(npm run a), Bash(npm run b)")).toBe("Allow Bash(npm run a), Bash(npm run b) for every hire of this project");
+});
+
+test("a hire's card lists only its own requests, oldest first", () => {
+  const state = { ...office(["r"], [employee("s1", "r"), employee("s2", "r")]), approvals: [hand({ id: "a", sessionId: "s2" }), hand({ id: "b" }), hand({ id: "c" })] };
+  expect(handsOf(state, "s1").map((a) => a.id)).toEqual(["b", "c"]);
+  expect(handsOf(office(["r"], []), "s1")).toEqual([]);
+});
+
+test("a lead that waits on the user carries a labelled needs-you tag that goes with the flag", () => {
+  const lead = employee("l", "r", { role: "lead", name: "Kiri", needsYou: true });
+  expect(needsYouTag(lead)).toEqual({ text: NEEDS_YOU, label: "Kiri needs you" });
+  expect(NEEDS_YOU).toBe("NEEDS YOU");
+  const { needsYou: _, ...cleared } = lead;
+  expect(needsYouTag(cleared)).toBeNull();
+  expect(needsYouTag(employee("b", "r", { role: "backend", needsYou: true }))).toBeNull();
+});
+
+test("an answer posts to its own route, and a gone request or one with no rule shows the office's short reason", async () => {
+  const real = { fetch: globalThis.fetch, location: globalThis.location };
+  const calls: string[] = [];
+  const replies = [new Response('{"ok":true}'), new Response('{"ok":false,"error":"That request is no longer waiting; the terminal has it."}', { status: 404 }), new Response('{"ok":false,"error":"There is no rule to add for that request; approve it once, or answer at the terminal."}', { status: 409 })];
+  Object.assign(globalThis, { location: { href: "http://x/tok/" }, fetch: async (u: URL, i: RequestInit) => (calls.push(`${i.method} ${u.pathname}`), replies.shift()) });
+  try {
+    expect(await post("always/a%2Fb")).toBeNull();
+    expect(await post("approve/gone")).toBe("That request is no longer waiting; the terminal has it.");
+    expect(await post("always/norule")).toMatch(/^There is no rule to add/);
+  } finally {
+    Object.assign(globalThis, real);
+  }
+  expect(calls).toEqual(["POST /tok/always/a%2Fb", "POST /tok/approve/gone", "POST /tok/always/norule"]);
 });

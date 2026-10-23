@@ -352,3 +352,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: `SendMessage` can return success while the message never arrives (anthropics/claude-code #89543, #102975), so a lead could wait for a report its hire had already sent. The watcher the lead already runs must see the report either way, and the ack comes from the receiver reading a file, never from the send's result.
 - Rejected: waiting for a retry of the message; a daemon that re-sends; the lead polling the hire's transcript.
 - Where: report-files, 157908d
+
+## 2026-10-23 The permission card
+
+- Decision: a hire's raised hand is a card, in the top-bar tray and on the hire's desk (a click on the character opens it near the desk; Escape or a click outside closes it). Both show the same component from the same state: who asks and the project, the tool, the full arguments as text, the hire's last words (`why`, in a slot held from the first paint so it fills in place), and Approve once, Deny and, only when the server gives a rule, Always for this project with the exact rule text beside it ("Allow Bash(npm run *) for every hire of this project"). A click in flight disables the buttons; a gone request (404) or one with no rule (409) shows the office's short reason as a problem line. A lead that waits on the user (`needsYou`) wears a "NEEDS YOU" tag above its LEAD tag, and its roster entry says "needs you".
+- Why: permissions were answered at the hire's desk or never, and hires sat blocked for hours. The user sees the waiting hire in the office, so the answer belongs there, with what the hire said and what Always would grant.
+- Rejected: a modal that blocks the office; hiding the rule behind Always; a push notification.
+- Where: permission-card, COMMIT

@@ -4,13 +4,15 @@ import type { OfficeState } from "../server/office.ts";
 import { internSeed, seedFor } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, LEAD_TAG, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
+import { needsYouTag } from "./approvals.ts";
 import { showsLeadTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
 import { buildTeamSign, buildWhiteboard, teamSignLabel, whiteboardCount } from "./whiteboard.ts";
 
-export type Scene = { update(state: OfficeState, selected: string | null): void; destroy(): void };
+/** `anchorOf` is where a hire's card hangs: the pixel under its name, in the scene's own scrolling frame. */
+export type Scene = { update(state: OfficeState, selected: string | null): void; anchorOf(id: string): { x: number; y: number } | null; destroy(): void };
 
-type Person = { art: DeskArt; name: Text; tag?: Text; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
+type Person = { art: DeskArt; name: Text; tag?: Text; need?: Container; employee: OfficeState["employees"][string]; seed: number; hot: boolean; table: boolean; drawn: string };
 /** An intern walking out from its parent's seat (`born`), or back to it once stopped (`left`); times are performance.now() ms. */
 type Walker = { sprite: Container; parent: string; slot: number; born: number; left?: number };
 type Dimmer = { overlay: Graphics; label: Text; target: number; now: number };
@@ -22,6 +24,17 @@ const SEAT = { x: 17, y: 14 };
 // ponytail: three standing spots; a fourth intern of one parent stands on the first. Add spots if sub-agent fan-out that wide shows up.
 const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
+const NEED_FILL = 0xf2a93b;
+/** The "needs you" tag: dark text on the office's amber, so it reads at a glance beside the gold LEAD tag. */
+function buildNeedsYou(text: string) {
+  const label = new Text({ text, style: { ...LABEL, fontSize: 10, fill: COLORS.night } });
+  label.anchor.set(0.5, 1);
+  label.position.set(0, -2);
+  const back = new Graphics().rect(-label.width / 2 - 4, -label.height - 2, label.width + 8, label.height + 3).fill(NEED_FILL);
+  const tag = new Container();
+  tag.addChild(back, label);
+  return tag;
+}
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 export async function createScene(host: HTMLElement, onSelect: (id: string | null) => void, onBoard: (roomId: string, team?: string) => void, onHire?: () => void, onStartPm?: () => void): Promise<Scene> {
@@ -135,6 +148,15 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
           p.tag.position.set((d.x + LEAD_TAG.x) * scale, (d.y + LEAD_TAG.y) * scale);
           names.addChild(p.tag);
         }
+        const need = needsYouTag(e);
+        if (need) {
+          p.need ??= buildNeedsYou(need.text);
+          p.need.position.set((d.x + LEAD_TAG.x) * scale, (d.y + LEAD_TAG.y) * scale - 16);
+          names.addChild(p.need);
+        } else if (p.need) {
+          p.need.destroy({ children: true });
+          p.need = undefined;
+        }
       }
     }
     for (const [id, p] of people) if (!seen.has(id)) removePerson(id, p);
@@ -167,6 +189,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
     p.art.root.destroy({ children: true });
     p.name.destroy();
     p.tag?.destroy();
+    p.need?.destroy({ children: true });
     people.delete(id);
   }
   function removeWalker(id: string, w: Walker) {
@@ -196,6 +219,7 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       p.art.person.y = bob(pose, f);
       p.art.person.alpha = p.name.alpha = pose === "off" ? 0.4 : 1;
       if (p.tag) p.tag.alpha = p.name.alpha;
+      if (p.need) p.need.alpha = p.name.alpha;
       drawDesk(p.art.fx, pose, f, p.art.skin, id === selected, p.hot, p.table);
     }
     for (const d of dimmers.values()) {
@@ -214,6 +238,12 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
       latest = state;
       selected = sel;
       render();
+    },
+    anchorOf(id) {
+      const p = people.get(id);
+      if (!p) return null;
+      const scale = world.scale.x;
+      return { x: (p.art.root.x + CELL.w / 2) * scale, y: (p.art.root.y + (p.table ? TABLE.h : 57)) * scale + 20 };
     },
     destroy() {
       resize.disconnect();

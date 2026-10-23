@@ -1,11 +1,13 @@
 // The office page, rendered from the server's state alone: a lobby with a door per project, and one project's office full screen at a time.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { OfficeState, Status } from "../server/office.ts";
 import { rosterOf, scaleFor, selectionIn } from "./layout.ts";
 import { canRemove, DOOR, hashFor, isProject, layoutLobby, projectState, roomFromHash } from "./lobby.ts";
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
-import { Tray } from "./approvals.tsx";
+import { DeskCard, Tray } from "./approvals.tsx";
+import { handsOf, needsYouTag } from "./approvals.ts";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
@@ -116,6 +118,8 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
 function Project({ room, state, onHire }: { room: string; state: OfficeState; onHire: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [pmNote, setPmNote] = useState<string | null>(null);
+  // The hire whose permission card is open on its desk, and where the scene hangs it.
+  const [card, setCard] = useState<{ id: string; at: { x: number; y: number } | null } | null>(null);
   const starting = useRef(false);
   const hasPm = Object.values(state.employees).some((e) => e.role === "pm");
   useEffect(() => {
@@ -150,6 +154,12 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
   const opener = useRef<Element | null>(null);
   // The scene keeps the first render's callback, so this reads only refs and the stable setter.
   const select = (id: string | null) => {
+    // A hire with a raised hand opens its card, where the answers are; the panel opens once the hand is down.
+    if (id && handsOf(latest.current.state, id).length) {
+      setSelected(null);
+      return setCard({ id, at: null });
+    }
+    setCard(null);
     const open = latest.current.selected;
     if (id && !open) opener.current = document.activeElement;
     setSelected(id);
@@ -175,6 +185,20 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
     scene.current?.update(state, selected);
   }, [state, selected]);
 
+  // The card follows its hire's desk as the office moves, and goes with the last raised hand.
+  const cardId = card?.id;
+  useEffect(() => {
+    if (!cardId) return;
+    if (!handsOf(state, cardId).length) return setCard(null);
+    const move = () => {
+      const at = scene.current?.anchorOf(cardId) ?? null;
+      setCard((c) => (c && (c.at?.x !== at?.x || c.at?.y !== at?.y) ? { ...c, at } : c));
+    };
+    move();
+    addEventListener("resize", move);
+    return () => removeEventListener("resize", move);
+  }, [state, cardId]);
+
   // The employee left (an ended session, or the office's next push): the panel closes and focus goes back.
   useEffect(() => {
     if (selected && selectionIn(state, selected) === null) select(null);
@@ -189,6 +213,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
   return (
     <>
       <div className="scene" ref={host} />
+      {card?.at && host.current && createPortal(<DeskCard key={card.id} state={state} id={card.id} at={card.at} onClose={() => setCard(null)} />, host.current)}
       {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
       {board && isProject(board.id) && state.rooms[board.id] && <BoardPanel key={`${board.id}/${board.team ?? ""}`} state={state} id={board.id} team={board.team} onClose={() => setBoard(null)} />}
       {isProject(room) && <BoardList state={state} onOpen={openBoard} />}
@@ -201,6 +226,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
             <li key={e.sessionId}>
               <button data-pose={poseOf(e)} onClick={() => select(e.sessionId)}>
                 {e.name}, {roleTitle(e.role)}, {state.rooms[e.room]?.name}, {statusText(e)}
+                {needsYouTag(e) && ", needs you"}
                 {interns > 0 && `, ${interns} ${interns === 1 ? "intern" : "interns"}`}
               </button>
             </li>
