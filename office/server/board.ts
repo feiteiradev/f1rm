@@ -70,10 +70,10 @@ export function openQuestion(text: string): string {
   return NO_QUESTION.test(question) ? "" : question;
 }
 
-/** The open question of the board at `path`, or "" when there is none or the file can't be read. */
-export async function readQuestion(path: string): Promise<string> {
+/** The board file's text at `path` in bounded size, or "" when there is no board or it can't be read. */
+export async function readBoardText(path: string): Promise<string> {
   try {
-    return openQuestion(await Bun.file(path).slice(0, MAX_BOARD_BYTES).text());
+    return await Bun.file(path).slice(0, MAX_BOARD_BYTES).text();
   } catch {
     return "";
   }
@@ -81,9 +81,5 @@ export async function readQuestion(path: string): Promise<string> {
 
 /** The board at `path`, or no rows when there is no board or it can't be read. */
 export async function readBoard(path: string): Promise<BoardRow[]> {
-  try {
-    return parseBoard(await Bun.file(path).slice(0, MAX_BOARD_BYTES).text());
-  } catch {
-    return [];
-  }
+  return parseBoard(await readBoardText(path));
 }

@@ -5,7 +5,7 @@ import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpa
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, readQuestion, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
+import { boardFile, openQuestion, parseBoard, readBoard, readBoardText, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { changeEdition, isEdition, projectFile, readEdition, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
@@ -1016,9 +1016,10 @@ export function startServer({
         // Only the boards of teams someone in the room works in.
         const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t) => t !== null));
         for (const team of teams) {
-          const teamRows = await readBoard(teamBoardFile(boardsDir, id, team));
+          const text = await readBoardText(teamBoardFile(boardsDir, id, team)); // read once: the rows and the open question come from the same text
+          const teamRows = parseBoard(text);
           if (teamRows.length) (nextTeams[id] ??= {})[team] = teamRows;
-          if (await readQuestion(teamBoardFile(boardsDir, id, team))) nextAsking.add(`${id}\n${team}`);
+          if (openQuestion(text)) nextAsking.add(`${id}\n${team}`);
         }
       }
       if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards) || [...nextAsking].sort().join() !== [...asking].sort().join()) {
