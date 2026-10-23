@@ -1088,7 +1088,7 @@ test("R10a: a permission is answered in the office, and the rule is said once in
   ]) expect(rule, s).toContain(s);
   expect(guidelines.split("approve <name>'s request in the office").length).toBe(3); // the rule, and the PM's line in the talk rules
   const gate = /^- A session can't answer a permission request\..*$/m.exec(section("Gates"))?.[0] ?? "";
-  for (const s of ["approve, deny and always", "Bash", "refused", "Only the user's browser"]) expect(gate, s).toContain(s);
+  for (const s of ["approve, deny and always", "Bash", "refused", "Only the user's browser", "reads the command text", "`git commit -F`"]) expect(gate, s).toContain(s);
   expect(talk).toContain("`## Open question for the user`");
   for (const [name, text] of [["pm.md", role("pm").body], ["lead.md", role("lead").body]] as const) {
     expect(text, name).toContain("approve <name>'s request in the office");
@@ -1109,7 +1109,7 @@ test("R10a: docs/decisions.md has the entries Permissions are answered in the of
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const answered = entries.find((e) => e.startsWith("2026-10-23 Permissions are answered in the office\n"))!;
   const tags = entries.find((e) => e.startsWith("2026-10-23 The office tags a lead that waits on the user\n"))!;
-  for (const s of ["1800", "updatedPermissions", ".claude/settings.local.json", "canAlways", "exit code 2", "approve <name>'s request in the office"]) expect(answered, s).toContain(s);
+  for (const s of ["1800", "updatedPermissions", ".claude/settings.local.json", "canAlways", "exit code 2", "approve <name>'s request in the office", "exactly the allow rules Claude Code itself suggested", "The gate is advisory: it reads the command text"]) expect(answered, s).toContain(s);
   for (const s of ["needsYou", "Open question for the user", "push message"]) expect(tags, s).toContain(s);
   for (const e of [answered, tags]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
