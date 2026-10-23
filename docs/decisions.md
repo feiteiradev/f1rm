@@ -64,6 +64,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: research, PRs and reports from hires arrived in the middle of the PM chat and made it confusing. The board and the findings file hold the rest, and the user asks "status?" for more.
 - Rejected: per-task status reports from leads to the PM.
 - Where: rules-prose
+- Superseded: by "Lean review and test runs" (2026-10-23).
 
 ## 2026-10-20 Reviewer conflict and tip rules
 
@@ -155,6 +156,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants minor findings fixed before the merge, not in follow-up branches (the G1 then G1b pattern).
 - Rejected: merging on APPROVED and filing follow-ups.
 - Where: reviewer-every-finding, e8ed02b
+- Superseded: by "Lean review and test runs" (2026-10-23).
 
 ## 2026-10-21 Idle members free their team slot
 
@@ -321,3 +323,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: ultra adds "question the request, push back", which stalls an unattended worker; the user saw high token and CPU spend and few deliveries.
 - Rejected: ultra for everyone; a global config change for all sessions (it would also change the user's own and the leads' sessions); the process env alone (measured: it does not reach the session).
 - Where: ponytail-full, a64bd3d
+
+## 2026-10-23 Lean review and test runs
+
+- Decision: (1) The Reviewer sends back only blocking findings. Non-blocking ones (from `/code-review` and ponytail-review) go in its verdict under "Non-blocking (for the batch task)", the lead copies them to `~/.f1rm/evidence/<repo>/findings.md`, and one batch task fixes them at the milestone's end (a normal task with its own Reviewer under the same rules; skipped when the list is empty or the user says to leave them). A finding is blocking when it is a wrong or missing behaviour against the brief, a bypass or security hole, a false positive in a main flow, or a test that does not test what it claims; a wording nit, a style point, a hypothetical edge or a cleanup is not. A Reviewer lands when no blocking finding is left. (2) At most 2 blocking rounds per branch; a third is `ESCALATE <slug>` to the lead, who asks the user. A conflict-only round never counts. (3) The dev runs the full suite once per round, on its final commit, and records `{commit, exit code, pass/fail counts}` in `check-record.json`; the lead checks the record against the branch tip and does not rerun the suite; the Reviewer runs only the new tests on the base (red) and the full suite once on the scratch merge.
+- Why: the user saw high token and CPU spend and few deliveries; a Reviewer that reported every finding kept tasks in review for 5 to 30 rounds, and every round reran the whole suite in three sessions.
+- Rejected: every finding goes back (the "Reviewer sends back every finding" decision); the lead rerunning the dev's suite; a numeric cap on non-blocking findings.
+- Where: lean-review, 570ff5b
