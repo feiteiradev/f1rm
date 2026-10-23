@@ -42,8 +42,8 @@
 .hand .who { display: flex; gap: 12px; align-items: baseline; }
 .hand .where { color: var(--muted); }
 .hand .tool { margin-top: 4px; color: var(--amber); font-weight: 700; }
-/* Two lines are held for the hire's last words from the first paint, so a short note arriving a moment later moves nothing. */
-.hand .why { min-height: 2.9em; margin-top: 4px; color: var(--text); overflow-wrap: anywhere; }
+/* A fixed three-line slot, held from the first paint: the hire's last words (up to 300 characters) scroll inside it, so they arriving later moves nothing. */
+.hand .why { height: 4.35em; margin: 4px 0 0; overflow-y: auto; color: var(--text); overflow-wrap: anywhere; }
 .hand .why-label { color: var(--muted); }
 .hand .args {
   margin: 6px 0 0;

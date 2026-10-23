@@ -26,7 +26,7 @@ export function HandCard({ state, approval: a }: { state: OfficeState; approval:
       </p>
       <p className="tool">{card.tool}</p>
       {/* The hire's last words can arrive after the card; the slot is there from the start, so nothing under it moves. */}
-      <p className="why" aria-live="polite">{card.why && <><span className="why-label">Why </span>{card.why}</>}</p>
+      <p className="why" aria-live="polite" tabIndex={card.why ? 0 : undefined}>{card.why && <><span className="why-label">Why </span>{card.why}</>}</p>
       {/* Text, never HTML: the arguments are whatever the session asked to run. */}
       <pre className="args" aria-label={`${card.tool} arguments`}>{card.args}</pre>
       <div className="answer">
