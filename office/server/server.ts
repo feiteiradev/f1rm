@@ -606,6 +606,8 @@ export function startServer({
     } catch {} // a row this build can't read must not stop the office from starting
   }
   dropStaleDoors();
+  // What the log replayed says nothing about now: no one works until a live event or the listing says so (the first check follows at once).
+  state = { ...state, employees: Object.fromEntries(Object.entries(state.employees).map(([id, { workedAt: _, ...e }]) => [id, e.status === "working" ? { ...e, status: "idle" as const } : e])) };
 
   const employeeOf = (id: string) => (Object.hasOwn(state.employees, id) ? state.employees[id] : undefined);
   const pmOf = (room: string) => Object.values(state.employees).find((e) => e.room === room && e.role === "pm");
@@ -637,7 +639,7 @@ export function startServer({
     const fresh = new Map([...(listed ?? [])].filter(([id]) => eventCounts.get(id) === before.get(id)));
     if (fresh.size === (listed?.size ?? 0)) listedAt = clock();
     for (const [id, { pid }] of fresh) if (typeof pid === "number") pids.set(id, pid);
-    const next = listed ? applyListing(state, fresh, new Set(approvals.list().map((a) => a.sessionId))) : state;
+    const next = listed ? applyListing(state, fresh, new Set(approvals.list().map((a) => a.sessionId)), clock()) : state;
     if (next !== state) {
       state = next;
       push();
@@ -1085,6 +1087,7 @@ export function startServer({
   }
   const ready = Promise.all([sweepOnce(), readBoards()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
+  void checkProcesses(); // likewise: the replayed employees learn who is busy now, not a tick later
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
   const processTimer = setInterval(checkProcesses, Math.min(5_000, offlineAfterMs / 4));
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));

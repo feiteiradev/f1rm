@@ -1169,6 +1169,13 @@ test("R10a: docs/decisions.md has the entries Permissions are answered in the of
   for (const e of [answered, tags]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
+test("honest status: the log has The office tells the truth, and the README says when someone shows as working", () => {
+  const entry = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).find((e) => e.startsWith("2026-10-23 The office tells the truth\n"))!;
+  for (const s of ["last 90 seconds", "busy", "HOT_MS", "#75092", "#80100", "trusting the last hook event alone", "the listing's `state` field"]) expect(entry, s).toContain(s);
+  expect(entry.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toContain("one of their hook events came in the last 90 seconds");
+});
+
 test("W5: both READMEs list f1rm wake", () => {
   expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm wake` \|/m);
   expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm wake <name|id> [message]`");
