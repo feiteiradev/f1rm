@@ -137,6 +137,8 @@ function installed(s: Settings): { url: string; secret: string } | null {
 }
 /** Hooks from an older install (http hooks, which show errors while the office is stopped) that install would replace. */
 const outdated = (s: Settings) => f1rmHandlers(s).some(isF1rmHttp);
+/** An f1rm PermissionRequest hook that the office's hold would outlast (installs from before the 30-minute hold have 120 s): `serve` refuses it, so install writes it again. */
+const shortPermissionHook = (s: Settings) => (s.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).some((h) => isF1rm(h) && !(Number(h.timeout) > DEFAULT_TIMEOUT_S));
 
 /** Removes f1rm's handlers, and the groups that held only them. */
 function withoutF1rm(s: Settings): Settings {
@@ -391,6 +393,9 @@ async function open() {
   } else if (outdated(settings)) {
     install();
     notes.push("updated f1rm's hooks, so a stopped office no longer shows hook errors");
+  } else if (shortPermissionHook(settings)) {
+    install();
+    notes.push("updated f1rm's permission hook, so a request can wait for you in the office for 30 minutes");
   }
   let url = await runningOffice();
   if (!url) {

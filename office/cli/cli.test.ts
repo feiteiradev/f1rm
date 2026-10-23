@@ -930,6 +930,26 @@ test("a bare f1rm with the office running just opens this folder's project, in o
   expect(stub.calls()).toEqual([`open ${url}#/project/${encodeURIComponent(folder)}`]);
 });
 
+test("a bare f1rm re-installs a permission hook whose timeout the 30-minute hold would outlast, and says so", async () => {
+  const home = tempHome(), folder = realpathSync(repoDir("blog"));
+  const stub = stubBin();
+  stub.run(home, "install");
+  const old = settingsOf(home); // what every install from before the 30-minute hold has: timeout 120
+  const hook = old.hooks.PermissionRequest[0].hooks[0];
+  hook.timeout = 120;
+  hook.command = hook.command.replace(/-m \d+ /, "-m 120 ");
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
+  const r = await f1rmIn(folder, home, stub.bin);
+  expect(r.out).toBe("Opened the f1rm office on blog (updated f1rm's permission hook, so a request can wait for you in the office for 30 minutes).");
+  const fixed = f1rmHandlers(settingsOf(home)).find((h) => h.event === "PermissionRequest")!;
+  expect([fixed.timeout, fixed.command]).toEqual([2 * DEFAULT_TIMEOUT_S, expect.stringContaining(`-m ${2 * DEFAULT_TIMEOUT_S} `)]);
+  const again = await f1rmIn(folder, home, stub.bin); // current now: nothing to say
+  office.stop(true);
+  expect(again.out).toBe("Opened the f1rm office on blog.");
+});
+
 test("help prints the usage line and exits 0; an unknown command, here included, prints it and exits 1", async () => {
   const home = tempHome(), folder = repoDir("shop");
   const stub = stubBin();
