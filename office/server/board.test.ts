@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { boardFile, MAX_BOARD_BYTES, teamBoardFile, parseBoard } from "./board.ts";
+import { boardFile, MAX_BOARD_BYTES, openQuestion, teamBoardFile, parseBoard } from "./board.ts";
 import { projectFile, readEdition, writeEdition } from "./editions.ts";
 import { startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
@@ -155,4 +155,21 @@ test("a project's edition reaches the office from its file, and the office sets 
   expect((await set({ room: "/code/nope", edition: "work" })).status).toBe(404);
   expect((await fetch(`http://127.0.0.1:${server.port}/wrong-token/edition`, { method: "POST", body: JSON.stringify({ room, edition: "founder" }) })).status).toBe(401);
   expect(readEdition(projectFile(projectsDir, room))).toBe("work");
+});
+
+test("openQuestion reads the line under an 'Open question for the user' heading, or the text after it on that line", () => {
+  const board = (middle: string) => `# Board: shop / checkout\n\n${middle}\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | - | todo | - | x |\n`;
+  expect(openQuestion(board("## Open question for the user\nShip the guest checkout first?"))).toBe("Ship the guest checkout first?");
+  expect(openQuestion(board("## Open question for the user\n\n- Ship it first?  \n"))).toBe("Ship it first?");
+  expect(openQuestion(board("**Open question for the user:** Which payment provider?"))).toBe("Which payment provider?");
+  expect(openQuestion(board("open question for the user: spend 5 credits?"))).toBe("spend 5 credits?");
+  for (const none of ["none", "None.", "-", "n/a", "**none**"]) expect([none, openQuestion(board(`## Open question for the user\n${none}`))]).toEqual([none, ""]);
+  expect(openQuestion(board("## Open question for the user\n## Notes\nnot a question"))).toBe("");
+  expect(openQuestion(board("## Open question for the user"))).toBe("");
+  expect(openQuestion(board("Open questions are tracked elsewhere."))).toBe("");
+  expect(openQuestion("")).toBe("");
+});
+
+test("openQuestion is bounded plain text", () => {
+  expect(openQuestion(`## Open question for the user\n${"Q".repeat(1000)}‮`).length).toBe(200);
 });

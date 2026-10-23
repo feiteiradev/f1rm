@@ -4,12 +4,13 @@ import { timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, readBoard, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
+import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
+import { boardFile, readBoard, readQuestion, repoDir, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { changeEdition, isEdition, projectFile, readEdition, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
+import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
@@ -451,6 +452,14 @@ export function startServer({
         }
       }
     }
+    // A permission request is answered by the user's browser only: a command that names an answer route (approve, deny, always) of this office, by its port, its link key or the saved link, is refused.
+    // ponytail: it guards against a slip, not a determined session that builds the address piece by piece; the link key lives in a file the user's account can read.
+    if (tool === "Bash") {
+      const line = String(input.command ?? "");
+      if (/(?:approve|deny|always)\/[^\s'"]/.test(line) && (line.includes(token) || line.includes("office-url") || new RegExp(`(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${server.port}\\b`).test(line))) {
+        return refuse("answer", "Only the user answers a permission request, in the office: tell the session in your Report to what you are waiting for, and wait.");
+      }
+    }
     // The Bash line is split once; `$(mktemp -d)` is one word, so a HOME made of it stays in its command's prefix.
     const split = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)) : [];
     const commands = split.map((c) => c.words);
@@ -651,7 +660,12 @@ export function startServer({
   let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
   // Without a settings folder there is nowhere to keep an edition, so the page isn't told about editions at all and never asks.
-  const snapshot = () => JSON.stringify({ ...state, boards, teamBoards, ...(projectsDir && { editions }), approvals: approvals.list() });
+  // The teams (room and team, one string) whose board holds an open question for the user.
+  let asking = new Set<string>();
+  // A lead waits on the user while its own permission request is held, or its team's board holds an open question. The reducer never sees this; the snapshot adds it.
+  const needsYou = (e: Employee) => e.role === "lead" && (approvals.list().some((a) => a.sessionId === e.sessionId) || asking.has(`${e.room}\n${teamOf(e)}`));
+  const employeesNow = () => Object.fromEntries(Object.entries(state.employees).map(([id, e]) => [id, needsYou(e) ? { ...e, needsYou: true } : e]));
+  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions }), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -708,7 +722,8 @@ export function startServer({
           }
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
-            const decision = await approvals.hold(event.sessionId, String(payload.tool_name ?? ""), payload.tool_input, event.at, req.signal);
+            const tool = String(payload.tool_name ?? "");
+            const decision = await approvals.hold(event.sessionId, tool, payload.tool_input, event.at, req.signal, () => lastSaid(transcriptsDir, event.sessionId, payload.transcript_path), alwaysRules(tool, payload.tool_input, payload.permission_suggestions));
             if (decision) return Response.json({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision } });
           }
         }
@@ -719,7 +734,7 @@ export function startServer({
       if (!same(given, token)) return new Response("<!doctype html><title>f1rm</title><p>Open the office with <code>f1rm</code>.", { status: 401, headers: { "content-type": "text/html; charset=utf-8" } });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "ask", "tell", "letgo", "intern", "remove"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "always", "ask", "tell", "letgo", "intern", "remove"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       }
       if (rest[0] === "jump" && rest.length === 2) {
@@ -733,6 +748,12 @@ export function startServer({
         }
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
+      if (rest[0] === "always" && rest.length === 2) {
+        if (approvals.always(rest[1])) return Response.json({ ok: true });
+        return approvals.list().some((a) => a.id === rest[1])
+          ? Response.json({ ok: false, error: "There is no rule to add for that request; approve it once, or answer at the terminal." }, { status: 409 })
+          : Response.json({ ok: false, error: "That request is no longer waiting; the terminal has it." }, { status: 404 });
       }
       if ((rest[0] === "approve" || rest[0] === "deny") && rest.length === 2) {
         const decided = approvals.answer(rest[1], rest[0] === "approve" ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE });
@@ -988,6 +1009,7 @@ export function startServer({
       if (!boardsDir) return;
       const next: Record<string, BoardRow[]> = {};
       const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
+      const nextAsking = new Set<string>();
       for (const id of projects) {
         const rows = await readBoard(boardFile(boardsDir, id));
         if (rows.length) next[id] = rows;
@@ -996,11 +1018,13 @@ export function startServer({
         for (const team of teams) {
           const teamRows = await readBoard(teamBoardFile(boardsDir, id, team));
           if (teamRows.length) (nextTeams[id] ??= {})[team] = teamRows;
+          if (await readQuestion(teamBoardFile(boardsDir, id, team))) nextAsking.add(`${id}\n${team}`);
         }
       }
-      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards)) {
+      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards) || [...nextAsking].sort().join() !== [...asking].sort().join()) {
         boards = next;
         teamBoards = nextTeams;
+        asking = nextAsking;
         push();
       }
     } finally {

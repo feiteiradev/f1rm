@@ -83,6 +83,8 @@ test("install adds a hook with the ingest secret for every observed event, keepi
     // a stuck office must not stall sessions, except that the permission hook is held for the browser
     if (h.event === "PermissionRequest") expect(h.timeout).toBeGreaterThan(DEFAULT_TIMEOUT_S);
     else expect(h.timeout).toBeLessThanOrEqual(5);
+    // the hold is 30 minutes at least, and curl's own -m outlasts it too
+    if (h.event === "PermissionRequest") expect([h.timeout, Number(/-m (\d+) /.exec(h.command)![1])].every((s) => s > 1800)).toBe(true);
     expect(h.command).toContain(`-m ${h.timeout} `);
   }
 
@@ -150,6 +152,10 @@ test("an older install's http hooks, with or without the messaging token, become
   expect(secretOf(home)).toBe(secret);
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(settingsOf(home)).toEqual(userSettings);
+});
+
+test("the office holds a permission request for 30 minutes at least by default", () => {
+  expect(DEFAULT_TIMEOUT_S).toBeGreaterThanOrEqual(1800);
 });
 
 test("serve refuses an approval timeout the installed permission hook would not outlast", () => {
