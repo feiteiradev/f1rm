@@ -184,3 +184,17 @@ test("a raised hand stays waiting however old the last event is", async () => {
   now += 10 * HOT_MS;
   expect((await seen(server)).employees.asking.status).toBe("waiting");
 });
+
+test("a raised hand whose held request timed out, with the terminal prompt up and the session listed, stays waiting", async () => {
+  now = 1_000_000;
+  listed = new Map([["asking", 4247]]); // listed, live; `waiting` from the CLI reads as no status in machine.ts
+  const projectsDir = join(dir, "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  writeFileSync(projectFile(projectsDir, "/code/shop/.git"), "{}\n");
+  const server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: machine(), clientDir: dir, projectsDir, dbPath: join(dir, "probe.db"), clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e12, isAlive: () => true, approvalTimeoutMs: 100 });
+  servers.push(server);
+  await hook(server, "asking", "PermissionRequest", bash("rm -rf build")); // held 100 ms, then falls back to the terminal prompt
+  await hook(server, "asking", "Notification", { notification_type: "permission_prompt", message: "Claude needs your permission" });
+  const s = await seen(server);
+  expect(s.employees.asking.status).toBe("waiting");
+});

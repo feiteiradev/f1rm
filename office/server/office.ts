@@ -242,7 +242,8 @@ export function applyListing(state: OfficeState, listed: ReadonlyMap<string, { s
   for (const [id, e] of Object.entries(state.employees)) {
     const live = listed.get(id);
     const hot = e.workedAt !== undefined && now - e.workedAt < HOT_MS;
-    const status: Status = waiting.has(id) ? e.status : live?.status === "busy" || hot ? "working" : live || e.status === "working" ? "idle" : e.status;
+    // A raised hand stays: the held request's, or one the terminal prompt shows (a listing has no status for a session that waits).
+    const status: Status = waiting.has(id) || (e.status === "waiting" && !live?.status) ? e.status : live?.status === "busy" || hot ? "working" : live || e.status === "working" ? "idle" : e.status;
     changed ||= status !== e.status;
     employees[id] = status === e.status ? e : { ...e, status };
   }
