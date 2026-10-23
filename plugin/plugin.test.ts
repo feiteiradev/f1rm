@@ -662,6 +662,8 @@ test("the guidelines say once that every hire but a lead starts at ponytail full
   expect(guidelines.split(rule)).toHaveLength(2);
   expect(guidelines).toContain("A lead keeps the config default");
   expect(guidelines).toContain("`f1rm wake` keeps the level");
+  const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  expect(log.split("## 2026-10-23 Ponytail full for workers")).toHaveLength(2);
 });
 
 test("the Reviewer sends back every /code-review finding and merges only when none is left; ponytail-review never blocks; only a blocking round counts toward ESCALATE", () => {
