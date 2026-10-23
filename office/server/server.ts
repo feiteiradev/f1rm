@@ -698,8 +698,9 @@ export function startServer({
           }
           eventCounts.set(event.sessionId, (eventCounts.get(event.sessionId) ?? 0) + 1);
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
-          // The exceptions are the notification about the very prompt being held, and a sub-agent's events (a reviewer's /code-review fork, a dev's interns): they say nothing about the session's own prompt.
-          if (!event.kind.startsWith("Notification/") && !event.inSubagent && !event.kind.startsWith("Subagent")) approvals.release(event.sessionId);
+          const agentId: string | undefined = typeof payload.agent_id === "string" && payload.agent_id ? payload.agent_id : undefined;
+          // An event releases only the requests of its own thread: the main thread's, or the one sub-agent's it comes from (a reviewer's /code-review fork, a dev's interns share the session id). The exception is the notification about the very prompt being held.
+          if (!event.kind.startsWith("Notification/")) approvals.releaseOwn(event.sessionId, agentId);
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
@@ -723,7 +724,7 @@ export function startServer({
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
             const tool = String(payload.tool_name ?? "");
-            const decision = await approvals.hold(event.sessionId, tool, payload.tool_input, event.at, req.signal, () => lastSaid(transcriptsDir, event.sessionId, payload.transcript_path), alwaysRules(payload.permission_suggestions));
+            const decision = await approvals.hold(event.sessionId, tool, payload.tool_input, event.at, req.signal, () => lastSaid(transcriptsDir, event.sessionId, payload.transcript_path), alwaysRules(payload.permission_suggestions), agentId);
             if (decision) return Response.json({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision } });
           }
         }

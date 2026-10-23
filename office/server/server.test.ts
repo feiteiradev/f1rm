@@ -1186,6 +1186,40 @@ test("a sub-agent's events do not drop the session's pending hand, its own next 
   expect([answer.status, await answer.text()]).toEqual([200, ""]);
 });
 
+test("a sub-agent's own pending hand is released by that sub-agent's next event, and by nothing else", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: parent, approval: parentHand } = await raiseHand("s1", "make build");
+  const subRequest = (agent: string, command: string) => hook({ ...permissionRequest("s1", command), agent_id: agent, agent_type: "Explore" });
+  const sub = (agent: string, event: string, extra: object = {}) => hook({ ...common("s1", event), agent_id: agent, agent_type: "Explore", ...extra });
+  const mine = subRequest("agent-1", "ls docs");
+  const other = subRequest("agent-2", "ls src");
+  const hands = (await office((s) => (s.approvals ?? []).length === 3)).approvals!;
+  expect(hands.map((a) => (a.input as any).command).sort()).toEqual(["ls docs", "ls src", "make build"]);
+  // the parent's own event, a third sub-agent's and agent-2's do not release agent-1's request
+  await hook({ ...common("s1", "Notification"), message: "m", notification_type: "idle_prompt" });
+  await sub("agent-3", "PreToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_use_id: "toolu_3" });
+  await sub("agent-2", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls src" }, tool_response: {} }); // agent-2 answered in the terminal
+  const answer2 = await other;
+  expect([answer2.status, await answer2.text()]).toEqual([200, ""]);
+  expect(await settled(mine)).toBe(false);
+  expect((await office((s) => s.approvals!.length === 2)).approvals!.map((a) => (a.input as any).command).sort()).toEqual(["ls docs", "make build"]);
+  // agent-1's next event releases agent-1's request only, and the parent keeps its own
+  await sub("agent-1", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls docs" }, tool_response: {} });
+  const answer1 = await mine;
+  expect([answer1.status, await answer1.text()]).toEqual([200, ""]);
+  expect((await office((s) => s.approvals!.length === 1)).approvals!.map((a) => a.id)).toEqual([parentHand.id]);
+  expect(await settled(parent)).toBe(false);
+  // a sub-agent that stops lets go of its hand; the parent's own next event lets go of the parent's
+  const stopping = subRequest("agent-4", "ls lib");
+  await office((s) => s.approvals!.length === 2);
+  await sub("agent-4", "SubagentStop", { last_assistant_message: "done" });
+  expect((await stopping).status).toBe(200);
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "make build" }, tool_response: {} });
+  expect(await (await parent).text()).toBe("");
+  expect((await office((s) => s.approvals!.length === 0)).approvals).toEqual([]);
+});
+
 test("an employee removed because its process ended takes its pending hand with it", async () => {
   start();
   await hook(sessionStart("gone", "/code/shop"));

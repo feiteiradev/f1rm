@@ -32,7 +32,7 @@ export function alwaysRules(suggestions: unknown): PermissionUpdate[] {
 const ruleText = (always: PermissionUpdate[]) => always.flatMap((u) => u.rules.map((r) => `${r.toolName}(${r.ruleContent})`)).join(", ");
 
 export function createBroker(timeoutMs: number, onChange: () => void) {
-  const held = new Map<string, { approval: Approval; always: PermissionUpdate[]; settle: (d: Decision | null) => void }>();
+  const held = new Map<string, { approval: Approval; always: PermissionUpdate[]; agentId?: string; settle: (d: Decision | null) => void }>();
 
   function finish(id: string, decision: Decision | null) {
     const entry = held.get(id);
@@ -45,8 +45,8 @@ export function createBroker(timeoutMs: number, onChange: () => void) {
 
   return {
     list: () => [...held.values()].map((h) => h.approval),
-    /** Resolves with the browser's decision, or null on timeout, release or an aborted request. `read` gives the hire's last words; `always` are the rules the third answer adds, and none means it can't be offered. */
-    hold(sessionId: string, tool: string, input: unknown, at: number, signal: AbortSignal, read: () => string = () => "", always: PermissionUpdate[] = []): Promise<Decision | null> {
+    /** Resolves with the browser's decision, or null on timeout, release or an aborted request. `read` gives the hire's last words; `always` are the rules the third answer adds, and none means it can't be offered. `agentId` is the sub-agent that asks, none for the session's main thread. */
+    hold(sessionId: string, tool: string, input: unknown, at: number, signal: AbortSignal, read: () => string = () => "", always: PermissionUpdate[] = [], agentId?: string): Promise<Decision | null> {
       const approval: Approval = { id: randomUUID(), sessionId, tool, input, at, why: read(), canAlways: always.length > 0, rule: ruleText(always) };
       return new Promise((resolve) => {
         const timer = setTimeout(() => finish(approval.id, null), timeoutMs);
@@ -56,7 +56,7 @@ export function createBroker(timeoutMs: number, onChange: () => void) {
           if (said && said !== approval.why && held.has(approval.id)) (approval.why = said, onChange());
         }, ms));
         const settle = (d: Decision | null) => (clearTimeout(timer), looks.forEach(clearTimeout), resolve(d));
-        held.set(approval.id, { approval, always, settle });
+        held.set(approval.id, { approval, always, agentId, settle });
         signal.addEventListener("abort", () => finish(approval.id, null), { once: true });
         onChange();
       });
@@ -68,7 +68,11 @@ export function createBroker(timeoutMs: number, onChange: () => void) {
       const entry = held.get(id);
       return !!entry?.always.length && finish(id, { behavior: "allow", updatedPermissions: entry.always });
     },
-    /** The session moved on: its held requests get no decision. */
+    /** The session's main thread, or a sub-agent, moved on: only the requests it made itself get no decision. */
+    releaseOwn(sessionId: string, agentId?: string) {
+      for (const [id, h] of held) if (h.approval.sessionId === sessionId && h.agentId === agentId) finish(id, null);
+    },
+    /** The session is gone: all its held requests, whoever made them, get no decision. */
     release(sessionId: string) {
       for (const [id, h] of held) if (h.approval.sessionId === sessionId) finish(id, null);
     },
