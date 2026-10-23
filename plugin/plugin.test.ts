@@ -431,7 +431,7 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
   expect(section("Team brief")).toContain("Report: NEEDS YOU <team>: <topic> for what needs the user, DONE <team> when the slice is merged. Nothing else goes to the PM.");
   for (const text of [guidelines, role("lead").body]) expect(text).not.toMatch(/status report/i);
   const teams = section("Teams");
-  for (const s of ["checks each specialist's `DONE` against its brief", "reruns its checks before it hires the Reviewer", "sends the work back", "~/.f1rm/evidence/<repo>/findings.md", "5-line summary", "only role that merges"]) expect(teams, s).toContain(s);
+  for (const s of ["checks each specialist's `DONE` against its brief", "before it hires the Reviewer", "sends the work back", "~/.f1rm/evidence/<repo>/findings.md", "5-line summary", "only role that merges"]) expect(teams, s).toContain(s);
   const lead = role("lead").body;
   for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`NEEDS YOU <team>: <topic>` and `DONE <team>`"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
@@ -654,7 +654,8 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
   for (const t of ["Projects are isolated", "Decisions log merges by union", "Project notes live outside memory"]) expect(titles).toContain(`2026-10-21 ${t}`);
   for (const t of ["The skill gate arms on the first prompt only", "A refused skill counts as tried"]) expect(titles).toContain(`2026-10-22 ${t}`);
   expect(entries.find((e) => e.startsWith("2026-10-22 A refused skill counts as tried"))).toContain("`security-review` is never taken from a try");
-  for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+  // An entry a later one overrides may end with one `- Superseded:` line; its other lines stay as written.
+  for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).filter((l) => !l.startsWith("- Superseded: ")).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
 test("the guidelines say once that every hire but a lead starts at ponytail full, and the decision is logged", () => {
@@ -666,33 +667,66 @@ test("the guidelines say once that every hire but a lead starts at ponytail full
   expect(log.split("## 2026-10-23 Ponytail full for workers")).toHaveLength(2);
 });
 
-test("the Reviewer sends back every /code-review finding and merges only when none is left; ponytail-review never blocks; only a blocking round counts toward ESCALATE", () => {
+const LEAN_ENTRY = "2026-10-23 Lean review and test runs";
+const NON_BLOCKING = "Non-blocking (for the batch task)";
+
+test("lean review: only blocking findings go back, a Reviewer lands when none is left, the rest wait for one batch task", () => {
   const flow = section("Review and merge flow");
   const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";
-  for (const s of ["every finding, blocking or not", "Merge only when none is left", "a round that holds a blocking finding counts toward `ESCALATE`", "ounds of minor findings alone never escalate"]) expect(step4, s).toContain(s);
+  for (const s of ["blocking or non-blocking", "a wrong or missing behaviour against the brief, a bypass or security hole, a false positive in a main flow, or a test that does not test what it claims", "a wording nit, a style point, a hypothetical edge or a cleanup is not", "with the blocking findings only", "A Reviewer lands when no blocking finding is left", NON_BLOCKING, "ponytail-review", "At most 2 blocking rounds per branch", "`ESCALATE <slug>`", "never counts toward ESCALATE", "counts once, for the finding", "or any item of the content checklist is missed"]) expect(step4, s).toContain(s);
   // The guidelines state each rule once, in the review flow; the other places point to it.
-  expect(flow).toContain("its findings go in your report and never block");
-  for (const s of ["never block", "Merge only when none is left", "ounds of minor findings alone never escalate"]) expect(guidelines.split(s).length - 1, s).toBe(1);
-  expect(guidelines).not.toContain("no finding goes to a later branch");
+  for (const s of ["wrong or missing behaviour", "A Reviewer lands when no blocking finding is left", "At most 2 blocking rounds per branch"]) expect(guidelines.split(s).length - 1, s).toBe(1);
   const handoff = section("Handoff via SendMessage");
-  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the findings with file and line, marked blocking or not/);
-  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third round with a blocking finding \(see the review flow\)/);
-  expect(step4).toContain("in place of a third round with a blocking finding");
-  expect(step4).toContain("or any item of the content checklist is missed");
-  for (const file of [guidelines, ...["reviewer", "lead", "pm"].map((r) => role(r).body)]) expect(file).not.toContain("in place of a third `CHANGES REQUESTED`");
+  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the blocking findings with file and line/);
+  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third blocking round \(see the review flow\)/);
+  const teams = section("Teams");
+  for (const s of ["copies the verdict's non-blocking findings to `~/.f1rm/evidence/<repo>/findings.md`", "hires one batch task for the non-blocking findings", "a normal task with its own Reviewer, under the same rules", "skips it, and says so in its `DONE <team>`, when the list is empty or the user says to leave them", "each finding as `fixed` or `left`"]) expect(teams, s).toContain(s);
   const reviewer = role("reviewer").body;
-  for (const s of ["every `/code-review` finding, blocking or not", "merge only when none is left", "Its findings go in your report and never block.", "a round that holds a blocking finding counts toward `ESCALATE`"]) expect(reviewer, s).toContain(s);
-  expect(reviewer).toContain("`CHANGES REQUESTED` with every finding");
-  expect(reviewer).not.toContain("with the blocking findings");
-  expect(reviewer).not.toContain("goes back like a blocking one");
-  expect(reviewer.split("blocking or not").length - 1).toBe(2);
+  for (const s of [NON_BLOCKING, "the blocking findings", "step 4"]) expect(reviewer, s).toContain(s);
   const lead = role("lead").body;
-  for (const s of ["minor findings too", "before the merge", "fixed"]) expect(lead, s).toContain(s);
-  expect(section("Teams")).toMatch(/minor findings too[^\n]*before the merge/);
-  expect(section("Teams")).not.toContain("left unfixed");
-  expect(role("pm").body).toContain("before the merge");
-  expect(guidelines).not.toContain("findings left unfixed");
-  for (const text of [guidelines, role("reviewer").body, lead, role("pm").body]) expect(text).not.toMatch(/follow-up branch|merge first|fix(ed)? (them )?later/i);
+  for (const s of [NON_BLOCKING, "batch task", "`ESCALATE <slug>`", "with blocking findings goes back to its dev"]) expect(lead, s).toContain(s);
+  const pm = role("pm").body;
+  for (const s of ["only blocking findings", "batch task"]) expect(pm, s).toContain(s);
+  for (const f of ["README.md", join("plugin", "README.md")]) expect(readFileSync(join(REPO, f), "utf8"), f).toContain("batch task");
+  // No old wording survives anywhere a role reads.
+  const old = /every (`\/code-review` )?finding|blocking or not|minor findings|reruns? (its|your) checks|follow-up branch|merge first|fix(ed)? (them )?later/i;
+  for (const [name, text] of Object.entries({ guidelines, reviewer, lead, pm })) expect(text, name).not.toMatch(old);
+});
+
+test("lean review: the dev runs the suite once per round and records it; the lead checks the record; the Reviewer runs the new tests on the base and the suite once on the merge", () => {
+  const handoff = section("Handoff via SendMessage");
+  for (const s of ["**Test runs.**", "once per round, on its final commit", "`{commit, exit code, pass/fail counts}`", "`check-record.json`", "its `DONE` names the file", "runs the suite once more and records again", "checks the record against the branch tip (same commit, exit 0) and does not rerun the suite", "runs only the new tests on the base (red) and the full suite once on the scratch merge"]) expect(handoff, s).toContain(s);
+  for (const s of ["{commit, exit code, pass/fail counts}", "does not rerun the suite"]) expect(guidelines.split(s).length - 1, s).toBe(1);
+  expect(handoff).not.toContain("the full check command and its exit code");
+  const flow = section("Review and merge flow");
+  for (const s of ["run the new tests only", "the repo's full check command once (see Test runs in Handoff)"]) expect(flow, s).toContain(s);
+  const teams = section("Teams");
+  expect(teams).toContain("its check record (see Test runs in Handoff)");
+  expect(section("Workflows")).not.toMatch(/rerun/);
+  const lead = role("lead").body;
+  expect(lead).toContain("its check record");
+  expect(lead).not.toMatch(/rerun its checks/);
+  for (const name of ["backend-dev", "frontend-dev"]) {
+    const { body } = role(name);
+    for (const s of ["once per round, on your final commit", "`check-record.json`", "Test runs in the guidelines"]) expect(body, `${name} ${s}`).toContain(s);
+    expect(body, name).not.toMatch(/rerun your checks/);
+  }
+  for (const name of SPECIALISTS) expect(role(name).body, name).not.toMatch(/rerun your checks/);
+  expect(role("reviewer").body).toContain("full check command on that result once");
+  expect(role("reviewer").body).not.toContain("not only on the branch");
+  expect(role("reviewer").body).toContain("the new tests only");
+});
+
+test("the decisions log holds the lean review entry, and the entries it supersedes say so", () => {
+  const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  const entries = log.split(/^## /m).slice(1);
+  const lean = entries.filter((e) => e.startsWith(LEAN_ENTRY));
+  expect(lean).toHaveLength(1);
+  expect(lean[0]).toMatch(/- Where: .*lean-review/);
+  for (const e of ["2026-10-20 Reviewer sends back every finding", "2026-10-20 Leads filter team traffic"]) {
+    const entry = entries.find((x) => x.startsWith(e)) ?? "";
+    expect(entry, e).toContain('\n- Superseded: by "Lean review and test runs" (2026-10-23).');
+  }
 });
 
 test("the plugin is 0.4.0, and its README names both documents", () => {

@@ -17,25 +17,25 @@ Role: Reviewer. Decide whether a branch meets its brief, and merge it locally on
 ## Work
 
 - Read the brief and acceptance criteria that the branch was built against. The message from whoever hired you names the branch, the brief and the main branch.
-- The findings come from the `/code-review` that starts your session, at the level your brief names. Apart from the Spec axis below, do not review the diff a second time; your own work is the gates below. Send back every `/code-review` finding, blocking or not, and merge only when none is left.
-- Your first command stays `/code-review`. Load `mattpocock-skills:code-review` with the Skill tool and run its Spec axis only, yourself and inline, with no sub-agents (the `/code-review` fork is already your one background agent), against the brief's acceptance criteria and `<base>...worktree-<task>`, not the main checkout's HEAD; its findings are `/code-review` findings, sent back the same way.
-- Run `ponytail:ponytail-review` on a code branch. Its findings go in your report and never block.
+- The findings come from the `/code-review` that starts your session, at the level your brief names. Apart from the Spec axis below, do not review the diff a second time; your own work is the gates below. Sort them as step 4 of the review flow says: send back the blocking findings only, and land when none is left.
+- Your first command stays `/code-review`. Load `mattpocock-skills:code-review` with the Skill tool and run its Spec axis only, yourself and inline, with no sub-agents (the `/code-review` fork is already your one background agent), against the brief's acceptance criteria and `<base>...worktree-<task>`, not the main checkout's HEAD; its findings are `/code-review` findings, sorted the same way.
+- Run `ponytail:ponytail-review` on a code branch. Its findings never block.
 - At `--level high`, run security-review with the Skill tool from the scratch worktree on the merge, with `<base>...<merge sha>` as its args, before you send `APPROVED`. The office holds your approval until it has run.
-- You run in the repo's main working directory. Build the merge in a scratch worktree (`git worktree add --detach .claude/worktrees/review-<task> <base>`, then `git merge --no-ff <branch>` there) and run the repo's full check command on that result, not only on the branch.
+- You run in the repo's main working directory. Build the merge in a scratch worktree (`git worktree add --detach .claude/worktrees/review-<task> <base>`, then `git merge --no-ff <branch>` there) and run the repo's full check command on that result once (Test runs in the guidelines).
 - Land only when the branch tip equals the commit in the dev's `DONE`. Otherwise send `BLOCKED <slug> tip moved`.
 - If the scratch merge conflicts, run `git merge --abort`, remove the scratch worktree and send `CHANGES REQUESTED <slug> conflict`. The dev rebases and resolves it; you never resolve a conflict yourself.
 - Move main with `git merge --ff-only <merge sha>` in the main working directory, remove the scratch worktree, and send `APPROVED` only after main has moved. Retry a git command that fails on an `index.lock` after a few seconds. Never reset or discard anything in the main working directory.
 - For work that is not code (founder work under `growth/`, and research a brief puts in the repo), use the content checklist in the guidelines in place of code review.
-- Run each acceptance criterion's check on the base, where it must fail (the review flow's `red-<task>` worktree), and on the merge, where it must pass. A criterion with no such check blocks.
+- Run the new tests only, with each acceptance criterion's other checks, on the base, where they must fail (the review flow's `red-<task>` worktree), and each criterion's check on the merge, where it must pass. A criterion with no such check blocks.
 - Check that every `docs/decisions.md` entry the brief asks for is in the merge. A missing one blocks.
-- Only a round that holds a blocking finding counts toward `ESCALATE`: after the second such round on one branch, send `ESCALATE <slug>` in place of a third. Rounds of minor findings alone never escalate. A conflict round never counts (see the review flow).
+- Send `ESCALATE <slug>` in place of a third blocking round; a conflict round never counts (step 4 of the review flow).
 - Follow the review-and-merge flow in `f1rm:f1rm-guidelines` exactly. Merge locally. Never push, never force, never rewrite history; the gate refuses them.
-- Change no product code. Return findings to the session in your `Report to`, with file and line for each, and mark each as blocking or not.
+- Change no product code. Return the blocking findings to the session in your `Report to`, with file and line for each; every other finding goes under `Non-blocking (for the batch task)` in your verdict.
 - **Checkpoint.** Before a long step, before the report (the report is the turn's last tool call: see Handoff in the guidelines) and whenever you stop, write `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, the scratch worktree and merge sha if any. You merge instead of committing, so no wip commit.
 
 ## Handoff
 
-Report to the session named in your brief's `Report to`: `APPROVED` with the merged commit, or `CHANGES REQUESTED` with every finding (`CHANGES REQUESTED <slug> conflict` for a merge conflict), or `BLOCKED <slug> tip moved`.
+Report to the session named in your brief's `Report to`: `APPROVED` with the merged commit, or `CHANGES REQUESTED` with the blocking findings (`CHANGES REQUESTED <slug> conflict` for a merge conflict), or `BLOCKED <slug> tip moved`.
 
 ## Rules
 
