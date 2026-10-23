@@ -18,9 +18,17 @@ function transcript(session: string, lines: unknown[], project = "-code-shop") {
   return path;
 }
 
-test("the last assistant text, past tool calls, user lines and a sub-agent's words", () => {
-  const path = transcript("a", [said("first"), said("Running the build to see why the test fails."), tool, { type: "user", message: { content: "ok" } }, said("a sub-agent's words", { isSidechain: true }), tool]);
+const result = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] } };
+
+test("the text the hire wrote just before the call, past the call itself and a sub-agent's words", () => {
+  const path = transcript("a", [said("first"), said("Running the build to see why the test fails."), said("a sub-agent's words", { isSidechain: true }), { ...result, isSidechain: true }, tool]);
   expect(lastSaid(root, "a", path)).toBe("Running the build to see why the test fails.");
+});
+
+test("a call with no text before it in its turn has no why: the previous command's words are not its reason", () => {
+  expect(lastSaid(root, "a2", transcript("a2", [said("Listing the files."), tool, result, tool]))).toBe(""); // after a tool result
+  expect(lastSaid(root, "a2", transcript("a2", [said("An old answer."), { type: "user", message: { content: "next task please" } }, tool]))).toBe(""); // after the user's prompt
+  expect(lastSaid(root, "a2", transcript("a2", [said("Listing the files."), tool, result, said("Now the build."), tool]))).toBe("Now the build."); // text again after the result
 });
 
 test("only text counts: a thinking block and a tool call are left out, and a message's text blocks join", () => {
