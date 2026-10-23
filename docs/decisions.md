@@ -338,3 +338,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user saw high token and CPU spend and few deliveries; the machine's load average was 30 to 120 with many sessions and full suites running at once, and tests timed out under that load.
 - Rejected: the cap of 30; a lock per worktree (it would not stop two suites in one repo); roles remembering not to run suites in parallel.
 - Where: fewer-sessions, 5073ecf
+
+## 2026-10-23 The office tells the truth
+
+- Decision: an employee shows as working only when its process is live and either `claude agents` lists its session as busy or one of its hook events of work (not a Stop, not a raised hand) arrived in the last 90 seconds (`HOT_MS` in `office/server/office.ts`, applied by `applyListing` on every check); otherwise it is idle, and offline once the sweep finds no live process. A busy session stays working however long it is silent, a sub-agent's events never start its finished parent, and events replayed from the log never make anyone working.
+- Why: the browser showed a session working while its terminal showed nothing. Cause (measured, `honest-status` diagnosis): a status set by a hook event was never expired; only the `claude agents` status (for a listed session) or the 5-minute quiet sweep took it back, so a Stop or SessionEnd that never came, or an office restart replaying a logged PreToolUse, left a dead session working for 5 minutes or more (a stopped Haiku session read working for 297 s on main). A status that latches after the work is gone is a known Claude Code failure too (#75092, #80100).
+- Rejected: trusting the last hook event alone (it is what latched); trusting the listing's `state` field (it stays "working" after a hire's DONE, `status` is the signal).
+- Where: honest-status, 226c35a
