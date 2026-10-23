@@ -31,6 +31,26 @@ const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:p
 // ponytail: it only slows an honest model down; `git -C . push` gets past it.
 export const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
 
+/**
+ * The claude flags that start a hire at ponytail full, ahead of the caller's own flags. Ultra adds "question the request, push back", which stalls an unattended worker, so only a lead keeps the config default.
+ * The level rides in the session's `--settings` env: the daemon starts a `--bg` session with its own environment, so a variable set on the `claude --bg` process never reaches the SessionStart hook (measured on Claude Code 2.1.309).
+ * A `--settings` the caller passes gets the env merged in (their own PONYTAIL_DEFAULT_MODE wins), since only the last of two flags would count.
+ * ponytail shortcut: a `--settings` that is a file path, not JSON, is left as given and that hire gets the config default; merge the file's JSON if one is ever passed.
+ */
+export function withPonytail(role: string, flags: string[]): string[] {
+  if (role === "lead") return flags;
+  const at = flags.indexOf("--settings");
+  if (at < 0) return ["--settings", JSON.stringify({ env: { PONYTAIL_DEFAULT_MODE: "full" } }), ...flags];
+  try {
+    const own = JSON.parse(flags[at + 1] ?? "");
+    if (own === null || typeof own !== "object" || Array.isArray(own)) return flags;
+    const merged = JSON.stringify({ ...own, env: { PONYTAIL_DEFAULT_MODE: "full", ...own.env } });
+    return flags.map((f, i) => (i === at + 1 ? merged : f));
+  } catch {
+    return flags;
+  }
+}
+
 /** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
 export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
 
@@ -197,7 +217,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
-  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...extra];
+  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withPonytail(role, extra)];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
   if (role === "reviewer") argv.push(...REVIEWER_DISALLOWED);

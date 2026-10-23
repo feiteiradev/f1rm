@@ -657,6 +657,13 @@ test("docs/decisions.md holds the seeded entries, oldest first, each with its fo
   for (const e of entries) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
+test("the guidelines say once that every hire but a lead starts at ponytail full, and the decision is logged", () => {
+  const rule = "`f1rm hire` starts every hire but a lead at ponytail `full`";
+  expect(guidelines.split(rule)).toHaveLength(2);
+  expect(guidelines).toContain("A lead keeps the config default");
+  expect(guidelines).toContain("`f1rm wake` keeps the level");
+});
+
 test("the Reviewer sends back every /code-review finding and merges only when none is left; ponytail-review never blocks; only a blocking round counts toward ESCALATE", () => {
   const flow = section("Review and merge flow");
   const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";

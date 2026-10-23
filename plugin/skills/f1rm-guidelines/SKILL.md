@@ -26,6 +26,8 @@ Hierarchy: the user, then one PM per repo. The PM hires only leads, one or two p
 | `sales` | Founder only. First customers, outreach drafts, pricing | `anthropic-skills:6-first-customers-acquisition-plan`, `anthropic-skills:7-fast-revenue-strategy` |
 | `strategist` | Founder only. Idea validation, niche, customer pain points, a business plan | `anthropic-skills:1-startup-idea-validator`, `anthropic-skills:2-profitable-niche-finder`, `anthropic-skills:3-customer-pain-point-researcher`, `anthropic-skills:4-lean-startup-business-plan-builder` |
 
+**Ponytail level.** `f1rm hire` starts every hire but a lead at ponytail `full`, because ultra adds "question the request, push back", which stalls an unattended worker. A lead keeps the config default (ultra for the user). `f1rm wake` keeps the level.
+
 Playbook:
 
 1. **Pick the workflow, then interview.** The PM picks by rule (see Picking the workflow). In a milestone, plan only after the user confirms a shared understanding.
