@@ -1,12 +1,12 @@
 // Seam: `f1rm status`, from a temp HOME's transcripts, an injected `claude agents --json` list, an injected clock and an injected commit lookup.
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { head, hires, ls, parseArgs, status, statusFor, tail, watch, type Hire } from "./status.ts";
+import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -46,7 +46,7 @@ test("a live hire shows its name, role, team, agents status, transcript activity
   expect(one).toEqual({
     name: "shop.backend-dev-checkout", role: "backend-dev", team: "shop", sessionId: "aaaa1111", status: "busy", state: "working",
     lastActivity: new Date(NOW - 5 * MIN).toISOString(), idleMinutes: 5, lastCommit: new Date(NOW - 90 * MIN).toISOString(),
-    ended: false, limitUntil: null,
+    ended: false, limitUntil: null, recovery: null,
   } satisfies Hire);
 });
 
@@ -535,4 +535,78 @@ test("a named watch gets past the length check at 150 characters, and is refused
   } finally {
     repos.cleanup();
   }
+});
+
+test("what the office's recovery noted about a hire shows as its NOTE and as `recovery` in --json; a hire it noted nothing about shows none", async () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "aaaa1111", [talk("working on it")], 5);
+  transcript(h, `${REPO}/.claude/worktrees/landing`, "cccc3333", [talk("working on it")], 5);
+  const dir = join(h, ".f1rm", "recovery");
+  mkdirSync(dir, { recursive: true });
+  const note = "shop.backend-dev-checkout stopped again after a wake; f1rm wake shop.backend-dev-checkout";
+  writeFileSync(join(dir, "-code-shop.json"), JSON.stringify({ "shop.backend-dev-checkout": { note, wokeAt: 1 }, "shop.designer-landing": { wokeAt: 2 } }));
+  const list = [live("shop.backend-dev-checkout", "aaaa1111", cwd), live("shop.designer-landing", "cccc3333", `${REPO}/.claude/worktrees/landing`)];
+  const [dev, designer] = hires(base(h, list));
+  expect([dev.recovery, designer.recovery]).toEqual([note, null]);
+  const deps = { home: h, now: () => NOW, loadAgents: async () => list, sleep: async () => {}, commitTime: () => null };
+  const text = await statusFor(parseArgs([]), REPO, deps);
+  expect(text.out.split("\n")[1]).toContain(note);
+  expect(JSON.parse((await statusFor(parseArgs(["--json"]), REPO, deps)).out)[0].recovery).toBe(note);
+  // A file that is not JSON, or an entry of another shape, shows nothing and breaks nothing.
+  writeFileSync(join(dir, "-code-shop.json"), "{cut");
+  expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
+  writeFileSync(join(dir, "-code-shop.json"), JSON.stringify({ "shop.backend-dev-checkout": { note: 7 } }));
+  expect(hires(base(h, list)).map((x) => x.recovery)).toEqual([null, null]);
+});
+
+test("headAsync and tailAsync read what head and tail read, a missing file as empty, and any other error through", async () => {
+  const h = home();
+  const file = join(h, "t.jsonl");
+  const lines = Array.from({ length: 6000 }, (_, i) => JSON.stringify({ type: "assistant", n: i, pad: "x".repeat(60) }));
+  writeFileSync(file, lines.join("\n") + "\n");
+  expect(await tailAsync(file)).toBe(tail(file));
+  expect(await headAsync(file)).toBe(head(file));
+  expect((await tailAsync(file)).split("\n").at(-2)).toContain('"n":5999');
+  expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
+  expect(await headAsync(join(h, "none.jsonl"))).toBe("");
+  await expect(tailAsync(h)).rejects.toThrow(); // a folder where a transcript should be
+});
+
+test("lastTurn skips what startsTurn says is no turn: a skill's meta body, a tool result and a sidechain line leave a limit stop standing; a cross-session message and a prompt end it", () => {
+  const user = (content: unknown, more: object = {}) => ({ type: "user", message: { role: "user", content }, ...more });
+  const stop = limitStop();
+  const until = (...after: object[]) => {
+    const text = [stop, ...after].map((l) => JSON.stringify(l)).join("\n");
+    return limitUntil(text);
+  };
+  expect(until(user([{ type: "text", text: "Base directory for this skill: /x" }], { isMeta: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user([{ type: "text", text: "<local-command-caveat>Caveat</local-command-caveat>" }], { isMeta: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user([{ type: "tool_result", tool_use_id: "t1", content: "ok" }]))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(talk("a sub-agent talking", { isSidechain: true }))).toBe("8:40pm (Europe/Lisbon)");
+  expect(until(user('Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/1.sock">resume</cross-session-message>', { isMeta: true }))).toBeNull();
+  expect(until(user("resume"))).toBeNull();
+});
+
+test("tailAsync reads a missing file as empty, and any other error shows: a file nobody may read, and a folder nobody may search (the stat path)", async () => {
+  const h = home();
+  const file = join(h, "locked.jsonl");
+  writeFileSync(file, "x\n");
+  const root = process.getuid?.() === 0;
+  chmodSync(file, 0o000);
+  try {
+    if (!root) await expect(tailAsync(file)).rejects.toThrow();
+  } finally {
+    chmodSync(file, 0o600);
+  }
+  const dir = join(h, "closed");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "t.jsonl"), "x\n");
+  chmodSync(dir, 0o600); // readable and writable, not searchable: stat of a file in it fails with EACCES
+  try {
+    if (!root) await expect(tailAsync(join(dir, "t.jsonl"))).rejects.toThrow();
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+  expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
 });

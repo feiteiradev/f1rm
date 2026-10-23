@@ -14,6 +14,7 @@ import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { mayWake } from "../cli/wake.ts";
+import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
@@ -205,6 +206,8 @@ const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").to
 // An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
 const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
+/** How long the SendMessage gate waits for `claude agents --json --all`. The hook gives up after 5 s and then lets the call through, so a slower listing must read as "can't say" and end in the unknown-name refusal. */
+export const GATE_LISTING_MS = 3000;
 const PM_DECIDES =
   "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
 const INTERN =
@@ -241,6 +244,10 @@ type Options = {
   letGoAfterMs?: number;
   /** True while the process with this id runs; tests swap it. Default: a signal-0 call. */
   isAlive?: (pid: number) => boolean;
+  /** How long the SendMessage gate waits for the listing of ended hires. */
+  gateListingMs?: number;
+  /** The recovery tick (see recovery.ts): how often it runs, and the Claude Code, disk and clock it reads. Without it the office recovers nothing. */
+  recovery?: { everyMs: number; deps: Omit<RecoveryDeps, "board" | "tell"> };
 };
 
 // Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
@@ -325,6 +332,8 @@ export function startServer({
   removeAfterMs = 15 * 60_000,
   letGoAfterMs = 15 * 60_000,
   isAlive = processRuns,
+  gateListingMs = GATE_LISTING_MS,
+  recovery,
 }: Options) {
   clientDir = resolve(clientDir);
   const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
@@ -353,6 +362,16 @@ export function startServer({
     if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
   };
   const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
+  /** `machine.sessions()` within the gate's time; null when it can't say, a timeout included. */
+  const gateSessions = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), gateListingMs)));
+    try {
+      return await Promise.race([Promise.resolve(machine.sessions?.()).catch(() => null), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   /**
    * The hire of the sender's project that `name` (its name, session id or short id) points at when no session of that name has a live process: `claude agents --json --all` lists
    * it done, stopped, failed or blocked on a limit, with no pid. An employee-shaped record in the sender's room, so the same checks apply to it; null for anything else (no project, no such hire,
@@ -361,7 +380,7 @@ export function startServer({
   async function endedHire(me: Employee, name: string): Promise<Employee | null> {
     if (!me || me.room === ELSEWHERE.id) return null;
     const project = folderOf(me.room);
-    const mine = ((await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? []).filter((s) => s.kind === "background" && hireName(s.name) && repoOf(s.cwd) === project);
+    const mine = ((await gateSessions()) ?? []).filter((s) => s.kind === "background" && hireName(s.name) && repoOf(s.cwd) === project);
     const found = mine.find((s) => s.name === name || s.sessionId === name || s.id === name);
     const hire = found && hireName(found.name);
     if (!found || !hire || mine.some((s) => s.name === found.name && s.pid)) return null;
@@ -445,7 +464,7 @@ export function startServer({
     }
     const wakeCalls = COORDINATORS.has(role) ? commands.map((c) => hireArgs(c, "wake")).filter((a): a is string[] => !!a) : [];
     if (wakeCalls.length) {
-      const sessions = (await Promise.resolve(machine.sessions?.()).catch(() => null)) ?? [];
+      const sessions = (await gateSessions()) ?? [];
       const me = state.employees[sessionId];
       for (const args of wakeCalls) {
         const target = args.find((a) => !a.startsWith("-"));
@@ -1016,18 +1035,42 @@ export function startServer({
       letting = false;
     }
   }
+  // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
+  const registered = () => (projectsDir ? Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id && existsSync(projectFile(projectsDir, id))).map(folderOf) : []);
+  const recovering = recovery && createRecovery({
+    ...recovery.deps,
+    board: async (repo, team) => (boardsDir ? readBoard(team ? teamBoardFile(boardsDir, repo, team) : boardFile(boardsDir, repo)) : []),
+    // Every live seat of the name in this project is tried until one takes it (a stale copy keeps a dead socket); a nudge names the hire's own session, since an interactive session may wear its title.
+    tell: async (repo, name, message, sessionId) => {
+      const seats = Object.values(state.employees).filter((e) => e.title === name && e.status !== "offline" && e.room !== ELSEWHERE.id && folderOf(e.room) === repo && e.socket && (!sessionId || e.sessionId === sessionId));
+      for (const seat of seats) if (await machine.tell(seat.socket!, seat.sessionId, message).then(() => true, () => false)) return true;
+      return false;
+    },
+  });
+  let recoveringNow = false;
+  async function recoverOnce() {
+    if (!recovering || recoveringNow) return;
+    recoveringNow = true;
+    try {
+      await recovering.tick(registered());
+    } finally {
+      recoveringNow = false;
+    }
+  }
   const ready = Promise.all([sweepOnce(), readBoards()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
   const processTimer = setInterval(checkProcesses, Math.min(5_000, offlineAfterMs / 4));
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
+  const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     clearInterval(timer);
     clearInterval(processTimer);
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
+    clearInterval(recoveryTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);
     db.close();

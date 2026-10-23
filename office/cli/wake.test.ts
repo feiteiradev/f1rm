@@ -50,6 +50,17 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
 });
 
+test("the checks wait for a git lookup and transcript readers that answer later, so the office's event loop is never blocked", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  const later = <T>(v: T) => new Promise<T>((resolve) => setTimeout(() => resolve(v), 5));
+  const base = deps([lead, dev]);
+  const p = await planWake({ target: "shop.backend-dev-checkout", cwd: REPO }, {
+    ...base, gitCommonDir: () => later(`${REPO}/.git`), modelOf: () => later("claude-haiku-5-5"), promptOf: () => later("brief\nReport to: lead-elsewhere"),
+  });
+  expect(p.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
+  expect(p.argv).toContain("resumed; continue your task\nReport to: lead-elsewhere");
+});
+
 test("without a message the note says the hire was resumed; the sentence that names the skills to load is never in it", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   const p = await plan("shop.backend-dev-checkout", [lead, dev]);
@@ -64,6 +75,40 @@ test("a hire is found by its name, its session id or its short id, and flags aft
     const p = await plan(target, [lead, dev], { extra: ["--model", "haiku"] });
     expect([target, p.argv.slice(0, 8), p.argv.slice(-2)]).toEqual([target, ["claude", "--bg", "--resume", "abcd1234-0000", "--agent", "f1rm:designer", "--name", "shop.designer-landing"], ["--model", "haiku"]]);
   }
+});
+
+test("a stopped worktree hire is listed with the main repo as its folder: the resume runs in its worktree, with the model and the Report to its transcript there holds", async () => {
+  // `claude agents --json --all` lists a stopped session of a worktree hire with cwd = the repo; the transcript of the old session is under the worktree's folder.
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", REPO);
+  const seen: string[][] = [];
+  const onlyThere = <T>(answer: T) => (cwd: string, sessionId: string) => (seen.push([cwd, sessionId]), cwd === wt("checkout") ? answer : null);
+  const p = await plan("shop.backend-dev-checkout", [lead, dev], {}, {
+    exists: (path) => path === wt("checkout") || path === REPO,
+    modelOf: onlyThere("claude-haiku-5-5"),
+    promptOf: onlyThere("brief\nReport to: lead-elsewhere"),
+  });
+  expect(p.cwd).toBe(wt("checkout"));
+  expect(p.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
+  expect(p.argv).toContain("resumed; continue your task\nReport to: lead-elsewhere");
+  expect(seen).toEqual([[wt("checkout"), "dev-sid-1"], [wt("checkout"), "dev-sid-1"]]);
+});
+
+test("a lead and a Reviewer have no worktree and resume at the repo; a specialist whose worktree folder is gone is refused, never resumed in the main checkout the listing gives", async () => {
+  const exists = (path: string) => path === REPO || path === wt("checkout");
+  const reviewer = stopped("shop.reviewer-review-checkout", "rev-sid-1", REPO);
+  expect((await plan("shop.reviewer-review-checkout", [lead, reviewer], {}, { exists })).cwd).toBe(REPO); // wt("checkout") exists, and is still not the Reviewer's folder
+  const oldLead = stopped("lead-shop", "lead-sid-0", REPO);
+  expect((await plan("lead-shop", [oldLead], {}, { exists })).cwd).toBe(REPO);
+  // A lead is never put in a worktree, even when a task slug equals its team's slug and that worktree is on disk.
+  const sameSlug = (path: string) => path === REPO || path === wt("shop");
+  expect((await plan("lead-shop", [oldLead], {}, { exists: sameSlug })).cwd).toBe(REPO);
+  // The listing gives the repo for a stopped worktree hire: with its worktree gone it is refused (the office tells its Report to), not resumed where it could edit the main checkout.
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", REPO);
+  const gone = await failure(plan("shop.backend-dev-checkout", [lead, dev], {}, { exists: (path) => path === REPO }));
+  expect(gone?.message).toBe("shop.backend-dev-checkout was let go; hire a new one");
+  // And a listing that still gives the worktree itself is resumed there.
+  const listed = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  expect((await plan("shop.backend-dev-checkout", [lead, listed], {}, { exists })).cwd).toBe(wt("checkout"));
 });
 
 test("the woken hire keeps the model it last answered with, unless the caller gives one: a resume alone falls back to the role's own", async () => {

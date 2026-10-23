@@ -2,10 +2,10 @@
 // A session whose process ended is resumed as a NEW session (new id, the old history copied, the old transcript untouched); name and folder are kept only because they are passed here.
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
-import { head, hires, tail, textOf } from "./status.ts";
+import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
 export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
@@ -29,23 +29,24 @@ export type WakeRequest = {
 export type WakeDeps = {
   /** `claude agents --json`, with `--all` for the finished sessions too; null if it can't say. */
   agents: (all: boolean) => Promise<any[] | null>;
-  gitCommonDir: (cwd: string) => string | null;
+  /** Git's common dir for a folder; the real one asks git without blocking the event loop. */
+  gitCommonDir: (cwd: string) => string | null | Promise<string | null>;
   home: string;
   now: number;
   exists: (path: string) => boolean;
   /** The model a session last answered with, or null when its transcript says none. */
-  modelOf: (cwd: string, sessionId: string) => string | null;
+  modelOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
   /** The text of the session's first prompt, the one `f1rm hire` wrote, or null when its transcript can't be read. */
-  promptOf: (cwd: string, sessionId: string) => string | null;
+  promptOf: (cwd: string, sessionId: string) => string | null | Promise<string | null>;
 };
 
-/** The text of the first user line that is not meta in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
+/** The text of the first line that starts a turn (see startsTurn) in the start of a transcript: the forked `/code-review` of a Reviewer writes a `<local-command-caveat>` line (`isMeta`) before the hire's prompt. */
 export function firstPrompt(start: string): string | null {
   for (const l of start.split("\n")) {
     if (!l.includes('"type":"user"')) continue;
     try {
       const line = JSON.parse(l);
-      if (line.type === "user" && line.isMeta !== true) return textOf(line.message?.content) || null;
+      if (line.type === "user" && startsTurn(line)) return textOf(line.message?.content) || null;
     } catch {} // a cut or odd line is no prompt
   }
   return null;
@@ -67,6 +68,11 @@ export function lastModel(end: string): string | null {
   return null;
 }
 
+/** The session a hire reports to: the one its first prompt named, else its lead (a member) or the PM (a lead). */
+export function reportToOf(hire: HireName, first: string | null, repo: string): string {
+  return (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => join(repo, ".git") }));
+}
+
 export type WakePlan = { argv: string[]; cwd: string; name: string; sessionId: string };
 
 const background = (list: any[]) => list.filter((a) => a?.kind === "background" && typeof a.name === "string");
@@ -77,7 +83,7 @@ const background = (list: any[]) => list.filter((a) => a?.kind === "background" 
  * through the same checks as a hire. Who may wake is the gate's to judge (see mayWake), not this command's: it cannot tell who runs it.
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
-  const common = d.gitCommonDir(req.cwd);
+  const common = await d.gitCommonDir(req.cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
   const tooLong = rootTooLong(common);
@@ -98,7 +104,11 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   if (!hire) throw new Error(`${name} is not a hire: only a lead or a specialist is woken`);
   if (mine.some((a) => a.pid)) throw new Error(`${name} is live: message it instead`);
   const target = mine.reduce((best, a) => ((a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best));
-  const cwd = String(target.cwd);
+  // A specialist works in `<repo>/.claude/worktrees/<task>` (a lead and a Reviewer, in the repo itself), but `claude agents --all` lists a STOPPED worktree session with the main repo as its folder.
+  // The resume, the model and the first prompt come from the worktree: that is where the old transcript is, and where the hire must keep working.
+  const own = hire.role === "lead" || hire.reviewer ? null : join(repo, ".claude", "worktrees", hire.task);
+  // A specialist whose worktree is gone is not resumed in the folder the listing gives: that is the main checkout, where it could edit files and commit.
+  const cwd = own ?? String(target.cwd);
   if (!d.exists(cwd)) throw new Error(`${name} was let go; hire a new one`);
 
   // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one still holds a slot, and must not count against itself.
@@ -111,14 +121,14 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
 
   // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);
-  const first = d.promptOf(cwd, sessionId);
-  const reportTo = (first && /Report to: (\S+)/.exec(first)?.[1]) || (hire.role !== "lead" && hire.team ? `lead-${hire.team}` : pmName(repo, { gitCommonDir: () => common }));
+  const first = await d.promptOf(cwd, sessionId);
+  const reportTo = reportToOf(hire, first, repo);
   // The office arms its APPROVED hold from the new session's first prompt, which is this note: a high-level Reviewer's carries the sentence again. A Reviewer whose prompt could not be read carries it too
   // (one extra security-review is cheaper than a missing hold). The sentence that names skills to load is not repeated: the history has them.
   const hold = first === null ? hire.role === "reviewer" : first.includes(SECURITY);
   const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${hold ? SECURITY : ""}`;
   const extra = req.extra ?? [];
-  const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : d.modelOf(cwd, sessionId);
+  const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : await d.modelOf(cwd, sessionId);
   const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];
   if (hire.role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
   return { argv, cwd, name, sessionId };
@@ -134,6 +144,18 @@ export function parseWakeArgs(words: string[]): { target: string | undefined; me
   return { target, message, override: own.includes("--override"), extra: at < 0 ? [] : words.slice(at) };
 }
 
+/** A session's transcript: `<home>/.claude/projects/<its folder>/<session id>.jsonl`. */
+export const transcriptFile = (home: string, cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
+
+/** The real Claude Code, git, disk and clock, for a wake run now. */
+export function realWakeDeps(home: string): WakeDeps {
+  return {
+    agents, gitCommonDir: gitCommonDirAsync, home, now: Date.now(), exists: existsSync,
+    modelOf: async (cwd, sessionId) => lastModel(await tailAsync(transcriptFile(home, cwd, sessionId))),
+    promptOf: async (cwd, sessionId) => firstPrompt(await headAsync(transcriptFile(home, cwd, sessionId))),
+  };
+}
+
 /** Runs `f1rm wake` and returns the exit code. */
 export async function wake(words: string[]): Promise<number> {
   if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
@@ -141,11 +163,7 @@ export async function wake(words: string[]): Promise<number> {
   if (!target) throw new Error(USAGE);
   let plan: WakePlan;
   try {
-    const home = process.env.HOME!;
-    const file = (cwd: string, sessionId: string) => join(home, ".claude", "projects", projectFolder(cwd), `${sessionId}.jsonl`);
-    const modelOf = (cwd: string, sessionId: string) => lastModel(tail(file(cwd, sessionId)));
-    const promptOf = (cwd: string, sessionId: string) => firstPrompt(head(file(cwd, sessionId)));
-    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, { agents, gitCommonDir: machine.gitCommonDir, home, now: Date.now(), exists: existsSync, modelOf, promptOf });
+    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, realWakeDeps(process.env.HOME!));
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(`${err.message} Do not wake it; tell the session you report to. Only after the user approves this wake in that conversation is it rerun with --override.`);

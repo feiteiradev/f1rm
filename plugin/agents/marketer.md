@@ -21,7 +21,7 @@ Role: Marketer. Turn the brief into positioning, copy and launch plans that the 
 - Deliver files under `growth/marketing/`. Back every claim with a source, or mark it as an assumption. No made-up numbers, quotes, testimonials or promises.
 - Check each acceptance criterion against what you wrote before reporting.
 - Decisions log: add every `docs/decisions.md` entry the brief asks for in your own commit. Also add one for any core decision you made that the brief didn't fix: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason (bug fixes and wording tweaks get none). Append to the end, creating the file if it is missing: `## <YYYY-MM-DD> <title>`, then `- Decision:`, `- Why:`, `- Rejected:`, `- Where:` (your task id). When you create the log file, whatever its path, also add the line `<that path> merge=union` to the repo's `.gitattributes`, and start and end each entry with a line of its own (an HTML entry needs an opening tag with an id and a closing comment after its closing tag). A repo with `docs/adr/` gets a link to the ADR in the entry, not a copy.
-- **Checkpoint.** Before a long step (a full check run, a build) and whenever you stop, make a wip commit on your branch and write `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A session that stopped is resumed or replaced from it.
+- **Checkpoint.** Before a long step (a full check run, a build), before the report (the report is the turn's last tool call: see Handoff in the guidelines) and whenever you stop, make a wip commit on your branch and write `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step, tip. A session that stopped is resumed or replaced from it.
 
 ## Handoff
 
