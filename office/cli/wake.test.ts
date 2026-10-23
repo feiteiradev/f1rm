@@ -93,14 +93,19 @@ test("a stopped worktree hire is listed with the main repo as its folder: the re
   expect(seen).toEqual([[wt("checkout"), "dev-sid-1"], [wt("checkout"), "dev-sid-1"]]);
 });
 
-test("a lead and a Reviewer have no worktree and resume at the repo; a member whose worktree folder is gone falls back to the folder the listing gives", async () => {
+test("a lead and a Reviewer have no worktree and resume at the repo; a specialist whose worktree folder is gone is refused, never resumed in the main checkout the listing gives", async () => {
   const exists = (path: string) => path === REPO || path === wt("checkout");
   const reviewer = stopped("shop.reviewer-review-checkout", "rev-sid-1", REPO);
   expect((await plan("shop.reviewer-review-checkout", [lead, reviewer], {}, { exists })).cwd).toBe(REPO); // wt("checkout") exists, and is still not the Reviewer's folder
   const oldLead = stopped("lead-shop", "lead-sid-0", REPO);
   expect((await plan("lead-shop", [oldLead], {}, { exists })).cwd).toBe(REPO);
+  // A lead is never put in a worktree, even when a task slug equals its team's slug and that worktree is on disk.
+  const sameSlug = (path: string) => path === REPO || path === wt("shop");
+  expect((await plan("lead-shop", [oldLead], {}, { exists: sameSlug })).cwd).toBe(REPO);
+  // The listing gives the repo for a stopped worktree hire: with its worktree gone it is refused (the office tells its Report to), not resumed where it could edit the main checkout.
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", REPO);
-  expect((await plan("shop.backend-dev-checkout", [lead, dev], {}, { exists: (path) => path === REPO })).cwd).toBe(REPO);
+  const gone = await failure(plan("shop.backend-dev-checkout", [lead, dev], {}, { exists: (path) => path === REPO }));
+  expect(gone?.message).toBe("shop.backend-dev-checkout was let go; hire a new one");
   // And a listing that still gives the worktree itself is resumed there.
   const listed = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   expect((await plan("shop.backend-dev-checkout", [lead, listed], {}, { exists })).cwd).toBe(wt("checkout"));

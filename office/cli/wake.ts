@@ -107,7 +107,8 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   // A specialist works in `<repo>/.claude/worktrees/<task>` (a lead and a Reviewer, in the repo itself), but `claude agents --all` lists a STOPPED worktree session with the main repo as its folder.
   // The resume, the model and the first prompt come from the worktree: that is where the old transcript is, and where the hire must keep working.
   const own = hire.role === "lead" || hire.reviewer ? null : join(repo, ".claude", "worktrees", hire.task);
-  const cwd = own && d.exists(own) ? own : String(target.cwd);
+  // A specialist whose worktree is gone is not resumed in the folder the listing gives: that is the main checkout, where it could edit files and commit.
+  const cwd = own ?? String(target.cwd);
   if (!d.exists(cwd)) throw new Error(`${name} was let go; hire a new one`);
 
   // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one still holds a slot, and must not count against itself.
