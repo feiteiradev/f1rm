@@ -11,7 +11,7 @@ export const USAGE =
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
 /** Working background sessions on the whole machine, leads and the user's own included. */
-export const CAP = 30;
+export const CAP = 8;
 /** Live leads in one repo, and working sessions in one team (its Reviewer included). */
 export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -132,7 +132,7 @@ export type LiveHires = { name: string; state: string; cwd: string; status?: "bu
 
 /**
  * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
- * (30 working on the machine, 2 teams per project, 2 working per team). Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
+ * (8 working on the machine, 2 teams per project, 2 working per team). Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
  */
 export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean }): void {
   const lead = role === "lead";

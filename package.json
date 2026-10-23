@@ -11,7 +11,8 @@
     "start": "bun office/cli/f1rm.ts start",
     "smoke": "bun scripts/smoke.ts",
     "typecheck": "tsc --noEmit",
-    "check": "bun test && bun run typecheck && bun run build"
+    "check": "bun scripts/check-lock.ts bun run suite",
+    "suite": "bun test && bun run typecheck && bun run build"
   },
   "dependencies": {
     "pixi.js": "^8.22.0",

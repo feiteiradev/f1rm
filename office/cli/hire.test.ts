@@ -386,11 +386,11 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--settings", FULL, "--model", "haiku"]);
 });
 
-test("at 30 working background sessions, hire refuses with a non-zero exit and tells the lead to ask the user in its own session", () => {
-  const stub = stubClaude([...Array(29).fill(bg("working")), bg("blocked")]);
+test("at 8 working background sessions, hire refuses with a non-zero exit and tells the lead to ask the user in its own session", () => {
+  const stub = stubClaude([...Array(7).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).not.toBe(0);
-  expect(r.err).toContain("30 hires are already working (the cap is 30)");
+  expect(r.err).toContain("8 hires are already working (the cap is 8)");
   expect(r.err).toContain("Tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.");
   expect(r.err).not.toContain("Only the PM asks the user");
   expect(r.err).not.toContain("Tell the user");
@@ -399,7 +399,7 @@ test("at 30 working background sessions, hire refuses with a non-zero exit and t
 
 test("below the cap hire goes ahead: finished hires and interactive sessions do not count", () => {
   const stub = stubClaude([
-    ...Array(29).fill(bg("working")),
+    ...Array(7).fill(bg("working")),
     bg("done"),
     bg("stopped"),
     bg("failed"),
@@ -410,7 +410,7 @@ test("below the cap hire goes ahead: finished hires and interactive sessions do 
 });
 
 test("--override hires past the cap", () => {
-  const stub = stubClaude(Array(7).fill(bg("working")));
+  const stub = stubClaude(Array(8).fill(bg("working")));
   const r = hire(stub, ["--override", ...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(r.code).toBe(0);
   expect(stub.argv()![2]).toBe("f1rm:designer");
@@ -526,9 +526,9 @@ test("an idle member frees its team slot though its state still says working; bu
 });
 
 test("an idle member frees its slot in the team cap only: the machine cap still counts it", () => {
-  const stub = stubClaude([...Array(30).fill({ ...bg("working"), status: "idle" })]);
+  const stub = stubClaude([...Array(8).fill({ ...bg("working"), status: "idle" })]);
   const r = hire(stub, [...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF]);
-  expect(r.err).toContain("30 hires are already working (the cap is 30)");
+  expect(r.err).toContain("8 hires are already working (the cap is 8)");
 });
 
 test("one specialist per task: a task a live session works in is refused, even with --override", () => {

@@ -93,7 +93,7 @@ test("the guidelines cover every item the spec lists", () => {
   expect(section("Handoff via SendMessage")).toContain("commits on the hire's worktree branch");
   expect(section("Review and merge flow")).toContain("Never run `git push`");
   expect(section("Review and merge flow")).toContain("--ff-only");
-  expect(section("Cap rule")).toContain("**30 background sessions working at once**");
+  expect(section("Cap rule")).toContain("**8 background sessions working at once**");
   expect(section("Cap rule")).toMatch(/override flag.*only after the user has approved/s);
   expect(section("Definition of done")).toContain("Reviewer has signed off");
 });
@@ -105,7 +105,7 @@ test("the guidelines run teams: when to form them, the team brief, NEEDS YOU/DON
   expect(section("Who talks to whom")).toContain("The user talks to each lead directly");
   expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
   const caps = section("Cap rule");
-  for (const s of ["**30 background sessions working at once**", "**2 teams**", "**2 working in a team**", "**One specialist per task**"]) expect(caps).toContain(s);
+  for (const s of ["**8 background sessions working at once**", "**2 teams**", "**2 working in a team**", "**One specialist per task**"]) expect(caps).toContain(s);
   expect(caps).toMatch(/status is `idle`.*frees its slot.*missing or unreadable status counts as working/s);
   expect(section("Interns")).toContain("**at most 2 interns**");
   expect(section("Board format")).toContain("~/.f1rm/boards/<repo>.team.<team>.md");
@@ -240,12 +240,23 @@ test("both READMEs list f1rm letgo, the hire flags and the Workflows section", (
   expect(plugin).toContain("(skills/f1rm-guidelines/SKILL.md#workflows)");
 });
 
-test("both READMEs and the hire skill state the machine cap as 30, never 6", () => {
+test("both READMEs and the hire skill state the machine cap as 8, never 6 or 30", () => {
   const texts = [join(REPO, "README.md"), join(PLUGIN, "README.md"), join(PLUGIN, "skills", "hire", "SKILL.md")].map((f) => readFileSync(f, "utf8"));
-  expect(texts[0]).toContain("At most 30 background sessions work at once");
-  expect(texts[1]).toContain("30 working sessions on the machine");
-  expect(parts(join(PLUGIN, "skills", "hire", "SKILL.md")).fm.description).toContain("30 working sessions on the machine");
-  for (const t of [...texts, guidelines]) expect(t).not.toMatch(/\b(6|six) (background|working) sessions/);
+  expect(texts[0]).toContain("At most 8 background sessions work at once");
+  expect(texts[1]).toContain("8 working sessions on the machine");
+  expect(parts(join(PLUGIN, "skills", "hire", "SKILL.md")).fm.description).toContain("8 working sessions on the machine");
+  for (const t of [...texts, guidelines]) expect(t).not.toMatch(/\b(6|six|30|thirty) (background|working) sessions/);
+  expect(guidelines).not.toMatch(/cap of 30/);
+});
+
+test("fewer sessions: the guidelines name the check lock, send roles to bun run check for the full suite and never two at once", () => {
+  const runs = section("Handoff via SendMessage");
+  for (const s of ["`bun run check`", "per-repo lock", "every worktree of the repo", "never run two", "waits", "prints who holds it", "`bun test <file>`"]) expect(runs, s).toContain(s);
+  const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  const entry = log.split(/^## /m).find((e) => e.startsWith("2026-10-23 Fewer sessions")) ?? "";
+  expect(entry).toMatch(/- Decision: .*cap.*8.*lock/s);
+  expect(entry).toContain("fewer-sessions, ");
+  expect(log.split(/^## /m).find((e) => e.startsWith("2026-10-19 Machine cap")) ?? "").toMatch(/\n- Superseded: [^\n]*Fewer sessions/);
 });
 
 test("a hire reports to the PM's name, which f1rm pm sets and the PM passes on", () => {
