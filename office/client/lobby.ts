@@ -52,6 +52,8 @@ export function projectState(state: OfficeState, roomId: string): OfficeState {
     ...(state.boards?.[roomId] && { boards: { [roomId]: state.boards[roomId] } }),
     ...(state.teamBoards?.[roomId] && { teamBoards: { [roomId]: state.teamBoards[roomId] } }),
     ...(state.editions?.[roomId] && { editions: { [roomId]: state.editions[roomId] } }),
+    // The raised hands of this project's hires, for the cards on their desks; a recording has none.
+    ...(state.approvals && { approvals: state.approvals.filter((a) => a.sessionId in employees) }),
   };
 }
 

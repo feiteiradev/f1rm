@@ -40,7 +40,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--mono); }
 [data-status="idle"] .swatch { background: var(--idle); }
 
 main { position: relative; flex: 1; min-height: 0; }
-.scene { height: 100%; overflow: auto; }
+.scene { position: relative; height: 100%; overflow: auto; }
 .scene canvas { display: block; }
 
 .note {

@@ -42,6 +42,9 @@
 .hand .who { display: flex; gap: 12px; align-items: baseline; }
 .hand .where { color: var(--muted); }
 .hand .tool { margin-top: 4px; color: var(--amber); font-weight: 700; }
+/* A fixed three-line slot, held from the first paint: the hire's last words (up to 300 characters) scroll inside it, so they arriving later moves nothing. */
+.hand .why { height: 4.35em; margin: 4px 0 0; overflow-y: auto; color: var(--text); overflow-wrap: anywhere; }
+.hand .why-label { color: var(--muted); }
 .hand .args {
   margin: 6px 0 0;
   padding: 8px;
@@ -64,4 +67,25 @@
 .hand .approve { color: var(--bg); background: var(--green); border-color: var(--green); }
 .hand .deny { color: var(--text); background: transparent; }
 .hand .deny:hover { border-color: var(--muted); }
+.hand .always { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.hand .always button { flex: none; color: var(--amber); background: transparent; border-color: var(--amber); }
+.hand .always button:hover:not(:disabled) { background: rgb(242 169 59 / 0.12); }
+.hand .grant { flex: 1 1 14ch; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.hand button:active:not(:disabled) { transform: translateY(1px); }
 .hand .problem { margin-top: 6px; color: var(--amber); }
+
+/* On the hire's desk: hangs under the name in the scene's own scrolling frame, kept inside the visible width. */
+.desk-card {
+  position: absolute;
+  z-index: 5;
+  left: clamp(8px, calc(var(--x) - 180px), calc(100% - 368px));
+  width: min(360px, calc(100% - 16px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+}
+.desk-card:focus-visible { outline-offset: -2px; }
+.desk-card .hand { border-bottom: 1px solid var(--line); }
+.desk-card .hand:last-child { border-bottom: 0; }
