@@ -1101,12 +1101,14 @@ test("Let go, Give them an intern and background need the UI token, the right me
   expect(calls).toEqual([]);
 });
 
-const permissionRequest = (id: string, command: string) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest" });
+/** What Claude Code offers for an allow rule in `permission_suggestions`. */
+const suggest = (ruleContent: string, destination = "localSettings") => [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent }], behavior: "allow", destination }];
+const permissionRequest = (id: string, command: string, permission_suggestions?: object[]) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest", ...(permission_suggestions && { permission_suggestions }) });
 const decide = (verb: "approve" | "deny" | "always", id: string, token = TOKEN, init: RequestInit = {}) =>
   fetch(`${base()}/${token}/${verb}/${id}`, { method: "POST", ...init });
 /** Sends a PermissionRequest and returns its still-held response with the approval the office lists for it. */
-async function raiseHand(session = "s1", command = "rm -rf build") {
-  const held = hook(permissionRequest(session, command));
+async function raiseHand(session = "s1", command = "rm -rf build", suggestions?: object[]) {
+  const held = hook(permissionRequest(session, command, suggestions));
   const [approval] = (await office((s) => (s.approvals ?? []).some((a) => a.sessionId === session))).approvals!.filter((a) => a.sessionId === session);
   return { held, approval };
 }
@@ -1239,44 +1241,45 @@ test("Approve and Deny need the UI token, a POST and the browser's own origin", 
   expect(await settled(held)).toBe(false); // none of that answered it
 });
 
-test("a permission request lists why the hire asks (its last words, cut to 300) and whether Always can be offered", async () => {
+test("a permission request lists why the hire asks (its last words, cut to 300), whether Always can be offered, and the rule it would add", async () => {
   start(undefined, undefined, undefined, { transcriptsDir: transcripts });
   await hook(sessionStart("s1", "/code/shop"));
   const path = transcript("s1", [{ type: "assistant", message: { content: [{ type: "text", text: "Clearing the build folder so the next build is clean. " + "z".repeat(400) }] } }, { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: {} }] } }]);
-  const held1 = hook({ ...permissionRequest("s1", "rm -rf build"), transcript_path: path });
+  const held1 = hook({ ...permissionRequest("s1", "rm -rf build", suggest("rm -rf build", "session")), transcript_path: path });
   const [first] = (await office((s) => (s.approvals ?? []).length === 1)).approvals!;
   expect(first.why).toStartWith("Clearing the build folder so the next build is clean. zzz");
-  expect([first.why.length, first.canAlways]).toEqual([300, true]);
+  expect([first.why.length, first.canAlways, first.rule]).toEqual([300, true, "Bash(rm -rf build)"]);
   await decide("deny", first.id);
   await held1;
-  const chained = hook({ ...permissionRequest("s1", "ls && rm -rf build"), transcript_path: "/not/the/session's/file.jsonl" });
+  // Claude Code suggested nothing: the office makes no rule of its own.
+  const plain = hook({ ...permissionRequest("s1", "npm run proofa"), transcript_path: "/not/the/session's/file.jsonl" });
   const [second] = (await office((s) => (s.approvals ?? []).length === 1)).approvals!;
-  expect([second.why, second.canAlways]).toEqual(["", false]);
+  expect([second.why, second.canAlways, second.rule]).toEqual(["", false, ""]);
   await decide("deny", second.id);
-  await chained;
+  await plain;
 });
 
-test("Always for this project allows the request and returns the allow rule for the repo's local settings", async () => {
+test("Always for this project allows the request and returns exactly the rule Claude Code suggested, for the repo's local settings", async () => {
   start();
   await hook(sessionStart("s1", "/code/shop"));
-  const { held: pending, approval } = await raiseHand("s1", "npm run test -- --watch");
+  const { held: pending, approval } = await raiseHand("s1", "npm run proofa", suggest("npm run proofa", "session"));
   const res = await decide("always", approval.id);
   expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
   expect(await (await pending).json()).toEqual({
     hookSpecificOutput: {
       hookEventName: "PermissionRequest",
-      decision: { behavior: "allow", updatedPermissions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "npm run *" }], behavior: "allow", destination: "localSettings" }] },
+      decision: { behavior: "allow", updatedPermissions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "npm run proofa" }], behavior: "allow", destination: "localSettings" }] },
     },
   });
   expect((await office(() => true)).approvals).toEqual([]);
   expect((await decide("always", approval.id)).status).toBe(404); // answered once
 });
 
-test("Always is refused for a request with no rule to add, and the request stays held", async () => {
+test("Always is refused for a request Claude Code suggested no rule for, and the request stays held", async () => {
   start();
   await hook(sessionStart("s1", "/code/shop"));
-  const { held: pending, approval } = await raiseHand("s1", "ls && pwd");
-  expect(approval.canAlways).toBe(false);
+  const { held: pending, approval } = await raiseHand("s1", "git config core.sshCommand x");
+  expect([approval.canAlways, approval.rule]).toEqual([false, ""]);
   expect((await decide("always", approval.id)).status).toBe(409);
   expect(await settled(pending)).toBe(false);
   expect((await decide("approve", approval.id)).status).toBe(200);
@@ -1285,7 +1288,7 @@ test("Always is refused for a request with no rule to add, and the request stays
 test("Always takes the UI token, a POST and the browser's own origin, like Approve and Deny", async () => {
   start();
   await hook(sessionStart("s1", "/code/shop"));
-  const { held: pending, approval } = await raiseHand("s1", "git status");
+  const { held: pending, approval } = await raiseHand("s1", "git status", suggest("git status"));
   expect((await decide("always", approval.id, "wrong")).status).toBe(401);
   expect((await fetch(`${base()}/always/${approval.id}`, { method: "POST" })).status).toBe(401);
   expect((await fetch(`${base()}/${TOKEN}/always/${approval.id}`)).status).toBe(405);

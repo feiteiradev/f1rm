@@ -1,8 +1,8 @@
 // The approvals broker: holds a PermissionRequest hook's HTTP response until the browser decides, the timeout passes or the session moves on.
 import { randomUUID } from "node:crypto";
 
-/** A raised hand: a tool the session is asking to run, who asks and why (the hire's last words, cut short), and whether "Always for this project" can be offered. */
-export type Approval = { id: string; sessionId: string; tool: string; input: unknown; at: number; why: string; canAlways: boolean };
+/** A raised hand: a tool the session is asking to run, who asks and why (the hire's last words, cut short), whether "Always for this project" can be offered, and the text of the rule it would add (empty when it can't). */
+export type Approval = { id: string; sessionId: string; tool: string; input: unknown; at: number; why: string; canAlways: boolean; rule: string };
 /** An allow rule Claude Code writes to the repo's `.claude/settings.local.json` (its `localSettings` destination). */
 export type PermissionUpdate = { type: "addRules"; rules: { toolName: string; ruleContent?: string }[]; behavior: "allow"; destination: "localSettings" };
 /** What the hook answers with. Null (an empty 200) leaves the decision to the terminal prompt. */
@@ -10,29 +10,26 @@ export type Decision = { behavior: "allow"; updatedPermissions?: PermissionUpdat
 
 /** Seconds the broker holds a request by default: 30 minutes, so a hire waits for the user in the office. `f1rm install` gives the hook a longer timeout, so the broker always answers first. */
 export const DEFAULT_TIMEOUT_S = 1800;
-/** When an empty why is read again, in ms after the request arrived. */
+/** When the why is read again, in ms after the request arrived: the transcript catches up with the hook a moment late. */
 const LOOK_AGAIN_MS = [250, 1000, 3000];
 export const DENY_MESSAGE = "Denied from the f1rm office.";
 
-const allow = (ruleContent?: string, toolName = "Bash"): PermissionUpdate[] => [{ type: "addRules", rules: [{ toolName, ...(ruleContent && { ruleContent }) }], behavior: "allow", destination: "localSettings" }];
-
 /**
- * The rule "Always for this project" adds, or none. A Bash command that is one plain program gets a rule for its program and subcommand (`git status *`), or for exactly the command when
- * it has no subcommand (`ls -la`). A chained, piped, substituted or redirected line, and any other tool, get only what Claude Code itself suggested for the request (`permission_suggestions`),
- * its allow rules moved to the local settings.
+ * What "Always for this project" grants: exactly the allow rules Claude Code suggested for this request (`permission_suggestions`), moved to the local settings, and never a rule the office makes.
+ * Only `addRules` entries with `behavior: "allow"` count, and only their rules that name a tool and a pattern: a suggestion for a whole tool is dropped, as is an entry left with no rule.
+ * No suggestion, no Always.
  */
-export function alwaysRules(tool: string, input: unknown, suggestions: unknown): PermissionUpdate[] {
-  const command = tool === "Bash" ? String((input as { command?: unknown } | null)?.command ?? "").trim() : "";
-  const [program, sub] = command.split(/\s+/);
-  if (command && /^[\w.+-]+$/.test(program) && !/[;&|()`$<>\\\n]/.test(command)) {
-    const prefixed = sub !== undefined && /^[a-z][\w-]*$/.test(sub);
-    return allow(prefixed ? `${program} ${sub} *` : command);
-  }
+export function alwaysRules(suggestions: unknown): PermissionUpdate[] {
   if (!Array.isArray(suggestions)) return [];
-  const rules = suggestions.flatMap((s) => (s?.type === "addRules" && s.behavior === "allow" && Array.isArray(s.rules) ? s.rules : []));
-  const named = rules.filter((r) => typeof r?.toolName === "string" && (r.ruleContent === undefined || typeof r.ruleContent === "string"));
-  return named.length ? [{ type: "addRules", rules: named.map((r) => ({ toolName: r.toolName, ...(r.ruleContent !== undefined && { ruleContent: r.ruleContent }) })), behavior: "allow", destination: "localSettings" }] : [];
+  return suggestions.flatMap((s) => {
+    if (s?.type !== "addRules" || s.behavior !== "allow" || !Array.isArray(s.rules)) return [];
+    const rules = s.rules.filter((r: any) => typeof r?.toolName === "string" && r.toolName && typeof r.ruleContent === "string" && r.ruleContent).map((r: any) => ({ toolName: r.toolName, ruleContent: r.ruleContent }));
+    return rules.length ? [{ type: "addRules" as const, rules, behavior: "allow" as const, destination: "localSettings" as const }] : [];
+  });
 }
+
+/** The rules as the card shows them: `Bash(npm run proofa), Bash(npm run proofb)`. */
+const ruleText = (always: PermissionUpdate[]) => always.flatMap((u) => u.rules.map((r) => `${r.toolName}(${r.ruleContent})`)).join(", ");
 
 export function createBroker(timeoutMs: number, onChange: () => void) {
   const held = new Map<string, { approval: Approval; always: PermissionUpdate[]; settle: (d: Decision | null) => void }>();
@@ -48,10 +45,9 @@ export function createBroker(timeoutMs: number, onChange: () => void) {
 
   return {
     list: () => [...held.values()].map((h) => h.approval),
-    /** Resolves with the browser's decision, or null on timeout, release or an aborted request. `why` is the hire's last words, or a reader of them; `always` is the rule the third answer adds, and none means it can't be offered. */
-    hold(sessionId: string, tool: string, input: unknown, at: number, signal: AbortSignal, why: string | (() => string) = "", always: PermissionUpdate[] = []): Promise<Decision | null> {
-      const read = typeof why === "function" ? why : () => why;
-      const approval: Approval = { id: randomUUID(), sessionId, tool, input, at, why: read(), canAlways: always.length > 0 };
+    /** Resolves with the browser's decision, or null on timeout, release or an aborted request. `read` gives the hire's last words; `always` are the rules the third answer adds, and none means it can't be offered. */
+    hold(sessionId: string, tool: string, input: unknown, at: number, signal: AbortSignal, read: () => string = () => "", always: PermissionUpdate[] = []): Promise<Decision | null> {
+      const approval: Approval = { id: randomUUID(), sessionId, tool, input, at, why: read(), canAlways: always.length > 0, rule: ruleText(always) };
       return new Promise((resolve) => {
         const timer = setTimeout(() => finish(approval.id, null), timeoutMs);
         // The hook fires a moment before Claude Code has written the hire's last words to its transcript, so what is read first can be empty or the words before: look again a few times.

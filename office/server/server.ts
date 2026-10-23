@@ -723,7 +723,7 @@ export function startServer({
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
             const tool = String(payload.tool_name ?? "");
-            const decision = await approvals.hold(event.sessionId, tool, payload.tool_input, event.at, req.signal, () => lastSaid(transcriptsDir, event.sessionId, payload.transcript_path), alwaysRules(tool, payload.tool_input, payload.permission_suggestions));
+            const decision = await approvals.hold(event.sessionId, tool, payload.tool_input, event.at, req.signal, () => lastSaid(transcriptsDir, event.sessionId, payload.transcript_path), alwaysRules(payload.permission_suggestions));
             if (decision) return Response.json({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision } });
           }
         }

@@ -16,7 +16,7 @@ f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead
 - **Jump.** Click an employee and press Jump to bring their exact iTerm2 tab to the front. `⌘K` searches everyone by name, role, project or task.
 - **Ask.** A side question is answered by a read-only copy of the employee's session. Their work is never touched.
 - **Tell.** A message the employee reads at their next step, without stopping a running tool.
-- **Approvals.** A hire's permission request waits for you in the office for 30 minutes, in a tray in the top bar and on the hire's desk, with the full command, who asks and why (the hire's last words). Approve once, Deny, or Always for this project, which adds an allow rule to the repo's `.claude/settings.local.json` when Claude Code can add one for that command. A request nobody answers falls back to the hire's own prompt. A lead that waits on you, on a permission or an open question on its team board, is tagged "needs you".
+- **Approvals.** A hire's permission request waits for you in the office for 30 minutes, in a tray in the top bar and on the hire's desk, with the full command, who asks and why (the hire's last words). Approve once, Deny, or Always for this project, which adds exactly the allow rule Claude Code suggested for that request (the card shows it) to the repo's `.claude/settings.local.json`; with no suggestion there is no such button. A request nobody answers falls back to the hire's own prompt. A lead that waits on you, on a permission or an open question on its team board, is tagged "needs you".
 - **Whiteboards.** Each project shows the PM's task board on the wall.
 
 ## Quick start

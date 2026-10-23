@@ -1083,7 +1083,7 @@ test("R10a: a permission is answered in the office, and the rule is said once in
   const rule = /^- \*\*A permission is answered in the office\.\*\*.*$/m.exec(talk)?.[0] ?? "";
   for (const s of [
     "`BLOCKED <slug> permission`", "`NEEDS YOU <team>: permission for <hire>`", "approve <name>'s request in the office", "never runs the command itself",
-    "at least 30 minutes", "a card on the hire's desk and in the top bar", "who asks, why", "Approve once", "Deny", "Always for this project", ".claude/settings.local.json",
+    "at least 30 minutes", "a card on the hire's desk and in the top bar", "who asks, why", "Approve once", "Deny", "Always for this project", "exactly the allow rule Claude Code suggested", ".claude/settings.local.json",
     "falls back to the hire's own prompt", "Only the user's browser answers", "(see Gates)", "`--allowedTools",
   ]) expect(rule, s).toContain(s);
   expect(guidelines.split("approve <name>'s request in the office").length).toBe(3); // the rule, and the PM's line in the talk rules

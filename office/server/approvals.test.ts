@@ -2,50 +2,58 @@
 import { expect, test } from "bun:test";
 import { alwaysRules, createBroker, type PermissionUpdate } from "./approvals.ts";
 
-const rule = (ruleContent?: string, toolName = "Bash"): PermissionUpdate[] => [{ type: "addRules", rules: [{ toolName, ...(ruleContent && { ruleContent }) }], behavior: "allow", destination: "localSettings" }];
-const bash = (command: string, suggestions?: unknown) => alwaysRules("Bash", { command }, suggestions);
+const update = (...rules: { toolName: string; ruleContent?: string }[]): PermissionUpdate[] => [{ type: "addRules", rules, behavior: "allow", destination: "localSettings" }];
+/** What Claude Code offers in `permission_suggestions` for an allow rule: the destination it would save to in the terminal is its own choice. */
+const offered = (ruleContent: string | undefined, toolName = "Bash", destination = "localSettings") => ({ type: "addRules", rules: [{ toolName, ...(ruleContent !== undefined && { ruleContent }) }], behavior: "allow", destination });
 
-test("a Bash command with a subcommand gets an allow rule for its two-word prefix, written to the repo's local settings", () => {
-  expect(bash("git status")).toEqual(rule("git status *"));
-  expect(bash("npm run test -- --watch")).toEqual(rule("npm run *"));
+test("Always is exactly the allow rules Claude Code suggested for the request, moved to the repo's local settings", () => {
+  expect(alwaysRules([offered("rm -rf node_modules")])).toEqual(update({ toolName: "Bash", ruleContent: "rm -rf node_modules" }));
+  expect(alwaysRules([offered("npm run proofa", "Bash", "session")])).toEqual(update({ toolName: "Bash", ruleContent: "npm run proofa" }));
+  expect(alwaysRules([offered("/code/shop/src/**", "Edit", "projectSettings")])).toEqual(update({ toolName: "Edit", ruleContent: "/code/shop/src/**" }));
+  // several suggestions, several rules: all of them, in order
+  expect(alwaysRules([offered("git status"), offered("git diff", "Bash", "session")])).toEqual([...update({ toolName: "Bash", ruleContent: "git status" }), ...update({ toolName: "Bash", ruleContent: "git diff" })]);
 });
 
-test("a Bash command with no subcommand gets a rule for exactly that command", () => {
-  expect(bash("pwd")).toEqual(rule("pwd"));
-  expect(bash("ls -la")).toEqual(rule("ls -la"));
-  expect(bash("rm -rf build")).toEqual(rule("rm -rf build"));
-  expect(bash("curl http://localhost:4170/x")).toEqual(rule("curl http://localhost:4170/x"));
+test("the office makes no rule of its own: no suggestion, no Always", () => {
+  expect(alwaysRules(undefined)).toEqual([]);
+  expect(alwaysRules("nope")).toEqual([]);
+  expect(alwaysRules([])).toEqual([]);
 });
 
-test("a Bash line that chains, pipes, substitutes or redirects gets no rule of its own", () => {
-  for (const command of ["ls && rm -rf build", "ls; pwd", "cat a | sh", "echo $(whoami)", "echo `id`", "ls > out", "ls\npwd", "FOO=1 make"]) expect([command, bash(command)]).toEqual([command, []]);
-});
-
-test("a tool with no rule of its own is allowed only as Claude Code itself suggests, moved to the repo's local settings", () => {
+test("only allow rules count: deny and ask rules, modes, directories and junk are left out", () => {
   const suggestions = [
-    { type: "addRules", rules: [{ toolName: "Edit" }], behavior: "allow", destination: "session" },
-    { type: "addRules", rules: [{ toolName: "Edit" }], behavior: "deny", destination: "session" },
+    { ...offered("rm -rf build"), behavior: "deny" },
+    { ...offered("rm -rf build"), behavior: "ask" },
     { type: "setMode", mode: "bypassPermissions", destination: "session" },
-    "junk",
+    { type: "addDirectories", directories: ["/etc"], destination: "session" },
+    { type: "replaceRules", rules: [{ toolName: "Bash", ruleContent: "ls" }], behavior: "allow", destination: "session" },
+    "junk", null, 7,
+    { type: "addRules", behavior: "allow", destination: "session" },
+    { type: "addRules", rules: "Bash", behavior: "allow", destination: "session" },
   ];
-  expect(alwaysRules("Edit", { file_path: "/x" }, suggestions)).toEqual(rule(undefined, "Edit"));
-  expect(alwaysRules("Edit", { file_path: "/x" }, undefined)).toEqual([]);
-  expect(alwaysRules("Edit", { file_path: "/x" }, "nope")).toEqual([]);
-  expect(bash("ls && pwd", suggestions.slice(0, 1))).toEqual(rule(undefined, "Edit")); // a chained line falls back to what Claude Code suggests
+  expect(alwaysRules(suggestions)).toEqual([]);
+  expect(alwaysRules([...suggestions, offered("ls -la")])).toEqual(update({ toolName: "Bash", ruleContent: "ls -la" }));
 });
 
-test("a Bash prefix rule wins over Claude Code's own suggestion", () => {
-  expect(bash("git status", [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "git status" }], behavior: "allow", destination: "session" }])).toEqual(rule("git status *"));
+test("a rule for a whole tool is dropped, and so is a suggestion that has no other rule", () => {
+  expect(alwaysRules([offered(undefined)])).toEqual([]);
+  expect(alwaysRules([offered("")])).toEqual([]);
+  expect(alwaysRules([{ type: "addRules", rules: [{ toolName: "Bash" }, { toolName: "Bash", ruleContent: "git status" }, { ruleContent: "x" }, { toolName: 5, ruleContent: "x" }], behavior: "allow", destination: "session" }])).toEqual(update({ toolName: "Bash", ruleContent: "git status" }));
 });
 
-const hold = (broker: ReturnType<typeof createBroker>, always = alwaysRules("Bash", { command: "git status" }, undefined), why = "checking the tree") =>
+const hold = (broker: ReturnType<typeof createBroker>, always = alwaysRules([offered("git status")]), why = () => "checking the tree") =>
   broker.hold("s1", "Bash", { command: "git status" }, 1, new AbortController().signal, why, always);
 
-test("a held request lists its why, and canAlways says whether Always can be offered", () => {
+test("a held request lists its why, canAlways, and the text of the rule Always would grant", () => {
   const broker = createBroker(10_000, () => {});
   void hold(broker);
+  void hold(broker, alwaysRules([offered("git status"), offered("git diff")]));
   void hold(broker, []);
-  expect(broker.list().map((a) => [a.why, a.canAlways])).toEqual([["checking the tree", true], ["checking the tree", false]]);
+  expect(broker.list().map((a) => [a.why, a.canAlways, a.rule])).toEqual([
+    ["checking the tree", true, "Bash(git status)"],
+    ["checking the tree", true, "Bash(git status), Bash(git diff)"],
+    ["checking the tree", false, ""],
+  ]);
   broker.releaseAll();
 });
 
@@ -76,7 +84,7 @@ test("approve, deny and always give three different decisions", async () => {
   expect(broker.always(w)).toBe(true);
   expect(await approve).toEqual({ behavior: "allow" });
   expect(await deny).toEqual({ behavior: "deny", message: "no" });
-  expect(await always).toEqual({ behavior: "allow", updatedPermissions: rule("git status *") });
+  expect(await always).toEqual({ behavior: "allow", updatedPermissions: update({ toolName: "Bash", ruleContent: "git status" }) });
   expect(broker.always(w)).toBe(false); // answered once
 });
 
