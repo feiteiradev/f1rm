@@ -311,7 +311,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-10-23 The office tags a lead that waits on the user
 
-- Decision: the state carries `employees[sessionId].needsYou: true` for a lead whose own permission request is held, or whose team board (`~/.f1rm/boards/<repo>.team.<team>.md`) holds an open question for the user: one line under an `## Open question for the user` heading, or after it on the same line, replaced with `none` once answered. A hire's request tags nobody, because the lead waits on the hire and not on the user. The server adds the tag when it builds the snapshot and the reducer never sees it; the office client reads it.
+- Decision: the state carries `employees[sessionId].needsYou: true` for a lead whose own permission request is held, or whose team board (`~/.f1rm/boards/<repo>.team.<team>.md`) holds an open question for the user: the first non-empty line under the last `## Open question for the user` heading (any level of `#`, any text after the title such as a date; text on the heading's own line is not the question, and a bullet that mentions it is no heading), replaced with `none` (`n/a` and `nothing` also count) once answered. A hire's request tags nobody, because the lead waits on the hire and not on the user. The server adds the tag when it builds the snapshot and the reducer never sees it; the office client reads it.
 - Why: the user should see which lead needs them without opening each session.
 - Rejected: a push message to the user; the lead's `claude agents` state `blocked` as the signal (it also holds for reasons that are not the user's, and the held request already says it); tagging the lead for its hire's request.
 - Where: permission-server, 7f1d4f8

@@ -1110,7 +1110,8 @@ test("R10a: docs/decisions.md has the entries Permissions are answered in the of
   const answered = entries.find((e) => e.startsWith("2026-10-23 Permissions are answered in the office\n"))!;
   const tags = entries.find((e) => e.startsWith("2026-10-23 The office tags a lead that waits on the user\n"))!;
   for (const s of ["1800", "updatedPermissions", ".claude/settings.local.json", "canAlways", "exit code 2", "approve <name>'s request in the office", "exactly the allow rules Claude Code itself suggested", "The gate is advisory: it reads the command text"]) expect(answered, s).toContain(s);
-  for (const s of ["needsYou", "Open question for the user", "push message"]) expect(tags, s).toContain(s);
+  for (const s of ["needsYou", "Open question for the user", "push message", "the last `## Open question for the user` heading"]) expect(tags, s).toContain(s);
+  expect(tags).not.toContain("on the same line");
   for (const e of [answered, tags]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
