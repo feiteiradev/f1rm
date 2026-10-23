@@ -83,6 +83,8 @@ test("install adds a hook with the ingest secret for every observed event, keepi
     // a stuck office must not stall sessions, except that the permission hook is held for the browser
     if (h.event === "PermissionRequest") expect(h.timeout).toBeGreaterThan(DEFAULT_TIMEOUT_S);
     else expect(h.timeout).toBeLessThanOrEqual(5);
+    // the hold is 30 minutes at least, and curl's own -m outlasts it too
+    if (h.event === "PermissionRequest") expect([h.timeout, Number(/-m (\d+) /.exec(h.command)![1])].every((s) => s > 1800)).toBe(true);
     expect(h.command).toContain(`-m ${h.timeout} `);
   }
 
@@ -150,6 +152,10 @@ test("an older install's http hooks, with or without the messaging token, become
   expect(secretOf(home)).toBe(secret);
   expect(f1rm(home, "uninstall").code).toBe(0);
   expect(settingsOf(home)).toEqual(userSettings);
+});
+
+test("the office holds a permission request for 30 minutes at least by default", () => {
+  expect(DEFAULT_TIMEOUT_S).toBeGreaterThanOrEqual(1800);
 });
 
 test("serve refuses an approval timeout the installed permission hook would not outlast", () => {
@@ -922,6 +928,51 @@ test("a bare f1rm with the office running just opens this folder's project, in o
   office.stop(true);
   expect(r.out).toBe("Opened the f1rm office on blog.");
   expect(stub.calls()).toEqual([`open ${url}#/project/${encodeURIComponent(folder)}`]);
+});
+
+test("a bare f1rm re-installs a permission hook whose timeout the 30-minute hold would outlast, and says so", async () => {
+  const home = tempHome(), folder = realpathSync(repoDir("blog"));
+  const stub = stubBin();
+  stub.run(home, "install");
+  const old = settingsOf(home); // what every install from before the 30-minute hold has: timeout 120
+  const hook = old.hooks.PermissionRequest[0].hooks[0];
+  hook.timeout = 120;
+  hook.command = hook.command.replace(/-m \d+ /, "-m 120 ");
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
+  const r = await f1rmIn(folder, home, stub.bin);
+  expect(r.out).toBe("Opened the f1rm office on blog (updated f1rm's permission hook, so a request can wait for you in the office for 30 minutes).");
+  const fixed = f1rmHandlers(settingsOf(home)).find((h) => h.event === "PermissionRequest")!;
+  expect([fixed.timeout, fixed.command]).toEqual([2 * DEFAULT_TIMEOUT_S, expect.stringContaining(`-m ${2 * DEFAULT_TIMEOUT_S} `)]);
+  const again = await f1rmIn(folder, home, stub.bin); // current now: nothing to say
+  office.stop(true);
+  expect(again.out).toBe("Opened the f1rm office on blog.");
+});
+
+test("re-installing with no F1RM_PORT keeps the port the hooks were installed with, a bare f1rm included", async () => {
+  const { home, port } = await installedOnFreePort(); // hooks that point at a custom port, as an F1RM_PORT install writes them
+  const stub = stubBin();
+  const old = settingsOf(home);
+  const hook = old.hooks.PermissionRequest[0].hooks[0];
+  hook.timeout = 120;
+  hook.command = hook.command.replace(/-m \d+ /, "-m 120 ");
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(old, null, 2) + "\n");
+  const office = Bun.serve({ port: 0, fetch: () => new Response("office") });
+  writeFileSync(join(home, ".f1rm", "office-url"), `http://127.0.0.1:${office.port}/tok/`);
+  const env = { ...process.env, HOME: home, F1RM_PORT: "" };
+  delete (env as Record<string, string | undefined>).F1RM_PORT;
+  const r = Bun.spawn(["bun", CLI], { cwd: realpathSync(repoDir("blog")), env: { ...env, PATH: `${stub.bin}:${process.env.PATH}`, F1RM_WAIT_MS: "5000" }, stdout: "pipe", stderr: "pipe" });
+  await r.exited;
+  expect(JSON.stringify(settingsOf(home))).toContain(`:${port}/ingest`);
+  expect(JSON.stringify(settingsOf(home))).not.toContain(":4170/ingest");
+  expect(f1rmHandlers(settingsOf(home)).find((h) => h.event === "PermissionRequest")!.timeout).toBe(2 * DEFAULT_TIMEOUT_S);
+  // plain `f1rm install` with F1RM_PORT unset keeps it too, and an explicit F1RM_PORT still moves it
+  expect(Bun.spawnSync(["bun", CLI, "install"], { env }).exitCode).toBe(0);
+  expect(JSON.stringify(settingsOf(home))).toContain(`:${port}/ingest`);
+  Bun.spawnSync(["bun", CLI, "install"], { env: { ...env, F1RM_PORT: "5999" } });
+  expect(JSON.stringify(settingsOf(home))).toContain(":5999/ingest");
+  office.stop(true);
 });
 
 test("help prints the usage line and exits 0; an unknown command, here included, prints it and exits 1", async () => {

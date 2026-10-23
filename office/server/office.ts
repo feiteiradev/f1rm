@@ -31,6 +31,8 @@ export type Employee = {
   transcript?: string;
   /** The session's inbox socket, where Tell delivers. Unchecked: whoever holds the ingest secret chose it. */
   socket?: string;
+  /** A lead that waits on the user: its own permission request is held, or its team board holds an open question for the user. The server adds this to what it pushes; the reducer never sees it. */
+  needsYou?: true;
 };
 /** A sub-agent, shown walking out from its parent's desk until it stops. */
 export type Intern = {

@@ -50,11 +50,36 @@ export function parseBoard(text: string): BoardRow[] {
   return rows;
 }
 
+const HEADING = /^#+\s*open question for the user\b/i;
+// `none`, `n/a`, `no` or `nothing`, in any punctuation and with a note after it, but not a question that starts with the word.
+const NO_QUESTION = /^\W*(?:none|n\/a|no|nothing)\b[^?]*$/i;
+export const MAX_QUESTION_CHARS = 200;
+
+/**
+ * The open question on a team board: the first line under the last "Open question for the user" heading (`#`, any level, any text after the title, such as a date).
+ * Text on the heading's own line is not the question, and a bullet that mentions it is no heading. Empty when there is none, or that line says `none`.
+ * A lead writes the question when it waits on the user and replaces the line with `none` once answered; the office tags that lead "needs you" while one stands.
+ */
+export function openQuestion(text: string): string {
+  const lines = text.split("\n");
+  const at = lines.findLastIndex((l) => HEADING.test(l));
+  if (at < 0) return "";
+  const next = lines.slice(at + 1).find((l) => l.trim()) ?? "";
+  if (/^\s*[#|]/.test(next)) return "";
+  const question = clip(next.replaceAll("`", "").replace(/^[\s*_>-]+|[\s*_]+$/g, ""), MAX_QUESTION_CHARS);
+  return NO_QUESTION.test(question) ? "" : question;
+}
+
+/** The board file's text at `path` in bounded size, or "" when there is no board or it can't be read. */
+export async function readBoardText(path: string): Promise<string> {
+  try {
+    return await Bun.file(path).slice(0, MAX_BOARD_BYTES).text();
+  } catch {
+    return "";
+  }
+}
+
 /** The board at `path`, or no rows when there is no board or it can't be read. */
 export async function readBoard(path: string): Promise<BoardRow[]> {
-  try {
-    return parseBoard(await Bun.file(path).slice(0, MAX_BOARD_BYTES).text());
-  } catch {
-    return [];
-  }
+  return parseBoard(await readBoardText(path));
 }

@@ -1,6 +1,6 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -1101,12 +1101,14 @@ test("Let go, Give them an intern and background need the UI token, the right me
   expect(calls).toEqual([]);
 });
 
-const permissionRequest = (id: string, command: string) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest" });
-const decide = (verb: "approve" | "deny", id: string, token = TOKEN, init: RequestInit = {}) =>
+/** What Claude Code offers for an allow rule in `permission_suggestions`. */
+const suggest = (ruleContent: string, destination = "localSettings") => [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent }], behavior: "allow", destination }];
+const permissionRequest = (id: string, command: string, permission_suggestions?: object[]) => ({ ...preToolUse(id, "Bash", { command }), hook_event_name: "PermissionRequest", ...(permission_suggestions && { permission_suggestions }) });
+const decide = (verb: "approve" | "deny" | "always", id: string, token = TOKEN, init: RequestInit = {}) =>
   fetch(`${base()}/${token}/${verb}/${id}`, { method: "POST", ...init });
 /** Sends a PermissionRequest and returns its still-held response with the approval the office lists for it. */
-async function raiseHand(session = "s1", command = "rm -rf build") {
-  const held = hook(permissionRequest(session, command));
+async function raiseHand(session = "s1", command = "rm -rf build", suggestions?: object[]) {
+  const held = hook(permissionRequest(session, command, suggestions));
   const [approval] = (await office((s) => (s.approvals ?? []).some((a) => a.sessionId === session))).approvals!.filter((a) => a.sessionId === session);
   return { held, approval };
 }
@@ -1167,6 +1169,57 @@ test("a later event for the session drops its pending hand and answers the hook 
   expect(await settled(other.held)).toBe(false);
 });
 
+test("a sub-agent's events do not drop the session's pending hand, its own next event still does", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: pending, approval } = await raiseHand();
+  const sub = (event: string, extra: object = {}) => hook({ ...common("s1", event), agent_id: "agent-1", agent_type: "Explore", ...extra });
+  await sub("SubagentStart");
+  await sub("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_use_id: "toolu_9" });
+  await sub("PostToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_response: {} });
+  await sub("SubagentStop", { agent_transcript_path: "/t", last_assistant_message: "done" });
+  await hook({ ...common("s1", "SubagentStop"), agent_id: "agent-2", agent_type: "Explore" }); // a stop whose start the office never saw
+  expect(await settled(pending)).toBe(false);
+  expect((await office(() => true)).approvals!.map((a) => a.id)).toEqual([approval.id]);
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} }); // answered in the terminal
+  const answer = await pending;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+});
+
+test("a sub-agent's own pending hand is released by that sub-agent's next event, and by nothing else", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: parent, approval: parentHand } = await raiseHand("s1", "make build");
+  const subRequest = (agent: string, command: string) => hook({ ...permissionRequest("s1", command), agent_id: agent, agent_type: "Explore" });
+  const sub = (agent: string, event: string, extra: object = {}) => hook({ ...common("s1", event), agent_id: agent, agent_type: "Explore", ...extra });
+  const mine = subRequest("agent-1", "ls docs");
+  const other = subRequest("agent-2", "ls src");
+  const hands = (await office((s) => (s.approvals ?? []).length === 3)).approvals!;
+  expect(hands.map((a) => (a.input as any).command).sort()).toEqual(["ls docs", "ls src", "make build"]);
+  // the parent's own event, a third sub-agent's and agent-2's do not release agent-1's request
+  await hook({ ...common("s1", "Notification"), message: "m", notification_type: "idle_prompt" });
+  await sub("agent-3", "PreToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_use_id: "toolu_3" });
+  await sub("agent-2", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls src" }, tool_response: {} }); // agent-2 answered in the terminal
+  const answer2 = await other;
+  expect([answer2.status, await answer2.text()]).toEqual([200, ""]);
+  expect(await settled(mine)).toBe(false);
+  expect((await office((s) => s.approvals!.length === 2)).approvals!.map((a) => (a.input as any).command).sort()).toEqual(["ls docs", "make build"]);
+  // agent-1's next event releases agent-1's request only, and the parent keeps its own
+  await sub("agent-1", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls docs" }, tool_response: {} });
+  const answer1 = await mine;
+  expect([answer1.status, await answer1.text()]).toEqual([200, ""]);
+  expect((await office((s) => s.approvals!.length === 1)).approvals!.map((a) => a.id)).toEqual([parentHand.id]);
+  expect(await settled(parent)).toBe(false);
+  // a sub-agent that stops lets go of its hand; the parent's own next event lets go of the parent's
+  const stopping = subRequest("agent-4", "ls lib");
+  await office((s) => s.approvals!.length === 2);
+  await sub("agent-4", "SubagentStop", { last_assistant_message: "done" });
+  expect((await stopping).status).toBe(200);
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "make build" }, tool_response: {} });
+  expect(await (await parent).text()).toBe("");
+  expect((await office((s) => s.approvals!.length === 0)).approvals).toEqual([]);
+});
+
 test("an employee removed because its process ended takes its pending hand with it", async () => {
   start();
   await hook(sessionStart("gone", "/code/shop"));
@@ -1220,6 +1273,103 @@ test("Approve and Deny need the UI token, a POST and the browser's own origin", 
   expect((await decide("deny", approval.id, TOKEN, { headers: { host: "evil.example" } })).status).toBe(403);
   expect((await decide("approve", "no-such-id")).status).toBe(404);
   expect(await settled(held)).toBe(false); // none of that answered it
+});
+
+test("a permission request lists why the hire asks (its last words, cut to 300), whether Always can be offered, and the rule it would add", async () => {
+  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
+  await hook(sessionStart("s1", "/code/shop"));
+  // Claude Code writes the call's line a moment after the hook fires: the words are there, the call is not, so the card has no why until the office reads again.
+  const words = { type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Clearing the build folder so the next build is clean. " + "z".repeat(400) }] } };
+  const path = transcript("s1", [{ type: "assistant", message: { id: "m0", content: [{ type: "text", text: "An earlier step." }] } }, words]);
+  const held1 = hook({ ...permissionRequest("s1", "rm -rf build", suggest("rm -rf build", "session")), transcript_path: path });
+  expect((await office((s) => (s.approvals ?? []).length === 1)).approvals![0].why).toBe("");
+  appendFileSync(path, JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "rm -rf build" } }] } }) + "\n");
+  const [first] = (await office((s) => (s.approvals ?? []).some((a) => a.why !== ""), 2500)).approvals!;
+  expect(first.why).toStartWith("Clearing the build folder so the next build is clean. zzz");
+  expect([first.why.length, first.canAlways, first.rule]).toEqual([300, true, "Bash(rm -rf build)"]);
+  await decide("deny", first.id);
+  await held1;
+  // Claude Code suggested nothing: the office makes no rule of its own.
+  const plain = hook({ ...permissionRequest("s1", "npm run proofa"), transcript_path: "/not/the/session's/file.jsonl" });
+  const [second] = (await office((s) => (s.approvals ?? []).length === 1)).approvals!;
+  expect([second.why, second.canAlways, second.rule]).toEqual(["", false, ""]);
+  await decide("deny", second.id);
+  await plain;
+});
+
+test("Always for this project allows the request and returns exactly the rule Claude Code suggested, for the repo's local settings", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: pending, approval } = await raiseHand("s1", "npm run proofa", suggest("npm run proofa", "session"));
+  const res = await decide("always", approval.id);
+  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
+  expect(await (await pending).json()).toEqual({
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedPermissions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "npm run proofa" }], behavior: "allow", destination: "localSettings" }] },
+    },
+  });
+  expect((await office(() => true)).approvals).toEqual([]);
+  expect((await decide("always", approval.id)).status).toBe(404); // answered once
+});
+
+test("Always is refused for a request Claude Code suggested no rule for, and the request stays held", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: pending, approval } = await raiseHand("s1", "git config core.sshCommand x");
+  expect([approval.canAlways, approval.rule]).toEqual([false, ""]);
+  expect((await decide("always", approval.id)).status).toBe(409);
+  expect(await settled(pending)).toBe(false);
+  expect((await decide("approve", approval.id)).status).toBe(200);
+});
+
+test("Always takes the UI token, a POST and the browser's own origin, like Approve and Deny", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: pending, approval } = await raiseHand("s1", "git status", suggest("git status"));
+  expect((await decide("always", approval.id, "wrong")).status).toBe(401);
+  expect((await fetch(`${base()}/always/${approval.id}`, { method: "POST" })).status).toBe(401);
+  expect((await fetch(`${base()}/${TOKEN}/always/${approval.id}`)).status).toBe(405);
+  expect((await decide("always", approval.id, TOKEN, { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  expect((await decide("always", "no-such-id")).status).toBe(404);
+  expect(await settled(pending)).toBe(false);
+});
+
+const seatAt = (id: string, title: string, agent_type: string) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", session_title: title, agent_type });
+const needing = async (until: (s: OfficeState) => boolean) => Object.values((await office(until)).employees).filter((e) => e.needsYou).map((e) => e.title);
+
+test("a lead whose own permission request waits on the user is tagged needsYou until it is answered; a hire's request tags nobody", async () => {
+  start({ "/code/shop": "/code/shop/.git" });
+  await seatAt("l1", "lead-checkout", "f1rm:lead");
+  await seatAt("m1", "checkout.backend-dev-a", "f1rm:backend-dev");
+  await seatAt("p1", "pm-shop", "f1rm:pm");
+  const hire = hook({ ...permissionRequest("m1", "ls"), cwd: "/code/shop" });
+  await office((s) => (s.approvals ?? []).length === 1);
+  expect(await needing(() => true)).toEqual([]);
+  const lead = hook({ ...permissionRequest("l1", "ls"), cwd: "/code/shop" });
+  const state = await office((s) => (s.approvals ?? []).length === 2);
+  expect(await needing(() => true)).toEqual(["lead-checkout"]);
+  await decide("approve", state.approvals!.find((a) => a.sessionId === "l1")!.id);
+  await lead;
+  expect(await needing((s) => s.approvals!.length === 1)).toEqual([]);
+  await decide("deny", state.approvals!.find((a) => a.sessionId === "m1")!.id);
+  await hire;
+});
+
+test("a lead with an open question on its team board is tagged needsYou until the board says none", async () => {
+  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
+  const file = join(boards, "-code-shop.team.checkout.md");
+  const board = (middle: string) => `# Board: shop / checkout\n\n${middle}\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | checkout.backend-dev-a | doing | worktree-a | x |\n`;
+  writeFileSync(file, board("## Open question for the user\nShip guest checkout first?"));
+  start({ "/code/shop": "/code/shop/.git" }, undefined, boards, { boardPollMs: 30 });
+  await seatAt("l1", "lead-checkout", "f1rm:lead");
+  await seatAt("l2", "lead-other", "f1rm:lead");
+  await seatAt("m1", "checkout.backend-dev-a", "f1rm:backend-dev");
+  expect(await needing((s) => Object.values(s.employees).some((e) => e.needsYou))).toEqual(["lead-checkout"]); // not the other team's lead, not a member
+  writeFileSync(file, board("## Open question for the user\nnone"));
+  expect(await needing((s) => !Object.values(s.employees).some((e) => e.needsYou))).toEqual([]);
+  writeFileSync(file, board("## Open question for the user\nSpend 5 credits?"));
+  expect(await needing((s) => Object.values(s.employees).some((e) => e.needsYou))).toEqual(["lead-checkout"]);
 });
 
 // The PreToolUse reply: a deny holds the call, an empty 200 lets it run.
@@ -1472,6 +1622,30 @@ test("a lead hires only into its own team: not a lead, not without --team, not i
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
     expect(out.permissionDecisionReason).toContain(command.includes("hire lead") || command.includes("hire --team checkout lead") ? "never another lead" : "add --team checkout");
   }
+});
+
+test("no session answers a permission request through the office's approve, deny and always routes; the user's browser does", async () => {
+  const bash = await gateOffice();
+  const at = `http://127.0.0.1:${server.port}`;
+  const refused = [
+    `curl -s -X POST ${at}/${TOKEN}/approve/abc`,
+    `curl -s -X POST "http://localhost:${server.port}/anything/deny/abc"`,
+    `curl -s -X POST ${at}/${TOKEN}/always/abc`,
+    `cd /code/shop && curl -s -X POST -m 5 http://[::1]:${server.port}/x/approve/abc || true`,
+    `curl -X POST "$(cat ~/.f1rm/office-url)approve/abc"`,
+    `bun -e "fetch('${at}/' + process.env.T + '/always/abc', {method:'POST'})"`,
+    `curl -X POST http://example.test/${TOKEN}/approve/abc`,
+  ];
+  for (const id of ["d", "l", "p", "v"]) {
+    for (const command of refused) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the user answers a permission request, in the office");
+    }
+  }
+  // Other calls to the office, other apps' routes and a mention of the words pass; a session with no role is the user's own and is never held.
+  for (const command of [`curl -s ${at}/ingest`, "curl -s -X POST http://localhost:3000/approve/12", "git log --grep=approve/ -n 1", "grep -rn 'deny/' README.md", `curl -s ${at}/${TOKEN}/jump/abc`]) expect([command, await bash("d", command)]).toEqual([command, null]);
+  expect(await bash("f", refused[0])).toBeNull();
 });
 
 test("a lead whose name carries no team can hire into none", async () => {

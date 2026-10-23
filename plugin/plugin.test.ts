@@ -221,7 +221,7 @@ test("the guidelines say what each gate holds and the way out, and a cap refusal
   expect(cap).toMatch(/PM.*tells? the user/s);
 });
 
-test("pm.md turns handed work into a board task, sends exploration to a Haiku Explore intern, sends permission blocks to the hire's desk, picks up first, and ends a milestone", () => {
+test("pm.md turns handed work into a board task, sends exploration to a Haiku Explore intern, sends a permission to the user as a request to approve in the office, picks up first, and ends a milestone", () => {
   const pm = role("pm").body;
   for (const s of ["including a slash command", "Haiku Explore intern", "never run its command", "Pick up", "claude logs", "f1rm letgo", "close this session"]) expect(pm).toContain(s);
   const lead = role("lead").body;
@@ -425,7 +425,7 @@ test("three gates, the README's hiring line, and the content checklist match the
 
 test("B3-B5: leads filter team traffic, so the PM tells the user only what needs a decision or the user, plus one end-of-milestone report", () => {
   const talk = section("Who talks to whom");
-  for (const s of ["big decisions;", "a permission on a hire's desk", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
+  for (const s of ["big decisions;", "a permission request", "spend, credentials or inputs", "a `git push`", "a dirty main checkout", "one end-of-milestone report", 'the user asks "status?"']) expect(talk, s).toContain(s);
   expect(talk).toMatch(/lead receives all of its team's messages/);
   expect(talk).toMatch(/sends the PM only `NEEDS YOU <team>: <topic>` and `DONE <team>`/);
   expect(section("Team brief")).toContain("Report: NEEDS YOU <team>: <topic> for what needs the user, DONE <team> when the slice is merged. Nothing else goes to the PM.");
@@ -519,9 +519,9 @@ test("R8b: the talk rules are stated once in the guidelines and pointed to from 
   for (const s of [
     "The user talks to each lead directly", "in the lead's own session (the office's Jump)", "a numbered round", "its recommended answer", '"yes to all"', "open question on its team board",
     "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
-    "approve in the office", "Jump to <name> in the office", "helps the user decide when asked", "writes the end-of-milestone report",
+    "approve <name>'s request in the office", "helps the user decide when asked", "writes the end-of-milestone report",
     "In ops and the simple workflow the PM stays the user's contact", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
-    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the hire's desk for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM asks the user the question on the team board and answers the lead; a cap or a permission still goes to that session.",
+    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the office's permission card for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM asks the user the question on the team board and answers the lead; a cap still goes to that session, and a permission to the office's card.",
   ]) expect(talk, s).toContain(s);
   expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
   expect(guidelines).not.toMatch(/claude attach <id>/);
@@ -1076,6 +1076,43 @@ test("W4: docs/decisions.md has the entries f1rm wake and A message to a hire wi
   for (const s of ["claude --bg --resume <session-id> --agent f1rm:<role> --name <name>", "same cap code", "was let go; hire a new one", "is live: message it instead", "claude attach"]) expect(wake, s).toContain(s);
   for (const s of ["no live session; f1rm wake <name>", "name [ref]", "unknown to the office", "root cause"]) expect(gate, s).toContain(s);
   for (const e of [wake, gate]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
+});
+
+test("R10a: a permission is answered in the office, and the rule is said once in the guidelines and pointed to from the roles", () => {
+  const talk = section("Who talks to whom");
+  const rule = /^- \*\*A permission is answered in the office\.\*\*.*$/m.exec(talk)?.[0] ?? "";
+  for (const s of [
+    "`BLOCKED <slug> permission`", "`NEEDS YOU <team>: permission for <hire>`", "approve <name>'s request in the office", "never runs the command itself",
+    "at least 30 minutes", "a card on the hire's desk and in the top bar", "who asks, why", "Approve once", "Deny", "Always for this project", "exactly the allow rule Claude Code suggested", ".claude/settings.local.json",
+    "falls back to the hire's own prompt", "Only the user's browser answers", "(see Gates)", "`--allowedTools",
+  ]) expect(rule, s).toContain(s);
+  expect(guidelines.split("approve <name>'s request in the office").length).toBe(3); // the rule, and the PM's line in the talk rules
+  const gate = /^- A session can't answer a permission request\..*$/m.exec(section("Gates"))?.[0] ?? "";
+  for (const s of ["approve, deny and always", "Bash", "refused", "Only the user's browser", "reads the command text", "`git commit -F`"]) expect(gate, s).toContain(s);
+  expect(talk).toContain("`## Open question for the user`");
+  for (const [name, text] of [["pm.md", role("pm").body], ["lead.md", role("lead").body]] as const) {
+    expect(text, name).toContain("approve <name>'s request in the office");
+    expect(text, name).toContain("Who talks to whom");
+  }
+  // No "until the card exists" (it exists) and no send to the hire's desk; the roles and the prompt never name `claude attach` (R8b).
+  for (const [name, text] of [["guidelines", guidelines], ["pm.md", role("pm").body], ["lead.md", role("lead").body], ["prompt", pmPromptText()]] as const) {
+    expect(text, name).not.toContain("permission card exists");
+    expect(text, name).not.toContain("Jump to <name> in the office");
+    expect(text, name).not.toMatch(/permission (?:block )?(?:goes )?(?:to|on) (?:the |a )?hire's (?:own )?desk/);
+  }
+  for (const [name, text] of [["README", readFileSync(join(REPO, "README.md"), "utf8")], ["plugin README", readFileSync(join(PLUGIN, "README.md"), "utf8")]] as const) {
+    for (const s of ["Always for this project", "needs you"]) expect(text, name).toContain(s);
+  }
+});
+
+test("R10a: docs/decisions.md has the entries Permissions are answered in the office and The office tags a lead that waits on the user", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const answered = entries.find((e) => e.startsWith("2026-10-23 Permissions are answered in the office\n"))!;
+  const tags = entries.find((e) => e.startsWith("2026-10-23 The office tags a lead that waits on the user\n"))!;
+  for (const s of ["1800", "updatedPermissions", ".claude/settings.local.json", "canAlways", "exit code 2", "approve <name>'s request in the office", "exactly the allow rules Claude Code itself suggested", "The gate is advisory: it reads the command text"]) expect(answered, s).toContain(s);
+  for (const s of ["needsYou", "Open question for the user", "push message", "the last `## Open question for the user` heading"]) expect(tags, s).toContain(s);
+  expect(tags).not.toContain("on the same line");
+  for (const e of [answered, tags]) expect(e.split("\n").filter((l) => l.trim()).slice(1).map((l) => /^- (Decision|Why|Rejected|Where): \S/.exec(l)?.[1])).toEqual(["Decision", "Why", "Rejected", "Where"]);
 });
 
 test("W5: both READMEs list f1rm wake", () => {

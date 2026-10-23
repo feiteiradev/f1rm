@@ -16,7 +16,7 @@ f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead
 - **Jump.** Click an employee and press Jump to bring their exact iTerm2 tab to the front. `⌘K` searches everyone by name, role, project or task.
 - **Ask.** A side question is answered by a read-only copy of the employee's session. Their work is never touched.
 - **Tell.** A message the employee reads at their next step, without stopping a running tool.
-- **Approvals.** Permission prompts collect in a tray in the top bar, with the full command, so you can approve or deny from anywhere. Unanswered prompts fall back to the terminal.
+- **Approvals.** A hire's permission request waits for you in the office for 30 minutes, in a tray in the top bar and on the hire's desk, with the full command, who asks and why (the hire's last words). Approve once, Deny, or Always for this project, which adds exactly the allow rule Claude Code suggested for that request (the card shows it) to the repo's `.claude/settings.local.json`; with no suggestion there is no such button. A request nobody answers falls back to the hire's own prompt. A lead that waits on you, on a permission or an open question on its team board, is tagged "needs you".
 - **Whiteboards.** Each project shows the PM's task board on the wall.
 
 ## Quick start
@@ -79,7 +79,7 @@ The office can steer your sessions, so it is locked to you.
 - The browser needs a fresh token on every launch. `start` prints the URL that carries it.
 - Hooks need a separate secret written at install time. Every hook reads it from a file only you can read, so it never shows up in the process list. The hooks are quiet `curl` calls: with the office stopped they do nothing, and your sessions show no errors.
 - Every request has its `Host` and `Origin` checked, and the server sends no CORS headers.
-- Approvals show the full command before the Approve button, and each approval answers exactly one request.
+- Approvals show the full command before the Approve button, and each approval answers exactly one request. Only your browser answers: a session's call to the approve, deny or always routes is refused.
 
 ## Development
 
