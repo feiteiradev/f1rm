@@ -50,26 +50,24 @@ export function parseBoard(text: string): BoardRow[] {
   return rows;
 }
 
-const HEADING = /^[\s#>*_-]*open question for the user[\s*_:]*(.*)$/i;
-const NO_QUESTION = /^(?:none|n\/a|no|nothing)\.?$/i;
+const HEADING = /^#+\s*open question for the user\b/i;
+// `none`, with a full stop or a note after it, but not a question that starts with the word.
+const NO_QUESTION = /^none\b[^?]*$/i;
 export const MAX_QUESTION_CHARS = 200;
 
 /**
- * The open question on a team board: the first line under an "Open question for the user" heading, or the text after it on the same line. Empty when there is none, or the line says `none`.
- * A lead writes it when it waits on the user and replaces it with `none` once answered; the office tags that lead "needs you" while one stands.
+ * The open question on a team board: the first line under the last "Open question for the user" heading (`#`, any level, any text after the title, such as a date).
+ * Text on the heading's own line is not the question, and a bullet that mentions it is no heading. Empty when there is none, or that line says `none`.
+ * A lead writes the question when it waits on the user and replaces the line with `none` once answered; the office tags that lead "needs you" while one stands.
  */
 export function openQuestion(text: string): string {
   const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const heading = HEADING.exec(lines[i]);
-    if (!heading) continue;
-    let question = heading[1];
-    if (!question.trim()) question = lines.slice(i + 1).find((l) => l.trim()) ?? "";
-    if (/^\s*[#|]/.test(question)) return "";
-    question = clip(question.replace(/^[\s*_>-]+|[\s*_]+$/g, ""), MAX_QUESTION_CHARS);
-    return NO_QUESTION.test(question) ? "" : question;
-  }
-  return "";
+  const at = lines.findLastIndex((l) => HEADING.test(l));
+  if (at < 0) return "";
+  const next = lines.slice(at + 1).find((l) => l.trim()) ?? "";
+  if (/^\s*[#|]/.test(next)) return "";
+  const question = clip(next.replaceAll("`", "").replace(/^[\s*_>-]+|[\s*_]+$/g, ""), MAX_QUESTION_CHARS);
+  return NO_QUESTION.test(question) ? "" : question;
 }
 
 /** The open question of the board at `path`, or "" when there is none or the file can't be read. */

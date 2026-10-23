@@ -157,17 +157,32 @@ test("a project's edition reaches the office from its file, and the office sets 
   expect(readEdition(projectFile(projectsDir, room))).toBe("work");
 });
 
-test("openQuestion reads the line under an 'Open question for the user' heading, or the text after it on that line", () => {
+test("openQuestion reads the line under an 'Open question for the user' heading; the last such heading wins", () => {
   const board = (middle: string) => `# Board: shop / checkout\n\n${middle}\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | - | todo | - | x |\n`;
   expect(openQuestion(board("## Open question for the user\nShip the guest checkout first?"))).toBe("Ship the guest checkout first?");
   expect(openQuestion(board("## Open question for the user\n\n- Ship it first?  \n"))).toBe("Ship it first?");
-  expect(openQuestion(board("**Open question for the user:** Which payment provider?"))).toBe("Which payment provider?");
-  expect(openQuestion(board("open question for the user: spend 5 credits?"))).toBe("spend 5 credits?");
-  for (const none of ["none", "None.", "-", "n/a", "**none**"]) expect([none, openQuestion(board(`## Open question for the user\n${none}`))]).toEqual([none, ""]);
+  expect(openQuestion(board("### open question for the user\n1. Ship A or B? (recommend A)"))).toBe("1. Ship A or B? (recommend A)");
+  for (const none of ["none", "None.", "**none**", "`none`", "None (answered 2026-10-23: A)", ""]) expect([none, openQuestion(board(`## Open question for the user\n${none}`))]).toEqual([none, ""]);
+  expect(openQuestion(board("## Open question for the user\nNone of these work, which one do you want?"))).toBe("None of these work, which one do you want?");
   expect(openQuestion(board("## Open question for the user\n## Notes\nnot a question"))).toBe("");
   expect(openQuestion(board("## Open question for the user"))).toBe("");
   expect(openQuestion(board("Open questions are tracked elsewhere."))).toBe("");
   expect(openQuestion("")).toBe("");
+});
+
+test("openQuestion on the shapes a real team board has: an older bullet, a dated heading, a backticked none", () => {
+  // An older answered bullet, then the lead's later heading with a date: the heading's question counts, the bullet does not.
+  const older = "- Open question for the user: none.\n\n## Open question for the user (2026-10-22, R9b live proof)\nPick 1 or 2?\n";
+  expect(openQuestion(older)).toBe("Pick 1 or 2?");
+  // A bullet saying a question is open is no heading either.
+  expect(openQuestion("- Open question for the user: ship A?\n")).toBe("");
+  // The text on the heading's own line is not the question, so answering means replacing the next line.
+  expect(openQuestion("## Open question for the user (2026-10-22, R9b)\nPick 1 or 2?\n")).toBe("Pick 1 or 2?");
+  expect(openQuestion("## Open question for the user (2026-10-22, R9b)\nnone\n")).toBe("");
+  expect(openQuestion("## Open question for the user (2026-10-22, R9b)\n`none`\n")).toBe("");
+  // Two headings: the last one is the lead's current state.
+  expect(openQuestion("## Open question for the user\nOld question?\n\n## Open question for the user (later)\nnone\n")).toBe("");
+  expect(openQuestion("## Open question for the user\nnone\n\n## Open question for the user (later)\nNew question?\n")).toBe("New question?");
 });
 
 test("openQuestion is bounded plain text", () => {
