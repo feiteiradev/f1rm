@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
-import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, type LiveHires } from "./hire.ts";
+import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, withPonytail, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
@@ -129,7 +129,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${hold ? SECURITY : ""}`;
   const extra = req.extra ?? [];
   const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : await d.modelOf(cwd, sessionId);
-  const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...extra, ...(model ? ["--model", model] : [])];
+  const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...withPonytail(hire.role, extra), ...(model ? ["--model", model] : [])];
   if (hire.role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
   return { argv, cwd, name, sessionId };
 }

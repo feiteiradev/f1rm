@@ -48,6 +48,36 @@ function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process
 }
 
 const pmArgs = ["--report-to", "pm-shop"];
+const FULL = '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}';
+/** The value of the one --settings flag in an argv, or null if there is none. */
+const settingsOf = (argv: string[] | null) => {
+  const at = argv?.indexOf("--settings") ?? -1;
+  expect(argv?.lastIndexOf("--settings")).toBe(at);
+  return at < 0 ? null : argv![at + 1];
+};
+
+test("every hire but a lead is started at ponytail full by its own --settings, which a lead's start does not carry", () => {
+  for (const [role, task] of [["backend-dev", "x"], ["frontend-dev", "x"], ["designer", "x"], ["researcher", "x"], ["reviewer", "review-x"]]) {
+    const stub = stubClaude([]);
+    expect([role, hire(stub, [...pmArgs, role, `${role}-${task}`, task, BRIEF]).code]).toEqual([role, 0]);
+    expect([role, settingsOf(stub.argv())]).toEqual([role, FULL]);
+  }
+  const lead = stubClaude([]);
+  expect(hire(lead, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF]).code).toBe(0);
+  expect(settingsOf(lead.argv())).toBeNull();
+});
+
+test("a reviewer's --settings stays ahead of --disallowedTools, which would swallow it, and a --settings the caller passes gets the level merged in", () => {
+  const rv = stubClaude([]);
+  hire(rv, [...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  expect(rv.argv()!.indexOf("--settings")).toBeLessThan(rv.argv()!.indexOf("--disallowedTools"));
+  const own = stubClaude([]);
+  expect(hire(own, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--settings", '{"disableAllHooks":true,"env":{"A":"1"}}']).code).toBe(0);
+  expect(JSON.parse(settingsOf(own.argv())!)).toEqual({ disableAllHooks: true, env: { A: "1", PONYTAIL_DEFAULT_MODE: "full" } });
+  const set = stubClaude([]);
+  hire(set, [...pmArgs, "designer", "designer-y", "y", BRIEF, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"lite"}}']);
+  expect(JSON.parse(settingsOf(set.argv())!)).toEqual({ env: { PONYTAIL_DEFAULT_MODE: "lite" } });
+});
 
 test("a lead hired from a subfolder of the repo is started in the repo root, which is where status looks for it; outside git it is started where the command ran", () => {
   const repos = longRepos();
@@ -118,6 +148,8 @@ test("hire runs exactly claude --bg --agent --name --worktree with the slash com
     "--worktree",
     "landing",
     `/design-pipeline Report to: pm-shop\n\n${BRIEF}`,
+    "--settings",
+    FULL,
   ]);
   expect(r.out).toContain("backgrounded");
 });
@@ -342,16 +374,16 @@ test("a reviewer starts with no --worktree, so it runs in the main checkout; eve
 test("only a reviewer hire carries the no-push deny rule, after the prompt so it cannot swallow it", () => {
   const reviewer = stubClaude([]);
   hire(reviewer, [...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(reviewer.argv()!.slice(6)).toEqual(["--disallowedTools", "Bash(git push *)"]);
+  expect(reviewer.argv()!.slice(6)).toEqual(["--settings", FULL, "--disallowedTools", "Bash(git push *)"]);
   const designer = stubClaude([]);
   hire(designer, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
-  expect(designer.argv()).toHaveLength(8);
+  expect(designer.argv()).not.toContain("--disallowedTools");
 });
 
 test("flags after the brief go to claude", () => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--model", "haiku"]);
-  expect(stub.argv()!.slice(8)).toEqual(["--model", "haiku"]);
+  expect(stub.argv()!.slice(8)).toEqual(["--settings", FULL, "--model", "haiku"]);
 });
 
 test("at 30 working background sessions, hire refuses with a non-zero exit and tells the lead to ask the user in its own session", () => {

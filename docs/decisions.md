@@ -315,3 +315,9 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user should see which lead needs them without opening each session.
 - Rejected: a push message to the user; the lead's `claude agents` state `blocked` as the signal (it also holds for reasons that are not the user's, and the held request already says it); tagging the lead for its hire's request.
 - Where: permission-server, 7f1d4f8
+## 2026-10-23 Ponytail full for workers
+
+- Decision: non-lead hires start at ponytail level `full` and leads at the config default (ultra for the user). `f1rm hire`, `f1rm wake`, the office's hire route and the recovery tick add `--settings {"env":{"PONYTAIL_DEFAULT_MODE":"full"}}` to the `claude --bg` start for every role but `lead` (merged into a `--settings` the caller passes). The env rides in the session's settings because the variable set on the `claude --bg` process does not reach the SessionStart hook: the daemon starts the session with its own environment (a live Haiku canary showed ultra with the process env, full with the settings env).
+- Why: ultra adds "question the request, push back", which stalls an unattended worker; the user saw high token and CPU spend and few deliveries.
+- Rejected: ultra for everyone; a global config change for all sessions (it would also change the user's own and the leads' sessions); the process env alone (measured: it does not reach the session).
+- Where: ponytail-full, a64bd3d
