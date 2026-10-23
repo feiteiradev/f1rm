@@ -22,6 +22,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user runs several PMs across projects at once, and 7 were already working when a hire was refused.
 - Rejected: a setting or env var (not needed yet); raising the team, per-team or per-task caps.
 - Where: T3, a936f49
+- Superseded: the cap is 8 since 2026-10-23 Fewer sessions.
 
 ## 2026-10-19 A bare f1rm fails like f1rm start when the office doesn't start
 
@@ -330,3 +331,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user saw high token and CPU spend and few deliveries; a Reviewer that reported every finding kept tasks in review for 5 to 30 rounds, and every round reran the whole suite in three sessions.
 - Rejected: every finding goes back (the "Reviewer sends back every finding" decision); the lead rerunning the dev's suite; a numeric cap on non-blocking findings.
 - Where: lean-review, 570ff5b
+
+## 2026-10-23 Fewer sessions
+
+- Decision: the machine-wide cap of working hires goes from 30 to 8 (`CAP` in `office/cli/hire.ts`, one constant everywhere; leads and Reviewers still count, and the 2 teams per project, 2 working per team with idle members free, and one specialist per task stay). `bun run check` takes a per-repo lock (`scripts/check-lock.ts`, a file in the git common dir, so every worktree shares it and another repo has its own): a second caller waits up to 20 minutes and prints who holds it and since when, the lock of a holder whose process is gone is taken over, it is released on exit and Ctrl-C, and the suite's exit code is the exit code. The unlocked suite is `bun run suite`; `bun test <file>` stays unlocked.
+- Why: the user saw high token and CPU spend and few deliveries; the machine's load average was 30 to 120 with many sessions and full suites running at once, and tests timed out under that load.
+- Rejected: the cap of 30; a lock per worktree (it would not stop two suites in one repo); roles remembering not to run suites in parallel.
+- Where: fewer-sessions, 5073ecf

@@ -278,7 +278,7 @@ test("a hire with a live session is refused whichever of its ids is given: messa
   expect((await failure(plan("shop.backend-dev-checkout", [lead, doneIdle])))?.message).toContain("is live");
 });
 
-test("the wake counts against the caps like a hire: the team's two working, the machine's thirty, the lead's team, one specialist per task", async () => {
+test("the wake counts against the caps like a hire: the team's two working, the machine's eight, the lead's team, one specialist per task", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
   const two = [running("shop.frontend-dev-a", "a", wt("a")), running("shop.designer-b", "b", wt("b"))];
   const teamFull = await failure(plan("shop.backend-dev-checkout", [lead, dev, ...two]));
