@@ -27,6 +27,8 @@ export type Employee = {
   terminal: TerminalLocator;
   /** Clock time (ms) of the employee's latest event. */
   lastEventAt: number;
+  /** Clock time (ms) of its latest hook event of work, none since it stopped or asked; applyListing lets it show the employee working for HOT_MS. */
+  workedAt?: number;
   /** The session's transcript file, whose mtime counts as liveness. */
   transcript?: string;
   /** The session's inbox socket, where Tell delivers. Unchecked: whoever holds the ingest secret chose it. */
@@ -196,6 +198,10 @@ function step(state: OfficeState, e: F1rmEvent): OfficeState {
     strayStop = !(e.intern.id in interns);
     interns = internsWhere(interns, (i) => i.agentId !== e.intern!.id);
   }
+  // A sub-agent's events say nothing about whether its parent works (a finished parent hears from a background sub-agent for a while); only a raised hand of its own does,
+  // and while the parent works they are signs of it.
+  const hooked = strayStop || (e.inSubagent && STATUS[e.kind] !== "waiting") ? undefined : STATUS[e.kind];
+  const workedAt = hooked ? (hooked === "working" ? e.at : undefined) : STATUS[e.kind] === "working" && before?.workedAt !== undefined ? e.at : before?.workedAt;
   return {
     rooms: { ...state.rooms, [e.room.id]: e.room },
     interns,
@@ -206,13 +212,14 @@ function step(state: OfficeState, e: F1rmEvent): OfficeState {
         name: before ? before.name : nameFor(e.sessionId, new Set(Object.values(others).map((o) => o.name))),
         role,
         title: e.title ?? before?.title,
-        status: (strayStop || (e.inSubagent && STATUS[e.kind] === "idle") ? undefined : STATUS[e.kind]) ?? (before && before.status !== "offline" ? before.status : "idle"),
+        status: hooked ?? (before && before.status !== "offline" ? before.status : "idle"),
         activity: e.activity ?? before?.activity ?? "",
         tool: e.tool ?? before?.tool ?? "",
         cwd: e.cwd,
         room: e.room.id,
         terminal: e.terminal,
         lastEventAt: e.at,
+        ...(workedAt !== undefined && { workedAt }),
         transcript: e.transcript ?? before?.transcript,
         socket: e.socket ?? before?.socket,
       },
@@ -220,16 +227,22 @@ function step(state: OfficeState, e: F1rmEvent): OfficeState {
   };
 }
 
+/** A hook event this recent, of a kind that means work, shows its employee working even when `claude agents` has not (yet) called the session busy. */
+export const HOT_MS = 90_000;
+
 /**
- * What `claude agents` says decides working vs idle for the sessions it lists: busy is working, idle is idle, except that a
- * session with a raised hand (`waiting`) is left as it is. Any other session, or status, keeps what its hooks said.
+ * Who works. An employee is working only when `claude agents` lists its session as busy, or its last hook event was one of work (not a Stop, not a
+ * prompt waiting) less than HOT_MS ago (`workedAt`); a hook event never keeps anyone working longer than that, since a Stop or a SessionEnd may never come.
+ * Otherwise it is idle: a listed session is live, and an unlisted one is for the sweep to take offline. A session with a raised hand (`waiting`)
+ * is left as it is, and so is an unlisted one that is not working.
  */
-export function applyListing(state: OfficeState, listed: ReadonlyMap<string, { status?: "busy" | "idle" }>, waiting: ReadonlySet<string>): OfficeState {
+export function applyListing(state: OfficeState, listed: ReadonlyMap<string, { status?: "busy" | "idle" }>, waiting: ReadonlySet<string>, now: number): OfficeState {
   let changed = false;
   const employees: Record<string, Employee> = {};
   for (const [id, e] of Object.entries(state.employees)) {
-    const listing = listed.get(id)?.status;
-    const status: Status = !listing || waiting.has(id) ? e.status : listing === "busy" ? "working" : "idle";
+    const live = listed.get(id);
+    const hot = e.workedAt !== undefined && now - e.workedAt < HOT_MS;
+    const status: Status = waiting.has(id) ? e.status : live?.status === "busy" || hot ? "working" : live || e.status === "working" ? "idle" : e.status;
     changed ||= status !== e.status;
     employees[id] = status === e.status ? e : { ...e, status };
   }
@@ -260,7 +273,8 @@ export function sweep(
     else if (quiet >= t.removeAfter) changed = true;
     else if (e.status === "offline") employees[id] = e;
     else {
-      employees[id] = { ...e, status: "offline" };
+      const { workedAt: _, ...rest } = e;
+      employees[id] = { ...rest, status: "offline" };
       changed = true;
     }
   }

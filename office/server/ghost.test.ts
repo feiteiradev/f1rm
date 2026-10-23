@@ -186,6 +186,7 @@ test("a killed terminal and a claude -p run leave no ghost; a session claude sti
 test("a restarted server restores the sessions that are still running", async () => {
   now = 1_000_000;
   alive = new Map([["running", undefined]]);
+  statuses = { running: "busy" };
   const first = start();
   await hook(first.server, "running", "PreToolUse", bash("make build"));
   await hook(first.server, "recent", "PreToolUse", { tool_name: "Edit", tool_input: { file_path: "/code/shop/a.ts" } });
@@ -197,7 +198,8 @@ test("a restarted server restores the sessions that are still running", async ()
   const second = start(first.dbPath);
   const restored = await office(second.server, (s) => ids(s).length === 2);
   expect(ids(restored)).toEqual(["recent", "running"]);
-  expect(restored.employees.recent).toMatchObject({ status: "working", activity: "Edit a.ts", room: "/code/shop/.git" });
+  // What the log replayed says nothing about now: not even a session that was working a moment ago works until an event or the listing says so.
+  expect(restored.employees.recent).toMatchObject({ status: "idle", activity: "Edit a.ts", room: "/code/shop/.git" });
   expect(restored.employees.running.activity).toBe("Bash: make build");
   second.server.stop(true);
 
@@ -429,7 +431,7 @@ test("an event is stored, and answered 200, while another process is reading the
   expect(rows).toEqual([{ id: "busy" }]);
 });
 
-test("on the check, a listed session's claude agents status decides working or idle, whatever its last hook was; an unlisted one keeps its hook status", async () => {
+test("on the check, a listed session works when claude agents says busy, or its last hook event was one of work a moment ago; an unlisted one keeps its hook status", async () => {
   now = 1_000_000;
   alive = new Map([["busy", undefined], ["resting", undefined]]);
   statuses = { busy: "busy", resting: "idle" };
@@ -441,13 +443,13 @@ test("on the check, a listed session's claude agents status decides working or i
   await hook(server, "unlisted", "Stop");
   await hook(server, "unlisted2", "PreToolUse", bash("make build"));
 
-  const state = await office(server, (s) => s.employees.busy?.status === "working" && s.employees.resting?.status === "idle");
+  const state = await office(server, (s) => s.employees.busy?.status === "working" && s.employees.resting?.status === "working");
   expect(state.employees.unlisted.status).toBe("idle");
   expect(state.employees.unlisted2.status).toBe("working");
   // The hooks still choose the pose: the last tool stays.
   expect(state.employees.resting).toMatchObject({ activity: "Bash: make build", tool: "Bash" });
 
-  // The listing keeps deciding: a Stop does not make a busy session idle, and an idle one works again only when the listing says busy.
+  // The listing keeps deciding for a session whose hooks are old (honest.test.ts): a Stop does not make a busy session idle.
   await hook(server, "resting", "PostToolUse", bash("make build"));
   statuses = { busy: "idle", resting: "busy" };
   await office(server, (s) => s.employees.busy?.status === "idle" && s.employees.resting?.status === "working");

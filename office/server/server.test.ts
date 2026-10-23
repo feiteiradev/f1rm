@@ -571,7 +571,7 @@ test("a sub-agent is an intern of its parent from its start to its stop, and nev
   const busy = await office((s) => Object.keys(s.interns).length === 2);
   expect(busy.interns["agent-1"]).toEqual({ agentId: "agent-1", parent: "parent", type: "Explore" });
   expect(Object.keys(busy.employees)).toEqual(["parent"]);
-  expect(busy.employees.parent.status).toBe("working");
+  expect(busy.employees.parent.status).toBe("idle"); // its own Stop ended its work, and a sub-agent's start does not begin it again
 
   await sub("SubagentStop", "agent-1", { agent_transcript_path: "/t", last_assistant_message: "done" });
   const left = await office((s) => Object.keys(s.interns).length === 1);
