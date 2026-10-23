@@ -51,8 +51,8 @@ export function parseBoard(text: string): BoardRow[] {
 }
 
 const HEADING = /^#+\s*open question for the user\b/i;
-// `none`, with a full stop or a note after it, but not a question that starts with the word.
-const NO_QUESTION = /^none\b[^?]*$/i;
+// `none`, `n/a`, `no` or `nothing`, in any punctuation and with a note after it, but not a question that starts with the word.
+const NO_QUESTION = /^\W*(?:none|n\/a|no|nothing)\b[^?]*$/i;
 export const MAX_QUESTION_CHARS = 200;
 
 /**
