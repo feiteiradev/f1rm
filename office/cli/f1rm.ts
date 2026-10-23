@@ -165,7 +165,9 @@ function install(): string[] {
   const done = [installBin()];
   const before = readSettings();
   const secret = installed(before)?.secret ?? randomBytes(32).toString("base64url");
-  const url = `http://127.0.0.1:${Number(process.env.F1RM_PORT ?? DEFAULT_PORT)}/ingest`;
+  // An explicit F1RM_PORT moves the hooks; without one a re-install (a bare `f1rm` included) keeps the port they were installed with.
+  const keptPort = installed(before) && Number(new URL(installed(before)!.url).port);
+  const url = `http://127.0.0.1:${Number(process.env.F1RM_PORT ?? (keptPort || DEFAULT_PORT))}/ingest`;
   const after = withoutF1rm(before);
   const created: Created = installed(before)
     ? readCreated()
