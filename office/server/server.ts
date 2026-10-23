@@ -698,8 +698,8 @@ export function startServer({
           }
           eventCounts.set(event.sessionId, (eventCounts.get(event.sessionId) ?? 0) + 1);
           // ponytail: any later event drops the session's hand, so a parallel tool call can drop it early and the prompt falls back to the terminal; correlate by tool_use_id if that is felt.
-          // The exception is the notification about the very prompt being held.
-          if (!event.kind.startsWith("Notification/")) approvals.release(event.sessionId);
+          // The exceptions are the notification about the very prompt being held, and a sub-agent's events (a reviewer's /code-review fork, a dev's interns): they say nothing about the session's own prompt.
+          if (!event.kind.startsWith("Notification/") && !event.inSubagent && !event.kind.startsWith("Subagent")) approvals.release(event.sessionId);
           push();
           // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
           // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.

@@ -1167,6 +1167,23 @@ test("a later event for the session drops its pending hand and answers the hook 
   expect(await settled(other.held)).toBe(false);
 });
 
+test("a sub-agent's events do not drop the session's pending hand, its own next event still does", async () => {
+  start();
+  await hook(sessionStart("s1", "/code/shop"));
+  const { held: pending, approval } = await raiseHand();
+  const sub = (event: string, extra: object = {}) => hook({ ...common("s1", event), agent_id: "agent-1", agent_type: "Explore", ...extra });
+  await sub("SubagentStart");
+  await sub("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_use_id: "toolu_9" });
+  await sub("PostToolUse", { tool_name: "Read", tool_input: { file_path: "/code/shop/a.ts" }, tool_response: {} });
+  await sub("SubagentStop", { agent_transcript_path: "/t", last_assistant_message: "done" });
+  await hook({ ...common("s1", "SubagentStop"), agent_id: "agent-2", agent_type: "Explore" }); // a stop whose start the office never saw
+  expect(await settled(pending)).toBe(false);
+  expect((await office(() => true)).approvals!.map((a) => a.id)).toEqual([approval.id]);
+  await hook({ ...common("s1", "PostToolUse"), tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_response: {} }); // answered in the terminal
+  const answer = await pending;
+  expect([answer.status, await answer.text()]).toEqual([200, ""]);
+});
+
 test("an employee removed because its process ended takes its pending hand with it", async () => {
   start();
   await hook(sessionStart("gone", "/code/shop"));
