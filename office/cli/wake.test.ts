@@ -288,10 +288,10 @@ test("the wake counts against the caps like a hire: the team's two working, the 
   expect((await plan("shop.backend-dev-checkout", [lead, dev, two[0]])).sessionId).toBe("dev-sid-1");
   // Members that ended their turn (state working, status idle) leave their slots free.
   expect((await plan("shop.backend-dev-checkout", [lead, dev, idle("shop.frontend-dev-a", "a", wt("a")), idle("shop.designer-b", "b", wt("b"))])).sessionId).toBe("dev-sid-1");
-  const crowd = Array.from({ length: 29 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
   const machineFull = await failure(plan("shop.backend-dev-checkout", [lead, dev, ...crowd]));
   expect(machineFull).toBeInstanceOf(HireRefused);
-  expect(machineFull?.message).toBe("30 hires are already working (the cap is 30).");
+  expect(machineFull?.message).toBe("8 hires are already working (the cap is 8).");
   // A woken lead fills a team slot of the project: two leads already run.
   const leads = [running("lead-a", "la", REPO), running("lead-b", "lb", REPO)];
   expect((await failure(plan("lead-shop", [stopped("lead-shop", "ls", REPO, "done"), ...leads])))?.message).toBe("this project already has 2 teams (the cap is 2).");
