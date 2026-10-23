@@ -1,6 +1,6 @@
 // Seam 1: the f1rm server, in-process, with the machine module faked.
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -1278,9 +1278,13 @@ test("Approve and Deny need the UI token, a POST and the browser's own origin", 
 test("a permission request lists why the hire asks (its last words, cut to 300), whether Always can be offered, and the rule it would add", async () => {
   start(undefined, undefined, undefined, { transcriptsDir: transcripts });
   await hook(sessionStart("s1", "/code/shop"));
-  const path = transcript("s1", [{ type: "assistant", message: { content: [{ type: "text", text: "Clearing the build folder so the next build is clean. " + "z".repeat(400) }] } }, { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: {} }] } }]);
+  // Claude Code writes the call's line a moment after the hook fires: the words are there, the call is not, so the card has no why until the office reads again.
+  const words = { type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Clearing the build folder so the next build is clean. " + "z".repeat(400) }] } };
+  const path = transcript("s1", [{ type: "assistant", message: { id: "m0", content: [{ type: "text", text: "An earlier step." }] } }, words]);
   const held1 = hook({ ...permissionRequest("s1", "rm -rf build", suggest("rm -rf build", "session")), transcript_path: path });
-  const [first] = (await office((s) => (s.approvals ?? []).length === 1)).approvals!;
+  expect((await office((s) => (s.approvals ?? []).length === 1)).approvals![0].why).toBe("");
+  appendFileSync(path, JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "rm -rf build" } }] } }) + "\n");
+  const [first] = (await office((s) => (s.approvals ?? []).some((a) => a.why !== ""), 2500)).approvals!;
   expect(first.why).toStartWith("Clearing the build folder so the next build is clean. zzz");
   expect([first.why.length, first.canAlways, first.rule]).toEqual([300, true, "Bash(rm -rf build)"]);
   await decide("deny", first.id);
