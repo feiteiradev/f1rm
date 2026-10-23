@@ -46,6 +46,8 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     mtimes: {} as Record<string, number>,
     boards: { pm: [] as BoardRow[], shop: [] as BoardRow[] } as Record<string, BoardRow[]>,
     commits: {} as Record<string, number>,
+    /** When (ms) each hire last ran `f1rm report`, by name. */
+    reports: {} as Record<string, number>,
     woke: [] as { repo: string; name: string; note: string }[],
     told: [] as { to: string; message: string }[],
     toldSession: [] as (string | undefined)[],
@@ -63,6 +65,7 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     promptOf: async (_cwd, sid) => over.prompts?.[sid] ?? null,
     board: async (_repo, team) => w.boards[team ?? "pm"] ?? [],
     commitTime: async (_repo, branch) => (w.commitCalls++, w.commits[branch] ?? null),
+    reportAt: async (_repo, name) => w.reports[name] ?? null,
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
     tell: async (_repo, to, message, sessionId) => (w.told.push({ to, message }), w.toldSession.push(sessionId), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
@@ -970,4 +973,33 @@ test("a live idle lead whose team is busy loses an old stop NOTE at once, not wh
   await o.tick();
   expect(o.w.store[REPO]?.["lead-shop"]?.note).toBeUndefined();
   expect(o.w.told).toEqual([]);
+});
+
+// ── reports as files ───────────────────────────────────────────────────────
+test("a hire whose SendMessage was lost but whose report.json is from this turn is not nudged; a report from before the turn does not count", async () => {
+  const nudged = async (reportAgo: number | null) => {
+    const o = office();
+    idleReviewer(o, "Review complete: the diff looks right.", 25); // the turn began 35 minutes before `now`
+    if (reportAgo !== null) o.w.reports[REVIEWER] = o.w.now - reportAgo * MIN;
+    await o.tick();
+    return o.w.told;
+  };
+  expect(await nudged(26)).toEqual([]); // written inside the turn
+  expect(await nudged(60)).toEqual([{ to: REVIEWER, message: NUDGE }]); // an earlier round's report
+  expect(await nudged(null)).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
+
+test("an ended hire whose turn closed with a report.json is not woken: its NOTE says reported, as for a delivered SendMessage", async () => {
+  const o = office({ prompts: { "dev-1": "brief\nReport to: lead-shop" } });
+  stoppedDev(o, [say("Committed and checked.", 1)]);
+  o.w.reports[DEV] = T0 - 2 * MIN;
+  await o.tick();
+  expect(o.w.woke).toEqual([]);
+  expect(o.w.store[REPO][DEV]).toMatchObject({ told: "dev-1", note: "reported; waits on lead-shop" });
+  // The report of an earlier round, before this turn began, wakes it as before.
+  const old = office();
+  stoppedDev(old, [say("Committed and checked.", 1)]);
+  old.w.reports[DEV] = T0 - 90 * MIN;
+  await old.tick();
+  expect(old.w.woke).toHaveLength(1);
 });

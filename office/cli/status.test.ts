@@ -1,11 +1,12 @@
 // Seam: `f1rm status`, from a temp HOME's transcripts, an injected `claude agents --json` list, an injected clock and an injected commit lookup.
 import { expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
+import { reportFile } from "./report.ts";
 import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
@@ -46,7 +47,7 @@ test("a live hire shows its name, role, team, agents status, transcript activity
   expect(one).toEqual({
     name: "shop.backend-dev-checkout", role: "backend-dev", team: "shop", sessionId: "aaaa1111", status: "busy", state: "working",
     lastActivity: new Date(NOW - 5 * MIN).toISOString(), idleMinutes: 5, lastCommit: new Date(NOW - 90 * MIN).toISOString(),
-    ended: false, limitUntil: null, recovery: null,
+    ended: false, limitUntil: null, recovery: null, report: null,
   } satisfies Hire);
 });
 
@@ -289,8 +290,7 @@ const namesOf = (names: string[]) => {
 };
 
 /** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
-async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => void = () => {}) {
-  const h = home();
+async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => void = () => {}, h = home()) {
   const listed = fleet(h, members);
   let clock = NOW, sleeps = 0, loads = 0;
   try {
@@ -609,4 +609,67 @@ test("tailAsync reads a missing file as empty, and any other error shows: a file
     chmodSync(dir, 0o700);
   }
   expect(await tailAsync(join(h, "none.jsonl"))).toBe("");
+});
+
+// Reports as files: `f1rm report` writes ~/.f1rm/evidence/<repo>/<slug>/report.json, and the watcher wakes once per new seq of a watched hire.
+const report = (h: string, slug: string, seq: number, more: object = {}) => {
+  const file = reportFile(h, "shop", slug);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ kind: "DONE", slug, commit: "abc1234def", note: null, at: new Date(NOW).toISOString(), seq, ...more }));
+};
+const lead = { name: "lead-a", ago: 3 };
+const dev = { name: "shop.backend-dev-x", ago: 3 };
+
+test("a watched hire's new report wakes the watcher with its kind, short commit and seq, and exit 0", async () => {
+  const r = await watchFleet(["shop.backend-dev-x"], [dev], 100, (n, h) => n === 3 && report(h, "x", 3));
+  expect(r).toMatchObject({ woke: true, sleeps: 3, code: 0, out: "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 3)\n" });
+});
+
+test("a Reviewer's report is read from review-<task>, a CHANGES one reads as CHANGES REQUESTED, and a report with no commit names none", async () => {
+  const r = await watchFleet(["reviewer-review-x"], [{ name: "reviewer-review-x", ago: 3 }], 100, (n, h) => n === 1 && report(h, "review-x", 1, { kind: "CHANGES", commit: null }));
+  expect(r.out).toBe("reviewer-review-x: reported CHANGES REQUESTED (report.json seq 1)\n");
+});
+
+test("a waiting name is woken by a new report, though it writes nothing", async () => {
+  const r = await watchFleet(["shop.backend-dev-x:waiting"], [dev], 100, (n, h) => n === 4 && report(h, "x", 1));
+  expect([r.woke, r.sleeps, r.out]).toEqual([true, 4, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n"]);
+});
+
+test("each seq wakes once: the announced one is kept in ~/.f1rm/watch/<repo>.json, a later watcher skips it, and the next seq wakes again", async () => {
+  const h = home();
+  report(h, "x", 1);
+  const first = await watchFleet(["shop.backend-dev-x"], [dev], 100, () => {}, h);
+  expect([first.woke, first.sleeps]).toEqual([true, 1]);
+  const file = join(h, ".f1rm", "watch", "-code-shop.json");
+  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ "shop.backend-dev-x": 1 });
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  // The same report is not announced again; the watcher runs on until the hire is quiet.
+  expect(await watchFleet(["shop.backend-dev-x"], [dev], 100, () => {}, h)).toMatchObject({ sleeps: 17, out: "shop.backend-dev-x: idle 20 minutes\n" });
+  const next = await watchFleet(["shop.backend-dev-x"], [dev], 100, (n, h2) => n === 2 && report(h2, "x", 2), h);
+  expect([next.sleeps, next.out]).toEqual([2, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 2)\n"]);
+});
+
+test("a report of a hire that is not named in the watch is not announced", async () => {
+  const r = await watchFleet(["lead-a"], [lead, dev], 100, (n, h) => n === 1 && report(h, "x", 1));
+  expect(r.out).toBe("lead-a: idle 20 minutes\n");
+  expect(r.sleeps).toBe(17);
+});
+
+test("a report that is still there when the watch sees an ended hire is announced beside the stall", async () => {
+  const r = await watchFleet(["shop.backend-dev-x"], [{ ...dev, ended: true }], 100, (n, h) => n === 1 && report(h, "x", 1));
+  expect(r.out).toBe("shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\nshop.backend-dev-x: ended\n");
+});
+
+test("f1rm status shows each hire's last report (kind, seq, how long ago) in a REPORT column and a report field", async () => {
+  const h = home();
+  const listed = fleet(h, [dev, lead]);
+  report(h, "x", 3, { kind: "BLOCKED", at: new Date(NOW - 12 * MIN).toISOString() });
+  const deps = { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => listed };
+  const table = (await status({ json: false }, deps)).out.split("\n");
+  expect(table[0]).toContain("REPORT");
+  expect(table.find((l) => l.startsWith("shop.backend-dev-x"))).toContain("BLOCKED #3 12m ago");
+  expect(table.find((l) => l.startsWith("lead-a"))).not.toContain("#");
+  const json = JSON.parse((await status({ json: true }, deps)).out);
+  expect(json.find((x: Hire) => x.name === "shop.backend-dev-x").report).toEqual({ kind: "BLOCKED", seq: 3, at: new Date(NOW - 12 * MIN).toISOString() });
+  expect(json.find((x: Hire) => x.name === "lead-a").report).toBeNull();
 });

@@ -23,7 +23,7 @@ Role: Researcher. Answer the question in the brief from current, primary sources
 
 ## Handoff
 
-Commit to the worktree branch only a `docs/decisions.md` entry the brief asks for, if any. Report to the session named in your brief's `Report to` with the branch, the path, a three-line summary and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict and send a new `DONE`.
+Commit to the worktree branch only a `docs/decisions.md` entry the brief asks for, if any. Report to the session named in your brief's `Report to` with the branch, the path, a three-line summary and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` for anything a later milestone will need, or `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict and send a new `DONE`. Before each report, run `f1rm report <KIND> <slug> --commit <sha>` and then send the message (Every report is also a file, in Handoff in the guidelines).
 
 ## Rules
 

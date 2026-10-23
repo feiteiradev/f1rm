@@ -1180,3 +1180,25 @@ test("W5: both READMEs list f1rm wake", () => {
   expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm wake` \|/m);
   expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm wake <name|id> [message]`");
 });
+
+test("report-files: the guidelines say once that every report is also a file, every sending role points to it, the lead reads reports from the watcher, and both READMEs and the log carry it", () => {
+  const handoff = section("Handoff via SendMessage");
+  expect(guidelines.split("**Every report is also a file.**")).toHaveLength(2);
+  for (const s of [
+    "`SendMessage` can return success while the message never arrives", "first runs `f1rm report <KIND> [<slug>]", "then sends its message, which stays the turn's last tool call; both carry the same words",
+    "`CHANGES` (for `CHANGES REQUESTED`)", "a Reviewer's `<slug>` is `review-<task>`", "`~/.f1rm/evidence/<repo>/<slug>/report.json`", "`seq` rises by 1 on every write", "wakes the lead once for each new `seq` of a watched name (a `name:waiting` one too)",
+    "REPORT column", "counts a report file written in the hire's turn as a delivered report", "The lead acts on a report it has not handled whether or not the message arrived",
+  ]) expect(handoff, s).toContain(s.replace("[<slug>]", "<slug>"));
+  expect(section("Watching and waking")).toContain("`<name>: reported <KIND> (commit <sha>, report.json seq <n>)`");
+  expect(section("Watching and waking")).toContain("**Reported**: take the report as you would its message");
+  for (const name of Object.keys(ROLES)) {
+    const sends = !["pm", "lead"].includes(name);
+    expect(role(name).body.includes("Every report is also a file"), name).toBe(sends);
+    if (sends) expect(role(name).body, name).toContain("`f1rm report <KIND> " + (name === "reviewer" ? "review-<task>" : "<slug>") + " --commit <sha>`");
+  }
+  expect(role("lead").body).toContain("`<name>: reported <KIND> (...)` for each new report of a hire, which is how you read reports");
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm report` \|/m);
+  expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm report <KIND> <slug> [--commit <sha>] [--note \"<one line>\"]`");
+  const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+  expect(log.split("## 2026-10-23 Reports are also files")).toHaveLength(2);
+});
