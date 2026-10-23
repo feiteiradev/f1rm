@@ -77,6 +77,35 @@ test("a hire is found by its name, its session id or its short id, and flags aft
   }
 });
 
+test("a stopped worktree hire is listed with the main repo as its folder: the resume runs in its worktree, with the model and the Report to its transcript there holds", async () => {
+  // `claude agents --json --all` lists a stopped session of a worktree hire with cwd = the repo; the transcript of the old session is under the worktree's folder.
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", REPO);
+  const seen: string[][] = [];
+  const onlyThere = <T>(answer: T) => (cwd: string, sessionId: string) => (seen.push([cwd, sessionId]), cwd === wt("checkout") ? answer : null);
+  const p = await plan("shop.backend-dev-checkout", [lead, dev], {}, {
+    exists: (path) => path === wt("checkout") || path === REPO,
+    modelOf: onlyThere("claude-haiku-5-5"),
+    promptOf: onlyThere("brief\nReport to: lead-elsewhere"),
+  });
+  expect(p.cwd).toBe(wt("checkout"));
+  expect(p.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
+  expect(p.argv).toContain("resumed; continue your task\nReport to: lead-elsewhere");
+  expect(seen).toEqual([[wt("checkout"), "dev-sid-1"], [wt("checkout"), "dev-sid-1"]]);
+});
+
+test("a lead and a Reviewer have no worktree and resume at the repo; a member whose worktree folder is gone falls back to the folder the listing gives", async () => {
+  const exists = (path: string) => path === REPO || path === wt("checkout");
+  const reviewer = stopped("shop.reviewer-review-checkout", "rev-sid-1", REPO);
+  expect((await plan("shop.reviewer-review-checkout", [lead, reviewer], {}, { exists })).cwd).toBe(REPO); // wt("checkout") exists, and is still not the Reviewer's folder
+  const oldLead = stopped("lead-shop", "lead-sid-0", REPO);
+  expect((await plan("lead-shop", [oldLead], {}, { exists })).cwd).toBe(REPO);
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", REPO);
+  expect((await plan("shop.backend-dev-checkout", [lead, dev], {}, { exists: (path) => path === REPO })).cwd).toBe(REPO);
+  // And a listing that still gives the worktree itself is resumed there.
+  const listed = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  expect((await plan("shop.backend-dev-checkout", [lead, listed], {}, { exists })).cwd).toBe(wt("checkout"));
+});
+
 test("the woken hire keeps the model it last answered with, unless the caller gives one: a resume alone falls back to the role's own", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   const seen: string[][] = [];
