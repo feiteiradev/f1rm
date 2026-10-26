@@ -1042,8 +1042,6 @@ export function startServer({
       sweeping = false;
     }
   }
-  // Every few seconds: sessions whose process has ended leave, whether or not their SessionEnd came (a closed terminal, `claude stop`, a crash).
-  // A session claude agents never listed has no pid and keeps the quiet path of sweep().
   /**
    * GRACE_MS after a pause, the project's hires that `claude agents` still lists busy (a turn can run on with no hook, streaming text) are stopped with `claude stop`, which keeps their conversation and worktree.
    * An idle hire is left: it can't continue. The names stopped are kept in the pause, for the resume to wake.
@@ -1059,6 +1057,8 @@ export function startServer({
       if (now?.at === paused.at) setPaused(room, { ...now, stopped: done });
     }
   }
+  // Every few seconds: sessions whose process has ended leave, whether or not their SessionEnd came (a closed terminal, `claude stop`, a crash).
+  // A session claude agents never listed has no pid and keeps the quiet path of sweep().
   let checking = false;
   async function checkProcesses() {
     if (checking) return;
@@ -1159,7 +1159,7 @@ export function startServer({
       return false;
     },
   });
-  /** Starts waking the hires a pause stopped, one at a time (see recovery.resume), and returns how many. It runs on after the response; a restart of the office ends it, and the recovery tick takes over. */
+  /** Starts continuing the hires a pause halted or stopped, one at a time (see recovery.resume), and returns how many. It runs on after the response; a restart of the office ends it, and the recovery tick takes over. */
   function resumeHires(room: string, names: string[]): number {
     if (!recovering || !names.length) return 0;
     const repo = folderOf(room);

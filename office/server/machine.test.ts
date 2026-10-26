@@ -322,7 +322,7 @@ test("stop looks the session's short id up and runs `claude stop <id>` and nothi
   const unknown = await run("machine.stop('sess-9')", listed);
   expect(unknown.value).toBe(false);
   expect(unknown.calls.map((c) => c[1])).toEqual(["agents"]); // nothing is stopped for a session Claude Code does not list
-  expect((await run("machine.stop('sess-1')", listed, { all: 1 })).value).toBe(false); // stop refused
+  expect((await run("machine.stop('sess-1')", listed, { all: 1 })).value).toBe(false); // claude failing stops nothing
 });
 
 test("letGo refuses an id that could be read as a flag or a shell word, and runs nothing", async () => {

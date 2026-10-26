@@ -35,8 +35,8 @@ test("--all asks for every project and sends no folder, so it works anywhere", a
 });
 
 test("resume says how many stopped hires it is waking, and that a project that was not paused is not", async () => {
-  expect(await pauseCall("resume", [], office({ body: { waking: 3 } }).deps)).toContain("waking 3 stopped hires one at a time");
-  expect(await pauseCall("resume", [], office({ body: { waking: 1 } }).deps)).toContain("waking 1 stopped hire one at a time");
+  expect(await pauseCall("resume", [], office({ body: { waking: 3 } }).deps)).toContain("continuing 3 hires one at a time");
+  expect(await pauseCall("resume", [], office({ body: { waking: 1 } }).deps)).toContain("continuing 1 hire one at a time");
   expect(await pauseCall("resume", [], office().deps)).toBe("resumed shop");
   expect(await pauseCall("resume", [], office({ body: { rooms: [] } }).deps)).toBe("this project is not paused");
 });
@@ -74,7 +74,7 @@ test("the real command posts to the running office's pause route with the folder
     const paused = await run("pause", "lunch");
     expect([paused.code, paused.out]).toEqual([0, expect.stringContaining("paused thing")]);
     const resumed = await run("resume");
-    expect([resumed.code, resumed.out]).toEqual([0, expect.stringContaining("waking 2 stopped hires")]);
+    expect([resumed.code, resumed.out]).toEqual([0, expect.stringContaining("continuing 2 hires")]);
     expect(seen).toEqual([
       { path: "/tok/pause", body: { room: join(repo, ".git"), why: "lunch" } },
       { path: "/tok/resume", body: { room: join(repo, ".git") } },

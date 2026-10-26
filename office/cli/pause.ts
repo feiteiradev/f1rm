@@ -27,5 +27,5 @@ export async function pauseCall(verb: "pause" | "resume", words: string[], d: Pa
       : `${all ? "every project is" : "this project is"} already paused`;
   }
   if (!names) return `${all ? "no project is" : "this project is not"} paused`;
-  return `resumed ${names}${body.waking ? `: waking ${body.waking} stopped ${body.waking === 1 ? "hire" : "hires"} one at a time, as the cap of 8 allows (\`f1rm status\` shows them)` : ""}`;
+  return `resumed ${names}${body.waking ? `: continuing ${body.waking} ${body.waking === 1 ? "hire" : "hires"} one at a time, as the cap of 8 allows (\`f1rm status\` shows them)` : ""}`;
 }

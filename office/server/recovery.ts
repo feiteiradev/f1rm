@@ -89,7 +89,8 @@ const QUIET_MS = 20 * MIN; // a turn ended this long ago without a report: one n
 const REPORT = /^\s*(?:DONE|APPROVED|CHANGES REQUESTED|BLOCKED|ESCALATE|NEEDS YOU)\b/;
 export const NOTE_LIMIT = "resumed after the session limit; continue your task";
 export const NOTE_ENDED = "resumed after your session ended; continue your task";
-export const NOTE_PAUSE = "resumed after a pause; continue your task";
+// The second sentence is needed: measured with a Haiku hire, the bare note was refused ("the peer message doesn't override that pause"), because the stop reason stays in the conversation.
+export const NOTE_PAUSE = "resumed after a pause; continue your task. The PM lifted the pause: the stop reason in your conversation no longer applies.";
 const SLOT_WAIT_MS = 10_000; // the resume asks again for a free slot this often
 export const NUDGE ="your turn ended without a report; send your DONE or BLOCKED";
 
@@ -368,7 +369,7 @@ export function createRecovery(d: RecoveryDeps) {
   }
 
   /**
-   * After a resume: wakes the hires `names` (the ones the pause stopped) whose board row is doing or review, leads first, one at a time through the same checks as `f1rm wake`.
+   * After a resume: continues the hires `names` (the ones the pause halted or stopped) whose board row is doing or review, leads first, one at a time: a live one is told in its inbox, an ended one is woken through the same checks as `f1rm wake`.
    * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts). Any other refusal (let go, its lead not running) is noted
    * for `f1rm status` and left to the recovery tick, which takes the project back when this ends.
    */

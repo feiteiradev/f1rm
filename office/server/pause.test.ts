@@ -192,7 +192,7 @@ test("the office's recovery leaves a paused project alone, and a resume wakes th
   const reply = await (await post(server, "resume", { room: SHOP })).json();
   expect(reply).toMatchObject({ ok: true, rooms: ["shop"], waking: 1 });
   await settle(300);
-  expect(woke).toEqual([{ name: DEV, note: "resumed after a pause; continue your task" }]);
+  expect(woke).toEqual([{ name: DEV, note: expect.stringMatching(/^resumed after a pause; continue your task\. .*pause/) }]);
   expect(readdirSync(pausedDir)).toEqual([]);
 });
 

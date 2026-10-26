@@ -1012,6 +1012,8 @@ test("an ended hire whose turn closed with a report.json is not woken: its NOTE 
 });
 
 // ── pause and resume ───────────────────────────────────────────────────────
+// The fixed note, plus the sentence a Haiku hire needed to act on it (the stop reason stays in its conversation).
+const NOTE_PAUSE = "resumed after a pause; continue your task. The PM lifted the pause: the stop reason in your conversation no longer applies.";
 test("while the project is paused the tick wakes, nudges and notes nothing; after the resume the same stop is woken and the same quiet hire nudged", async () => {
   const o = office();
   stoppedDev(o, [say("compiling", 1)]);
@@ -1082,7 +1084,7 @@ test("a resume wakes the hires the pause stopped one at a time, leads first, and
   };
   await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"]);
   // Leads first; the one whose row is done is not woken; each wake is the same note.
-  expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: "resumed after a pause; continue your task" })));
+  expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: NOTE_PAUSE })));
   expect(o.w.slept).toEqual([10_000, 10_000, 10_000, 10_000]); // the first dev waits three times (the third frees a slot), the second once
   expect(freed).toHaveLength(2);
 });
@@ -1093,9 +1095,9 @@ test("a resume tells a hire that is still live (the pause only ended its turn) i
   o.w.boards.pm = [row("lead-shop", "doing", "shop")];
   o.w.boards.shop = [row(DEV, "review", "checkout")];
   await o.rec.resume(REPO, ["lead-shop", DEV]);
-  expect(o.w.told).toEqual([{ to: "lead-shop", message: "resumed after a pause; continue your task" }]);
+  expect(o.w.told).toEqual([{ to: "lead-shop", message: NOTE_PAUSE }]);
   expect(o.w.toldSession).toEqual(["lead-live"]);
-  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: "resumed after a pause; continue your task" }]);
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_PAUSE }]);
   // A live hire with no inbox is noted, for the session it reports to to message.
   const quiet = office();
   quiet.w.inbox = false;
