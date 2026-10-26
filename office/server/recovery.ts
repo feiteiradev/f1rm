@@ -380,7 +380,12 @@ export function createRecovery(d: RecoveryDeps) {
         if (signal?.aborted) return;
         try {
           if (!active(await d.board(repo, h.role === "lead" ? null : h.team), name, h)) break;
-          await d.wake(repo, name, NOTE_PAUSE);
+          // The pause only ended the turn of a session that was working at a hook: its process lives, and the note goes to its inbox.
+          const all = (await d.sessions()) ?? [];
+          const liveOne = all.filter((a) => a?.pid && a.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo).reduce<any>((best, a) => (!best || (a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best), undefined);
+          if (liveOne) {
+            if (!(await safeTell(repo, name, NOTE_PAUSE, String(liveOne.sessionId ?? liveOne.id)))) throw new Error(`${name} has no inbox`);
+          } else await d.wake(repo, name, NOTE_PAUSE);
           break;
         } catch (err) {
           if (err instanceof HireRefused && err.working !== null) {
@@ -389,7 +394,7 @@ export function createRecovery(d: RecoveryDeps) {
           }
           console.log(`resume ${basename(repo)}/${name}: ${(err as Error).message}`);
           const entries = d.store.load(repo);
-          (entries[name] ??= {}).note = `could not be woken after the pause (${(err as Error).message}); f1rm wake ${name}`;
+          (entries[name] ??= {}).note = `could not be resumed after the pause (${(err as Error).message}); message it, or f1rm wake ${name} when its process ended`;
           d.store.save(repo, entries);
           break;
         }

@@ -1087,6 +1087,24 @@ test("a resume wakes the hires the pause stopped one at a time, leads first, and
   expect(freed).toHaveLength(2);
 });
 
+test("a resume tells a hire that is still live (the pause only ended its turn) in its inbox, and wakes only the ones whose process ended", async () => {
+  const o = office();
+  o.w.list = [live("lead-shop", "lead-live", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD)];
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  o.w.boards.shop = [row(DEV, "review", "checkout")];
+  await o.rec.resume(REPO, ["lead-shop", DEV]);
+  expect(o.w.told).toEqual([{ to: "lead-shop", message: "resumed after a pause; continue your task" }]);
+  expect(o.w.toldSession).toEqual(["lead-live"]);
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: "resumed after a pause; continue your task" }]);
+  // A live hire with no inbox is noted, for the session it reports to to message.
+  const quiet = office();
+  quiet.w.inbox = false;
+  quiet.w.list = [live("lead-shop", "lead-live", REPO, { status: "idle" })];
+  quiet.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  await quiet.rec.resume(REPO, ["lead-shop"]);
+  expect(quiet.w.store[REPO]["lead-shop"].note).toContain("has no inbox");
+});
+
 test("a resume that is aborted stops waiting, and a wake refused for another reason is noted and the others still go", async () => {
   const o = office({ wake: async (repo, name, note) => { if (name === DEV) throw new Error(`${name} was let go; hire a new one`); o.w.woke.push({ repo, name, note }); } });
   o.w.boards.pm = [row("lead-shop", "doing", "shop")];

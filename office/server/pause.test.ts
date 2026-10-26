@@ -90,7 +90,7 @@ const KINDS: [string, Record<string, unknown>][] = [
 ];
 
 test("a paused project's sessions get continue:false on every hook kind; the PM, another project and a plain session are untouched", async () => {
-  const { server } = start();
+  const { server, pausedDir } = start();
   await seat(server, "lead", "lead-checkout", "f1rm:lead");
   await seat(server, "dev", "checkout.backend-dev-a", "f1rm:backend-dev");
   await seat(server, "pm", "pm-shop", "f1rm:pm");
@@ -106,6 +106,8 @@ test("a paused project's sessions get continue:false on every hook kind; the PM,
     expect([id, kind, JSON.parse((await reply(id, kind, extra)) ?? "null")]).toEqual([id, kind, PAUSE_ANSWER]);
   }
   expect(PAUSE_ANSWER).toEqual({ continue: false, stopReason: "project paused by the PM" });
+  // The hires that were answered are kept by name, for the resume to tell or wake; the PM, the plain session and the other project's lead are not.
+  expect(JSON.parse(readFileSync(join(pausedDir, readdirSync(pausedDir)[0]), "utf8")).halted).toEqual(["lead-checkout", "checkout.backend-dev-a"]);
   // The PM runs `f1rm resume` and answers the user, so it keeps working; so does a session that is no company employee, and another project's.
   for (const [kind, extra] of KINDS.filter(([kind]) => kind !== "PermissionRequest")) { // theirs is held for the browser, as ever
     expect([kind, await reply("pm", kind, extra)]).toEqual([kind, null]);

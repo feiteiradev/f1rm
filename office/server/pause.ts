@@ -9,8 +9,11 @@ export const PAUSE_ANSWER = { continue: false, stopReason: "project paused by th
 /** A session still busy this long after the pause (its turn went on without a hook, e.g. text streaming) is stopped. */
 export const GRACE_MS = 30_000;
 
-/** Who paused (`manual`, or `schedule` for the work-hours pause), when (ms), and why; `stopped` is the names of the hires `claude stop` ended after the grace, absent until it ran. */
-export type Paused = { by: "manual" | "schedule"; at: number; why: string; stopped?: string[] };
+/**
+ * Who paused (`manual`, or `schedule` for the work-hours pause), when (ms), and why. `halted` is the names of the hires whose hook was answered continue:false (their turn ended at that step, the process lives);
+ * `stopped` the ones `claude stop` ended after the grace, absent until it ran. A resume picks both up.
+ */
+export type Paused = { by: "manual" | "schedule"; at: number; why: string; halted?: string[]; stopped?: string[] };
 
 /** `~/.f1rm/paused`, where the office keeps the flags. */
 export const pausedDirOf = (home: string) => join(home, ".f1rm", "paused");
@@ -20,7 +23,8 @@ export const pausedFile = (dir: string, repo: string) => join(dir, `${repoKey(re
 export function readPaused(file: string): Paused | null {
   try {
     const p = JSON.parse(readFileSync(file, "utf8"));
-    const ok = (p?.by === "manual" || p?.by === "schedule") && Number.isFinite(p.at) && typeof p.why === "string" && (p.stopped === undefined || (Array.isArray(p.stopped) && p.stopped.every((s: unknown) => typeof s === "string")));
+    const names = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((s) => typeof s === "string"));
+    const ok = (p?.by === "manual" || p?.by === "schedule") && Number.isFinite(p.at) && typeof p.why === "string" && names(p.halted) && names(p.stopped);
     return ok ? p : null;
   } catch {
     return null;

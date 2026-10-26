@@ -750,7 +750,11 @@ export function startServer({
           }
           if (event.kind === "PostToolUse" && payload.tool_name === "Skill" && !payload.agent_id) skillGates.get(event.sessionId)?.loaded.add(String(payload.tool_input?.skill ?? ""));
           // A paused project's company sessions stop at this step, whatever the event: no refusal, no hold. The PM keeps working (it runs `f1rm resume` and answers the user), and so does a session that is no employee.
-          if (role && role !== "pm" && event.room.id !== ELSEWHERE.id && pausedOf(event.room.id)) {
+          const paused = event.room.id !== ELSEWHERE.id ? pausedOf(event.room.id) : null;
+          if (paused && role && role !== "pm") {
+            // The turn ends at this step; the resume tells or wakes the hire, so its name is kept.
+            const title = state.employees[event.sessionId]?.title;
+            if (title && hireName(title) && !paused.halted?.includes(title)) setPaused(event.room.id, { ...paused, halted: [...(paused.halted ?? []), title] });
             trackSession(event);
             return Response.json(PAUSE_ANSWER);
           }
@@ -915,7 +919,7 @@ export function startServer({
           if (rest[0] === "pause") setPaused(id, { by: "manual", at: clock(), why: (why as string | undefined) ?? "" });
           else {
             setPaused(id, null);
-            waking += resumeHires(id, was!.stopped ?? []);
+            waking += resumeHires(id, [...new Set([...(was!.halted ?? []), ...(was!.stopped ?? [])])]);
           }
           changed.push(id);
         }
@@ -1051,7 +1055,8 @@ export function startServer({
       const busy = Object.values(state.employees).filter((e) => e.room === room && e.role && e.role !== "pm" && e.title && hireName(e.title) && listed.get(e.sessionId)?.status === "busy");
       const done: string[] = [];
       for (const e of busy) if (await machine.stop(e.sessionId).catch(() => false)) done.push(e.title!);
-      if (pausedOf(room) === paused) setPaused(room, { ...paused, stopped: done }); // not if it was resumed meanwhile
+      const now = pausedOf(room); // not if it was resumed meanwhile; halted names added during the stops are kept
+      if (now?.at === paused.at) setPaused(room, { ...now, stopped: done });
     }
   }
   let checking = false;
