@@ -33,6 +33,7 @@ const fakeMachine = (repos = GIT_REPOS) => ({
   liveSessions: async () => new Map<string, { pid?: number }>(),
   backgroundId: async () => null,
   letGo: async () => {},
+  stop: async () => true,
   sessions: async () => [],
   mergedBranch: () => false,
   removeWorktree: () => {},

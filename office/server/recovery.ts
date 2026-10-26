@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
+import { HireRefused } from "../cli/hire.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { parseReport, reportFile, reportSlug } from "../cli/report.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
@@ -88,7 +89,9 @@ const QUIET_MS = 20 * MIN; // a turn ended this long ago without a report: one n
 const REPORT = /^\s*(?:DONE|APPROVED|CHANGES REQUESTED|BLOCKED|ESCALATE|NEEDS YOU)\b/;
 export const NOTE_LIMIT = "resumed after the session limit; continue your task";
 export const NOTE_ENDED = "resumed after your session ended; continue your task";
-export const NUDGE = "your turn ended without a report; send your DONE or BLOCKED";
+export const NOTE_PAUSE = "resumed after a pause; continue your task";
+const SLOT_WAIT_MS = 10_000; // the resume asks again for a free slot this often
+export const NUDGE ="your turn ended without a report; send your DONE or BLOCKED";
 
 /**
  * What the office remembers of one hire, per project, in `~/.f1rm/recovery/<repo>.json` so a restart keeps it and `f1rm status` can show it.
@@ -120,6 +123,10 @@ export type RecoveryDeps = {
   /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
   tell: (repo: string, name: string, message: string, sessionId?: string) => Promise<boolean>;
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
+  /** True while the project is paused (or its resume is still waking): the tick then wakes, nudges and notes nothing. Optional: tests that build RecoveryDeps without it never pause. */
+  paused?: (repo: string) => boolean;
+  /** Waits `ms`; the resume waits for a free slot with it. Defaults to a real wait. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 /** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
@@ -190,6 +197,7 @@ const active = (rows: BoardRow[], name: string, h: HireName) =>
  */
 export function createRecovery(d: RecoveryDeps) {
   async function recoverRepo(repo: string, all: any[]) {
+    if (d.paused?.(repo)) return;
     const entries = d.store.load(repo);
     const before = JSON.stringify(entries);
     const mine = all.filter((a) => a?.kind === "background" && typeof a.name === "string" && typeof a.cwd === "string" && hireName(a.name) && repoOf(a.cwd) === repo);
@@ -359,7 +367,38 @@ export function createRecovery(d: RecoveryDeps) {
     return true;
   }
 
+  /**
+   * After a resume: wakes the hires `names` (the ones the pause stopped) whose board row is doing or review, leads first, one at a time through the same checks as `f1rm wake`.
+   * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts). Any other refusal (let go, its lead not running) is noted
+   * for `f1rm status` and left to the recovery tick, which takes the project back when this ends.
+   */
+  async function resume(repo: string, names: string[], signal?: AbortSignal) {
+    const sleep = d.sleep ?? ((ms: number) => Bun.sleep(ms));
+    const hires = names.flatMap((name) => hireName(name) ? [{ name, h: hireName(name)! }] : []).sort((a, b) => Number(b.h.role === "lead") - Number(a.h.role === "lead"));
+    for (const { name, h } of hires) {
+      for (;;) {
+        if (signal?.aborted) return;
+        try {
+          if (!active(await d.board(repo, h.role === "lead" ? null : h.team), name, h)) break;
+          await d.wake(repo, name, NOTE_PAUSE);
+          break;
+        } catch (err) {
+          if (err instanceof HireRefused && err.working !== null) {
+            await sleep(SLOT_WAIT_MS);
+            continue;
+          }
+          console.log(`resume ${basename(repo)}/${name}: ${(err as Error).message}`);
+          const entries = d.store.load(repo);
+          (entries[name] ??= {}).note = `could not be woken after the pause (${(err as Error).message}); f1rm wake ${name}`;
+          d.store.save(repo, entries);
+          break;
+        }
+      }
+    }
+  }
+
   return {
+    resume,
     async tick(repos: string[]) {
       const all = repos.length ? await d.sessions() : null;
       if (!all) return;

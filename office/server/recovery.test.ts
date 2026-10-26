@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recoveryFile } from "../cli/status.ts";
-import { LOAD_FIRST } from "../cli/hire.ts";
+import { HireRefused, LOAD_FIRST } from "../cli/hire.ts";
 import { planWake } from "../cli/wake.ts";
 import { parseBoard, type BoardRow } from "./board.ts";
 import { createRecovery, fileStore, resetAt, type Entries } from "./recovery.ts";
@@ -55,6 +55,11 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     commitCalls: 0,
     inbox: true,
     store: {} as Record<string, Entries>,
+    /** The project is paused. */
+    paused: false,
+    /** The waits the resume asked for; `onSleep` runs at each, so a test can free a slot. */
+    slept: [] as number[],
+    onSleep: () => {},
   };
   const make = () => createRecovery({
     now: () => w.now,
@@ -69,6 +74,8 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
     tell: async (_repo, to, message, sessionId) => (w.told.push({ to, message }), w.toldSession.push(sessionId), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
+    paused: () => w.paused,
+    sleep: async (ms) => (w.slept.push(ms), w.onSleep()),
   });
   const rec = make();
   return { w, rec, make, tick: (repos = [REPO]) => rec.tick(repos) };
@@ -1002,4 +1009,95 @@ test("an ended hire whose turn closed with a report.json is not woken: its NOTE 
   old.w.reports[DEV] = T0 - 90 * MIN;
   await old.tick();
   expect(old.w.woke).toHaveLength(1);
+});
+
+// ── pause and resume ───────────────────────────────────────────────────────
+test("while the project is paused the tick wakes, nudges and notes nothing; after the resume the same stop is woken and the same quiet hire nudged", async () => {
+  const o = office();
+  stoppedDev(o, [say("compiling", 1)]);
+  o.w.paused = true;
+  await o.tick();
+  await o.tick();
+  expect([o.w.woke, o.w.told]).toEqual([[], []]);
+  expect(o.w.store[REPO]).toBeUndefined();
+  o.w.paused = false;
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
+
+  // The "stopped again" note is silent too.
+  const again = office();
+  stoppedDev(again, [say("compiling", 1)]);
+  again.w.commits["worktree-checkout"] = T0 - 60 * MIN;
+  await again.tick();
+  const woke = again.w.now;
+  again.w.list = [live("lead-shop", "lead-sid", REPO, { status: "idle" }), ended(DEV, "dev-1", DEV_CWD), ended(DEV, "dev-2", DEV_CWD, { startedAt: 2000 })];
+  again.w.transcripts["dev-2"] = [say("compiling", 1), say("on it", -1, woke)];
+  again.w.mtimes["dev-2"] = woke + 4 * MIN;
+  again.w.now = woke + 5 * MIN;
+  again.w.paused = true;
+  await again.tick();
+  expect(again.w.told).toEqual([]);
+  expect(again.w.store[REPO][DEV].note).toBeUndefined();
+
+  const quiet = office();
+  idleReviewer(quiet, "Review complete: the diff looks right.", 25);
+  quiet.w.paused = true;
+  await quiet.tick();
+  expect(quiet.w.told).toEqual([]);
+  quiet.w.paused = false;
+  await quiet.tick();
+  expect(quiet.w.told).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
+
+test("a resume wakes the hires the pause stopped one at a time, leads first, and waits for a free slot when the cap of 8 is full", async () => {
+  const DEV_B = "shop.backend-dev-other";
+  const planning = () => {
+    const o: ReturnType<typeof office> = office({
+      wake: async (repo, name, note) => {
+        const plan = await planWake({ target: name, message: note, cwd: repo }, {
+          agents: async (all) => (all ? o.w.list : o.w.list.filter((a) => a.pid || a.state === "blocked")),
+          gitCommonDir: () => `${repo}/.git`, home: "/nonexistent-home", now: T0, exists: () => true, modelOf: () => null, promptOf: () => null,
+        });
+        o.w.woke.push({ repo, name, note });
+        o.w.list.push(live(name, `new-${name}`, plan.cwd)); // the woken session is a live working one: it holds a slot
+      },
+    });
+    return o;
+  };
+  const o = planning();
+  const others = Array.from({ length: 7 }, (_, i) => live(`far.designer-${i}`, `far-${i}`, `/code/far/.claude/worktrees/t${i}`));
+  o.w.list = [...others, ended("lead-shop", "lead-old", REPO), ended(DEV, "dev-1", DEV_CWD), ended(DEV_B, "dev-2", wt("other")), ended("shop.backend-dev-done", "dev-3", wt("done"))];
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  o.w.boards.shop = [row(DEV, "doing", "checkout"), row(DEV_B, "review", "other"), row("shop.backend-dev-done", "done", "done")];
+  // 7 working elsewhere: the lead takes the 8th slot. The next wake finds the cap full and waits; a slot is freed at the third wait.
+  const freed: string[] = [];
+  o.w.onSleep = () => {
+    const far = (a: Listed) => String(a.name).startsWith("far.");
+    if (o.w.slept.length >= 3 && o.w.list.some(far)) {
+      const gone = o.w.list.findIndex(far);
+      freed.push(String(o.w.list[gone].name));
+      o.w.list.splice(gone, 1);
+    }
+    expect(o.w.woke.length).toBeLessThanOrEqual(1 + freed.length); // never past the cap
+  };
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"]);
+  // Leads first; the one whose row is done is not woken; each wake is the same note.
+  expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: "resumed after a pause; continue your task" })));
+  expect(o.w.slept).toEqual([10_000, 10_000, 10_000, 10_000]); // the first dev waits three times (the third frees a slot), the second once
+  expect(freed).toHaveLength(2);
+});
+
+test("a resume that is aborted stops waiting, and a wake refused for another reason is noted and the others still go", async () => {
+  const o = office({ wake: async (repo, name, note) => { if (name === DEV) throw new Error(`${name} was let go; hire a new one`); o.w.woke.push({ repo, name, note }); } });
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  o.w.boards.shop = [row(DEV, "doing", "checkout"), row("shop.backend-dev-b", "doing", "b")];
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-b", "lead-shop"]);
+  expect(o.w.woke.map((x) => x.name)).toEqual(["lead-shop", "shop.backend-dev-b"]);
+  expect(o.w.store[REPO][DEV].note).toContain("let go");
+  const stuck = office({ wake: async () => { throw new HireRefused("8 hires are already working (the cap is 8).", 8); } });
+  stuck.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  const stop = new AbortController();
+  stuck.w.onSleep = () => stop.abort();
+  await stuck.rec.resume(REPO, ["lead-shop"], stop.signal);
+  expect(stuck.w.slept).toEqual([10_000]);
 });

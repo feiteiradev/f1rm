@@ -25,6 +25,7 @@ const machine = () => ({
   liveSessions: async () => new Map([...listed].map(([id, pid]) => [id, { ...(pid !== undefined && { pid }), ...(statuses[id] && { status: statuses[id] }) }])),
   backgroundId: async () => null,
   letGo: async () => {},
+  stop: async () => true,
   sessions: async () => [],
   mergedBranch: () => false,
   removeWorktree: () => {},

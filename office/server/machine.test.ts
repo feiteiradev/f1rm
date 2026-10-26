@@ -314,6 +314,17 @@ test("letGo gives up when the session never leaves the list, and says what claud
   expect([refused.value, refused.calls]).toEqual([{ threw: "worktree has unpushed commits" }, ["stop 7c5dcf5d", "rm 7c5dcf5d"]]);
 });
 
+test("stop looks the session's short id up and runs `claude stop <id>` and nothing else: no rm, kill or daemon stop", async () => {
+  const listed = JSON.stringify([{ id: "7c5dcf5d", kind: "background", sessionId: "sess-1", name: "shop.backend-dev-a" }, { id: "0badf00d", kind: "background", sessionId: "sess-2" }]);
+  const stopped = await run("machine.stop('sess-1')", listed);
+  expect(stopped.value).toBe(true);
+  expect(stopped.calls.map((c) => c.slice(0, -1).join(" "))).toEqual(["claude agents --json --all", "claude stop 7c5dcf5d"]);
+  const unknown = await run("machine.stop('sess-9')", listed);
+  expect(unknown.value).toBe(false);
+  expect(unknown.calls.map((c) => c[1])).toEqual(["agents"]); // nothing is stopped for a session Claude Code does not list
+  expect((await run("machine.stop('sess-1')", listed, { all: 1 })).value).toBe(false); // stop refused
+});
+
 test("letGo refuses an id that could be read as a flag or a shell word, and runs nothing", async () => {
   for (const bad of ["--force", "7c5; rm -rf ~", ""]) {
     const r = await letGo(bad, 1);
