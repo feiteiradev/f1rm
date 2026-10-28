@@ -42,12 +42,55 @@ const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", 
 const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo", "timeout", "nice", "stdbuf"]);
 // The options of those wrappers that take the next word as their value.
 const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", "--kill-after", "--signal"], nice: ["-n", "--adjustment"], stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"], env: ["-u", "--unset"], sudo: ["-u"] };
-/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
-// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
-// so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
+// What the heredoc scan steps over, in order: a quoted string, an escaped character, a comment (a `#` at the start of a word: after a space or `; & | ( )`), a `${…}` and an arithmetic `((…))` (whose `<<` is no
+// opener), a here-string `<<<`, a heredoc opener `<<[-]WORD` (groups: dash, "double", 'single', backslash, bare word; a bare word followed by a quote or backslash is a partly quoted delimiter and is not read as one),
+// a newline, or any other character.
+const HEREDOC_SCAN = /"(?:\\.|[^"\\])*"|'[^']*'|\\[^]|(?<=^|[\s;&|()])#[^\n]*|\$\{[^}]*\}|\$?\(\((?:(?!\)\))[^])*\)\)|<<<|<<(-?)[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|(\\?)([^\s;&|()<>`"'\\]+)(?![\\"']))|\n|[^]/y;
+// A shell fed a heredoc runs its body as a script.
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "eval", "source", "."]);
+/**
+ * The line without its heredoc bodies and terminators: a body is data to the shell, so a body line `git push` is no command. What stays is the opening line and whatever follows the terminator.
+ * A body the shell runs stays whole too: one with a `$(` or a backtick under an unquoted delimiter, and every body of an opener line that holds a shell word anywhere (`bash <<'EOF'`, `cat <<EOF | bash`)
+ * or a `${` outside quotes (which may hide an opener). A body with no terminator runs to the end, as in the shell.
+ */
+// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other. A body that reaches a shell some other way (a file it is
+// written to, a variable, a function, an alias, an interpreter such as `python3 -`) is data, like `bash -c`'s argument. A shell word anywhere on the opener line, even in a quoted argument or a file name, keeps the body.
+const withoutHeredocBodies = (command: string) => {
+  let out = "", lineStart = 0, braces = false;
+  const pending: { end: string; tabs: boolean; quoted: boolean }[] = [];
+  HEREDOC_SCAN.lastIndex = 0;
+  for (let m; HEREDOC_SCAN.lastIndex < command.length && (m = HEREDOC_SCAN.exec(command)); ) {
+    const [token, dash, double, single, backslash, bare] = m;
+    const end = double ?? single ?? bare;
+    if (end !== undefined && !/^\d+$/.test(end)) pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\" });
+    if (token.startsWith("${")) braces = true;
+    out += token;
+    if (token !== "\n") continue;
+    const line = out.slice(lineStart);
+    const keepAll = braces || line.split(/[\s;&|()`]+/).some((w) => SHELLS.has(basename(unquoted(w))));
+    [lineStart, braces] = [out.length, false];
+    if (!pending.length) continue;
+    let at = HEREDOC_SCAN.lastIndex;
+    for (const h of pending.splice(0)) {
+      let body = "";
+      while (at < command.length) {
+        const nl = command.indexOf("\n", at), line = command.slice(at, nl < 0 ? command.length : nl);
+        at = nl < 0 ? command.length : nl + 1;
+        if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.end) break;
+        body += line + "\n";
+      }
+      if (keepAll || (!h.quoted && /\$\(|`/.test(body))) out += body;
+    }
+    HEREDOC_SCAN.lastIndex = at;
+    lineStart = out.length;
+  }
+  return out;
+};
+/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. Heredoc bodies are data and are not read. */
+// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
 const splitCommands = (command: string) => {
   const out: string[][] = [[]];
-  for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
+  for (const [, op, word] of withoutHeredocBodies(command).matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
     let i = 0, wrapper = "";
     for (; i < words.length; i++) {
@@ -141,6 +184,85 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
   return !(sub === "worktree" && here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
+};
+// What lands on the base branch when run in the main checkout. `f1rm merge` is the one way to land there (see the gate in refusal()); a dev's own worktree keeps its normal git.
+const LANDS_IN_MAIN = new Set(["merge", "cherry-pick", "rebase", "reset", "commit", "am", "pull", "revert"]);
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** The branch the main checkout has checked out, read from the git dir's HEAD; main and master when that can't be read. */
+const baseBranches = (gitDir: string) => {
+  try {
+    const m = /^ref: refs\/heads\/(.+)$/m.exec(readFileSync(join(gitDir, "HEAD"), "utf8"));
+    if (m) return [m[1].trim()];
+  } catch {} // a room that is not a repo has no HEAD
+  return ["main", "master"];
+};
+/**
+ * Whether a Bash line lands anything on the base branch of the repo whose main working directory is `main`. History-changing git run in the main checkout lands (or rewrites) there,
+ * as does `checkout <ref> -- <path>` (or `<ref> <path>`), `checkout -B` / `switch -C` and `restore --source`, which put a branch's files into it. Moving the base branch's ref lands from any folder: `update-ref`,
+ * `branch -f` and `fetch <this repo> x:<base>`, judged by the ref that moves, not by any word that names the base. The folder of a command is the session's cwd, moved by an earlier `cd` or `pushd`,
+ * by `-C <dir>`, `--work-tree` and `GIT_WORK_TREE`, and by a `--git-dir` or `GIT_DIR` that is the main repo's own `.git`.
+ */
+// Limits (ponytail): a `cd` in a subshell or a branch of `||` moves the folder for the rest of the line (a refused line is the only cost), and a folder built by a variable, `~` or `cd -P` is not followed.
+// Not seen: git aliases (`-c alias.m=merge`), `update-ref --stdin`, `--ignore-other-worktrees`, git run in `.claude/worktrees` itself, `git apply` and `git read-tree`, files written into main without git (cp, a redirect),
+// `export GIT_DIR=…; git merge`, and the command line of `sh -c` or a script file. `f1rm merge --check` is `sh -c` in the scratch worktree, so the PM or a lead can run any git through it by design. A branch that adds a dependency
+// fails the check until `bun install` runs in main, because the scratch worktrees link main's node_modules. A body that reaches a shell some other way (a file it is written to, a variable, a function, an alias) is data, like `bash -c`'s argument.
+const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string, main: string, bases: string[]) => {
+  const mainKey = homeKey(main), worktreesKey = homeKey(join(main, ".claude", "worktrees")), gitDirKey = homeKey(join(main, ".git"));
+  const inMain = (dir: string) => inside(mainKey, homeKey(dir)) && !inside(worktreesKey, homeKey(dir));
+  const base = new RegExp(`^(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
+  const intoBase = new RegExp(`:(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
+  const pathLike = (w: string) => /^(?:\.\.?|\.\.?\/.*|\/.*|file:.*)$/.test(w);
+  let dir = resolve(cwd);
+  for (const { prefix, words } of split) {
+    if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
+      const to = unquoted(words[1] ?? "");
+      if (to && !/^[-~]|\$/.test(to)) dir = resolve(dir, to);
+      continue;
+    }
+    const call = gitCall(words);
+    if (!call) continue;
+    let at = dir;
+    const gitDirs: string[] = [];
+    const setting = (name: string, value: string) => {
+      if (name === "-C") at = resolve(at, value);
+      else if (name === "--work-tree" || name === "GIT_WORK_TREE") at = resolve(at, value);
+      else if (name === "--git-dir" || name === "GIT_DIR") gitDirs.push(value);
+    };
+    for (const w of prefix) {
+      const m = /^(GIT_WORK_TREE|GIT_DIR)=(.*)$/.exec(unquoted(w));
+      if (m) setting(m[1], unquoted(m[2]));
+    }
+    call.options.forEach((o, i) => {
+      const eq = /^(--work-tree|--git-dir)=(.*)$/.exec(o);
+      if (eq) setting(eq[1], eq[2]);
+      else if (["-C", "--work-tree", "--git-dir"].includes(o)) setting(o, call.options[i + 1] ?? "");
+    });
+    // The repo is main's when --git-dir or GIT_DIR names its .git, whatever the work tree is; a relative one is tried from the session folder and from where -C moved to.
+    if (gitDirs.some((g) => [dir, at].some((from) => homeKey(resolve(from, g)) === gitDirKey))) at = main;
+    const { sub, rest } = call;
+    const any = (re: RegExp) => rest.some((a) => re.test(a));
+    const dashDash = rest.indexOf("--");
+    const named = rest.filter((a) => !a.startsWith("-"));
+    // update-ref [-m <reason>] [-d] <ref> …: the ref is the first word that is no option.
+    const updated = (() => {
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "-m") i++;
+        else if (!rest[i].startsWith("-")) return rest[i];
+      }
+    })();
+    if (sub === "update-ref" && updated !== undefined && (base.test(updated) || (updated === "HEAD" && inMain(at)))) return true;
+    // `branch -f <name> [<start>]` moves <name>; a rename or copy (`-M <old> <new>`, `-C`) makes <new>, the last word.
+    const renames = any(/^(?:--move|--copy|-[A-Za-z]*[MCmc])/), forces = any(/^(?:--force|-[A-Za-z]*f)/);
+    const moved = renames ? named.at(-1) : named[0];
+    if (sub === "branch" && (renames || forces) && moved !== undefined && base.test(moved)) return true;
+    if (sub === "fetch" && named.some(pathLike) && any(intoBase)) return true;
+    if (!inMain(at)) continue;
+    if (LANDS_IN_MAIN.has(sub)) return true;
+    if (sub === "checkout" && ((dashDash > 0 && rest.slice(0, dashDash).some((a) => !a.startsWith("-"))) || any(/^-[A-Za-z]*B/) || (dashDash < 0 && named.length >= 2 && !any(/^(?:-[A-Za-z]*b|--orphan)/)))) return true;
+    if (sub === "switch" && any(/^(-[A-Za-z]*C|--force-create)/)) return true;
+    if (sub === "restore" && any(/^(-s|--source)/)) return true;
+  }
+  return false;
 };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
@@ -518,6 +640,10 @@ export function startServer({
     // `f1rm pause` and `f1rm resume` act on the project of the folder they run in: of the company's sessions only its PM runs them, never its intern (`--all` is refused above, for everyone).
     const pausing = commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)));
     if (pausing && (role !== "pm" || payload.agent_id)) return refuse("pause", "Only the PM pauses and resumes its project. Send what you need to the session named in your brief's Report to.");
+    // `f1rm merge` lands a reviewed branch on main: the PM runs it for a simple task and a lead for its milestone; an intern, any specialist and a Reviewer do not.
+    if ((!COORDINATORS.has(role) || payload.agent_id) && commands.some((c) => hireArgs(c, "merge"))) {
+      return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
+    }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
     if (role === "lead") {
       const team = teamOf(state.employees[sessionId]);
@@ -537,6 +663,11 @@ export function startServer({
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    // Nothing lands on the base branch but `f1rm merge`. F3b: a Reviewer keeps its old `--no-ff` and `--ff-only` steps in the main checkout until that task removes the role's merge flow and this exception.
+    const me = state.employees[sessionId];
+    if (role !== "reviewer" && me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
+      return refuse("main", "Nothing lands on the base branch except `f1rm merge <task>`, run by the PM or a lead in the main working directory. Your own git works inside your worktree: merge main into your branch, rebase your unpushed branch. Send `DONE` to the session in your Report to.");
+    }
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
       return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
