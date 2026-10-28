@@ -13,7 +13,7 @@ export const GRACE_MS = 30_000;
  * Who paused (`manual`, or `schedule` for the work-hours pause), when (ms), and why. `halted` is the names of the hires whose hook was answered continue:false (their turn ended at that step, the process lives);
  * `stopped` the ones `claude stop` ended after the grace, absent until it ran. A resume picks both up.
  */
-export type Paused = { by: "manual" | "schedule"; at: number; why: string; halted?: string[]; stopped?: string[] };
+export type Paused = { by: "manual" | "schedule"; at: number; why: string; halted?: string[]; stopped?: string[]; checkpoint?: string };
 
 /** `~/.f1rm/paused`, where the office keeps the flags. */
 export const pausedDirOf = (home: string) => join(home, ".f1rm", "paused");
@@ -24,7 +24,7 @@ export function readPaused(file: string): Paused | null {
   try {
     const p = JSON.parse(readFileSync(file, "utf8"));
     const names = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((s) => typeof s === "string"));
-    const ok = (p?.by === "manual" || p?.by === "schedule") && Number.isFinite(p.at) && typeof p.why === "string" && names(p.halted) && names(p.stopped);
+    const ok = (p?.by === "manual" || p?.by === "schedule") && Number.isFinite(p.at) && typeof p.why === "string" && names(p.halted) && names(p.stopped) && (p.checkpoint === undefined || typeof p.checkpoint === "string");
     return ok ? p : null;
   } catch {
     return null;
@@ -39,3 +39,7 @@ export function writePaused(file: string, paused: Paused) {
 }
 
 export const clearPaused = (file: string) => rmSync(file, { force: true });
+
+/** Why a hire into a paused project is refused: its first prompt would meet the pause (`continue:false`) and stop at once. The same words for `f1rm hire` and the office's Hire dialog. */
+export const hireRefusal = (project: string, paused: Paused) =>
+  `${project} is paused (${paused.by}${paused.why ? `: ${paused.why}` : ""}): a new hire's first prompt would meet the pause and stop at once. Run \`f1rm resume\` in the project first, then hire.`;

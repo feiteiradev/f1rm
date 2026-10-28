@@ -246,6 +246,41 @@ test("a stop that failed, or a hire that turns busy after the 30 s, is tried aga
   expect(JSON.parse(readFileSync(join(pausedDir, readdirSync(pausedDir)[0]), "utf8")).stopped).toEqual(["checkout.backend-dev-a", "checkout.backend-dev-b"]);
 });
 
+test("a busy session that claude stop cannot find (an interactive one wearing a hire's title) is tried a few times, not at every check", async () => {
+  const { server } = start();
+  await seat(server, "mine", "checkout.backend-dev-a", "f1rm:backend-dev");
+  listed = new Map([["mine", { pid: 2, status: "busy" }]]);
+  stopResults = Array(50).fill(false);
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle(1500); // fourteen checks
+  expect(stopped).toEqual(["mine", "mine", "mine"]);
+});
+
+test("a new pause forgets the failed stops of the one before, so the same hire is tried again", async () => {
+  const { server } = start();
+  await seat(server, "mine", "checkout.backend-dev-a", "f1rm:backend-dev");
+  listed = new Map([["mine", { pid: 2, status: "busy" }]]);
+  stopResults = Array(50).fill(false);
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle(900);
+  expect(stopped).toEqual(["mine", "mine", "mine"]);
+  await post(server, "resume", { room: SHOP });
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle(900);
+  expect(stopped).toHaveLength(6);
+});
+
+test("--all names a project no session has been in from its registration, which keeps the folder, and falls back to the last word of its key", async () => {
+  const { server } = start();
+  writeFileSync(projectFile(join(dir, "projects"), "/code/my-shop"), JSON.stringify({ folder: "/code/my-shop" }) + "\n");
+  const names = (await (await post(server, "pause", { all: true })).json()).rooms.sort();
+  rmSync(projectFile(join(dir, "projects"), "/code/my-shop"));
+  expect(names).toEqual(["idle", "my-shop", "other", "shop"]); // the old registrations hold {}: the key's last word
+});
+
 test("--all covers every registered project, one no session has been in yet included", async () => {
   const { server, pausedDir } = start();
   await seat(server, "far", "lead-search", "f1rm:lead", "/code/other");

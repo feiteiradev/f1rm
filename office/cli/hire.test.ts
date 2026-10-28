@@ -572,3 +572,25 @@ test("one Reviewer per task: a second live session with the reviewer's name is r
   }
   expect(hire(stubClaude(live), [...pmArgs, "reviewer", "reviewer-review-form", "review-form", BRIEF], repo).code).toBe(0);
 });
+
+test("a hire into a paused project is refused with a pointer to resume, and starts nothing; once resumed it hires", () => {
+  const repos = longRepos();
+  try {
+    const repo = realpathSync(repos.repo(100));
+    const home = tmp("f1rm-home-");
+    const flag = join(home, ".f1rm", "paused", `${repo.replace(/[^A-Za-z0-9]/g, "-")}.json`);
+    mkdirSync(join(home, ".f1rm", "paused"), { recursive: true });
+    writeFileSync(flag, JSON.stringify({ by: "manual", at: 1, why: "lunch" }));
+    const stub = stubClaude([]);
+    const refused = hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repo, { HOME: home });
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("is paused (manual: lunch)");
+    expect(refused.err).toContain("`f1rm resume`");
+    expect(stub.argv()).toBeNull();
+    rmSync(flag);
+    expect(hire(stub, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF], repo, { HOME: home }).code).toBe(0);
+    expect(stub.argv()).not.toBeNull();
+  } finally {
+    repos.cleanup();
+  }
+});

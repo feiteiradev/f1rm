@@ -85,3 +85,37 @@ test("the real command posts to the running office's pause route with the folder
   const down = Bun.spawnSync(["bun", join(import.meta.dir, "f1rm.ts"), "pause"], { cwd: repo, env: { ...process.env, HOME: tmp("f1rm-pause-home-") } });
   expect([down.exitCode, down.stderr.toString()]).toEqual([1, expect.stringContaining("the office isn't running")]);
 });
+
+const result = (extra: object = {}) => ({ room: "shop", stopped: ["lead-checkout", "checkout.backend-dev-x"], killed: [{ pid: 322, command: "sleep 600", cwd: "/code/shop/.claude/worktrees/x", signal: "SIGTERM" }], remaining: [], checkpoint: "cp-20261028-153012", verified: true, saved: [{ task: "x", ref: "refs/f1rm/checkpoint/x", sha: "abc1234def", dirty: true }], ...extra });
+
+test("pause says All N stopped only once the office has checked that nothing of the project runs, and names what it killed and the checkpoint", async () => {
+  const out = await pauseCall("pause", [], office({ body: { results: [result()] } }).deps);
+  expect(out).toContain("paused shop");
+  expect(out).toContain("All 3 stopped (2 sessions, 1 background process)");
+  expect(out).toContain("nothing of the project still runs");
+  expect(out).toContain("killed pid 322 `sleep 600`");
+  expect(out).toContain("checkpoint cp-20261028-153012");
+  expect(out).toContain("refs/f1rm/checkpoint/x");
+});
+
+test("a worktree the checkpoint could not save is named, so the pause does not read as fully saved", async () => {
+  const out = await pauseCall("pause", [], office({ body: { results: [result({ unsaved: ["fresh"] })] } }).deps);
+  expect(out).toContain("NOT saved: fresh");
+  expect(out).toContain("files are untouched");
+  expect(out).toContain("checkpoint cp-20261028-153012");
+});
+
+test("a pause that cannot verify fails, names what still runs and says not to close", async () => {
+  const bad = result({ verified: false, remaining: [{ pid: 322, command: "sleep 600", cwd: "/code/shop/.claude/worktrees/x" }] });
+  const message = await pauseCall("pause", [], office({ body: { results: [bad] } }).deps).catch((e) => e.message);
+  expect(message).toContain("shop is NOT stopped");
+  expect(message).toContain("pid 322 `sleep 600`");
+  expect(message).toContain("cp-20261028-153012");
+  expect(message).not.toContain("All ");
+  expect(message).toContain("f1rm pause");
+});
+
+test("a pause set already, with nothing running, says so and quotes the checkpoint it has", async () => {
+  const quiet = result({ stopped: [], killed: [], saved: [] });
+  expect(await pauseCall("pause", [], office({ body: { rooms: [], results: [quiet] } }).deps)).toBe("this project is already paused; nothing of it runs (checkpoint cp-20261028-153012)");
+});

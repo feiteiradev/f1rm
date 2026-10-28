@@ -371,9 +371,9 @@ export function createRecovery(d: RecoveryDeps) {
   /**
    * After a resume: continues the hires `names` (the ones the pause halted or stopped) whose board row is doing or review, leads first, one at a time: a live one is told in its inbox, an ended one is woken through the same checks as `f1rm wake`.
    * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts, which the office does when the project is paused again; `done` hears of each hire as it is reached). Any other refusal (let go, its lead not running) is noted
-   * for `f1rm status` and left to the recovery tick, which takes the project back when this ends.
+   * for `f1rm status` and left to the recovery tick, which takes the project back when this ends. `notes` gives a hire its own note (where it stopped, from the checkpoint), NOTE_PAUSE to one without.
    */
-  async function resume(repo: string, names: string[], signal?: AbortSignal, done?: (name: string) => void) {
+  async function resume(repo: string, names: string[], signal?: AbortSignal, done?: (name: string) => void, notes: Record<string, string> = {}) {
     const sleep = d.sleep ?? ((ms: number) => Bun.sleep(ms));
     const hires = names.flatMap((name) => hireName(name) ? [{ name, h: hireName(name)! }] : []).sort((a, b) => Number(b.h.role === "lead") - Number(a.h.role === "lead"));
     for (const { name, h } of hires) {
@@ -385,8 +385,8 @@ export function createRecovery(d: RecoveryDeps) {
           const all = (await d.sessions()) ?? [];
           const liveOne = all.filter((a) => a?.pid && a.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo).reduce<any>((best, a) => (!best || (a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best), undefined);
           if (liveOne) {
-            if (!(await safeTell(repo, name, NOTE_PAUSE, String(liveOne.sessionId ?? liveOne.id)))) throw new Error(`${name} has no inbox`);
-          } else await d.wake(repo, name, NOTE_PAUSE);
+            if (!(await safeTell(repo, name, notes[name] ?? NOTE_PAUSE, String(liveOne.sessionId ?? liveOne.id)))) throw new Error(`${name} has no inbox`);
+          } else await d.wake(repo, name, notes[name] ?? NOTE_PAUSE);
           break;
         } catch (err) {
           if (err instanceof HireRefused && err.working !== null) {

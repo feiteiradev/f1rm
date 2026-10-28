@@ -27,16 +27,29 @@ export const projectsDir = () => join(process.env.HOME!, ".f1rm", "projects");
 /** The edition file for the repo at `cwd`: its room id, the git common dir or the folder itself. */
 export const editionFile = (cwd: string, m: Pick<typeof machine, "gitCommonDir"> = machine) => projectFile(projectsDir(), m.gitCommonDir(cwd) ?? cwd);
 
-export function writeEdition(file: string, edition: Edition) {
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ edition }) + "\n");
+/** The folder a registration was made for, or null (a registration from before it was kept, or a cut file). */
+export function readFolder(file: string): string | null {
+  try {
+    const folder = JSON.parse(readFileSync(file, "utf8"))?.folder;
+    return typeof folder === "string" && folder ? folder : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Registers a project, which is what gives it a door: creates `{}` (no edition chosen) when the file is missing, and leaves an existing one as it is. */
-export function register(file: string) {
+/** The registration's text: the edition when chosen, and the folder, which an edition change keeps. */
+const textOf = (edition: Edition | null, folder: string | null) => JSON.stringify({ ...(edition && { edition }), ...(folder && { folder }) }) + "\n";
+
+export function writeEdition(file: string, edition: Edition) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, textOf(edition, readFolder(file)));
+}
+
+/** Registers a project, which is what gives it a door: creates the file (no edition chosen, the folder kept when given) when it is missing, and leaves an existing one as it is. */
+export function register(file: string, folder?: string) {
   mkdirSync(dirname(file), { recursive: true });
   try {
-    writeFileSync(file, "{}\n", { flag: "wx" });
+    writeFileSync(file, textOf(null, folder ?? null), { flag: "wx" });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
   }
@@ -44,7 +57,7 @@ export function register(file: string) {
 
 /** Changes the edition of a registration that exists: throws ENOENT when the file is gone, so it can't recreate a registration removed in between. */
 export function changeEdition(file: string, edition: Edition) {
-  const text = JSON.stringify({ edition }) + "\n";
+  const text = textOf(edition, readFolder(file));
   // ponytail: rewritten in place, so a reader that comes between the write and the truncate can see the old tail or an empty file; a temp file
   // plus rename would fix that but could recreate a removed registration, so bring a lock in if it is felt.
   writeFileSync(file, text, { flag: "r+" });

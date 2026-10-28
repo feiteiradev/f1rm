@@ -1,12 +1,12 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { closeSync, constants, existsSync, fstatSync, openSync, readdirSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
-import { homedir, userInfo } from "node:os";
+import { closeSync, constants, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
-import { boardFile, openQuestion, parseBoard, readBoard, readBoardText, repoDir, repoKey, roomName, teamBoardFile, type BoardRow } from "./board.ts";
-import { changeEdition, isEdition, projectFile, readEdition, type Edition } from "./editions.ts";
+import { boardFile, clip, MAX_CELL, openQuestion, parseBoard, readBoard, readBoardText, repoDir, repoKey, roomName, teamBoardFile, type BoardRow } from "./board.ts";
+import { changeEdition, isEdition, projectFile, readEdition, readFolder, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
@@ -16,12 +16,15 @@ import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHir
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
-import { clearPaused, GRACE_MS, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
+import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
+import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
+import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 
 const MAX_MESSAGE = 4000;
 const MAX_WHY = 200;
+const STOP_TRIES = 3; // `claude stop` attempts on one busy session of a paused project
 // The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
 // at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
@@ -231,6 +234,10 @@ type Options = {
   projectsDir?: string;
   /** Where each project's pause flag lives (`~/.f1rm/paused`); without it a pause lasts until the office restarts. */
   pausedDir?: string;
+  /** Where each project's checkpoint manifests live (`~/.f1rm/checkpoints`); with `fullStop`, a pause saves one there. */
+  checkpointsDir?: string;
+  /** The process table and kill a pause uses to stop what the hires started. Without it a pause stops the sessions only, after the grace, and checkpoints nothing. */
+  fullStop?: FullStopOptions;
   /** Where Claude Code keeps session transcripts (`~/.claude/projects`): the skill gate reads a refused Skill call from there. */
   transcriptsDir?: string;
   /** The folders that never get a door: the office's own, Claude's and temp folders. Tests inject them. */
@@ -329,6 +336,8 @@ export function startServer({
   boardsDir,
   projectsDir,
   pausedDir,
+  checkpointsDir,
+  fullStop: fullStopDeps,
   transcriptsDir = join(homedir(), ".claude", "projects"),
   junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
@@ -392,6 +401,8 @@ export function startServer({
     if (!found || !hire || mine.some((s) => s.name === found.name && s.pid)) return null;
     return { sessionId: found.sessionId ?? found.id, name: found.name, role: roleOfAgentType(`f1rm:${hire.role}`) ?? null, title: found.name, status: "offline", activity: "", tool: "", cwd: found.cwd, room: me.room, lastEventAt: 0 } as Employee;
   }
+  /** True when a command line names this office: its link key, the saved link file or its address and port. */
+  const namesOffice = (line: string) => line.includes(token) || line.includes("office-url") || new RegExp(`(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${server.port}\\b`).test(line);
   /** Why the company's rules stop this tool call, or null to let it run. */
   async function refusal(sessionId: string, payload: Record<string, any>): Promise<string | null> {
     const role = state.employees[sessionId]?.role;
@@ -406,7 +417,7 @@ export function startServer({
     // A terminal (or the user's `!`) fires no hook, so it is never asked.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
-      if (/\b(?:pause|resume)\b/.test(line) && (line.includes(token) || line.includes("office-url") || new RegExp(`(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${server.port}\\b`).test(line))) {
+      if (/\b(?:pause|resume)\b/.test(line) && namesOffice(line)) {
         return refuse("pause-route", "Pause and resume go through `f1rm pause` and `f1rm resume`, never the office's own address.");
       }
       if (commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)?.includes("--all")))) {
@@ -475,7 +486,7 @@ export function startServer({
     // ponytail: it guards against a slip, not a determined session that builds the address piece by piece; the link key lives in a file the user's account can read.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
-      if (/(?:approve|deny|always)\/[^\s'"]/.test(line) && (line.includes(token) || line.includes("office-url") || new RegExp(`(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${server.port}\\b`).test(line))) {
+      if (/(?:approve|deny|always)\/[^\s'"]/.test(line) && namesOffice(line)) {
         return refuse("answer", "Only the user answers a permission request, in the office: tell the session in your Report to what you are waiting for, and wait.");
       }
     }
@@ -564,9 +575,51 @@ export function startServer({
   };
   /** The projects (room ids) a session has been in. Elsewhere is no project. */
   const projectRooms = () => Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id && (!projectsDir || existsSync(projectFile(projectsDir, id))));
+  /** The name of a registered project no session has been in: the folder its registration keeps, else the last word of its key (the file name is lossy: `my-shop` reads `shop`). */
+  const registeredName = (key: string) => {
+    const folder = projectsDir && readFolder(join(projectsDir, `${key}.json`));
+    return folder ? basename(folder) : key.split("-").pop() || key;
+  };
   /** Every registered project's key, those no session has been in included (`--all` reaches them: their first session meets the pause). */
   const registeredKeys = () => new Set([...projectRooms().map(repoKey), ...(projectsDir && existsSync(projectsDir) ? readdirSync(projectsDir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)) : [])]);
   const isProject = (room: string) => room !== ELSEWHERE.id && (Object.hasOwn(state.rooms, room) || (!!projectsDir && existsSync(projectFile(projectsDir, room))));
+  /**
+   * The full stop of one project (see fullstop.ts): its background hires' sessions, what they started, a snapshot of every worktree and the manifest, with the pause flag naming the checkpoint.
+   * `was` is the pause already set, if any: the project is then stopped and checkpointed again only when something of it still runs.
+   */
+  async function stopProject(id: string, name: string, why: string, was: Paused | null) {
+    const key = repoKey(id), repo = folderOf(id), deps = fullStopDeps!;
+    const dir = checkpointsDir ? checkpointDirOf(checkpointsDir, id) : join(tmpdir(), `f1rm-checkpoint-${key}`);
+    const listing = await machine.liveSessions();
+    const seen = new Map<string, Employee>();
+    for (const e of Object.values(state.employees)) {
+      if (e.room !== id || !e.role || e.role === "pm" || !e.title || !hireName(e.title)) continue;
+      if (!seen.has(e.title) || seen.get(e.title)!.status === "offline") seen.set(e.title, e);
+    }
+    const hires: Hire[] = [];
+    for (const e of seen.values()) {
+      if (!(await machine.backgroundId(e.sessionId))) continue; // the user's own interactive session wearing a hire's title: not ours to stop
+      const h = hireName(e.title!)!;
+      const pid = listing ? listing.get(e.sessionId)?.pid : pids.get(e.sessionId);
+      if (was && !pid) continue; // stopped by an earlier pause and already in its manifest
+      const rows = (h.role === "lead" || !h.team ? boards[id] : teamBoards[id]?.[h.team]) ?? [];
+      const row = rows.find((r) => r.owner === clip(e.title!, MAX_CELL.owner) || (h.reviewer && r.branch === clip(`worktree-${h.task}`, MAX_CELL.branch))) ?? null;
+      hires.push({ name: e.title!, role: h.role, task: h.task, sessionId: e.sessionId, cwd: e.cwd, ...(pid && { pid }), row });
+    }
+    const protect = deps.protect ?? [process.pid];
+    if (was && !hires.length && !claim(await deps.procs(), { roots: [], worktrees: join(realRealpath(repo), ".claude", "worktrees"), protect }).length) {
+      return { room: name, stopped: [] as string[], killed: [], remaining: [], checkpoint: was.checkpoint ?? null, verified: true, saved: [], unsaved: [] as string[] };
+    }
+    const previous = was?.checkpoint ? readManifest(dir, was.checkpoint) : null;
+    const r = await fullStop({ ...deps, repo, hires, protect, previous, why: was?.why ?? why, now: clock(), dir, stop: (sessionId) => machine.stop(sessionId) });
+    const now = pausedOf(key); // not if it was resumed meanwhile; halted names added during the stops are kept
+    if (now) setPaused(key, { ...now, stopped: [...new Set([...(now.stopped ?? []), ...r.stopped])], checkpoint: r.manifest.id });
+    push();
+    return {
+      room: name, stopped: r.stopped, killed: r.killed.map(({ pid, command, cwd, signal }) => ({ pid, command, cwd, signal })), remaining: r.remaining.map(({ pid, command, cwd }) => ({ pid, command, cwd })),
+      checkpoint: r.manifest.id, verified: r.remaining.length === 0, saved: r.saved, unsaved: r.unsaved,
+    };
+  }
   /** The resumes under way, by repo: each wakes or tells its hires one at a time and ends when the last is up, or when the project is paused again (it then hands its unfinished hires to the new pause). The recovery tick leaves a repo with a resume under way alone. */
   const resumes = new Map<string, Set<{ stop: AbortController; pending: Set<string> }>>();
   const closing = new AbortController();
@@ -924,28 +977,54 @@ export function startServer({
         }
         if (all !== true && !isProject(room as string)) return Response.json({ error: "No such project." }, { status: 404 });
         const changed: string[] = [];
+        const results: Awaited<ReturnType<typeof stopProject>>[] = [];
+        const lost: { name: string; why: string }[] = [];
         let waking = 0;
         for (const key of all === true ? registeredKeys() : [repoKey(room as string)]) {
           const was = pausedOf(key);
-          if (rest[0] === "pause" ? was : !was) continue; // already so
+          if (rest[0] === "resume" && !was) continue; // not paused
           const id = Object.keys(state.rooms).find((r) => repoKey(r) === key); // none for a project no session has been in
+          const name = id ? roomName(id) : registeredName(key);
           if (rest[0] === "pause") {
-            // A resume still under way ends here; the hires it had not reached go to this pause, for the next resume.
-            const unfinished: string[] = [];
-            for (const job of (id && resumes.get(folderOf(id))) || []) {
-              job.stop.abort();
-              unfinished.push(...job.pending);
-              job.pending.clear();
+            if (!was) {
+              // A resume still under way ends here; the hires it had not reached go to this pause, for the next resume.
+              const unfinished: string[] = [];
+              for (const job of (id && resumes.get(folderOf(id))) || []) {
+                job.stop.abort();
+                unfinished.push(...job.pending);
+                job.pending.clear();
+              }
+              stopTries.clear();
+              setPaused(key, { by: "manual", at: clock(), why: (why as string | undefined) ?? "", ...(unfinished.length && { halted: unfinished }) });
+              changed.push(name);
             }
-            setPaused(key, { by: "manual", at: clock(), why: (why as string | undefined) ?? "", ...(unfinished.length && { halted: unfinished }) });
+            // A pause that was already set stops and checkpoints again only if something of the project still runs.
+            if (id && fullStopDeps) {
+              try {
+                results.push(await stopProject(id, name, (why as string | undefined) ?? "", was));
+              } catch (err) {
+                // The flag is set, so the hires halt at their next step; but nothing was verified, and the command must not say "All N stopped".
+                console.log(`pause ${name}: ${(err as Error).message}`);
+                return Response.json({ ok: false, error: `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.` }, { status: 500 });
+              }
+            }
           } else {
             setPaused(key, null);
-            if (id) waking += resumeHires(id, [...new Set([...(was!.halted ?? []), ...(was!.stopped ?? [])])]);
+            if (id) {
+              // The checkpoint of the pause says who was running and where each stopped; a session whose conversation `claude agents` no longer lists cannot be woken, and is reported.
+              const m = was!.checkpoint && checkpointsDir ? readManifest(checkpointDirOf(checkpointsDir, id), was!.checkpoint) : null;
+              const listing = m ? await machine.sessions().catch(() => null) : null;
+              const gone = new Set(m && listing ? m.sessions.filter((s) => !listing.some((a) => a.sessionId === s.sessionId)).map((s) => s.name) : []);
+              for (const g of gone) lost.push({ name: g, why: `its conversation is gone: Claude Code lists no session ${m!.sessions.find((s) => s.name === g)!.sessionId}; hire a new one` });
+              const notes = Object.fromEntries((m?.sessions ?? []).map((s) => [s.name, whereItStopped(s, m!.id)]));
+              const names = [...new Set([...(was!.halted ?? []), ...(was!.stopped ?? []), ...(m?.sessions ?? []).map((s) => s.name)])].filter((n) => !gone.has(n));
+              waking += resumeHires(id, names, notes);
+            }
+            changed.push(name);
           }
-          changed.push(id ? roomName(id) : key.split("-").pop() || key);
         }
         push();
-        return Response.json({ ok: true, rooms: changed, waking });
+        return Response.json({ ok: true, rooms: changed, waking, results, lost });
       }
       if (rest[0] === "show" && rest.length === 1) {
         // A bare `f1rm` asks the open office pages to show a project, so it opens a new tab only when none is open.
@@ -982,6 +1061,8 @@ export function startServer({
           return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
         }
         const folder = folderOf(room);
+        const paused = pausedOf(room);
+        if (paused) return Response.json({ error: hireRefusal(roomName(room), paused), working: null }, { status: 409 });
         // Asked at most once, and only when something needs it: the PM's name and the path limit both read it, after the cheap checks.
         let common: string | null | undefined;
         const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
@@ -1067,14 +1148,19 @@ export function startServer({
    * GRACE_MS after a pause, the project's hires that `claude agents` still lists busy (a turn can run on with no hook, streaming text) are stopped with `claude stop`, which keeps their conversation and worktree.
    * An idle hire is left: it can't continue. The names stopped are kept in the pause, for the resume to wake.
    */
+  const stopTries = new Map<string, number>(); // failed `claude stop`s per session
   async function stopBusy(listed: Map<string, { status?: "busy" | "idle" }>) {
     for (const room of projectRooms()) {
       const paused = pausedOf(room);
       if (!paused || clock() - paused.at < GRACE_MS) continue;
-      // Every check while the project stays paused: a stop that failed, or a hire that turned busy after the 30 s, is tried again.
-      const busy = Object.values(state.employees).filter((e) => e.room === room && e.role && e.role !== "pm" && e.title && hireName(e.title) && !paused.stopped?.includes(e.title) && listed.get(e.sessionId)?.status === "busy");
+      // Every check while the project stays paused: a stop that failed, or a hire that turned busy after the 30 s, is tried again, a few times: a session `claude stop` cannot find
+      // (an interactive one wearing a hire's title) would otherwise cost two `claude` runs at every check.
+      const busy = Object.values(state.employees).filter((e) => e.room === room && e.role && e.role !== "pm" && e.title && hireName(e.title) && !paused.stopped?.includes(e.title) && listed.get(e.sessionId)?.status === "busy" && (stopTries.get(e.sessionId) ?? 0) < STOP_TRIES);
       const done: string[] = [];
-      for (const e of busy) if (await machine.stop(e.sessionId).catch(() => false)) done.push(e.title!);
+      for (const e of busy) {
+        if (await machine.stop(e.sessionId).catch(() => false)) done.push(e.title!);
+        else stopTries.set(e.sessionId, (stopTries.get(e.sessionId) ?? 0) + 1);
+      }
       const now = pausedOf(room); // not if it was resumed meanwhile; halted names added during the stops are kept
       if (now?.at === paused.at && (done.length || !now.stopped)) setPaused(room, { ...now, stopped: [...(now.stopped ?? []), ...done] });
     }
@@ -1182,13 +1268,13 @@ export function startServer({
     },
   });
   /** Starts continuing the hires a pause halted or stopped, one at a time (see recovery.resume), and returns how many. It runs on after the response; a restart of the office ends it, and the recovery tick takes over. */
-  function resumeHires(room: string, names: string[]): number {
+  function resumeHires(room: string, names: string[], notes?: Record<string, string>): number {
     if (!recovering || !names.length) return 0;
     const repo = folderOf(room);
     const job = { stop: new AbortController(), pending: new Set(names) };
     resumes.set(repo, (resumes.get(repo) ?? new Set()).add(job));
     void recovering
-      .resume(repo, names, AbortSignal.any([closing.signal, job.stop.signal]), (name) => job.pending.delete(name))
+      .resume(repo, names, AbortSignal.any([closing.signal, job.stop.signal]), (name) => job.pending.delete(name), notes)
       .catch((err) => console.log(`resume ${basename(repo)}: ${(err as Error).message}`))
       .finally(() => {
         resumes.get(repo)?.delete(job);
