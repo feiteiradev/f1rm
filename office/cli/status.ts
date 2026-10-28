@@ -3,6 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { basename, dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
 import { agents, commitTimeArgs, machine } from "../server/machine.ts";
+import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
@@ -312,7 +313,9 @@ export async function status(args: { json: boolean }, deps: Omit<HiresDeps, "age
   const listed = await deps.loadAgents();
   if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so there is nothing to report", code: 1 };
   const list = hires({ ...deps, agents: listed });
-  return { out: args.json ? JSON.stringify(list, null, 2) + "\n" : table(list, deps.now), err: "", code: 0 };
+  const paused = args.json ? null : readPaused(pausedFile(pausedDirOf(deps.home), deps.repo));
+  const banner = paused ? `PAUSED (${paused.by}) since ${new Date(paused.at).toISOString()}${paused.why ? `: ${paused.why}` : ""}; \`f1rm resume\` wakes it\n` : "";
+  return { out: args.json ? JSON.stringify(list, null, 2) + "\n" : banner + table(list, deps.now), err: "", code: 0 };
 }
 
 const POLL_MS = 60_000;
@@ -382,7 +385,9 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
       return [`${n.name}: reported ${r.kind === "CHANGES" ? "CHANGES REQUESTED" : r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
     });
     if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
-    const out = [...reported, ...names.flatMap((n) => { const why = stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; })];
+    // Nobody is stalled in a paused project: its sessions are stopped on purpose.
+    const paused = !!readPaused(pausedFile(pausedDirOf(deps.home), deps.repo));
+    const out = [...reported, ...names.flatMap((n) => { const why = paused ? null : stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; })];
     if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
   }
 }

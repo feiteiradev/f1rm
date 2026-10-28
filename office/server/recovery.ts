@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
+import { HireRefused } from "../cli/hire.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { parseReport, reportFile, reportSlug } from "../cli/report.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
@@ -15,7 +16,7 @@ const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 const MONTHS =["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*,\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
+const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*(?:,|\bat\b)\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
 
 /** The wall-clock parts of instant `t` in zone `tz` (a RangeError for a zone that does not exist). */
 function wall(t: number, tz: string) {
@@ -45,7 +46,7 @@ function instant(tz: string, year: number, month: number, day: number, hour: num
 }
 
 /**
- * When a limit stop lifts, as epoch ms: the text after "resets" ("8:40pm (Europe/Lisbon)", "Oct 27, 9am (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"), read as the first such moment after `stoppedAt`.
+ * When a limit stop lifts, as epoch ms: the text after "resets" ("8:40pm (Europe/Lisbon)", "Oct 27, 9am (Europe/Lisbon)", "Oct 28 at 6am (Europe/Lisbon)" as the weekly limit says it, "Monday 9:00 (Europe/Lisbon)"), read as the first such moment after `stoppedAt`.
  * A time without am/pm is a 24-hour one. No zone means this machine's. Null for a text that names no time or a zone that does not exist.
  */
 export function resetAt(text: string, stoppedAt: number): number | null {
@@ -88,6 +89,9 @@ const QUIET_MS = 20 * MIN; // a turn ended this long ago without a report: one n
 const REPORT = /^\s*(?:DONE|APPROVED|CHANGES REQUESTED|BLOCKED|ESCALATE|NEEDS YOU)\b/;
 export const NOTE_LIMIT = "resumed after the session limit; continue your task";
 export const NOTE_ENDED = "resumed after your session ended; continue your task";
+// The second sentence is needed: measured with a Haiku hire, the bare note was refused ("the peer message doesn't override that pause"), because the stop reason stays in the conversation.
+export const NOTE_PAUSE = "resumed after a pause; continue your task. The PM lifted the pause: the stop reason in your conversation no longer applies.";
+const SLOT_WAIT_MS = 10_000; // the resume asks again for a free slot this often
 export const NUDGE = "your turn ended without a report; send your DONE or BLOCKED";
 
 /**
@@ -120,6 +124,10 @@ export type RecoveryDeps = {
   /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
   tell: (repo: string, name: string, message: string, sessionId?: string) => Promise<boolean>;
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
+  /** True while the project is paused (or its resume is still waking): the tick then wakes, nudges and notes nothing. Optional: tests that build RecoveryDeps without it never pause. */
+  paused?: (repo: string) => boolean;
+  /** Waits `ms`; the resume waits for a free slot with it. Defaults to a real wait. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 /** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
@@ -190,6 +198,7 @@ const active = (rows: BoardRow[], name: string, h: HireName) =>
  */
 export function createRecovery(d: RecoveryDeps) {
   async function recoverRepo(repo: string, all: any[]) {
+    if (d.paused?.(repo)) return;
     const entries = d.store.load(repo);
     const before = JSON.stringify(entries);
     const mine = all.filter((a) => a?.kind === "background" && typeof a.name === "string" && typeof a.cwd === "string" && hireName(a.name) && repoOf(a.cwd) === repo);
@@ -359,7 +368,44 @@ export function createRecovery(d: RecoveryDeps) {
     return true;
   }
 
+  /**
+   * After a resume: continues the hires `names` (the ones the pause halted or stopped) whose board row is doing or review, leads first, one at a time: a live one is told in its inbox, an ended one is woken through the same checks as `f1rm wake`.
+   * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts, which the office does when the project is paused again; `done` hears of each hire as it is reached). Any other refusal (let go, its lead not running) is noted
+   * for `f1rm status` and left to the recovery tick, which takes the project back when this ends.
+   */
+  async function resume(repo: string, names: string[], signal?: AbortSignal, done?: (name: string) => void) {
+    const sleep = d.sleep ?? ((ms: number) => Bun.sleep(ms));
+    const hires = names.flatMap((name) => hireName(name) ? [{ name, h: hireName(name)! }] : []).sort((a, b) => Number(b.h.role === "lead") - Number(a.h.role === "lead"));
+    for (const { name, h } of hires) {
+      for (;;) {
+        if (signal?.aborted) return;
+        try {
+          if (!active(await d.board(repo, h.role === "lead" ? null : h.team), name, h)) break;
+          // The pause only ended the turn of a session that was working at a hook: its process lives, and the note goes to its inbox.
+          const all = (await d.sessions()) ?? [];
+          const liveOne = all.filter((a) => a?.pid && a.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo).reduce<any>((best, a) => (!best || (a.startedAt ?? 0) > (best.startedAt ?? 0) ? a : best), undefined);
+          if (liveOne) {
+            if (!(await safeTell(repo, name, NOTE_PAUSE, String(liveOne.sessionId ?? liveOne.id)))) throw new Error(`${name} has no inbox`);
+          } else await d.wake(repo, name, NOTE_PAUSE);
+          break;
+        } catch (err) {
+          if (err instanceof HireRefused && err.working !== null) {
+            await sleep(SLOT_WAIT_MS);
+            continue;
+          }
+          console.log(`resume ${basename(repo)}/${name}: ${(err as Error).message}`);
+          const entries = d.store.load(repo);
+          (entries[name] ??= {}).note = `could not be resumed after the pause (${(err as Error).message}); message it, or f1rm wake ${name} when its process ended`;
+          d.store.save(repo, entries);
+          break;
+        }
+      }
+      done?.(name); // reached, or refused for good; an abort leaves it for whoever carries on
+    }
+  }
+
   return {
+    resume,
     async tick(repos: string[]) {
       const all = repos.length ? await d.sessions() : null;
       if (!all) return;

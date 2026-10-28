@@ -7,6 +7,7 @@ import { projectFolder as folder } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
 import { reportFile } from "./report.ts";
+import { pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
 import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
@@ -672,4 +673,32 @@ test("f1rm status shows each hire's last report (kind, seq, how long ago) in a R
   const json = JSON.parse((await status({ json: true }, deps)).out);
   expect(json.find((x: Hire) => x.name === "shop.backend-dev-x").report).toEqual({ kind: "BLOCKED", seq: 3, at: new Date(NOW - 12 * MIN).toISOString() });
   expect(json.find((x: Hire) => x.name === "lead-a").report).toBeNull();
+});
+
+// ── a paused project ───────────────────────────────────────────────────────
+const pause = (h: string, why = "") => writePaused(pausedFile(pausedDirOf(h), REPO), { by: "manual", at: NOW - 5 * MIN, why });
+const SINCE = new Date(NOW - 5 * MIN).toISOString();
+
+test("status says the project is paused on a line of its own above the table, and prints the table and the json as before otherwise", async () => {
+  const h = home();
+  const cwd = `${REPO}/.claude/worktrees/checkout`;
+  transcript(h, cwd, "cccc3333", [talk("on it")], 3);
+  const deps = { ...base(h, []), loadAgents: async () => [live("shop.backend-dev-checkout", "cccc3333", cwd)] };
+  const before = await status({ json: false }, deps);
+  expect(before.out.split("\n")[0]).toContain("NAME");
+  const json = (await status({ json: true }, deps)).out;
+  pause(h, "lunch");
+  expect((await status({ json: false }, deps)).out).toBe(`PAUSED (manual) since ${SINCE}: lunch; \`f1rm resume\` wakes it\n${before.out}`);
+  expect((await status({ json: false }, { ...deps, loadAgents: async () => [] })).out).toBe(`PAUSED (manual) since ${SINCE}: lunch; \`f1rm resume\` wakes it\nno hires\n`);
+  pause(h);
+  expect((await status({ json: false }, { ...deps, loadAgents: async () => [] })).out).toBe(`PAUSED (manual) since ${SINCE}; \`f1rm resume\` wakes it\nno hires\n`);
+  expect((await status({ json: true }, deps)).out).toBe(json); // the json stays one array of hires
+});
+
+test("a watcher reports no stall while the project is paused, and the first poll after the resume does", async () => {
+  const r = await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n, home) => {
+    if (n === 1) pause(home);
+    if (n === 5) rmSync(pausedFile(pausedDirOf(home), REPO));
+  });
+  expect(r).toMatchObject({ woke: true, sleeps: 5, out: "lead-a: idle 605 minutes\n" }); // polls 1 to 4 find it idle for 20 minutes and say nothing
 });

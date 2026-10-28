@@ -47,6 +47,7 @@ const fakeMachine = () => ({
   },
   backgroundId: async () => null,
   letGo: async () => {},
+  stop: async () => true,
   sessions: async () => [],
   mergedBranch: () => false,
   removeWorktree: () => {},

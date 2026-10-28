@@ -290,6 +290,12 @@ export const machine = {
     return typeof found?.id === "string" && SAFE_ID.test(found.id) ? found.id : null;
   },
 
+  /** Stops a background session with `claude stop`, which keeps its conversation and its worktree (the pause's stop: never rm, kill or daemon stop). False if it lists no such session or `stop` refused. */
+  async stop(sessionId: string): Promise<boolean> {
+    const id = await machine.backgroundId(sessionId);
+    return !!id && (await claude("stop", id)).code === 0;
+  },
+
   /**
    * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
    * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.

@@ -1,17 +1,19 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | letgo | status | report
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | status | report
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { pausedDirOf } from "../server/pause.ts";
 import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong } from "./hire.ts";
 import { letgo } from "./letgo.ts";
 import { wake } from "./wake.ts";
+import { pauseCall } from "./pause.ts";
 import { reportIn } from "./report.ts";
 import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
@@ -276,7 +278,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
@@ -495,6 +497,19 @@ async function pm() {
   process.exit(await proc.exited);
 }
 
+/** `f1rm pause` / `f1rm resume`: the running office does it; with none running nothing is stopped, and the command says so. */
+const pauseOrResume = (verb: "pause" | "resume") => async () => {
+  const url = await runningOffice();
+  if (!url) throw new Error("the office isn't running, so there is nothing to " + verb + " (`f1rm start` starts it)");
+  console.log(await pauseCall(verb, process.argv.slice(3), {
+    room: () => machine.gitCommonDir(process.cwd()) ?? process.cwd(),
+    post: async (path, body) => {
+      const r = await fetch(new URL(path, url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+      return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };
+    },
+  }));
+};
+
 const commands: Record<string, () => void | Promise<void>> = {
   install: () => install().forEach((line) => console.log(line)),
   uninstall,
@@ -507,6 +522,8 @@ const commands: Record<string, () => void | Promise<void>> = {
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
   wake: async () => process.exit(await wake(process.argv.slice(3))),
+  pause: pauseOrResume("pause"),
+  resume: pauseOrResume("resume"),
   letgo: async () => {
     const names = process.argv.slice(3);
     if (!names.length) throw new Error("usage: f1rm letgo <name>...");
@@ -527,7 +544,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | letgo <name>... | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>]";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>]";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

@@ -1,8 +1,9 @@
 // `f1rm wake <name|id> [message]`: resumes a stopped, blocked or done hire (or lead) of this project in place, with its history, name and Report to.
 // A session whose process ended is resumed as a NEW session (new id, the old history copied, the old transcript untouched); name and folder are kept only because they are passed here.
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
+import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, withPonytail, type LiveHires } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
@@ -86,6 +87,9 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const common = await d.gitCommonDir(req.cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
+  // The office stops a paused project's sessions at every step; a session woken now would be stopped again at once.
+  const paused = readPaused(pausedFile(pausedDirOf(d.home), repo));
+  if (paused) throw new Error(`${basename(repo)} is paused (${paused.by}${paused.why ? `: ${paused.why}` : ""}): nothing in it is woken until \`f1rm resume\` runs in the project`);
   const tooLong = rootTooLong(common);
   if (tooLong) throw new HireRefused(tooLong, null);
   const all = await d.agents(true);

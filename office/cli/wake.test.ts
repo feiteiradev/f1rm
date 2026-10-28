@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder, SECURITY } from "./hire.ts";
 import { hireName } from "./letgo.ts";
+import { clearPaused, pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
 import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
 
 setDefaultTimeout(30_000);
@@ -49,6 +50,20 @@ test("a stopped member is resumed in the background with its agent, its name and
   ]);
   expect(p.cwd).toBe(wt("checkout"));
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
+});
+
+test("a hire of a paused project is not woken, and the refusal points at `f1rm resume`; once resumed it is woken as before", async () => {
+  const home = tmp("f1rm-wake-home-");
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  const file = pausedFile(pausedDirOf(home), REPO);
+  writePaused(file, { by: "manual", at: NOW, why: "lunch" });
+  const refused = await failure(plan("shop.backend-dev-checkout", [lead, dev], {}, { home }));
+  expect(refused?.message).toContain("shop is paused");
+  expect(refused?.message).toContain("f1rm resume");
+  const other = await plan("shop.backend-dev-checkout", [lead, dev], {}, { home: tmp("f1rm-wake-home-") }); // another office home has no pause
+  expect(other.name).toBe("shop.backend-dev-checkout");
+  clearPaused(file);
+  expect((await plan("shop.backend-dev-checkout", [lead, dev], {}, { home })).name).toBe("shop.backend-dev-checkout");
 });
 
 test("a woken member keeps ponytail full, a woken lead keeps the default, and a --settings the caller passes gets the level merged into it", async () => {
