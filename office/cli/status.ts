@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
 import { agents, commitTimeArgs, machine } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
+import { sleepGrace } from "../server/sleep.ts";
 import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
@@ -365,6 +366,8 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
   if (!names.length) return NO_NAMES;
   const seen = new Map<string, number | null>();
   const plain = new Set<string>();
+  const resting = sleepGrace();
+  resting(deps.now());
   for (;;) {
     await deps.sleep(POLL_MS);
     const listed = await deps.loadAgents();
@@ -385,8 +388,9 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
       return [`${n.name}: reported ${r.kind === "CHANGES" ? "CHANGES REQUESTED" : r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
     });
     if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
-    // Nobody is stalled in a paused project: its sessions are stopped on purpose.
-    const paused = !!readPaused(pausedFile(pausedDirOf(deps.home), deps.repo));
+    // Nobody is stalled in a paused project (its sessions are stopped on purpose) or just after the Mac slept (a poll that came more than 2 minutes late); a report still wakes the watcher.
+    const asleep = resting(deps.now());
+    const paused = asleep || !!readPaused(pausedFile(pausedDirOf(deps.home), deps.repo));
     const out = [...reported, ...names.flatMap((n) => { const why = paused ? null : stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; })];
     if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
   }

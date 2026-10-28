@@ -18,6 +18,7 @@ import { mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
 import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
+import { clearOverride, inWorkHours, nextEnd, overrideFile, readOverride, scheduleAction, writeOverride, type WorkHours } from "./workhours.ts";
 import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
@@ -238,6 +239,8 @@ type Options = {
   checkpointsDir?: string;
   /** The process table and kill a pause uses to stop what the hires started. Without it a pause stops the sessions only, after the grace, and checkpoints nothing. */
   fullStop?: FullStopOptions;
+  /** The work-hours schedule (workhours.ts): the config, read at every look so an edit applies at once, where a manual resume out of hours leaves its override, and how often the schedule is looked at. Without it nothing is scheduled. */
+  workHours?: { config: () => WorkHours; overridesDir: string; everyMs: number };
   /** Where Claude Code keeps session transcripts (`~/.claude/projects`): the skill gate reads a refused Skill call from there. */
   transcriptsDir?: string;
   /** The folders that never get a door: the office's own, Claude's and temp folders. Tests inject them. */
@@ -338,6 +341,7 @@ export function startServer({
   pausedDir,
   checkpointsDir,
   fullStop: fullStopDeps,
+  workHours,
   transcriptsDir = join(homedir(), ".claude", "projects"),
   junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
@@ -979,51 +983,25 @@ export function startServer({
         const changed: string[] = [];
         const results: Awaited<ReturnType<typeof stopProject>>[] = [];
         const lost: { name: string; why: string }[] = [];
+        const failed: string[] = []; // one project's failure never stops the loop over the others
         let waking = 0;
         for (const key of all === true ? registeredKeys() : [repoKey(room as string)]) {
-          const was = pausedOf(key);
-          if (rest[0] === "resume" && !was) continue; // not paused
-          const id = Object.keys(state.rooms).find((r) => repoKey(r) === key); // none for a project no session has been in
-          const name = id ? roomName(id) : registeredName(key);
           if (rest[0] === "pause") {
-            if (!was) {
-              // A resume still under way ends here; the hires it had not reached go to this pause, for the next resume.
-              const unfinished: string[] = [];
-              for (const job of (id && resumes.get(folderOf(id))) || []) {
-                job.stop.abort();
-                unfinished.push(...job.pending);
-                job.pending.clear();
-              }
-              stopTries.clear();
-              setPaused(key, { by: "manual", at: clock(), why: (why as string | undefined) ?? "", ...(unfinished.length && { halted: unfinished }) });
-              changed.push(name);
-            }
-            // A pause that was already set stops and checkpoints again only if something of the project still runs.
-            if (id && fullStopDeps) {
-              try {
-                results.push(await stopProject(id, name, (why as string | undefined) ?? "", was));
-              } catch (err) {
-                // The flag is set, so the hires halt at their next step; but nothing was verified, and the command must not say "All N stopped".
-                console.log(`pause ${name}: ${(err as Error).message}`);
-                return Response.json({ ok: false, error: `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.` }, { status: 500 });
-              }
-            }
+            const r = await pauseProject(key, "manual", (why as string | undefined) ?? "");
+            if (r.changed) changed.push(r.name);
+            if (r.result) results.push(r.result);
+            if (r.error) failed.push(r.error);
           } else {
-            setPaused(key, null);
-            if (id) {
-              // The checkpoint of the pause says who was running and where each stopped; a session whose conversation `claude agents` no longer lists cannot be woken, and is reported.
-              const m = was!.checkpoint && checkpointsDir ? readManifest(checkpointDirOf(checkpointsDir, id), was!.checkpoint) : null;
-              const listing = m ? await machine.sessions().catch(() => null) : null;
-              const gone = new Set(m && listing ? m.sessions.filter((s) => !listing.some((a) => a.sessionId === s.sessionId)).map((s) => s.name) : []);
-              for (const g of gone) lost.push({ name: g, why: `its conversation is gone: Claude Code lists no session ${m!.sessions.find((s) => s.name === g)!.sessionId}; hire a new one` });
-              const notes = Object.fromEntries((m?.sessions ?? []).map((s) => [s.name, whereItStopped(s, m!.id)]));
-              const names = [...new Set([...(was!.halted ?? []), ...(was!.stopped ?? []), ...(m?.sessions ?? []).map((s) => s.name)])].filter((n) => !gone.has(n));
-              waking += resumeHires(id, names, notes);
-            }
-            changed.push(name);
+            const r = await resumeProject(key);
+            if (!r) continue; // not paused
+            changed.push(r.name);
+            lost.push(...r.lost);
+            waking += r.waking;
+            holdUntilEvening(key);
           }
         }
         push();
+        if (failed.length) return Response.json({ ok: false, error: failed.join("\n"), rooms: changed, waking, results, lost }, { status: 500 });
         return Response.json({ ok: true, rooms: changed, waking, results, lost });
       }
       if (rest[0] === "show" && rest.length === 1) {
@@ -1253,6 +1231,88 @@ export function startServer({
       letting = false;
     }
   }
+  /**
+   * Pauses one project (by its key) the way `f1rm pause` does, for `by`: the flag first, then the full stop and the checkpoint. A pause that was set already stops and checkpoints again only if something still runs.
+   * A stop that fails leaves the flag set (the hires halt at their next step) and comes back as `error`: nothing was verified, so the caller must not say "All N stopped".
+   */
+  async function pauseProject(key: string, by: Paused["by"], why: string) {
+    const was = pausedOf(key);
+    const id = Object.keys(state.rooms).find((r) => repoKey(r) === key); // none for a project no session has been in
+    const name = id ? roomName(id) : registeredName(key);
+    if (!was) {
+      // A resume still under way ends here; the hires it had not reached go to this pause, for the next resume.
+      const unfinished: string[] = [];
+      for (const job of (id && resumes.get(folderOf(id))) || []) {
+        job.stop.abort();
+        unfinished.push(...job.pending);
+        job.pending.clear();
+      }
+      stopTries.clear();
+      setPaused(key, { by, at: clock(), why, ...(unfinished.length && { halted: unfinished }) });
+    }
+    let result: Awaited<ReturnType<typeof stopProject>> | undefined;
+    let error: string | undefined;
+    if (id && fullStopDeps) {
+      try {
+        result = await stopProject(id, name, why, was);
+      } catch (err) {
+        console.log(`pause ${name}: ${(err as Error).message}`);
+        error = `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.`;
+      }
+    }
+    return { name, changed: !was, result, error };
+  }
+  /** Lifts a project's pause and starts continuing its hires; null when it was not paused. */
+  async function resumeProject(key: string) {
+    const was = pausedOf(key);
+    if (!was) return null;
+    const id = Object.keys(state.rooms).find((r) => repoKey(r) === key);
+    const name = id ? roomName(id) : registeredName(key);
+    setPaused(key, null);
+    const lost: { name: string; why: string }[] = [];
+    let waking = 0;
+    if (id) {
+      // The checkpoint of the pause says who was running and where each stopped; a session whose conversation `claude agents` no longer lists cannot be woken, and is reported.
+      const m = was.checkpoint && checkpointsDir ? readManifest(checkpointDirOf(checkpointsDir, id), was.checkpoint) : null;
+      const listing = m ? await machine.sessions().catch(() => null) : null;
+      const gone = new Set(m && listing ? m.sessions.filter((s) => !listing.some((a) => a.sessionId === s.sessionId)).map((s) => s.name) : []);
+      for (const g of gone) lost.push({ name: g, why: `its conversation is gone: Claude Code lists no session ${m!.sessions.find((s) => s.name === g)!.sessionId}; hire a new one` });
+      const notes = Object.fromEntries((m?.sessions ?? []).map((s) => [s.name, whereItStopped(s, m!.id)]));
+      const names = [...new Set([...(was.halted ?? []), ...(was.stopped ?? []), ...(m?.sessions ?? []).map((s) => s.name)])].filter((n) => !gone.has(n));
+      waking = resumeHires(id, names, notes);
+    }
+    return { name, lost, waking };
+  }
+  /** A manual resume out of work hours lasts until the end of the next work day: the schedule leaves the project running until then, and pauses it again at that 19:00. */
+  function holdUntilEvening(key: string) {
+    if (!workHours) return;
+    const c = workHours.config(), t = clock();
+    if (!inWorkHours(c, t)) writeOverride(overrideFile(workHours.overridesDir, key), { until: nextEnd(c, t) });
+  }
+  // The schedule: at every look each registered project is paused by the schedule or has the schedule's own pause lifted, as scheduleAction says (a boundary the Mac slept through is applied at the first look after waking).
+  let scheduling = false;
+  async function scheduleOnce() {
+    if (!workHours || scheduling) return;
+    scheduling = true;
+    try {
+      const c = workHours.config(), now = clock();
+      for (const key of registeredKeys()) {
+        const file = overrideFile(workHours.overridesDir, key);
+        const override = readOverride(file);
+        if (override && override.until <= now) clearOverride(file);
+        const action = scheduleAction(c, now, pausedOf(key), override);
+        if (action === "pause") {
+          const r = await pauseProject(key, "schedule", "work hours");
+          if (r.error) console.log(`work hours ${r.name}: ${r.error}`);
+        } else if (action === "resume") await resumeProject(key);
+      }
+      push();
+    } catch (err) {
+      console.log(`work hours: ${(err as Error).message}`);
+    } finally {
+      scheduling = false;
+    }
+  }
   // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
   const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
   const recovering = recovery && createRecovery({
@@ -1300,6 +1360,8 @@ export function startServer({
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
+  const scheduleTimer = workHours && setInterval(scheduleOnce, workHours.everyMs);
+  void ready.then(scheduleOnce); // an office that starts out of hours pauses at once, not a look later
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     closing.abort();
@@ -1308,6 +1370,7 @@ export function startServer({
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
     clearInterval(recoveryTimer);
+    clearInterval(scheduleTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);
     db.close();

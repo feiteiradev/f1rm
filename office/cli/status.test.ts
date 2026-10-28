@@ -291,14 +291,14 @@ const namesOf = (names: string[]) => {
 };
 
 /** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
-async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => void = () => {}, h = home()) {
+async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => unknown = () => {}, h = home()) {
   const listed = fleet(h, members);
   let clock = NOW, sleeps = 0, loads = 0;
   try {
     const r = await watch(namesOf(names), {
       repo: REPO, home: h, now: () => clock,
       loadAgents: async () => { if (++loads > 100) throw new Error("runaway"); return listed; },
-      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; onSleep(sleeps, h, clock); },
+      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; const jump = onSleep(sleeps, h, clock); if (typeof jump === "number") clock += jump; }, // a number it returns is a sleep: the clock jumps by that many ms
     });
     return { ...r, sleeps, woke: true };
   } catch (e) {
@@ -673,6 +673,13 @@ test("f1rm status shows each hire's last report (kind, seq, how long ago) in a R
   const json = JSON.parse((await status({ json: true }, deps)).out);
   expect(json.find((x: Hire) => x.name === "shop.backend-dev-x").report).toEqual({ kind: "BLOCKED", seq: 3, at: new Date(NOW - 12 * MIN).toISOString() });
   expect(json.find((x: Hire) => x.name === "lead-a").report).toBeNull();
+});
+
+test("a watcher that wakes from a sleep (a gap over 2 minutes between polls) judges no one stalled for 5 minutes, and then does", async () => {
+  const r = await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n) => (n === 1 ? 3 * MIN : undefined));
+  expect(r).toMatchObject({ woke: true, sleeps: 6, out: "lead-a: idle 609 minutes\n" }); // the poll that ends the grace is the 5th minute after the first one back
+  // A gap of exactly 2 minutes (the poll's minute and one more) is no sleep.
+  expect(await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n) => (n === 1 ? MIN : undefined))).toMatchObject({ woke: true, sleeps: 1 });
 });
 
 // ── a paused project ───────────────────────────────────────────────────────

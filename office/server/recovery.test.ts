@@ -7,6 +7,7 @@ import { recoveryFile } from "../cli/status.ts";
 import { HireRefused, LOAD_FIRST } from "../cli/hire.ts";
 import { planWake } from "../cli/wake.ts";
 import { parseBoard, type BoardRow } from "./board.ts";
+import { sleepGrace } from "./sleep.ts";
 import { createRecovery, fileStore, resetAt, type Entries } from "./recovery.ts";
 
 setDefaultTimeout(30_000);
@@ -38,7 +39,7 @@ const sent = (message: string, closing: string, ago: number, now = T0) => [
 const row = (owner: string, status: string, task: string): BoardRow => ({ id: "T1", owner, status, branch: `worktree-${task}`, task: "x" });
 
 /** A fake office: the listing, transcripts, boards and clock are set by the test; wakes and tells are recorded. */
-function office(over: { wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
+function office(over: { resting?: (now: number) => boolean; wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
   const w = {
     now: T0 + 5 * MIN,
     list: [] as Listed[],
@@ -76,6 +77,7 @@ function office(over: { wake?: (repo: string, name: string, note: string) => Pro
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
     paused: () => w.paused,
     sleep: async (ms) => (w.slept.push(ms), w.onSleep()),
+    resting: over.resting ?? (() => false), // the fake clock jumps between ticks; the sleep rule has its own tests
   });
   const rec = make();
   return { w, rec, make, tick: (repos = [REPO]) => rec.tick(repos) };
@@ -743,6 +745,7 @@ test("when the tell to the newest session fails, the Report to is tried again by
   stoppedDev(o, [limitStop(null, 0)]);
   const tried: (string | undefined)[] = [];
   const make = createRecovery({
+    resting: () => false,
     now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null, promptOf: async () => null,
     board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {},
     tell: async (_r, _to, _m, sessionId) => (tried.push(sessionId), sessionId === undefined),
@@ -820,6 +823,7 @@ test("a hung git does not stop the tick: the hire is woken without a tip, the ot
   o.w.transcripts = { "dev-1": [say("compiling", 1)], "dev-2": [limitStop(null, 0)] };
   o.w.boards.shop = [row(DEV, "doing", "checkout"), row(second, "doing", "search")];
   const make = createRecovery({
+    resting: () => false,
     now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null, promptOf: async () => null,
     board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [],
     commitTime: async () => { throw new Error("git timed out after 10000 ms"); },
@@ -874,6 +878,7 @@ test("a throwing promptOf leaves the stop undecided: nothing is recorded as told
   stoppedDev(o, [limitStop(null, 0)]);
   let broken = true;
   const make = createRecovery({
+    resting: () => false,
     now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null,
     promptOf: async () => { if (broken) throw new Error("EACCES"); return null; },
     board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {},
@@ -897,6 +902,7 @@ test("a throwing promptOf leaves the stop undecided: nothing is recorded as told
   const r = office();
   stoppedDev(r, sent("DONE checkout", "Sent.", 1));
   const failing = createRecovery({
+    resting: () => false,
     now: () => r.w.now, sessions: async () => r.w.list, tail: async (_c, sid) => (r.w.transcripts[sid] ?? []).join("\n"), mtime: async () => null,
     promptOf: async () => { throw new Error("EACCES"); },
     board: async (_r, team) => r.w.boards[team ?? "pm"] ?? [], commitTime: async () => null, wake: async () => {}, tell: async () => true,
@@ -916,6 +922,7 @@ test("a git that failed at the wake leaves the tip unknown, so a real tip later 
   stoppedDev(o, [say("compiling", 1)]);
   let failing = true;
   const make = createRecovery({
+    resting: () => false,
     now: () => o.w.now, sessions: async () => o.w.list, tail: async (_c, sid) => (o.w.transcripts[sid] ?? []).join("\n"), mtime: async (_c, sid) => o.w.mtimes[sid] ?? null, promptOf: async () => null,
     board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [],
     commitTime: async () => { if (failing) throw new Error("git timed out after 10000 ms"); return T0 - 60 * MIN; },
@@ -979,6 +986,7 @@ test("one hire's failure is logged and the others are still decided and saved", 
   o.w.transcripts = { "dev-1": [say("compiling", 1)], "dev-2": [limitStop(null, 0)] };
   o.w.boards.shop = [row(DEV, "doing", "checkout"), row(second, "doing", "search")];
   const make = createRecovery({
+    resting: () => false,
     now: () => o.w.now, sessions: async () => o.w.list,
     tail: async (_c, sid) => { if (sid === "dev-1") throw new Error("EACCES: permission denied"); return (o.w.transcripts[sid] ?? []).join("\n"); },
     mtime: async () => null, promptOf: async () => null, board: async (_r, team) => o.w.boards[team ?? "pm"] ?? [], commitTime: async () => null,
@@ -1078,6 +1086,33 @@ test("while the project is paused the tick wakes, nudges and notes nothing; afte
   quiet.w.paused = false;
   await quiet.tick();
   expect(quiet.w.told).toEqual([{ to: REVIEWER, message: NUDGE }]);
+});
+
+test("a tick gap over 2 minutes is a sleep: for 5 minutes after it nobody is woken, told or nudged, then the tick judges again", async () => {
+  for (const [setup, after] of [
+    [(o: ReturnType<typeof office>) => stoppedDev(o, [say("compiling", 1)]), (o: ReturnType<typeof office>) => expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }])],
+    [(o: ReturnType<typeof office>) => idleReviewer(o, "Review complete: the diff looks right.", 25), (o: ReturnType<typeof office>) => expect(o.w.told).toEqual([{ to: REVIEWER, message: NUDGE }])],
+  ] as const) {
+    const o = office({ resting: sleepGrace() });
+    await o.tick(); // the last tick before the Mac slept
+    o.w.now += 3 * MIN; // the timer did not fire for 3 minutes
+    setup(o);
+    const woke = o.w.now;
+    for (let m = 0; m < 5; m++, o.w.now = woke + m * MIN) await o.tick();
+    expect([o.w.woke, o.w.told]).toEqual([[], []]);
+    expect(o.w.store[REPO]).toBeUndefined();
+    await o.tick(); // 5 minutes after the gap
+    after(o);
+  }
+});
+
+test("a tick gap of exactly 2 minutes is no sleep", async () => {
+  const o = office({ resting: sleepGrace() });
+  await o.tick();
+  stoppedDev(o, [say("compiling", 1)]);
+  o.w.now += 2 * MIN;
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
 });
 
 test("a resume wakes the hires the pause stopped one at a time, leads first, and waits for a free slot when the cap of 8 is full", async () => {
