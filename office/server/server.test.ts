@@ -1448,7 +1448,7 @@ test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member o
   for (const command of ['git commit -m "mentions f1rm wake x"', 'grep "f1rm wake" README.md', "f1rm woke"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
 });
 
-test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a Reviewer and a PM's intern are refused, nobody who is a company session runs --all, and the user's own session runs all of them", async () => {
+test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a Reviewer and a PM's intern are refused, no session runs --all, and the user's own session runs the rest", async () => {
   await delegationOffice();
   await hook({ ...common("v", "UserPromptSubmit"), prompt: "go", session_title: "checkout.reviewer-review-a", agent_type: "f1rm:reviewer" });
   const run = async (id: string, command: string, extra = {}) => held(await hook({ ...preToolUse(id, "Bash", { command }), ...extra }));
@@ -1470,13 +1470,15 @@ test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a R
       if (id === "p") expect(out.permissionDecisionReason).toContain("`--all` is for the user's terminal");
     }
   }
-  for (const command of [...mine, "f1rm pause --all", "f1rm resume --all"]) expect([command, await decision("f", command)]).toEqual([command, null]); // the user's own session
+  // A session with no company role runs its own project's pause and resume, but not --all: no session does. A plain terminal fires no hook at all, and so still may.
+  for (const command of mine) expect([command, await decision("f", command)]).toEqual([command, null]);
+  for (const command of ["f1rm pause --all", "f1rm resume --all", "bun office/cli/f1rm.ts pause why --all"]) expect([command, await decision("f", command)]).toEqual([command, "deny"]);
   for (const command of ['git log --grep "f1rm pause"', 'grep "f1rm resume" README.md', "echo 'ls; f1rm pause'", "f1rm paused", "f1rm status"]) {
     expect([command, await decision("l", command)]).toEqual([command, null]);
   }
 });
 
-test("a session does not call the office's pause or resume route itself: a command that names the route and the office's token or port is refused, whoever runs it", async () => {
+test("a session does not call the office's pause or resume route itself: a command that names the route and the office's token or port is refused, whoever runs it, a session of no role too", async () => {
   await delegationOffice();
   const run = async (id: string, command: string) => (await held(await hook(preToolUse(id, "Bash", { command }))))?.permissionDecision ?? null;
   for (const id of ["p", "l", "d"]) {
@@ -1486,7 +1488,7 @@ test("a session does not call the office's pause or resume route itself: a comma
     }
   }
   expect(await run("l", "curl -s https://example.com/pause")).toBeNull();
-  expect(await run("f", `curl -s -X POST ${base()}/${TOKEN}/pause -d '{"all":true}'`)).toBeNull(); // the user's own session
+  expect(await run("f", `curl -s -X POST ${base()}/${TOKEN}/pause -d '{"all":true}'`)).toBe("deny"); // a session of no role is a session too
 });
 
 // A PM, a lead, a designer and a freelancer, to see which of the delegation rules reach whom.

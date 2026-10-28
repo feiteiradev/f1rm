@@ -16,7 +16,7 @@ const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 const MONTHS =["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*,\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
+const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*(?:,|\bat\b)\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
 
 /** The wall-clock parts of instant `t` in zone `tz` (a RangeError for a zone that does not exist). */
 function wall(t: number, tz: string) {
@@ -46,7 +46,7 @@ function instant(tz: string, year: number, month: number, day: number, hour: num
 }
 
 /**
- * When a limit stop lifts, as epoch ms: the text after "resets" ("8:40pm (Europe/Lisbon)", "Oct 27, 9am (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"), read as the first such moment after `stoppedAt`.
+ * When a limit stop lifts, as epoch ms: the text after "resets" ("8:40pm (Europe/Lisbon)", "Oct 27, 9am (Europe/Lisbon)", "Oct 28 at 6am (Europe/Lisbon)" as the weekly limit says it, "Monday 9:00 (Europe/Lisbon)"), read as the first such moment after `stoppedAt`.
  * A time without am/pm is a 24-hour one. No zone means this machine's. Null for a text that names no time or a zone that does not exist.
  */
 export function resetAt(text: string, stoppedAt: number): number | null {
@@ -92,7 +92,7 @@ export const NOTE_ENDED = "resumed after your session ended; continue your task"
 // The second sentence is needed: measured with a Haiku hire, the bare note was refused ("the peer message doesn't override that pause"), because the stop reason stays in the conversation.
 export const NOTE_PAUSE = "resumed after a pause; continue your task. The PM lifted the pause: the stop reason in your conversation no longer applies.";
 const SLOT_WAIT_MS = 10_000; // the resume asks again for a free slot this often
-export const NUDGE ="your turn ended without a report; send your DONE or BLOCKED";
+export const NUDGE = "your turn ended without a report; send your DONE or BLOCKED";
 
 /**
  * What the office remembers of one hire, per project, in `~/.f1rm/recovery/<repo>.json` so a restart keeps it and `f1rm status` can show it.
@@ -370,10 +370,10 @@ export function createRecovery(d: RecoveryDeps) {
 
   /**
    * After a resume: continues the hires `names` (the ones the pause halted or stopped) whose board row is doing or review, leads first, one at a time: a live one is told in its inbox, an ended one is woken through the same checks as `f1rm wake`.
-   * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts). Any other refusal (let go, its lead not running) is noted
+   * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts, which the office does when the project is paused again; `done` hears of each hire as it is reached). Any other refusal (let go, its lead not running) is noted
    * for `f1rm status` and left to the recovery tick, which takes the project back when this ends.
    */
-  async function resume(repo: string, names: string[], signal?: AbortSignal) {
+  async function resume(repo: string, names: string[], signal?: AbortSignal, done?: (name: string) => void) {
     const sleep = d.sleep ?? ((ms: number) => Bun.sleep(ms));
     const hires = names.flatMap((name) => hireName(name) ? [{ name, h: hireName(name)! }] : []).sort((a, b) => Number(b.h.role === "lead") - Number(a.h.role === "lead"));
     for (const { name, h } of hires) {
@@ -400,6 +400,7 @@ export function createRecovery(d: RecoveryDeps) {
           break;
         }
       }
+      done?.(name); // reached, or refused for good; an abort leaves it for whoever carries on
     }
   }
 

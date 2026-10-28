@@ -24,8 +24,8 @@ const ended = (name: string, sessionId: string, cwd: string, more: Listed = {}) 
 
 // Transcript lines as Claude Code writes them (the wording and keys of real ones, nothing else).
 const say = (text: string, ago: number, now = T0) => JSON.stringify({ type: "assistant", uuid: `u${ago}-${text.length}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text }] } });
-const limitStop = (until: string | null, ago: number, now = T0) =>
-  JSON.stringify({ type: "assistant", timestamp: new Date(now - ago * MIN).toISOString(), isApiErrorMessage: true, apiError: "usage_limit_reached", message: { role: "assistant", content: [{ type: "text", text: `You've hit your session limit${until ? ` · resets ${until}` : ""}` }] } });
+const limitStop = (until: string | null, ago: number, now = T0, kind = "session") =>
+  JSON.stringify({ type: "assistant", timestamp: new Date(now - ago * MIN).toISOString(), isApiErrorMessage: true, apiError: "usage_limit_reached", message: { role: "assistant", content: [{ type: "text", text: `You've hit your ${kind} limit${until ? ` · resets ${until}` : ""}` }] } });
 // The shapes real sessions write: a reply with thinking is several lines sharing one message.id, and a report is a SendMessage tool_use, then its tool_result, then closing prose.
 const block = (id: string, ago: number, content: any, now = T0) => JSON.stringify({ type: "assistant", uuid: `${id}-${content.type}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { id, role: "assistant", content: [content] } });
 const result = (ago: number, now = T0) => JSON.stringify({ type: "user", uuid: `r${ago}`, timestamp: new Date(now - ago * MIN).toISOString(), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "sent" }] } });
@@ -92,6 +92,11 @@ test("the reset time of a limit stop is read from its text: a time of day, a dat
   expect(resetAt("11pm (America/New_York)", stoppedAt)).toBe(at("2026-10-23T03:00:00Z"));
   expect(resetAt("12am (Europe/Lisbon)", stoppedAt)).toBe(at("2026-10-22T23:00:00Z"));
   expect(resetAt("Jan 3, 9am (Europe/Lisbon)", stoppedAt)).toBe(at("2027-01-03T09:00:00Z")); // a date already past this year is next year's
+  // The weekly limit says "Oct 28 at 6am" (no comma, the word "at").
+  expect(resetAt("Oct 28 at 6am (Europe/Lisbon)", stoppedAt)).toBe(at("2026-10-28T06:00:00Z"));
+  expect(resetAt("Oct 28 at 6:30am (Europe/Lisbon)", stoppedAt)).toBe(at("2026-10-28T06:30:00Z"));
+  expect(resetAt("Nov 3 at 9pm (Europe/Lisbon)", stoppedAt)).toBe(at("2026-11-03T21:00:00Z"));
+  expect(resetAt("Oct 28 at 6am", at("2026-10-22T18:00:00Z"))).not.toBeNull(); // no zone: this machine's
 });
 
 test("a text that names no time, or a zone that does not exist, has no reset time", () => {
@@ -135,6 +140,30 @@ test("a hire that stopped on the session limit is woken about a minute after the
     await o.tick();
     expect([label, o.w.woke.length]).toEqual([label, 1]); // each stop is woken once
   }
+});
+
+test("a hire that stopped on the WEEKLY limit is woken a minute after the date it names, 'You've hit your weekly limit · resets Oct 28 at 6am (Europe/Lisbon)', like a session limit stop", async () => {
+  const o = office();
+  stoppedDev(o, [limitStop("Oct 28 at 6am (Europe/Lisbon)", 0, T0, "weekly")]);
+  const reset = at("2026-10-28T06:00:00Z");
+  for (const now of [T0 + MIN, at("2026-10-27T12:00:00Z"), reset, reset + 59_000]) {
+    o.w.now = now;
+    await o.tick();
+    expect([new Date(now).toISOString(), o.w.woke, o.w.told]).toEqual([new Date(now).toISOString(), [], []]);
+  }
+  expect(o.w.store[REPO][DEV].note).toContain("waits for the session limit to lift (resets Oct 28 at 6am (Europe/Lisbon))");
+  o.w.now = reset + MIN;
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_LIMIT }]);
+  o.w.now = reset + 5 * MIN;
+  await o.tick();
+  expect(o.w.woke).toHaveLength(1);
+  // The session form still reads as before, beside it.
+  const session = office();
+  stoppedDev(session, [limitStop("8:40pm (Europe/Lisbon)", 0)]);
+  session.w.now = at("2026-10-22T19:41:00Z");
+  await session.tick();
+  expect(session.w.woke).toHaveLength(1);
 });
 
 test("a limit stop that names no time is not woken: the session it reports to is told, once", async () => {
