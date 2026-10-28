@@ -30,7 +30,6 @@ function setup() {
   writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran" } }));
   writeFileSync(join(repo, "README.md"), "shop\n");
   writeFileSync(join(repo, ".gitignore"), "node_modules/\n");
-  writeFileSync(join(repo, "add.ts"), `export const add = (a: number, b: number) => 0;\n`); // a stub: the dev's test fails on it through a failing test, not an import error
   git(repo, "add", ".");
   git(repo, "commit", "-q", "-m", "first");
   const wt = join(repo, ".claude", "worktrees", "add-a");
@@ -412,17 +411,14 @@ test("a branch that changes how the suite runs (scripts.check, scripts.suite, sc
   expect((await mergeIn(["add-a"], s.repo, { home: s.home })).code).toBe(0);
 });
 
-test("a new test file counts as red only through a failing test: one that fails to import, and a fixture under tests/, are named and refused", async () => {
+test("a new test file is red when bun reports a failure for it on the base: a module the branch adds counts (it cannot load), a fixture under tests/ does not and is named and refused", async () => {
   const s = setup();
-  const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "other.test.ts": `import "./missing.ts";\n` });
+  const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "sub.ts": "export const sub = (a: number, b: number) => a - b;\n", "sub.test.ts": ADD_TEST.replace("add", "sub").replace("add", "sub").replace("add(1, 2)", "sub(3, 1)").replace("toBe(3)", "toBe(2)") });
   await done(s);
-  const head = git(s.repo, "rev-parse", "HEAD");
   const r = await merge(s);
-  expect(r.code).not.toBe(0);
-  expect(r.err).toContain("without a failing test");
-  expect(r.err).toContain("other.test.ts");
-  expect(r.err).not.toContain("add.test.ts");
-  untouched(s, head, tip);
+  expect(r.err).toBe("");
+  expect(r.code).toBe(0);
+  expect(JSON.parse(readFileSync(evidence(s, "merge.json"), "utf8"))).toMatchObject({ tip, red: ["add.test.ts", "sub.test.ts"] });
 
   const f = setup();
   const fixtureTip = commit(f.wt, { "add.ts": ADD, "tests/fixtures/data.json": "{}\n" });
@@ -430,4 +426,15 @@ test("a new test file counts as red only through a failing test: one that fails 
   const fixture = await merge(f);
   expect(fixture.err).toContain("tests/fixtures/data.json");
   untouched(f, git(f.repo, "rev-parse", "HEAD"), fixtureTip);
+});
+
+test("the suite guard compares the branch with its merge-base: a branch forked before main changed scripts.check is not refused for it", async () => {
+  const s = setup();
+  feature(s);
+  await done(s);
+  writeFileSync(join(s.repo, "package.json"), JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran; true" } }));
+  git(s.repo, "commit", "-q", "-am", "main changes scripts.check");
+  const r = await mergeIn(["add-a"], s.repo, { home: s.home });
+  expect(r.err).toBe("");
+  expect(r.code).toBe(0);
 });

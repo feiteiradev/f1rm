@@ -1805,6 +1805,14 @@ test("a command after a heredoc's terminator, on its opening line, or in an unqu
     "sudo bash <<'EOF'\ngit push\nEOF",
     "env FOO=1 dash <<EOF\ngit push\nEOF",
     "cat x | ksh <<-EOF\n\tgit push\n\tEOF",
+    // A shell on the opener's line anywhere (the heredoc is its stdin), and a `${` that may hold the opener.
+    "cat <<EOF | bash\ngit push origin main\nEOF",
+    "cat <<'EOF' | sh -s\ngit push origin main\nEOF",
+    "<<EOF bash\ngit push\nEOF",
+    "bash -s < /dev/null <<EOF\ngit push\nEOF",
+    "cat <<EOF | . /dev/stdin\ngit push\nEOF",
+    "echo ${a:-${b}<<EOF}\ngit push\nEOF}",
+    "echo ${a:-<<EOF} ${b}\ngit push\nEOF}",
   ];
   const passed: string[] = [];
   for (const command of read) {
@@ -1880,8 +1888,10 @@ test("the main checkout is also reached by --git-dir and GIT_DIR, a local fetch 
   const bash = await mainOffice();
   const refused = [
     "git --git-dir=/code/shop/.git merge x", "git --git-dir /code/shop/.git/ commit -m x", "GIT_DIR=/code/shop/.git git merge x", "GIT_DIR=/code/shop/.git GIT_WORK_TREE=/code/shop git commit -m x", "env GIT_DIR=/code/shop/.git git rebase main", "GIT_WORK_TREE=/code/shop git merge x",
-    "git fetch ./ x:main", "git fetch . +x:main", "git fetch /code/shop x:main", "git fetch ../../.. x:refs/heads/main", "git fetch ../../../ x:main",
-    "git update-ref -m 'moved' refs/heads/main abc1234", "git branch -M other main", "git branch -f main other",
+    "git fetch ./ x:main", "git fetch . +x:main", "git fetch /code/shop x:main", "git fetch ../../.. x:refs/heads/main", "git fetch ../../../ x:main", "git fetch .. x:main",
+    "git update-ref -m 'moved' refs/heads/main abc1234", "git branch -M other main", "git branch -f main other", "git branch -m -f feature main", "git branch -fm feature main",
+    // --git-dir is main's whatever the work tree is, and it resolves against the folder -C moved to.
+    "git --git-dir=/code/shop/.git --work-tree=. merge x", "GIT_DIR=/code/shop/.git GIT_WORK_TREE=. git commit -m x", "git -C .. --git-dir=../../.git commit -m x",
   ];
   for (const command of refused) {
     const out = await bash("b", command);
@@ -1892,7 +1902,7 @@ test("the main checkout is also reached by --git-dir and GIT_DIR, a local fetch 
     const out = await bash("bm", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
   }
-  for (const command of ["git update-ref refs/heads/worktree-add-a main", "git update-ref -m 'main moved' refs/heads/other abc1234", "git branch -f other main", "git branch -f worktree-add-a main", "git branch -M worktree-add-a other", "git --git-dir=/code/shop/.git/worktrees/add-a log", "GIT_DIR=/code/shop/.git/worktrees/add-a git status", "git fetch origin x:main", "git fetch origin", "git fetch . main:other", "git fetch ./ main:other"]) {
+  for (const command of ["git update-ref refs/heads/worktree-add-a main", "git update-ref -m 'main moved' refs/heads/other abc1234", "git branch -f other main", "git branch -f worktree-add-a main", "git branch -M worktree-add-a other", "git branch -m -f feature other", "git branch -c main backup", "git --git-dir=/code/shop/.git/worktrees/add-a log", "GIT_DIR=/code/shop/.git/worktrees/add-a git status", "git fetch origin x:main", "git fetch origin", "git fetch . main:other", "git fetch ./ main:other"]) {
     expect([command, await bash("b", command)]).toEqual([command, null]);
   }
   for (const command of ["git checkout -b feature main", "git checkout main", "git checkout -q worktree-add-a", "git checkout -- a.ts", "git checkout main -- a.ts"]) {

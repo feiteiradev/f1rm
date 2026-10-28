@@ -99,7 +99,8 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
   if (!custom && !hasCheckScript(main)) throw new Refused('the repo has no `check` script in package.json: pass --check "<command>"');
 
   const base0 = git(main, "rev-parse", "HEAD");
-  // The default check is the merged package.json's own script, which no one reads the diff of any more: a branch that changes it, or the lock script, lands by hand.
+  // The default check is the merged package.json's own script, which no one reads the diff of any more: a branch that changes it, or the lock script, lands by hand. Against the merge-base, so a branch forked
+  // before main changed them is not refused for it. ponytail: `typecheck`, `build`, tsconfig and bunfig can still weaken the suite; compare every script `suite` calls if that is felt.
   const suiteOf = (rev: string) => {
     try {
       const { check, suite } = JSON.parse(run(main, ["show", `${rev}:package.json`]).out).scripts ?? {};
@@ -109,7 +110,7 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
     }
   };
   const changed = git(main, "diff", "--name-only", `${base0}...${tip}`).split("\n").filter(Boolean);
-  if (!custom && (changed.includes("scripts/check-lock.ts") || suiteOf(base0) !== suiteOf(tip))) throw new Refused("the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts): land it by hand with the user, or pass --check");
+  if (!custom && (changed.includes("scripts/check-lock.ts") || suiteOf(git(main, "merge-base", base0, tip)) !== suiteOf(tip))) throw new Refused("the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts): land it by hand with the user, or pass --check");
   const tests = git(main, "diff", "--name-only", "--diff-filter=ACMR", `${base0}...${tip}`).split("\n").filter((f) => f && TEST_FILE.test(f));
   let red: string[] = [];
   if (changed.every(isDoc)) say("red: skipped, every changed file is documentation");
@@ -156,10 +157,10 @@ async function redOnBase(main: string, task: string, tip: string, base: string, 
       const p = Bun.spawn(["bun", "test", `./${file}`], { cwd: wt.path, stdout: "pipe", stderr: "pipe" });
       const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
       if (code === 0) passed.push(file);
-      else if (!/^\(fail\)/m.test(out + err)) unproven.push(file);
+      else if (!/^\s*[1-9]\d* fail\b/m.test(out + err)) unproven.push(file); // bun's summary: a failing test and a file that cannot load both say `1 fail`; a fixture says no test matched
     }
     if (passed.length) throw new Refused(`these new tests pass on the base, so they prove nothing: ${passed.join(", ")}`);
-    if (unproven.length) throw new Refused(`these new test files fail on the base without a failing test (an import error, or no test in them), so they prove nothing: ${unproven.join(", ")}`);
+    if (unproven.length) throw new Refused(`these new test files do not fail on the base (no test in them, or not a test file), so they prove nothing: ${unproven.join(", ")}`);
     say(`red: ${tests.join(", ")} fail on the base`);
     return tests;
   } finally {

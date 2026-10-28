@@ -47,27 +47,29 @@ const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", 
 // a newline, or any other character.
 const HEREDOC_SCAN = /"(?:\\.|[^"\\])*"|'[^']*'|\\[^]|(?<=^|[\s;&|()])#[^\n]*|\$\{[^}]*\}|\$?\(\((?:(?!\)\))[^])*\)\)|<<<|<<(-?)[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|(\\?)([^\s;&|()<>`"'\\]+)(?![\\"']))|\n|[^]/y;
 // A shell fed a heredoc runs its body as a script.
-const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "eval", "source"]);
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "eval", "source", "."]);
 /**
  * The line without its heredoc bodies and terminators: a body is data to the shell, so a body line `git push` is no command. What stays is the opening line and whatever follows the terminator.
- * A body the shell runs stays whole too: one with a `$(` or a backtick under an unquoted delimiter, and one fed to a shell (`bash <<'EOF'`). A body with no terminator runs to the end, as in the shell.
+ * A body the shell runs stays whole too: one with a `$(` or a backtick under an unquoted delimiter, and every body of an opener line that holds a shell word anywhere (`bash <<'EOF'`, `cat <<EOF | bash`)
+ * or a `${` outside quotes (which may hide an opener). A body with no terminator runs to the end, as in the shell.
  */
-// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other. The script an interpreter other than a shell
-// is fed (`python3 - <<EOF`) is data here, like `bash -c`'s argument.
+// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other. A body that reaches a shell some other way (a file it is
+// written to, a variable, a function, an alias, an interpreter such as `python3 -`) is data, like `bash -c`'s argument. A shell word anywhere on the opener line, even in a quoted argument or a file name, keeps the body.
 const withoutHeredocBodies = (command: string) => {
-  let out = "", segment = 0;
-  const pending: { end: string; tabs: boolean; quoted: boolean; shell: boolean }[] = [];
+  let out = "", lineStart = 0, braces = false;
+  const pending: { end: string; tabs: boolean; quoted: boolean }[] = [];
   HEREDOC_SCAN.lastIndex = 0;
   for (let m; HEREDOC_SCAN.lastIndex < command.length && (m = HEREDOC_SCAN.exec(command)); ) {
     const [token, dash, double, single, backslash, bare] = m;
     const end = double ?? single ?? bare;
-    if (end !== undefined && !/^\d+$/.test(end)) {
-      const shell = out.slice(segment).split(/\s+/).some((w) => SHELLS.has(basename(unquoted(w))));
-      pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\", shell });
-    }
+    if (end !== undefined && !/^\d+$/.test(end)) pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\" });
+    if (token.startsWith("${")) braces = true;
     out += token;
-    if (/^[;&|()`\n]$/.test(token)) segment = out.length;
-    if (token !== "\n" || !pending.length) continue;
+    if (token !== "\n") continue;
+    const line = out.slice(lineStart);
+    const keepAll = braces || line.split(/[\s;&|()`]+/).some((w) => SHELLS.has(basename(unquoted(w))));
+    [lineStart, braces] = [out.length, false];
+    if (!pending.length) continue;
     let at = HEREDOC_SCAN.lastIndex;
     for (const h of pending.splice(0)) {
       let body = "";
@@ -77,9 +79,10 @@ const withoutHeredocBodies = (command: string) => {
         if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.end) break;
         body += line + "\n";
       }
-      if (h.shell || (!h.quoted && /\$\(|`/.test(body))) out += body;
+      if (keepAll || (!h.quoted && /\$\(|`/.test(body))) out += body;
     }
     HEREDOC_SCAN.lastIndex = at;
+    lineStart = out.length;
   }
   return out;
 };
@@ -201,14 +204,14 @@ const baseBranches = (gitDir: string) => {
  */
 // Limits (ponytail): a `cd` in a subshell or a branch of `||` moves the folder for the rest of the line (a refused line is the only cost), and a folder built by a variable, `~` or `cd -P` is not followed.
 // Not seen: git aliases (`-c alias.m=merge`), `update-ref --stdin`, `--ignore-other-worktrees`, git run in `.claude/worktrees` itself, `git apply` and `git read-tree`, files written into main without git (cp, a redirect),
-// and the command line of `sh -c` or a script file. `f1rm merge --check` is `sh -c` in the scratch worktree, so the PM or a lead can run any git through it by design. A branch that adds a dependency
-// fails the check until `bun install` runs in main, because the scratch worktrees link main's node_modules.
+// `export GIT_DIR=…; git merge`, and the command line of `sh -c` or a script file. `f1rm merge --check` is `sh -c` in the scratch worktree, so the PM or a lead can run any git through it by design. A branch that adds a dependency
+// fails the check until `bun install` runs in main, because the scratch worktrees link main's node_modules. A body that reaches a shell some other way (a file it is written to, a variable, a function, an alias) is data, like `bash -c`'s argument.
 const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string, main: string, bases: string[]) => {
   const mainKey = homeKey(main), worktreesKey = homeKey(join(main, ".claude", "worktrees")), gitDirKey = homeKey(join(main, ".git"));
   const inMain = (dir: string) => inside(mainKey, homeKey(dir)) && !inside(worktreesKey, homeKey(dir));
   const base = new RegExp(`^(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
   const intoBase = new RegExp(`:(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
-  const pathLike = (w: string) => /^(?:\.|\.\.?\/.*|\/.*|file:.*)$/.test(w);
+  const pathLike = (w: string) => /^(?:\.\.?|\.\.?\/.*|\/.*|file:.*)$/.test(w);
   let dir = resolve(cwd);
   for (const { prefix, words } of split) {
     if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
@@ -218,11 +221,12 @@ const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string
     }
     const call = gitCall(words);
     if (!call) continue;
-    let at = dir, workTree = false, gitDir: string | undefined;
+    let at = dir;
+    const gitDirs: string[] = [];
     const setting = (name: string, value: string) => {
       if (name === "-C") at = resolve(at, value);
-      else if (name === "--work-tree" || name === "GIT_WORK_TREE") (at = resolve(at, value)), (workTree = true);
-      else if (name === "--git-dir" || name === "GIT_DIR") gitDir = resolve(dir, value);
+      else if (name === "--work-tree" || name === "GIT_WORK_TREE") at = resolve(at, value);
+      else if (name === "--git-dir" || name === "GIT_DIR") gitDirs.push(value);
     };
     for (const w of prefix) {
       const m = /^(GIT_WORK_TREE|GIT_DIR)=(.*)$/.exec(unquoted(w));
@@ -233,7 +237,8 @@ const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string
       if (eq) setting(eq[1], eq[2]);
       else if (["-C", "--work-tree", "--git-dir"].includes(o)) setting(o, call.options[i + 1] ?? "");
     });
-    if (!workTree && gitDir !== undefined && homeKey(gitDir) === gitDirKey) at = main;
+    // The repo is main's when --git-dir or GIT_DIR names its .git, whatever the work tree is; a relative one is tried from the session folder and from where -C moved to.
+    if (gitDirs.some((g) => [dir, at].some((from) => homeKey(resolve(from, g)) === gitDirKey))) at = main;
     const { sub, rest } = call;
     const any = (re: RegExp) => rest.some((a) => re.test(a));
     const dashDash = rest.indexOf("--");
@@ -247,7 +252,7 @@ const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string
     })();
     if (sub === "update-ref" && updated !== undefined && (base.test(updated) || (updated === "HEAD" && inMain(at)))) return true;
     // `branch -f <name> [<start>]` moves <name>; a rename or copy (`-M <old> <new>`, `-C`) makes <new>, the last word.
-    const renames = any(/^(?:--move|--copy|-[A-Za-z]*[MC])/), forces = any(/^(?:--force|-[A-Za-z]*f)/);
+    const renames = any(/^(?:--move|--copy|-[A-Za-z]*[MCmc])/), forces = any(/^(?:--force|-[A-Za-z]*f)/);
     const moved = renames ? named.at(-1) : named[0];
     if (sub === "branch" && (renames || forces) && moved !== undefined && base.test(moved)) return true;
     if (sub === "fetch" && named.some(pathLike) && any(intoBase)) return true;
