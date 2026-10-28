@@ -42,24 +42,31 @@ const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", 
 const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo", "timeout", "nice", "stdbuf"]);
 // The options of those wrappers that take the next word as their value.
 const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", "--kill-after", "--signal"], nice: ["-n", "--adjustment"], stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"], env: ["-u", "--unset"], sudo: ["-u"] };
-// What the heredoc scan steps over, in order: a quoted string, an escaped character, a comment, an arithmetic `((…))` (whose `<<` is a shift), a here-string `<<<`, a heredoc opener `<<[-]WORD`
-// (groups: dash, "double", 'single', backslash, bare word; a bare word followed by a quote or backslash is a partly quoted delimiter and is not read as one), a newline, or any other character.
-const HEREDOC_SCAN = /"(?:\\.|[^"\\])*"|'[^']*'|\\[^]|(?<=^|\s)#[^\n]*|\$?\(\((?:(?!\)\))[^])*\)\)|<<<|<<(-?)[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|(\\?)([^\s;&|()<>`"'\\]+)(?![\\"']))|\n|[^]/y;
-const COMMAND_SUBSTITUTION = /\$\((?:[^()]|\([^()]*\))*\)|`[^`]*`/g;
+// What the heredoc scan steps over, in order: a quoted string, an escaped character, a comment (a `#` at the start of a word: after a space or `; & | ( )`), a `${…}` and an arithmetic `((…))` (whose `<<` is no
+// opener), a here-string `<<<`, a heredoc opener `<<[-]WORD` (groups: dash, "double", 'single', backslash, bare word; a bare word followed by a quote or backslash is a partly quoted delimiter and is not read as one),
+// a newline, or any other character.
+const HEREDOC_SCAN = /"(?:\\.|[^"\\])*"|'[^']*'|\\[^]|(?<=^|[\s;&|()])#[^\n]*|\$\{[^}]*\}|\$?\(\((?:(?!\)\))[^])*\)\)|<<<|<<(-?)[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|(\\?)([^\s;&|()<>`"'\\]+)(?![\\"']))|\n|[^]/y;
+// A shell fed a heredoc runs its body as a script.
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "eval", "source"]);
 /**
- * The line without its heredoc bodies and terminators: a body is data to the shell, so a body line `git push` is no command. What stays is the opening line, whatever follows the
- * terminator, and, for an unquoted delimiter, the command substitutions of the body, which the shell does run. A body with no terminator runs to the end, as in the shell.
+ * The line without its heredoc bodies and terminators: a body is data to the shell, so a body line `git push` is no command. What stays is the opening line and whatever follows the terminator.
+ * A body the shell runs stays whole too: one with a `$(` or a backtick under an unquoted delimiter, and one fed to a shell (`bash <<'EOF'`). A body with no terminator runs to the end, as in the shell.
  */
-// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other.
+// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other. The script an interpreter other than a shell
+// is fed (`python3 - <<EOF`) is data here, like `bash -c`'s argument.
 const withoutHeredocBodies = (command: string) => {
-  let out = "";
-  const pending: { end: string; tabs: boolean; quoted: boolean }[] = [];
+  let out = "", segment = 0;
+  const pending: { end: string; tabs: boolean; quoted: boolean; shell: boolean }[] = [];
   HEREDOC_SCAN.lastIndex = 0;
   for (let m; HEREDOC_SCAN.lastIndex < command.length && (m = HEREDOC_SCAN.exec(command)); ) {
     const [token, dash, double, single, backslash, bare] = m;
     const end = double ?? single ?? bare;
+    if (end !== undefined && !/^\d+$/.test(end)) {
+      const shell = out.slice(segment).split(/\s+/).some((w) => SHELLS.has(basename(unquoted(w))));
+      pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\", shell });
+    }
     out += token;
-    if (end !== undefined && !/^\d+$/.test(end)) pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\" });
+    if (/^[;&|()`\n]$/.test(token)) segment = out.length;
     if (token !== "\n" || !pending.length) continue;
     let at = HEREDOC_SCAN.lastIndex;
     for (const h of pending.splice(0)) {
@@ -70,7 +77,7 @@ const withoutHeredocBodies = (command: string) => {
         if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.end) break;
         body += line + "\n";
       }
-      if (!h.quoted) for (const [sub] of body.matchAll(COMMAND_SUBSTITUTION)) out += sub + "\n";
+      if (h.shell || (!h.quoted && /\$\(|`/.test(body))) out += body;
     }
     HEREDOC_SCAN.lastIndex = at;
   }

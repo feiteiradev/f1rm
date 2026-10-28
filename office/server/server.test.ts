@@ -1758,7 +1758,9 @@ test("a heredoc body is data, not commands: its lines pass the push, landing and
     `cat <<EOF2\nx\nEOF\ngit push\nEOF2\n`,
     `cat <<EOF\n${body}`,
     `cat <<EOF\n$(echo plain) and \${HOME} text\nEOF`,
-    `sh <<'EOF'\n${body}\nEOF`,
+    `cat <<'EOF'\n$( ( (git push) ) )\nEOF`,
+    "x=$(cat <<'EOF'\nfix: git push is the user's\ngit commit -m y\nEOF\n)",
+    "echo \"$(cat <<'EOF'\nfix git push\nEOF\n)\"",
     `cat <<< "git push"`,
     `cat <<< 'git push; git commit -m x'`,
     `cat <<< "git push\ngit commit -m x"`,
@@ -1788,6 +1790,21 @@ test("a command after a heredoc's terminator, on its opening line, or in an unqu
     "echo 'a <<EOF'\ngit push\nEOF",
     "echo hi # <<EOF\ngit push\nEOF",
     "echo $((1 << 2))\ngit push\n2",
+    // The scan fails closed: what is no heredoc to the shell, or a body the shell runs, stays readable.
+    "true;# <<EOF\ngit push origin main\nEOF",
+    "true&&# <<EOF\ngit push origin main\nEOF",
+    "true | # <<EOF\ngit push origin main\nEOF",
+    "(# <<EOF\ngit push origin main\nEOF",
+    "echo ${x:-<<EOF}\ngit push origin main\nEOF}",
+    "cat <<EOF\n$( ( (git push) ) )\nEOF",
+    'cat <<EOF\n$(echo ")"; git push)\nEOF',
+    "cat <<EOF\n`echo x; git push`\nEOF",
+    "bash <<EOF\ngit push\nEOF",
+    "sh <<'EOF'\ngit push\nEOF",
+    "zsh -s <<EOF\ngit push\nEOF",
+    "sudo bash <<'EOF'\ngit push\nEOF",
+    "env FOO=1 dash <<EOF\ngit push\nEOF",
+    "cat x | ksh <<-EOF\n\tgit push\n\tEOF",
   ];
   const passed: string[] = [];
   for (const command of read) {
