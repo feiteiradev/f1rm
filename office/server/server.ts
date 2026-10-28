@@ -992,12 +992,11 @@ export function startServer({
             if (r.result) results.push(r.result);
             if (r.error) failed.push(r.error);
           } else {
-            const r = await resumeProject(key);
+            const r = await resumeProject(key, true);
             if (!r) continue; // not paused
             changed.push(r.name);
             lost.push(...r.lost);
             waking += r.waking;
-            holdUntilEvening(key);
           }
         }
         push();
@@ -1249,6 +1248,8 @@ export function startServer({
       }
       stopTries.clear();
       setPaused(key, { by, at: clock(), why, ...(unfinished.length && { halted: unfinished }) });
+    } else if (by === "manual" && was.by === "schedule") {
+      setPaused(key, { ...was, by: "manual", at: clock(), why }); // "I'm going to bed" after 19:00: the pause is the user's now, and the 09:00 look leaves it
     }
     let result: Awaited<ReturnType<typeof stopProject>> | undefined;
     let error: string | undefined;
@@ -1260,12 +1261,13 @@ export function startServer({
         error = `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.`;
       }
     }
-    return { name, changed: !was, result, error };
+    return { name, changed: !was || (by === "manual" && was.by === "schedule"), result, error };
   }
-  /** Lifts a project's pause and starts continuing its hires; null when it was not paused. */
-  async function resumeProject(key: string) {
+  /** Lifts a project's pause and starts continuing its hires; null when it was not paused. A resume `byHand` out of work hours leaves its override first: the flag is gone before the wake-up is done, and a look of the schedule in between must find it. */
+  async function resumeProject(key: string, byHand = false) {
     const was = pausedOf(key);
     if (!was) return null;
+    if (byHand) holdUntilEvening(key);
     const id = Object.keys(state.rooms).find((r) => repoKey(r) === key);
     const name = id ? roomName(id) : registeredName(key);
     setPaused(key, null);
@@ -1297,14 +1299,22 @@ export function startServer({
     try {
       const c = workHours.config(), now = clock();
       for (const key of registeredKeys()) {
-        const file = overrideFile(workHours.overridesDir, key);
-        const override = readOverride(file);
-        if (override && override.until <= now) clearOverride(file);
-        const action = scheduleAction(c, now, pausedOf(key), override);
-        if (action === "pause") {
-          const r = await pauseProject(key, "schedule", "work hours");
-          if (r.error) console.log(`work hours ${r.name}: ${r.error}`);
-        } else if (action === "resume") await resumeProject(key);
+        try {
+          const file = overrideFile(workHours.overridesDir, key);
+          const override = readOverride(file);
+          if (override && override.until <= now) clearOverride(file);
+          const action = scheduleAction(c, now, pausedOf(key), override);
+          if (action === "pause") {
+            const r = await pauseProject(key, "schedule", "work hours");
+            if (r.error) console.log(`work hours ${r.name}: ${r.error}`);
+            else if (r.result && !r.result.verified) console.log(`work hours ${r.name}: still running after the stop: ${r.result.remaining.map((q) => `pid ${q.pid} ${q.command}`).join(", ")}`);
+          } else if (action === "resume") {
+            const r = await resumeProject(key);
+            for (const l of r?.lost ?? []) console.log(`work hours ${r!.name}: ${l.name} not woken: ${l.why}`);
+          }
+        } catch (err) {
+          console.log(`work hours ${key}: ${(err as Error).message}`); // one project's failure must not skip the others
+        }
       }
       push();
     } catch (err) {
@@ -1317,6 +1327,7 @@ export function startServer({
   const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
   const recovering = recovery && createRecovery({
     ...recovery.deps,
+    everyMs: recovery.everyMs,
     // A paused project, or one whose stopped hires a resume is still waking, is left alone: no wake, no nudge, no note.
     paused: (repo) => resumes.has(repo) || Object.keys(state.rooms).some((id) => id !== ELSEWHERE.id && folderOf(id) === repo && !!pausedOf(id)),
     board: async (repo, team) => (boardsDir ? readBoard(team ? teamBoardFile(boardsDir, repo, team) : boardFile(boardsDir, repo)) : []),
@@ -1342,16 +1353,7 @@ export function startServer({
       });
     return names.length;
   }
-  let recoveringNow = false;
-  async function recoverOnce() {
-    if (!recovering || recoveringNow) return;
-    recoveringNow = true;
-    try {
-      await recovering.tick(registered());
-    } finally {
-      recoveringNow = false;
-    }
-  }
+  const recoverOnce = () => recovering?.tick(registered());
   const ready = Promise.all([sweepOnce(), readBoards()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   void checkProcesses(); // likewise: the replayed employees learn who is busy now, not a tick later

@@ -39,7 +39,7 @@ const sent = (message: string, closing: string, ago: number, now = T0) => [
 const row = (owner: string, status: string, task: string): BoardRow => ({ id: "T1", owner, status, branch: `worktree-${task}`, task: "x" });
 
 /** A fake office: the listing, transcripts, boards and clock are set by the test; wakes and tells are recorded. */
-function office(over: { resting?: (now: number) => boolean; wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
+function office(over: { real?: number; resting?: (now: number) => boolean; wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
   const w = {
     now: T0 + 5 * MIN,
     list: [] as Listed[],
@@ -55,6 +55,8 @@ function office(over: { resting?: (now: number) => boolean; wake?: (repo: string
     tailCalls: [] as string[],
     commitCalls: 0,
     inbox: true,
+    /** A promise `sessions` waits for, to hold a tick in flight. */
+    gate: undefined as Promise<void> | undefined,
     store: {} as Record<string, Entries>,
     /** The project is paused. */
     paused: false,
@@ -64,7 +66,7 @@ function office(over: { resting?: (now: number) => boolean; wake?: (repo: string
   };
   const make = () => createRecovery({
     now: () => w.now,
-    sessions: async () => w.list,
+    sessions: async () => (await w.gate, w.list),
     // The real readers are asynchronous (nothing may block the office's event loop), so the fakes are too.
     tail: async (_cwd, sid) => (w.tailCalls.push(sid), (w.transcripts[sid] ?? []).join("\n")),
     mtime: async (_cwd, sid) => w.mtimes[sid] ?? null,
@@ -77,7 +79,8 @@ function office(over: { resting?: (now: number) => boolean; wake?: (repo: string
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
     paused: () => w.paused,
     sleep: async (ms) => (w.slept.push(ms), w.onSleep()),
-    resting: over.resting ?? (() => false), // the fake clock jumps between ticks; the sleep rule has its own tests
+    // The fake clock jumps between ticks, so the sleep rule is off unless a test asks for the real one (`real`: the tick interval in ms).
+    ...(over.real ? { everyMs: over.real } : { resting: over.resting ?? (() => false) }),
   });
   const rec = make();
   return { w, rec, make, tick: (repos = [REPO]) => rec.tick(repos) };
@@ -1104,6 +1107,42 @@ test("a tick gap over 2 minutes is a sleep: for 5 minutes after it nobody is wok
     await o.tick(); // 5 minutes after the gap
     after(o);
   }
+});
+
+test("a tick longer than the interval is no sleep: the ticks skipped while it runs are still seen by the sleep rule", async () => {
+  const o = office({ real: 60_000 });
+  stoppedDev(o, [say("compiling", 1)]);
+  let open!: () => void;
+  o.w.gate = new Promise((r) => (open = r));
+  const slow = o.tick(); // in flight for 3 minutes
+  o.w.now += MIN;
+  await o.tick(); // the interval's next tick finds one running and does nothing, but is seen
+  o.w.now += MIN;
+  await o.tick();
+  o.w.now += MIN;
+  o.w.gate = undefined;
+  open();
+  await slow;
+  expect(o.w.woke).toHaveLength(1); // the slow tick itself judged, no grace
+  o.w.woke.length = 0;
+  o.w.store = {};
+  await o.tick(); // one minute after the last tick seen
+  expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
+});
+
+test("a tick interval of 3 minutes is not a sleep every time: the gap that counts is more than twice the interval", async () => {
+  const o = office({ real: 180_000 });
+  await o.tick();
+  stoppedDev(o, [say("compiling", 1)]);
+  o.w.now += 3 * MIN;
+  await o.tick();
+  expect(o.w.woke).toHaveLength(1); // a normal interval: no grace
+  const late = office({ real: 180_000 });
+  await late.tick();
+  stoppedDev(late, [say("compiling", 1)]);
+  late.w.now += 7 * MIN; // the timer missed two
+  await late.tick();
+  expect(late.w.woke).toEqual([]);
 });
 
 test("a tick gap of exactly 2 minutes is no sleep", async () => {

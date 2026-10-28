@@ -136,3 +136,11 @@ test("a config that is cut, of another shape or has an impossible field falls ba
   writeFileSync(file, JSON.stringify({ workHours: { start: "10:00" } }));
   expect(readConfig(file)).toEqual({ ...DEFAULTS, start: "10:00" });
 });
+
+test("one bad entry in the days list sends the whole list back to the default, and the good fields beside it stay", () => {
+  const file = join(dir, "days.json");
+  writeFileSync(file, JSON.stringify({ workHours: { days: ["mon", "funday", "wed"], start: "10:00" } }));
+  expect(readConfig(file)).toEqual({ ...DEFAULTS, start: "10:00" });
+  writeFileSync(file, JSON.stringify({ workHours: { days: ["Mon", "WED", "mon"] } })); // case is forgiven, a repeat counted once
+  expect(readConfig(file).days).toEqual(["mon", "wed"]);
+});

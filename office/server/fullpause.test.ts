@@ -380,11 +380,11 @@ test("a worktree with no commit to save on top of is named as not saved, in the 
 // The schedule runs on the office's own timer and clock: `clockNow` is the fake wall clock, in UTC (Lisbon is UTC+0 from 2026-10-25 to 2027-03-28).
 let clockNow = 0;
 const utc = (d: string) => Date.parse(`2026-${d}Z`);
-const scheduled = (p: ReturnType<typeof project>, from: number, config: WorkHours = DEFAULTS) => {
+const scheduled = (p: ReturnType<typeof project>, from: number, cfg: { current: WorkHours } = { current: DEFAULTS }, extra: object = {}) => {
   clockNow = from;
   const home = mkdtempSync(join(root, "home-"));
   const r = recoveryDeps();
-  const o = start(p, { clock: () => clockNow, recovery: r.recovery, workHours: { config: () => config, overridesDir: join(home, "overrides"), everyMs: 30 } }, home);
+  const o = start(p, { clock: () => clockNow, recovery: r.recovery, workHours: { config: () => cfg.current, overridesDir: join(home, "overrides"), everyMs: 30 }, ...extra }, home);
   return { ...o, r, flag: () => readPaused(pausedFile(o.pausedDir, p.room)), override: () => readOverride(overrideFile(join(home, "overrides"), p.room)) };
 };
 const stoppedListing = (p: ReturnType<typeof project>) => [
@@ -460,7 +460,7 @@ test("an office that starts out of hours with nothing paused pauses at once; a m
   expect(o.flag()).toMatchObject({ by: "schedule" });
 });
 
-test("a manual pause out of hours stays paused after the override expires, and a schedule that is turned off leaves everything alone", async () => {
+test("a pause by hand out of hours, with the override still live, stays paused after the override expires, and the expired override is removed", async () => {
   const p = project();
   world(p);
   const o = scheduled(p, utc("10-31T11:00:00"));
@@ -468,16 +468,64 @@ test("a manual pause out of hours stays paused after the override expires, and a
   await settle(300);
   clockNow = utc("10-31T11:30:00");
   await post(o.server, "resume", { room: p.room });
+  expect(o.override()).toEqual({ until: utc("11-02T19:00:00") }); // before the expiry
   await post(o.server, "pause", { room: p.room, why: "bed" }); // by hand, with the override still live
   clockNow = utc("11-02T19:30:00"); // past the override's expiry
   await settle(300);
   expect(o.flag()).toMatchObject({ by: "manual", why: "bed" });
+  expect(o.override()).toBeNull(); // after it
+});
 
-  const q = project();
-  world(q);
-  const off = scheduled(q, utc("10-31T11:00:00"), { ...DEFAULTS, enabled: false });
+test("turning the schedule off lifts the pause it made and pauses nothing; a pause by hand then stays", async () => {
+  const p = project();
+  world(p);
+  const cfg = { current: DEFAULTS };
+  const o = scheduled(p, utc("10-31T11:00:00"), cfg);
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
   await settle(300);
-  expect(readPaused(pausedFile(off.pausedDir, q.room))).toBeNull();
+  expect(o.flag()).toMatchObject({ by: "schedule" }); // seeded: the schedule paused it
+  listed = stoppedListing(p);
+  cfg.current = { ...DEFAULTS, enabled: false };
+  await settle(300);
+  expect(o.flag()).toBeNull(); // off: its own pause is lifted
+  await post(o.server, "pause", { room: p.room, why: "lunch" });
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "manual", why: "lunch" });
+});
+
+test("a pause by hand on a project the schedule already paused makes it a pause by hand: the 09:00 look leaves it paused", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-27T20:00:00")); // Tuesday evening
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" });
+  clockNow = utc("10-27T23:00:00");
+  await post(o.server, "pause", { room: p.room, why: "bed" }); // "I'm going to bed"
+  expect(o.flag()).toMatchObject({ by: "manual", why: "bed", checkpoint: expect.stringMatching(/^cp-/) });
+  clockNow = utc("10-28T09:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "manual", why: "bed" });
+});
+
+test("a manual resume out of hours holds even while its own wake-up is slow: a look of the schedule in the middle of it does not pause the project again", async () => {
+  const p = project();
+  world(p);
+  let delay = 0;
+  const slow = { ...machine(p.repo), sessions: async () => (await new Promise((r) => setTimeout(r, delay)), listed) }; // the resume reads this after it clears the flag
+  const o = scheduled(p, utc("10-27T14:00:00"), { current: DEFAULTS }, { machine: slow });
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  clockNow = utc("10-27T19:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule", checkpoint: expect.stringMatching(/^cp-/) });
+  listed = stoppedListing(p);
+  clockNow = utc("10-27T20:00:00");
+  delay = 400;
+  await post(o.server, "resume", { room: p.room });
+  await settle(300);
+  expect(o.flag()).toBeNull();
+  expect(o.override()).toEqual({ until: utc("10-28T19:00:00") });
 });
 
 test("--all goes on past a project whose process table cannot be read: the others are paused and checkpointed, the failure is named, and the state is pushed", async () => {

@@ -11,7 +11,7 @@ import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } 
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, commitTimeArgs, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
-import { sleepGrace } from "./sleep.ts";
+import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -131,6 +131,8 @@ export type RecoveryDeps = {
   sleep?: (ms: number) => Promise<void>;
   /** Called at every tick with the clock: true while the machine is just back from a sleep (see sleep.ts). Defaults to the real rule; a test whose clock jumps between ticks passes `() => false`. */
   resting?: (now: number) => boolean;
+  /** How often the tick runs, in ms: a gap of more than twice this, and at least 2 minutes, is a sleep. */
+  everyMs?: number;
 };
 
 /** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
@@ -407,14 +409,22 @@ export function createRecovery(d: RecoveryDeps) {
     }
   }
 
-  const resting = d.resting ?? sleepGrace();
+  const resting = d.resting ?? sleepGrace(Math.max(SLEEP_GAP_MS, 2 * (d.everyMs ?? 0)));
+  let ticking = false;
   return {
     resume,
     async tick(repos: string[]) {
-      if (resting(d.now())) return; // just back from a sleep: nobody is judged yet (the schedule runs on its own timer)
-      const all = repos.length ? await d.sessions() : null;
-      if (!all) return;
-      for (const repo of repos) await recoverRepo(repo, all).catch((err) => console.log(`recovery ${basename(repo)}: ${(err as Error).message}`));
+      // Every call is seen by the sleep rule, a call that finds the last tick still running included, so a slow tick is no sleep.
+      const asleep = resting(d.now()); // just back from a sleep: nobody is judged yet (the schedule runs on its own timer)
+      if (ticking || asleep) return;
+      ticking = true;
+      try {
+        const all = repos.length ? await d.sessions() : null;
+        if (!all) return;
+        for (const repo of repos) await recoverRepo(repo, all).catch((err) => console.log(`recovery ${basename(repo)}: ${(err as Error).message}`));
+      } finally {
+        ticking = false;
+      }
     },
   };
 }
