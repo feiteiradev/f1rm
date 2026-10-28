@@ -30,6 +30,7 @@ function setup() {
   writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran" } }));
   writeFileSync(join(repo, "README.md"), "shop\n");
   writeFileSync(join(repo, ".gitignore"), "node_modules/\n");
+  writeFileSync(join(repo, "add.ts"), `export const add = (a: number, b: number) => 0;\n`); // a stub: the dev's test fails on it through a failing test, not an import error
   git(repo, "add", ".");
   git(repo, "commit", "-q", "-m", "first");
   const wt = join(repo, ".claude", "worktrees", "add-a");
@@ -358,3 +359,75 @@ const symlinkSyncProbe = (p: string) => {
     return false;
   }
 };
+
+test("only the verified tip lands: a commit the dev makes while the tests and the check run is not merged, and merge.json records the verified tip", async () => {
+  const s = setup();
+  const tip = feature(s);
+  await done(s);
+  // The first check also moves main, so the merge is redone: the second attempt must merge the verified tip, not the branch as it is by then.
+  const marker = join(s.root, "once");
+  const id = "-c user.name=t -c user.email=t@t";
+  const late = `[ -e ${marker} ] || { touch ${marker}; (cd ${s.wt} && echo late > late.txt && git add late.txt && git ${id} commit -q -m late); git -C ${s.repo} ${id} commit -q --allow-empty -m moved; }`;
+  const r = await merge(s, "--check", late);
+  expect(r.err).toBe("");
+  expect(r.code).toBe(0);
+  expect(git(s.wt, "rev-parse", "HEAD")).not.toBe(tip);
+  expect(git(s.repo, "rev-parse", "HEAD^2")).toBe(tip);
+  expect(existsSync(join(s.repo, "late.txt"))).toBe(false);
+  expect(JSON.parse(readFileSync(evidence(s, "merge.json"), "utf8")).tip).toBe(tip);
+});
+
+test("if the main working directory is switched to another branch while the merge is checked, nothing lands and the other branch is not moved", async () => {
+  const s = setup();
+  const tip = feature(s);
+  await done(s);
+  const base = git(s.repo, "rev-parse", "HEAD");
+  const r = await merge(s, "--check", `git -C ${s.repo} checkout -q -b other`);
+  expect(r.code).not.toBe(0);
+  expect(r.err).toContain("is on other now, not main");
+  expect(git(s.repo, "rev-parse", "other")).toBe(base);
+  expect(git(s.repo, "rev-parse", "main")).toBe(base);
+  expect(git(s.repo, "rev-parse", "refs/heads/worktree-add-a")).toBe(tip);
+  expect(existsSync(evidence(s, "merge.json"))).toBe(false);
+});
+
+test("a branch that changes how the suite runs (scripts.check, scripts.suite, scripts/check-lock.ts) is refused for the default check and lands with an explicit --check; another script may change", async () => {
+  for (const change of [
+    { "package.json": JSON.stringify({ scripts: { check: "true" } }) },
+    { "package.json": JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran", suite: "true" } }) },
+    { "scripts/check-lock.ts": "process.exit(0);\n" },
+  ] as Record<string, string>[]) {
+    const s = setup();
+    const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, ...change });
+    await done(s);
+    const head = git(s.repo, "rev-parse", "HEAD");
+    const r = await mergeIn(["add-a"], s.repo, { home: s.home });
+    expect([Object.keys(change)[0], r.code, r.err]).toEqual([Object.keys(change)[0], 1, expect.stringContaining("changes how the suite runs")]);
+    untouched(s, head, tip);
+    expect((await merge(s)).code).toBe(0);
+  }
+  const s = setup();
+  commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "package.json": JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran", build: "echo hi" } }) });
+  await done(s);
+  expect((await mergeIn(["add-a"], s.repo, { home: s.home })).code).toBe(0);
+});
+
+test("a new test file counts as red only through a failing test: one that fails to import, and a fixture under tests/, are named and refused", async () => {
+  const s = setup();
+  const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "other.test.ts": `import "./missing.ts";\n` });
+  await done(s);
+  const head = git(s.repo, "rev-parse", "HEAD");
+  const r = await merge(s);
+  expect(r.code).not.toBe(0);
+  expect(r.err).toContain("without a failing test");
+  expect(r.err).toContain("other.test.ts");
+  expect(r.err).not.toContain("add.test.ts");
+  untouched(s, head, tip);
+
+  const f = setup();
+  const fixtureTip = commit(f.wt, { "add.ts": ADD, "tests/fixtures/data.json": "{}\n" });
+  await done(f);
+  const fixture = await merge(f);
+  expect(fixture.err).toContain("tests/fixtures/data.json");
+  untouched(f, git(f.repo, "rev-parse", "HEAD"), fixtureTip);
+});

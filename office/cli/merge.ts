@@ -3,6 +3,7 @@
 // run the full check once on the merge behind the suite lock, then fast-forward main to that merge. It never pushes and never touches a remote or another ref.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { machine } from "../server/machine.ts";
 import { writePrivate } from "../server/private.ts";
 import { SLUG } from "./hire.ts";
 import { readReport, reportFile } from "./report.ts";
@@ -78,9 +79,9 @@ export async function mergeIn(argv: string[], cwd: string, deps: Partial<MergeDe
 
 async function land(task: string, check: string, custom: boolean, cwd: string, deps: Pick<MergeDeps, "home" | "now" | "env">, say: (line: string) => void) {
   const branch = `worktree-${task}`;
-  const common = run(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-  if (!common.ok) throw new Refused("not in a git repo");
-  const main = dirname(real(common.out));
+  const common = machine.gitCommonDir(cwd);
+  if (!common) throw new Refused("not in a git repo");
+  const main = dirname(real(common));
   const toplevel = run(cwd, ["rev-parse", "--show-toplevel"]).out;
   if (real(toplevel) !== main) throw new Refused(`run it in the main working directory (${main}), not in a worktree or beside the repo`);
   if (!run(main, ["symbolic-ref", "-q", "HEAD"]).ok) throw new Refused("the main working directory has a detached HEAD: there is no base branch to land on");
@@ -98,19 +99,31 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
   if (!custom && !hasCheckScript(main)) throw new Refused('the repo has no `check` script in package.json: pass --check "<command>"');
 
   const base0 = git(main, "rev-parse", "HEAD");
+  // The default check is the merged package.json's own script, which no one reads the diff of any more: a branch that changes it, or the lock script, lands by hand.
+  const suiteOf = (rev: string) => {
+    try {
+      const { check, suite } = JSON.parse(run(main, ["show", `${rev}:package.json`]).out).scripts ?? {};
+      return JSON.stringify([check, suite]);
+    } catch {
+      return "";
+    }
+  };
   const changed = git(main, "diff", "--name-only", `${base0}...${tip}`).split("\n").filter(Boolean);
+  if (!custom && (changed.includes("scripts/check-lock.ts") || suiteOf(base0) !== suiteOf(tip))) throw new Refused("the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts): land it by hand with the user, or pass --check");
   const tests = git(main, "diff", "--name-only", "--diff-filter=ACMR", `${base0}...${tip}`).split("\n").filter((f) => f && TEST_FILE.test(f));
   let red: string[] = [];
   if (changed.every(isDoc)) say("red: skipped, every changed file is documentation");
   else if (!tests.length) throw new Refused("the branch changes code and no test file: the dev adds the tests that fail without the change");
-  else red = await redOnBase(main, task, branch, base0, tests, say);
+  else red = await redOnBase(main, task, tip, base0, tests, say);
 
   const evidence = dirname(reportPath);
   mkdirSync(evidence, { recursive: true });
   // The base can move while the check runs: the merge is redone from the new tip once, then it stops.
   for (let attempt = 1; ; attempt++) {
     const base = git(main, "rev-parse", "HEAD");
-    const sha = await mergeAndCheck(main, task, branch, base, check, join(evidence, "merge-check.log"), deps.env, say);
+    const sha = await mergeAndCheck(main, task, branch, tip, base, check, join(evidence, "merge-check.log"), deps.env, say);
+    const now = run(main, ["symbolic-ref", "-q", "--short", "HEAD"]).out;
+    if (now !== baseBranch) throw new Refused(`the main working directory is on ${now || "no branch"} now, not ${baseBranch}: nothing landed, switch it back and run \`f1rm merge ${task}\` again`);
     const ff = run(main, ["merge", "--ff-only", sha]);
     if (ff.ok) {
       say(`${baseBranch} fast-forwarded to ${sha.slice(0, 9)}`);
@@ -134,16 +147,19 @@ const hasCheckScript = (main: string) => {
 };
 
 /** Runs each new test file alone in a throwaway worktree at the base: all must fail there, and the files that pass are named. Returns the files. */
-async function redOnBase(main: string, task: string, branch: string, base: string, tests: string[], say: (line: string) => void) {
+async function redOnBase(main: string, task: string, tip: string, base: string, tests: string[], say: (line: string) => void) {
   const wt = scratch(main, `red-${task}`, base, true);
   try {
-    git(wt.path, "checkout", branch, "--", ...tests);
-    const passed: string[] = [];
+    git(wt.path, "checkout", tip, "--", ...tests);
+    const passed: string[] = [], unproven: string[] = [];
     for (const file of tests) {
-      const p = Bun.spawn(["bun", "test", `./${file}`], { cwd: wt.path, stdout: "ignore", stderr: "ignore" });
-      if ((await p.exited) === 0) passed.push(file);
+      const p = Bun.spawn(["bun", "test", `./${file}`], { cwd: wt.path, stdout: "pipe", stderr: "pipe" });
+      const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+      if (code === 0) passed.push(file);
+      else if (!/^\(fail\)/m.test(out + err)) unproven.push(file);
     }
     if (passed.length) throw new Refused(`these new tests pass on the base, so they prove nothing: ${passed.join(", ")}`);
+    if (unproven.length) throw new Refused(`these new test files fail on the base without a failing test (an import error, or no test in them), so they prove nothing: ${unproven.join(", ")}`);
     say(`red: ${tests.join(", ")} fail on the base`);
     return tests;
   } finally {
@@ -152,10 +168,10 @@ async function redOnBase(main: string, task: string, branch: string, base: strin
 }
 
 /** The branch merged `--no-ff` onto `base` in a scratch worktree, and the full check run once there behind the suite lock. Returns the merge commit; the worktree is gone either way. */
-async function mergeAndCheck(main: string, task: string, branch: string, base: string, check: string, log: string, env: Record<string, string>, say: (line: string) => void) {
+async function mergeAndCheck(main: string, task: string, branch: string, tip: string, base: string, check: string, log: string, env: Record<string, string>, say: (line: string) => void) {
   const wt = scratch(main, `merge-${task}`, base, false);
   try {
-    const m = run(wt.path, ["merge", "--no-ff", "-m", `Merge branch '${branch}'`, branch]);
+    const m = run(wt.path, ["merge", "--no-ff", "-m", `Merge branch '${branch}'`, tip]);
     if (!m.ok) {
       if (run(wt.path, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).ok) {
         run(wt.path, ["merge", "--abort"]);
