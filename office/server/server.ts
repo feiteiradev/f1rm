@@ -608,7 +608,7 @@ export function startServer({
     }
     const protect = deps.protect ?? [process.pid];
     if (was && !hires.length && !claim(await deps.procs(), { roots: [], worktrees: join(realRealpath(repo), ".claude", "worktrees"), protect }).length) {
-      return { room: name, stopped: [] as string[], killed: [], remaining: [], checkpoint: was.checkpoint ?? null, verified: true, saved: [] };
+      return { room: name, stopped: [] as string[], killed: [], remaining: [], checkpoint: was.checkpoint ?? null, verified: true, saved: [], unsaved: [] as string[] };
     }
     const previous = was?.checkpoint ? readManifest(dir, was.checkpoint) : null;
     const r = await fullStop({ ...deps, repo, hires, protect, previous, why: was?.why ?? why, now: clock(), dir, stop: (sessionId) => machine.stop(sessionId) });
@@ -617,7 +617,7 @@ export function startServer({
     push();
     return {
       room: name, stopped: r.stopped, killed: r.killed.map(({ pid, command, cwd, signal }) => ({ pid, command, cwd, signal })), remaining: r.remaining.map(({ pid, command, cwd }) => ({ pid, command, cwd })),
-      checkpoint: r.manifest.id, verified: r.remaining.length === 0, saved: r.saved,
+      checkpoint: r.manifest.id, verified: r.remaining.length === 0, saved: r.saved, unsaved: r.unsaved,
     };
   }
   /** The resumes under way, by repo: each wakes or tells its hires one at a time and ends when the last is up, or when the project is paused again (it then hands its unfinished hires to the new pause). The recovery tick leaves a repo with a resume under way alone. */
@@ -994,11 +994,20 @@ export function startServer({
                 unfinished.push(...job.pending);
                 job.pending.clear();
               }
+              stopTries.clear();
               setPaused(key, { by: "manual", at: clock(), why: (why as string | undefined) ?? "", ...(unfinished.length && { halted: unfinished }) });
               changed.push(name);
             }
             // A pause that was already set stops and checkpoints again only if something of the project still runs.
-            if (id && fullStopDeps) results.push(await stopProject(id, name, (why as string | undefined) ?? "", was));
+            if (id && fullStopDeps) {
+              try {
+                results.push(await stopProject(id, name, (why as string | undefined) ?? "", was));
+              } catch (err) {
+                // The flag is set, so the hires halt at their next step; but nothing was verified, and the command must not say "All N stopped".
+                console.log(`pause ${name}: ${(err as Error).message}`);
+                return Response.json({ ok: false, error: `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.` }, { status: 500 });
+              }
+            }
           } else {
             setPaused(key, null);
             if (id) {

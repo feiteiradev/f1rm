@@ -257,6 +257,22 @@ test("a busy session that claude stop cannot find (an interactive one wearing a 
   expect(stopped).toEqual(["mine", "mine", "mine"]);
 });
 
+test("a new pause forgets the failed stops of the one before, so the same hire is tried again", async () => {
+  const { server } = start();
+  await seat(server, "mine", "checkout.backend-dev-a", "f1rm:backend-dev");
+  listed = new Map([["mine", { pid: 2, status: "busy" }]]);
+  stopResults = Array(50).fill(false);
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle(900);
+  expect(stopped).toEqual(["mine", "mine", "mine"]);
+  await post(server, "resume", { room: SHOP });
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle(900);
+  expect(stopped).toHaveLength(6);
+});
+
 test("--all names a project no session has been in from its registration, which keeps the folder, and falls back to the last word of its key", async () => {
   const { server } = start();
   writeFileSync(projectFile(join(dir, "projects"), "/code/my-shop"), JSON.stringify({ folder: "/code/my-shop" }) + "\n");

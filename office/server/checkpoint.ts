@@ -10,7 +10,7 @@ import { NOTE_PAUSE } from "./recovery.ts";
 export type Snapshot = { ref: string; sha: string; dirty: boolean };
 /** One session as the pause found it. `snapshot` is its worktree's, null for a session that works in the repo itself (a lead, a Reviewer). */
 export type CheckSession = { name: string; role: string; task: string; row: BoardRow | null; sessionId: string; cwd: string; snapshot: Snapshot | null };
-export type Manifest = { id: string; at: number; repo: string; why: string; sessions: CheckSession[]; killed: Pick<Killed, "pid" | "command" | "cwd" | "signal">[]; verified: boolean };
+export type Manifest = { id: string; at: number; repo: string; why: string; sessions: CheckSession[]; killed: Pick<Killed, "pid" | "command" | "cwd" | "signal">[]; verified: boolean; unsaved?: string[] };
 
 const TASK = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ID = /^cp-\d{8}-\d{6}(?:-\d+)?$/;

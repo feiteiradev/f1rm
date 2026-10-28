@@ -45,6 +45,8 @@ let stuck: number[] = [];
 let sent: [number, string][] = [];
 let stopped: string[] = [];
 let spawned = 0;
+let stopFails: string[] = []; // sessions `claude stop` refuses
+let procsError: string | null = null; // a process table that cannot be read
 // What `claude agents --json --all` lists after the stop: the sessions the resume can wake.
 let listed: { id: string; name: string; kind: string; state: string; cwd: string; sessionId: string; pid?: number; startedAt?: number; status?: string }[] = [];
 const sessionPids = new Map<string, number>();
@@ -55,6 +57,7 @@ const machine = (repo: string) => ({
   backgroundId: async (id: string) => (id === "interactive" ? null : `bg-${id}`),
   stop: async (id: string) => {
     stopped.push(id);
+    if (stopFails.includes(id)) return false;
     table = table.filter((q) => q.pid !== sessionPids.get(id));
     sessionPids.delete(id);
     return true;
@@ -63,7 +66,10 @@ const machine = (repo: string) => ({
   askFork: async function* () {}, tell: async () => {}, workingHires: async () => 0, backgroundSessions: async () => [], spawnBackground: async () => (spawned++, ""), startPmInIterm: async () => {},
 });
 const fullStop = () => ({
-  procs: async () => table,
+  procs: async () => {
+    if (procsError) throw new Error(procsError);
+    return table;
+  },
   kill: (pid: number, sig: "SIGTERM" | "SIGKILL") => {
     sent.push([pid, sig]);
     if (!stuck.includes(pid)) table = table.filter((q) => q.pid !== pid);
@@ -81,6 +87,8 @@ afterEach(() => {
   sent = [];
   stopped = [];
   spawned = 0;
+  stopFails = [];
+  procsError = null;
   listed = [];
   sessionPids.clear();
 });
@@ -311,4 +319,52 @@ test("the Hire dialog's route refuses a hire into a paused project, with a point
   const again = await hire();
   expect([again.status, again.status === 200 ? "" : await again.text()]).toEqual([200, ""]);
   expect(spawned).toBe(1);
+});
+
+test("a pause that cannot read the process table fails and says so, and never says All N stopped", async () => {
+  const p = project();
+  world(p);
+  const o = start(p);
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  procsError = "lsof timed out";
+  const r = await post(o.server, "pause", { room: p.room });
+  const body: any = await r.json();
+  expect(r.status).toBe(500);
+  expect(body.ok).toBe(false);
+  expect(body.error).toContain("could not check what still runs: lsof timed out");
+  expect(body.error).not.toContain("All ");
+  expect(stopped).toEqual([]); // the table is read before anything is stopped
+  procsError = null;
+  expect(((await (await post(o.server, "pause", { room: p.room })).json()) as any).results[0]).toMatchObject({ verified: true, stopped: ["checkout.backend-dev-x"] }); // the next pause does the whole stop
+});
+
+test("only the hires claude stop really stopped are counted as stopped", async () => {
+  const p = project();
+  world(p);
+  stopFails = ["lead"];
+  const o = start(p);
+  await seat(o.server, "lead", "lead-checkout", "f1rm:lead", p.repo);
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  const res = ((await (await post(o.server, "pause", { room: p.room })).json()) as any).results[0];
+  expect(res.stopped).toEqual(["checkout.backend-dev-x"]);
+  expect(res.killed.map((k: any) => k.pid)).toContain(310); // the lead's session outlived the refused stop, so it was killed like the rest
+  expect(res.verified).toBe(true);
+});
+
+test("a worktree with no commit to save on top of is named as not saved, in the answer and the manifest", async () => {
+  const p = project();
+  world(p);
+  const fresh = join(p.repo, ".claude", "worktrees", "fresh");
+  git(p.repo, "worktree", "add", "-q", "--orphan", "-b", "fresh-branch", fresh);
+  writeFileSync(join(fresh, "wip.txt"), "unborn\n");
+  const o = start(p);
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  const res = ((await (await post(o.server, "pause", { room: p.room })).json()) as any).results[0];
+  expect(res.unsaved).toEqual(["fresh"]);
+  expect(res.saved.map((s: any) => s.task)).toEqual(["x"]);
+  expect(readManifest(checkpointDirOf(o.checkpointsDir, p.room), res.checkpoint)?.unsaved).toEqual(["fresh"]);
+  expect(readFileSync(join(fresh, "wip.txt"), "utf8")).toBe("unborn\n");
 });

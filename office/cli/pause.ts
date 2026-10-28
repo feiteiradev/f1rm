@@ -9,7 +9,7 @@ export const USAGE = "usage: f1rm pause [reason...] [--all] | f1rm resume [--all
 
 type Proc = { pid: number; command: string; cwd: string | null };
 /** What the office did to one project: the sessions it stopped, the processes it killed, what still ran after that, and the checkpoint it took. */
-export type StopResult = { room: string; stopped: string[]; killed: (Proc & { signal: string })[]; remaining: Proc[]; checkpoint: string | null; verified: boolean; saved: { task: string; ref: string; sha: string; dirty: boolean }[] };
+export type StopResult = { room: string; stopped: string[]; killed: (Proc & { signal: string })[]; remaining: Proc[]; checkpoint: string | null; verified: boolean; saved: { task: string; ref: string; sha: string; dirty: boolean }[]; unsaved?: string[] };
 type Reply = { ok?: boolean; error?: string; rooms?: string[]; waking?: number; results?: StopResult[]; lost?: { name: string; why: string }[] };
 export type PauseDeps = {
   /** The project of the folder the command runs in (its room id), or null outside git. */
@@ -57,6 +57,7 @@ function stopReport(results: StopResult[], paused: string, all: boolean): string
   return results.map((r) => [
     `paused ${r.room}: All ${r.stopped.length + r.killed.length} stopped (${plural(r.stopped.length, "session")}, ${plural(r.killed.length, "background process", "background processes")}); checked afterwards, nothing of the project still runs.`,
     ...r.killed.map((p) => `  killed ${procLine(p)}${p.signal === "SIGKILL" ? " with SIGKILL" : ""}`),
+    ...(r.unsaved?.length ? [`NOT saved: ${r.unsaved.join(", ")} (no commit to save on top of); the files are untouched, but no ref holds them.`] : []),
     ...(r.checkpoint ? [`checkpoint ${r.checkpoint}: ${plural(r.saved.length, "worktree")} saved${r.saved.length ? ` (${r.saved.map((s) => `${s.ref}${s.dirty ? " with uncommitted work" : ""}`).join(", ")})` : ""}. Safe to close; \`f1rm resume\` wakes everyone with a note of where they stopped.`] : []),
   ].join("\n")).join("\n");
 }

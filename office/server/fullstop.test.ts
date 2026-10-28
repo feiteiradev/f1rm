@@ -1,6 +1,6 @@
 // Seam: the full stop's process rule and its verified emptiness, with the machine's process table and kill injected.
 import { expect, test } from "bun:test";
-import { clearProject, claim, type Proc } from "./fullstop.ts";
+import { clearProject, claim, procsFrom, type Proc } from "./fullstop.ts";
 
 const REPO = "/code/shop";
 const WT = `${REPO}/.claude/worktrees`;
@@ -91,6 +91,42 @@ test("a session that `claude stop` left running is killed too, and one that cann
   const r = await clearProject({ roots: [310, 320], worktrees: WT, protect: [200, 102], stopSessions: async () => {}, ...w.deps });
   expect(r.killed.map((k) => k.pid)).toContain(310);
   expect(r.remaining.map((q) => q.pid)).toEqual([320]);
+});
+
+test("a tmux server started in a worktree hands over none of the user's panes: an orphan whose tree holds a terminal is not claimed, nor anything under it", () => {
+  const tty = (q: Proc): Proc => ({ ...q, tty: true });
+  const t = [
+    ...table(),
+    p(600, 1, "tmux -L work new-session -d", `${WT}/a`), // the tmux server: parent launchd, cwd in a worktree, no terminal of its own
+    tty(p(601, 600, "-zsh", `${WT}/a`)), // a pane's login shell
+    tty(p(602, 601, "claude", "/code/other")), // the user's interactive session in the pane
+    tty(p(603, 601, "npm test", "/code/other")), // and what runs in the pane
+    p(604, 600, "node watcher.js", `${WT}/a`), // a no-terminal child of the tmux server
+  ];
+  const got = claim(t, { roots: [310, 320], worktrees: WT, protect: [200] }).map((c) => c.pid);
+  for (const pid of [600, 601, 602, 603, 604]) expect(got).not.toContain(pid);
+  expect(got).toContain(400); // the plain orphan is still the project's
+});
+
+test("an orphan's walk stops at a login shell or a claude, even without a terminal", () => {
+  const t = [p(1, 0, "launchd", "/"), p(700, 1, "sleep-wrapper", `${WT}/a`), p(701, 700, "sleep 5", `${WT}/a`), p(702, 700, "-zsh", `${WT}/a`), p(703, 702, "vim notes", "/code/other"), p(704, 700, "claude", "/code/other")];
+  const got = claim(t, { roots: [], worktrees: WT, protect: [] }).map((c) => c.pid).sort();
+  expect(got).toEqual([700, 701]);
+});
+
+test("the real process table parses the terminal of each process, and a ps or lsof that fails or times out is an error, not an empty table", async () => {
+  const ok = (out: string) => ({ out, code: 0, timedOut: false });
+  const ps = " 10 1 Ss ?? /sbin/launchd\n 11 10 S+ ttys004 -zsh\n 12 10 Z ?? defunct\n";
+  const table = await procsFrom(async (argv) => (argv[0] === "ps" ? ok(ps) : ok("p11\nn/code/shop\n")));
+  expect(table).toEqual([
+    { pid: 10, ppid: 1, command: "/sbin/launchd", cwd: null },
+    { pid: 11, ppid: 10, command: "-zsh", cwd: "/code/shop", tty: true },
+    { pid: 12, ppid: 10, command: "defunct", cwd: null, zombie: true },
+  ]);
+  const reason = (run: Parameters<typeof procsFrom>[0]) => procsFrom(run).then(() => "no error", (e) => e.message);
+  expect(await reason(async (argv) => (argv[0] === "ps" ? { out: "", code: 1, timedOut: false } : ok("")))).toContain("ps");
+  expect(await reason(async (argv) => (argv[0] === "ps" ? ok(ps) : { out: "p11\n", code: null, timedOut: true }))).toContain("lsof");
+  expect(await reason(async (argv) => (argv[0] === "ps" ? ok(ps) : { out: "", code: 1, timedOut: false }))).toContain("lsof");
 });
 
 test("a child that moved its cwd out of the worktrees and lost its parent is still found by the tree seen before the stop", async () => {

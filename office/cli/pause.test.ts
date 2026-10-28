@@ -98,6 +98,13 @@ test("pause says All N stopped only once the office has checked that nothing of 
   expect(out).toContain("refs/f1rm/checkpoint/x");
 });
 
+test("a worktree the checkpoint could not save is named, so the pause does not read as fully saved", async () => {
+  const out = await pauseCall("pause", [], office({ body: { results: [result({ unsaved: ["fresh"] })] } }).deps);
+  expect(out).toContain("NOT saved: fresh");
+  expect(out).toContain("files are untouched");
+  expect(out).toContain("checkpoint cp-20261028-153012");
+});
+
 test("a pause that cannot verify fails, names what still runs and says not to close", async () => {
   const bad = result({ verified: false, remaining: [{ pid: 322, command: "sleep 600", cwd: "/code/shop/.claude/worktrees/x" }] });
   const message = await pauseCall("pause", [], office({ body: { results: [bad] } }).deps).catch((e) => e.message);

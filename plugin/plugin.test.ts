@@ -237,7 +237,7 @@ test("the PM pauses and resumes when the user says so and never waits for agents
     "run `f1rm pause [reason]` yourself", "Never wait for the agents by message", "never ask a lead to pause its team",
     "the helpers inside them included", "background processes they started", "never the office, a terminal or the user's own sessions",
     "checks afterwards that nothing of the project still runs", "`refs/f1rm/checkpoint/<task>`", "without touching the files", "a manifest",
-    "`All N stopped` and the checkpoint id only after that check", "exits non-zero it names what still runs",
+    "`All N stopped` and the checkpoint id only after that check", "does not see a detached job a lead or Reviewer started in the main checkout", "second office's own `claude` daemon", "is named `NOT saved`", "exits non-zero it names what still runs",
     "**Pause and close.**", "`paused at <time>, checkpoint <id>`", "\"safe to close\"",
     "**Restart.**", "`f1rm pm` on a paused project", "the board, the milestones file and the manifest", "say in one line where everything stopped",
     "**Resume.**", "`f1rm resume`", "leads first, one at a time within the cap of 8", "a note of where it stopped", "is named in the output",
