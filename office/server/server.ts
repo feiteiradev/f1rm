@@ -14,7 +14,7 @@ import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
-import { mayWake } from "../cli/wake.ts";
+import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
 import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
@@ -111,11 +111,11 @@ const hireArgs = (words: string[], verb = "hire") => {
   const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === verb);
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
-/** The role and `--team` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
+/** The role, `--team` and `--simple` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
 const hireOf = (args: string[] | null) => {
   if (!args) return null;
-  const { team, args: [role] } = parseHireFlags(args);
-  return role === "--help" || role === "-h" ? null : { role, team };
+  const { team, simple, args: [role] } = parseHireFlags(args);
+  return role === "--help" || role === "-h" ? null : { role, team, simple };
 };
 /** Where the words after the options start: a flag that takes a value takes the next word with it. */
 const skipOptions = (args: string[], i: number, withValue: Set<string>) => {
@@ -159,31 +159,23 @@ const ghLands = ([program, ...words]: string[]) => {
   if (args[i] === "api") return writesApi(args.slice(i + 1));
   return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
 };
-// What a Reviewer may not run: it merges with --no-ff or --ff-only and removes its worktrees, and rewrites nothing.
-const REVIEWER_NEVER = new Set(["reset", "rebase", "cherry-pick", "revert", "am", "pull", "clean", "update-ref"]);
-// A short-flag cluster with `f` is a force only for these; `git log -Sfoo` and `git diff -Uf` are not. A bare `-f` and `--force*` are refused everywhere.
-const FORCE_SHORT = new Set(["checkout", "switch", "branch", "worktree", "tag", "merge", "clean", "push", "fetch", "reset", "add", "update-ref"]);
+// A Reviewer (a content review, of a branch with no code) reads and works in scratch worktrees of its own; nothing else of git runs. `f1rm merge`, run by the lead or the PM, is the one way to land.
+const REVIEWER_READS = new Set(["status", "log", "diff", "show", "rev-parse", "rev-list", "merge-base", "ls-files", "ls-tree", "cat-file", "blame", "grep", "shortlog", "describe", "show-ref", "for-each-ref", "diff-tree", "name-rev"]);
+// `git branch` lists with these; any other flag, or a bare name with none of the listing ones, creates, moves or deletes.
+const BRANCH_FLAGS = /^(?:--(?:list|all|remotes|verbose|show-current|contains|no-contains|merged|no-merged|points-at)(?:=.*)?|-[alrv]+)$/;
+const BRANCH_LISTS = /^(?:--(?:list|contains|no-contains|merged|no-merged|points-at)(?:=.*)?|-[a-z]*l[a-z]*)$/;
 const RED_WORKTREE = /^\.claude\/worktrees\/red-[^/]+\/?$/;
-// ponytail: a dev task whose slug starts `red-` has its worktree removable by a Reviewer too; tighten it if that ever matters.
-// `git checkout <path>` and `git checkout <ref> -- <path>` are not refused: a path and a ref look alike, and the Reviewer needs `checkout main`, `checkout -b x` and `checkout <branch> -- <files>`.
-/** Whether a git call is one a Reviewer may not run. The one force it needs is removing its red-<task> scratch worktree. */
+// ponytail: `git log --output=<file>` and `git diff --output=<file>` write a file; a Reviewer's cwd is the repo, so tighten it if that ever matters.
+/** Whether a git call is one a Reviewer may not run. A worktree is added, listed, pruned and removed; the one force it needs is removing its red-<task> scratch worktree. */
 const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   if (!call) return false;
   const { sub, rest, options } = call;
-  const any = (re: RegExp) => rest.some((a) => re.test(a));
-  if (REVIEWER_NEVER.has(sub)) return true;
-  if ((sub === "branch" && any(/^-[A-Za-z]*[DM]/)) || (sub === "checkout" && any(/^-[A-Za-z]*B/)) || (sub === "switch" && any(/^-[A-Za-z]*C/))) return true;
-  // `checkout -- <path>` (nothing but options before the `--`) restores a path from the index; `checkout <branch> -- <files>` is how the red-<task> worktree gets its check files.
-  const restoresPath = sub === "checkout" && rest.includes("--") && rest.slice(0, rest.indexOf("--")).every((a) => a.startsWith("-"));
-  // `--amend` as a word, not as the value of `-m`, `-F`, `-C`, `-c`, `-t` or `--message`.
-  const amends = sub === "commit" && rest.some((a, j) => /^--am/.test(a) && !/^(-[^mFCct]*[mFCct]|--(message|file|reuse-message|reedit-message|template))$/.test(rest[j - 1] ?? ""));
-  // `restore` may only unstage; `checkout --ours|--theirs` overwrites a path.
-  const discards = (sub === "restore" && !["--staged", "-S"].includes(rest.filter((a) => a.startsWith("-") && a !== "--").join())) || (sub === "checkout" && any(/^--(ours|theirs)$/));
-  if (sub === "stash" || amends || restoresPath || discards || (sub === "checkout" && rest.includes("."))) return true;
-  if (!any(/^--force/) && !rest.includes("-f") && !(FORCE_SHORT.has(sub) && any(/^-[A-Za-z]*f/))) return false;
+  if (sub === "branch") return !rest.every((a) => !a.startsWith("-") || BRANCH_FLAGS.test(a)) || (rest.some((a) => !a.startsWith("-")) && !rest.some((a) => BRANCH_LISTS.test(a)));
+  if (sub !== "worktree") return !REVIEWER_READS.has(sub);
+  if (!rest.some((a) => /^--force/.test(a) || /^-[A-Za-z]*f/.test(a))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
-  return !(sub === "worktree" && here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
+  return !(here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
 };
 // What lands on the base branch when run in the main checkout. `f1rm merge` is the one way to land there (see the gate in refusal()); a dev's own worktree keeps its normal git.
 const LANDS_IN_MAIN = new Set(["merge", "cherry-pick", "rebase", "reset", "commit", "am", "pull", "revert"]);
@@ -267,7 +259,7 @@ const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED)(?![A-Za-z0-9])/;
+const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED|NEEDS[\s_-]+YOU)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
 // Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
 const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
@@ -281,7 +273,7 @@ const sameFolder = (x: string, y: string) => {
 const leadOf = (team: string | null, fallback = "your lead (the Report to of your brief)") => (team ? `lead-${team}` : fallback);
 /** Who talks to whom: for each kind of company employee, the sessions of its project it may message (its own team, when it has one, is `team`) and the way out when a target is refused. */
 const TALK = {
-  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead", wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and no one else. A specialist or a Reviewer is reached through its lead: tell ${leadOf(teamOf(e), "their lead")}.` },
+  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead" || isSimpleEmployee(e), wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and its simple tasks' devs, and no one else. A member of a team is reached through its lead: tell ${leadOf(teamOf(e), "their lead")}.` },
   lead: {
     allows: (team: string | null, e: Employee) => e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team),
     wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${leadOf(teamOf(e), "their lead")}.`,
@@ -290,7 +282,17 @@ const TALK = {
     allows: (team: string | null, e: Employee) => !!team && teamOf(e) === team,
     wayOut: (team: string | null) => `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${leadOf(team)}.`,
   },
+  // A simple task's session has no lead and no team: the PM is its lead, and the only session its reports (DONE, BLOCKED, NEEDS YOU, ESCALATE) go to.
+  simple: {
+    allows: (_team: string | null, e: Employee) => e.role === "pm",
+    wayOut: (_team: string | null, _e: Employee, pm: string) => `A simple task's session messages the PM (${pm}) only, its reports included. Anyone else is reached through the PM: ask ${pm}.`,
+  },
 };
+/** Whether an employee is a simple task's session: a specialist whose name has no team (`backend-dev-x`), not a lead or a Reviewer. */
+function isSimpleEmployee(e: Employee) {
+  const h = e.title ? hireName(e.title) : null;
+  return !!h && isSimple(h);
+}
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
 // `$(mktemp -d)`, and neither the user's real home (see REAL_HOME) nor the HOME this office runs with (a second office is measured by its own sessions).
@@ -594,11 +596,11 @@ export function startServer({
         if (intern) {
           if (answering.some((e) => e.sessionId !== sessionId && (me.title === undefined || e.title !== me.title))) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
         } else {
-          const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : "member"];
+          const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : isSimpleEmployee(me) ? "simple" : "member"];
           const bad = answering.find((e) => !talk.allows(team, e));
-          if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad)}`);
-          if (!COORDINATORS.has(role) && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
-            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
+          if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad, Object.values(state.employees).find((e) => e.room === me.room && e.role === "pm")?.title ?? "the PM")}`);
+          if (!COORDINATORS.has(role) && talk !== TALK.simple && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
+            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE, NEEDS YOU) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
           }
           if (gone) {
             const target = hireName(gone.title!)!;
@@ -633,7 +635,7 @@ export function startServer({
         const name = target && (hireName(target) ? target : sessions.find((s) => s.kind === "background" && (s.sessionId === target || s.id === target))?.name);
         const hire = name ? hireName(name) : null;
         if (hire && !mayWake({ role, team: teamOf(me) }, hire)) {
-          return refuse("wake", role === "pm" ? "The PM wakes leads; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
+          return refuse("wake", role === "pm" ? "The PM wakes leads and its simple tasks' devs; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
         }
       }
     }
@@ -644,9 +646,15 @@ export function startServer({
     if ((!COORDINATORS.has(role) || payload.agent_id) && commands.some((c) => hireArgs(c, "merge"))) {
       return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
     }
-    if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
+    if (role === "pm" && hires.some((h) => h.simple && (h.team || h.role === "lead" || h.role === "reviewer"))) {
+      return refuse("hire", "--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer.");
+    }
+    if (role === "pm" && hires.some((h) => !h.simple && h.role !== "lead")) {
+      return refuse("hire", "PMs hire leads; send this to a lead, or hire one dev, designer or researcher for a simple task with `--simple`. A lead hires the specialists of its team.");
+    }
     if (role === "lead") {
       const team = teamOf(state.employees[sessionId]);
+      if (hires.some((h) => h.simple)) return refuse("hire", "Only the PM hires with --simple: a lead hires into its own team, with --team.");
       if (hires.some((h) => h.role === "lead")) return refuse("hire", "A lead hires specialists for its own team, never another lead. Ask the PM for a new team.");
       if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
     }
@@ -663,13 +671,13 @@ export function startServer({
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
-    // Nothing lands on the base branch but `f1rm merge`. F3b: a Reviewer keeps its old `--no-ff` and `--ff-only` steps in the main checkout until that task removes the role's merge flow and this exception.
+    // Nothing lands on the base branch but `f1rm merge`, for every role.
     const me = state.employees[sessionId];
-    if (role !== "reviewer" && me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
+    if (me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
       return refuse("main", "Nothing lands on the base branch except `f1rm merge <task>`, run by the PM or a lead in the main working directory. Your own git works inside your worktree: merge main into your branch, rebase your unpushed branch. Send `DONE` to the session in your Report to.");
     }
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
-      return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
+      return refuse("history", "A Reviewer's git is read-only plus its own scratch worktrees: status, log, diff, show and the like, git worktree add and remove (only `git worktree remove --force .claude/worktrees/red-<task>` may force). Nothing lands on the base branch except `f1rm merge <task>`, which the lead or the PM runs.");
     }
     if (FOUNDER_ONLY.has(role) && tool.startsWith("mcp__") && wordsOf(tool).some((w) => PUTS_OUT.has(w))) {
       return refuse("founder", "Drafts only: a Founder role never posts, publishes, sends or schedules. Save it as a draft and hand it to the session in your brief's Report to; the founder puts it out.");

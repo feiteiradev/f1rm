@@ -8,7 +8,7 @@ import { sleepGrace } from "../server/sleep.ts";
 import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
-import { readReport, reportFile, reportSlug } from "./report.ts";
+import { readReport, reportFile, reportSlug, SHOWN } from "./report.ts";
 
 export type Hire = {
   name: string;
@@ -385,7 +385,7 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
       const r = reportOf(deps.home, deps.repo, n.name);
       if (!r || r.seq <= (seqs[n.name] ?? 0)) return [];
       seqs[n.name] = r.seq;
-      return [`${n.name}: reported ${r.kind === "CHANGES" ? "CHANGES REQUESTED" : r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
+      return [`${n.name}: reported ${SHOWN[r.kind] ?? r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
     });
     if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
     // Nobody is stalled in a paused project (its sessions are stopped on purpose) or just after the Mac slept (a poll that came more than 2 minutes late); a report still wakes the watcher.
