@@ -25,7 +25,7 @@ const lockOf = (dir: string) => join(realpathSync(dir), git(dir, "rev-parse", "-
 
 /** Runs the lock script around `cmd` in `cwd`; the poll and the wait are short so a test does not idle. */
 function run(cwd: string, cmd: string[], env: Record<string, string> = {}) {
-  const proc = Bun.spawn(["bun", SCRIPT, ...cmd], { cwd, env: { ...process.env, F1RM_CHECK_POLL_MS: "50", ...env }, stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", SCRIPT, ...cmd], { cwd, env: { ...process.env, F1RM_CHECK_POLL_MS: "50", F1RM_CHECK_LOCKED: "", ...env }, stdout: "pipe", stderr: "pipe" });
   const done = Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]).then(([code, out, err]) => ({ code, out: out + err }));
   return { proc, done };
 }
@@ -126,3 +126,22 @@ test("bun run check goes through the lock and the suite itself is the unlocked s
   expect(scripts.check).toBe("bun scripts/check-lock.ts bun run suite");
   expect(scripts.suite).toBe("bun test && bun run typecheck && bun run build");
 });
+
+test("a command started by a caller that already holds the lock (F1RM_CHECK_LOCKED) runs at once and neither takes nor waits for the lock", async () => {
+  const dir = repo();
+  writeFileSync(lockOf(dir), JSON.stringify({ pid: process.pid, since: Date.now(), cwd: dir, commit: "abc1234" }));
+  const log = join(dir, "log");
+  const r = await run(dir, sh(`echo ran >> ${log}; exit 4`), { F1RM_CHECK_LOCKED: "1", F1RM_CHECK_WAIT_MS: "300" }).done;
+  expect(r.code).toBe(4);
+  expect(r.out).not.toContain("waiting");
+  expect(lines(log)).toEqual(["ran"]);
+  expect(existsSync(lockOf(dir))).toBe(true); // the holder's, left alone
+}, 15_000);
+
+test("the command a lock holder runs sees F1RM_CHECK_LOCKED, so a check script that is this script again does not wait for it", async () => {
+  const dir = repo();
+  const r = await run(dir, sh(`bun ${SCRIPT} sh -c 'echo inner-ran'`), { F1RM_CHECK_WAIT_MS: "300" }).done;
+  expect(r.code).toBe(0);
+  expect(r.out).toContain("inner-ran");
+  expect(r.out).not.toContain("waiting");
+}, 15_000);

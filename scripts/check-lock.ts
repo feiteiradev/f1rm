@@ -31,6 +31,9 @@ if (!command.length) {
   process.exit(2);
 }
 
+// The command runs with F1RM_CHECK_LOCKED set: `f1rm merge` holds the lock around the repo's whole check, which is this script again, and the inner call must not wait for its own caller.
+if (process.env.F1RM_CHECK_LOCKED) process.exit((await Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"] }).exited) ?? 1);
+
 const common = git("rev-parse", "--git-common-dir");
 if (!common) {
   say("not a git repo, so there is no lock: running the check unlocked.");
@@ -102,6 +105,6 @@ for (let held = take(); held; held = take()) {
   await Bun.sleep(POLL_MS);
 }
 
-child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"] });
+child = Bun.spawn(command, { env: { ...process.env, F1RM_CHECK_LOCKED: "1" }, stdio: ["inherit", "inherit", "inherit"] });
 const code = await child.exited;
 process.exit(signal || code);
