@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { FOUNDER_ONLY, MODELS, roleOfAgentType } from "../people.ts";
 import { editionFile, readEdition, type Edition } from "../server/editions.ts";
+import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from "../server/pause.ts";
 import { claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
@@ -125,6 +126,8 @@ export type HireRequest = {
   content?: boolean;
   /** Flags that go to claude as given. */
   extra?: string[];
+  /** The project's pause, when it is paused: nothing is hired into it. */
+  paused?: Paused | null;
 };
 
 /** The live background sessions Claude Code lists, as `machine.backgroundSessions` gives them. */
@@ -198,6 +201,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (req.name && req.name !== name) throw new Error(`this hire's name must be "${name}"`);
   const reportTo = team ? `lead-${team}` : req.reportTo;
 
+  if (req.paused) throw new HireRefused(hireRefusal(basename(cwd), req.paused), null);
   const tooLong = rootTooLong(m.gitCommonDir(cwd));
   if (tooLong) throw new HireRefused(tooLong, null);
 
@@ -254,7 +258,7 @@ export async function hire(words: string[]): Promise<number> {
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
   try {
-    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
+    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(

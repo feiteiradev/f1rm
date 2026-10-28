@@ -801,6 +801,45 @@ test("uninstall keeps the event log and the PM's boards", () => {
   expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(false);
 });
 
+test("pm on a paused project with a checkpoint tells the fresh PM to read the board, the milestones file and the manifest and say in one line where everything stopped", () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  const key = repo.replace(/[^A-Za-z0-9]/g, "-");
+  const plain = stubClaude();
+  expect(pmIn(repo, { HOME: home }, plain).code).toBe(0);
+  expect(plain.args()[4]).not.toContain("PAUSED"); // not paused: the usual prompt
+
+  mkdirSync(join(home, ".f1rm", "paused"), { recursive: true });
+  writeFileSync(join(home, ".f1rm", "paused", `${key}.json`), JSON.stringify({ by: "manual", at: Date.UTC(2026, 9, 28, 15, 30, 12), why: "going home", checkpoint: "cp-20261028-153012" }));
+  const dir = join(home, ".f1rm", "checkpoints", key);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "cp-20261028-153012.json"), JSON.stringify({ id: "cp-20261028-153012", at: 1, repo, why: "", verified: true, sessions: [], killed: [] }));
+  writeFileSync(join(dir, "latest"), "cp-20261028-153012\n");
+
+  const stub = stubClaude();
+  expect(pmIn(repo, { HOME: home }, stub).code).toBe(0);
+  const prompt = stub.args()[4]!;
+  expect(prompt).toStartWith("/mattpocock-skills:grilling "); // still the first command
+  expect(prompt).toContain("PAUSED");
+  expect(prompt).toContain("cp-20261028-153012");
+  expect(prompt).toContain(join(dir, "cp-20261028-153012.json"));
+  expect(prompt).toContain("the board, the milestones file and the manifest");
+  expect(prompt).toContain("one line where everything stopped");
+  expect(prompt).toContain("`f1rm resume`");
+  expect(prompt).toContain("going home");
+});
+
+test("pm on a paused project with no checkpoint still says it is paused and waits for the user's resume", () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  mkdirSync(join(home, ".f1rm", "paused"), { recursive: true });
+  writeFileSync(join(home, ".f1rm", "paused", `${repo.replace(/[^A-Za-z0-9]/g, "-")}.json`), JSON.stringify({ by: "schedule", at: 1, why: "" }));
+  const stub = stubClaude();
+  expect(pmIn(repo, { HOME: home }, stub).code).toBe(0);
+  const prompt = stub.args()[4]!;
+  expect(prompt).toContain("PAUSED");
+  expect(prompt).toContain("`f1rm resume`");
+  expect(prompt).not.toContain("manifest");
+});
+
 const edition = (cwd: string, home: string, ...args: string[]) => {
   const r = Bun.spawnSync(["bun", CLI, "edition", ...args], { cwd, env: { ...process.env, HOME: home } });
   return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.stderr.toString() };
@@ -817,7 +856,7 @@ test("f1rm edition changes a registered repo's edition outside the repo, and ref
   expect(readdirSync(repo)).toEqual([]);
   const files = registered(home);
   expect(files).toHaveLength(1);
-  expect(JSON.parse(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8"))).toEqual({ edition: "founder" });
+  expect(JSON.parse(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8"))).toEqual({ edition: "founder", folder: realpathSync(repo) });
   const bad = edition(repo, home, "startup");
   expect(bad.code).not.toBe(0);
   expect(bad.err).toContain("usage: f1rm edition [work|founder]");
@@ -841,12 +880,13 @@ test("pm registers its repo with no edition chosen and starts as Work, from a su
   expect(stub.args()[4]).toContain("This is a Work project");
   const files = registered(home);
   expect(files).toHaveLength(1);
-  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe("{}\n");
+  // The registration keeps the folder, so the office can name the project before any session has been in it (the file name is lossy).
+  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe(JSON.stringify({ folder: realpathSync(repo) }) + "\n");
   expect(edition(repo, home, "founder").code).toBe(0);
   const again = stubClaude();
   expect(pmIn(repo, { HOME: home }, again).code).toBe(0);
   expect(registered(home)).toEqual(files);
-  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe('{"edition":"founder"}\n');
+  expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe(JSON.stringify({ edition: "founder", folder: realpathSync(repo) }) + "\n");
   expect(again.args()[4]).toContain("This is a Founder project");
 });
 

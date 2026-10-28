@@ -6,6 +6,8 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
+import { checkpointsDirOf } from "../server/checkpoint.ts";
+import { realFullStop } from "../server/fullstop.ts";
 import { pausedDirOf } from "../server/pause.ts";
 import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
@@ -13,7 +15,7 @@ import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong } from "./hire.ts";
 import { letgo } from "./letgo.ts";
 import { wake } from "./wake.ts";
-import { pauseCall } from "./pause.ts";
+import { pauseCall, pausedNote } from "./pause.ts";
 import { reportIn } from "./report.ts";
 import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
@@ -278,7 +280,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
@@ -483,14 +485,14 @@ async function pm() {
   // Running the PM registers the repo, which is what gives it a door. The first PM in a repo sets its edition.
   // With no answer (no terminal), it starts as Work and asks again next time.
   const file = editionFile(root, git);
-  register(file);
+  register(file, root);
   let chosen = readEdition(file);
   if (!chosen) {
     const answer = prompt(`Is ${name.slice(3)} a Work or a Founder project? [w/f]`)?.trim().toLowerCase() ?? "";
     chosen = answer.startsWith("f") ? "founder" : answer.startsWith("w") ? "work" : null;
     if (chosen) writeEdition(file, chosen);
   }
-  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work")], {
+  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work") + pausedNote(root, process.env.HOME!)], {
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],
   });
@@ -504,7 +506,7 @@ const pauseOrResume = (verb: "pause" | "resume") => async () => {
   console.log(await pauseCall(verb, process.argv.slice(3), {
     room: () => machine.gitCommonDir(process.cwd()) ?? process.cwd(),
     post: async (path, body) => {
-      const r = await fetch(new URL(path, url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+      const r = await fetch(new URL(path, url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(120_000) });
       return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };
     },
   }));

@@ -1111,11 +1111,25 @@ test("a resume wakes the hires the pause stopped one at a time, leads first, and
     }
     expect(o.w.woke.length).toBeLessThanOrEqual(1 + freed.length); // never past the cap
   };
-  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"]);
-  // Leads first; the one whose row is done is not woken; each wake is the same note.
-  expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: NOTE_PAUSE })));
+  const where = `${NOTE_PAUSE} You stopped at checkpoint cp-9: your task other.`;
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"], undefined, undefined, { [DEV_B]: where });
+  // Leads first; the one whose row is done is not woken; a hire with a where-it-stopped note from the manifest gets it, the others the plain pause note.
+  expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: name === DEV_B ? where : NOTE_PAUSE })));
   expect(o.w.slept).toEqual([10_000, 10_000, 10_000, 10_000]); // the first dev waits three times (the third frees a slot), the second once
   expect(freed).toHaveLength(2);
+});
+
+test("a resume from a manifest gives each hire its own note, where it stopped, leads first, and the default pause note to one with none", async () => {
+  const o = office();
+  o.w.list = [ended("lead-shop", "lead-old", REPO), ended(DEV, "dev-1", DEV_CWD), ended("shop.backend-dev-b", "dev-2", wt("b"))];
+  o.w.boards.pm = [row("lead-shop", "doing", "shop")];
+  o.w.boards.shop = [row(DEV, "doing", "checkout"), row("shop.backend-dev-b", "doing", "b")];
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-b", "lead-shop"], undefined, undefined, { [DEV]: `${NOTE_PAUSE} You stopped at checkpoint cp-1.`, "lead-shop": `${NOTE_PAUSE} You stopped at checkpoint cp-1 (lead).` });
+  expect(o.w.woke).toEqual([
+    { repo: REPO, name: "lead-shop", note: `${NOTE_PAUSE} You stopped at checkpoint cp-1 (lead).` },
+    { repo: REPO, name: DEV, note: `${NOTE_PAUSE} You stopped at checkpoint cp-1.` },
+    { repo: REPO, name: "shop.backend-dev-b", note: NOTE_PAUSE },
+  ]);
 });
 
 test("a resume tells a hire that is still live (the pause only ended its turn) in its inbox, and wakes only the ones whose process ended", async () => {

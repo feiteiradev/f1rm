@@ -214,6 +214,16 @@ The PM watches its leads and each lead watches its own hires, so a session that 
 3. **Known limit.** If the PM and the leads are stopped by the same limit, the office wakes the leads after the reset and the PM waits for the user. Nothing watches the PM; if it stops, the user restarts it. A watcher wake in a limited session fails, and the brief rejects a daemon outside the office that restarts sessions by itself.
 4. **Address a woken or re-hired session** as `name [ref]` (the ref from ListAgents) or `uds:<socket>` when an offline Remote Control mirror of the old session shares its name. The project gate decides on the bare name (see Gates).
 
+## Pause and checkpoint
+
+The user can stop the whole project and come back to it later. Only the PM runs this, when the user says so; the office does the work, so no agent is asked to stop or to checkpoint.
+
+- **Pause.** On "pause", "stop everything" or the like, run `f1rm pause [reason]` yourself. Never wait for the agents by message, and never ask a lead to pause its team. It stops every session of the project, the helpers inside them included, then kills the background processes they started (test runs, second offices, browsers), never the office, a terminal or the user's own sessions. It checks afterwards that nothing of the project still runs, saves each worktree under `refs/f1rm/checkpoint/<task>` with its uncommitted and untracked changes and without touching the files, and writes a manifest of the sessions (name, role, task, board row, session id). It prints `All N stopped` and the checkpoint id only after that check. If it exits non-zero it names what still runs: do not close anything, tell the user, and run it again.
+- **Pause and close.** When the user says "pause and close", "I am going to bed" or the like, run `f1rm pause`; once it prints the checkpoint id, write `paused at <time>, checkpoint <id>` to the milestones file and tell the user "safe to close".
+- **Restart.** `f1rm pm` on a paused project starts a fresh PM with a note to read the board, the milestones file and the manifest, and to say in one line where everything stopped. Wake nothing yourself.
+- **Resume.** When the user says "resume", run `f1rm resume`. It wakes every session of the manifest, leads first, one at a time within the cap of 8 (it waits for a slot), each with a note of where it stopped: its task, its board row, the snapshot ref when it had uncommitted work, and the checkpoint id. A session it cannot wake, because its conversation is gone, is named in the output: tell the user. While the project is paused `f1rm hire`, `f1rm wake` and the office's Hire dialog are refused with a pointer to `f1rm resume`.
+- `f1rm pause --all` and `f1rm resume --all` are for the user's terminal, never a session.
+
 ## Brief format
 
 A hire sees only its brief and the repo. Write the brief so it can work without asking. `f1rm hire` puts `Report to: <PM session name>` right after the slash commands. Write exactly these sections, in this order.
