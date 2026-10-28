@@ -332,6 +332,32 @@ test("who may wake follows who may hire: the PM wakes leads, a lead its own team
   }
 });
 
+test("a stopped simple dev (no team) is woken in its own worktree, reports to the PM, and the wake counts it as a team of one", async () => {
+  const solo = stopped("backend-dev-x", "solo-sid", wt("x"));
+  const p = await plan("backend-dev-x", [solo]);
+  expect(p.argv.slice(0, 9)).toEqual(["claude", "--bg", "--resume", "solo-sid", "--agent", "f1rm:backend-dev", "--name", "backend-dev-x", "resumed; continue your task\nReport to: pm-shop"]);
+  expect(p.cwd).toBe(wt("x"));
+  // Two other teams (a lead, another simple task) fill the project: the wake is refused like a third hire; one other team leaves room.
+  const other = running("designer-y", "y", wt("y"));
+  const full = await failure(plan("backend-dev-x", [solo, lead, other]));
+  expect(full).toBeInstanceOf(HireRefused);
+  expect(full?.message).toBe("this project already has 2 teams (the cap is 2).");
+  expect((await plan("backend-dev-x", [solo, other])).sessionId).toBe("solo-sid");
+  expect((await plan("backend-dev-x", [solo, lead, other], { override: true })).sessionId).toBe("solo-sid");
+  // The Report to its first prompt named wins over the default.
+  expect((await plan("backend-dev-x", [solo], {}, { promptOf: () => "/pstack:poteto-mode Report to: pm-other\n\nbrief" })).argv[8]).toBe("resumed; continue your task\nReport to: pm-other");
+});
+
+test("the PM wakes a simple dev as well as a lead; no lead wakes it, and a team's member is still its lead's", () => {
+  const t = (name: string) => hireName(name)!;
+  expect(mayWake({ role: "pm", team: null }, t("backend-dev-x"))).toBe(true);
+  expect(mayWake({ role: "pm", team: null }, t("designer-x"))).toBe(true);
+  expect(mayWake({ role: "pm", team: null }, t("shop.backend-dev-a"))).toBe(false);
+  expect(mayWake({ role: "pm", team: null }, t("reviewer-review-x"))).toBe(false);
+  expect(mayWake({ role: "lead", team: "shop" }, t("backend-dev-x"))).toBe(false);
+  for (const role of ["backend", "designer", "reviewer", null]) expect([role, mayWake({ role, team: null }, t("backend-dev-x"))]).toEqual([role, false]);
+});
+
 // The real command, against a stub claude that lists a stopped hire and records how it is started.
 function stub(list: Entry[], newId = "newnewne") {
   const bin = tmp("f1rm-wake-bin-");

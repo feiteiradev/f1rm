@@ -11,9 +11,12 @@ import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
 
-/** Who may wake a hire follows who may hire it: the PM wakes leads, a lead wakes the members of its own team, a specialist wakes nobody. */
+/** A simple task's hire: a specialist with no team, whose lead is the PM. */
+export const isSimple = (h: HireName): boolean => h.role !== "lead" && !h.team && !h.reviewer;
+
+/** Who may wake a hire follows who may hire it: the PM wakes leads and its simple tasks' hires, a lead wakes the members of its own team, a specialist wakes nobody. */
 export const mayWake = (waker: { role: string | null; team: string | null }, target: HireName): boolean =>
-  waker.role === "pm" ? target.role === "lead" : waker.role === "lead" ? target.role !== "lead" && !!waker.team && target.team === waker.team : false;
+  waker.role === "pm" ? target.role === "lead" || isSimple(target) : waker.role === "lead" ? target.role !== "lead" && !!waker.team && target.team === waker.team : false;
 
 export type WakeRequest = {
   /** A session's name, session id or short id. */

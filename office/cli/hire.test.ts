@@ -59,7 +59,7 @@ const settingsOf = (argv: string[] | null) => {
 test("every hire but a lead is started at ponytail full by its own --settings, which a lead's start does not carry", () => {
   for (const [role, task] of [["backend-dev", "x"], ["frontend-dev", "x"], ["designer", "x"], ["researcher", "x"], ["reviewer", "review-x"]]) {
     const stub = stubClaude([]);
-    expect([role, hire(stub, [...pmArgs, role, `${role}-${task}`, task, BRIEF]).code]).toEqual([role, 0]);
+    expect([role, hire(stub, [...(role === "reviewer" ? ["--content"] : []), ...pmArgs, role, `${role}-${task}`, task, BRIEF]).code]).toEqual([role, 0]);
     expect([role, settingsOf(stub.argv())]).toEqual([role, FULL]);
   }
   const lead = stubClaude([]);
@@ -69,7 +69,7 @@ test("every hire but a lead is started at ponytail full by its own --settings, w
 
 test("a reviewer's --settings stays ahead of --disallowedTools, which would swallow it, and a --settings the caller passes gets the level merged in", () => {
   const rv = stubClaude([]);
-  hire(rv, [...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  hire(rv, ["--content", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
   expect(rv.argv()!.indexOf("--settings")).toBeLessThan(rv.argv()!.indexOf("--disallowedTools"));
   const own = stubClaude([]);
   expect(hire(own, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--settings", '{"disableAllHooks":true,"env":{"A":"1"}}']).code).toBe(0);
@@ -159,18 +159,17 @@ test("hire without --report-to reports to the PM session of the repo it runs in"
   const repo = join(repoDir(), "shop");
   mkdirSync(repo);
   hire(stub, ["backend-dev", "backend-dev-api", "api", BRIEF], repo);
-  expect(stub.argv()![7]).toBe(`/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd. Report to: pm-shop\n\n${BRIEF}`);
+  expect(stub.argv()![7]).toStartWith("/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd. Report to: pm-shop\n\nReview inside your session.");
+  expect(stub.argv()![7]).toEndWith(`\n\n${BRIEF}`);
 });
 
 test.each([
   ["frontend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
   ["backend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
   ["researcher", "/mattpocock-skills:research"],
-  ["reviewer", "/code-review medium worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review."],
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
-  const task = role === "reviewer" ? "review-x" : "x";
-  hire(stub, [...pmArgs, role, `${role}-${task}`, task, BRIEF]);
+  hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
   expect(stub.argv()!.find((a) => a.startsWith("/"))).toStartWith(`${commands} Report to: pm-shop\n\n`);
 });
 
@@ -183,10 +182,10 @@ test("--skills adds to the list; a slash-only skill becomes the first command an
   const researcher = stubClaude([]);
   hire(researcher, ["--skills", "research,seo-audit", ...pmArgs, "researcher", "researcher-x", "x", BRIEF]);
   expect(prompt(researcher)).toStartWith("/research Before you start, load these with the Skill tool: seo-audit, mattpocock-skills:research. Report to: pm-shop\n\n");
-  // security-review reads the git state where it runs, so it never runs at the start: --level high puts it after the merge.
-  const reviewer = stubClaude([]);
-  expect(hire(reviewer, ["--skills", "security-review", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("--level high");
-  expect(reviewer.argv()).toBeNull();
+  // security-review reads the git state where it runs, so it never runs at the start: a dev's --level high runs it in its own review.
+  const security = stubClaude([]);
+  expect(hire(security, ["--skills", "security-review", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).err).toContain("--level high");
+  expect(security.argv()).toBeNull();
 });
 
 test("a backend bug loads diagnosing-bugs before tdd: --skills mattpocock-skills:diagnosing-bugs goes ahead of the role's own later skills", () => {
@@ -217,7 +216,7 @@ test("what hire adds to a brief is the Report to line alone: no PLAN, no GO, and
 test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s is refused with nothing started: the Skill tool refuses it and the user can run it by hand", (skill) => {
   for (const [role, task] of [["lead", "checkout"], ["backend-dev", "x"], ["reviewer", "review-x"]]) {
     const stub = stubClaude([]);
-    const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
+    const r = hire(stub, [...(role === "reviewer" ? ["--content"] : []), "--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
     expect(r.code, `${role} ${skill}`).not.toBe(0);
     expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
@@ -225,10 +224,10 @@ test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s i
 });
 
 // Every pstack skill but setup-pstack carries disable-model-invocation, so one rule refuses them: any pstack: skill other than poteto-mode, architect and how.
-test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is refused for a dev, a lead and a code Reviewer, with nothing started", (skill) => {
+test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is refused for a dev, a lead and a content Reviewer, with nothing started", (skill) => {
   for (const [role, task] of [["backend-dev", "x"], ["lead", "checkout"], ["reviewer", "review-x"]]) {
     const stub = stubClaude([]);
-    const r = hire(stub, ["--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
+    const r = hire(stub, [...(role === "reviewer" ? ["--content"] : []), "--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
     // setup-pstack is the one pstack skill the Skill tool loads, so the message does not say it refuses the skill.
     expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
     expect(r.err, `${role} ${skill}`).not.toContain("the Skill tool refuses it");
@@ -267,15 +266,6 @@ test("a slash-only --skills named twice, or the dev's own poteto-mode, counts on
   expect(prompt(twice)).toStartWith("/research Before you start, load these with the Skill tool: mattpocock-skills:research. ");
 });
 
-// A code Reviewer's first command is /code-review <level> worktree-<task>: a slash-only skill would take its place.
-test.each(["research", "pstack:poteto-mode"])("a code Reviewer is refused --skills %s, and a content Reviewer takes it as its first command", (skill) => {
-  const code = stubClaude([]);
-  const r = hire(code, ["--skills", skill, ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(r.err).toContain(`${skill} is slash-only`);
-  expect(r.err).toContain("a code Reviewer's first command is /code-review");
-  expect(code.argv()).toBeNull();
-});
-
 test("a content Reviewer takes --skills research as its first command", () => {
   const content = stubClaude([]);
   hire(content, ["--content", "--skills", "research", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
@@ -307,7 +297,7 @@ test("pstack:architect and pstack:how are for a lead only: every other role is r
   for (const role of ["designer", "researcher", "reviewer"]) {
     const stub = stubClaude([]);
     const task = role === "reviewer" ? "review-x" : "x";
-    expect(hire(stub, ["--skills", "pstack:architect", ...pmArgs, role, `${role}-${task}`, task, BRIEF]).err, role).toContain("for a lead only");
+    expect(hire(stub, [...(role === "reviewer" ? ["--content"] : []), "--skills", "pstack:architect", ...pmArgs, role, `${role}-${task}`, task, BRIEF]).err, role).toContain("for a lead only");
     expect(stub.argv(), role).toBeNull();
   }
   const lead = stubClaude([]);
@@ -319,18 +309,17 @@ test("pstack:architect and pstack:how are for a lead only: every other role is r
   expect(prompt(research)).toStartWith("/research Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. ");
 });
 
-test("--level sets the reviewer's /code-review level, and high runs security-review on the merge before APPROVED; other roles refuse it", () => {
-  const high = stubClaude([]);
-  hire(high, ["--level", "high", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(prompt(high)).toStartWith(
-    "/code-review high worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review. Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args. Report to: pm-shop",
-  );
-  const low = stubClaude([]);
-  hire(low, ["--level", "low", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(prompt(low)).toStartWith("/code-review low worktree-x Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, ponytail:ponytail-review, mattpocock-skills:code-review. ");
+test("--level sets the level of a dev's own review, named in its prompt; any other role, and any other value, is refused with nothing started", () => {
+  for (const level of ["low", "medium", "high"]) {
+    const stub = stubClaude([]);
+    expect(hire(stub, ["--level", level, ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).code).toBe(0);
+    expect(prompt(stub)).toContain(`run the code-review skill at level ${level} on`);
+    expect(prompt(stub).includes("security-review skill")).toBe(level === "high");
+  }
   const bad = stubClaude([]);
-  expect(hire(bad, ["--level", "max", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("level");
-  expect(hire(bad, ["--level", "high", ...pmArgs, "designer", "designer-x", "x", BRIEF]).err).toContain("reviewer only");
+  expect(hire(bad, ["--level", "max", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF]).err).toContain("level");
+  expect(hire(bad, ["--level", "high", ...pmArgs, "designer", "designer-x", "x", BRIEF]).err).toContain("--level is for the two devs");
+  expect(hire(bad, ["--level", "high", "--content", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("--level is for the two devs");
   expect(bad.argv()).toBeNull();
 });
 
@@ -347,21 +336,21 @@ test("--content starts a reviewer with the guidelines, sonnet, no code-review sk
   expect(other.argv()).toBeNull();
 });
 
-test("a reviewer's task must be review-<task>, and its /code-review targets the branch under review", () => {
+test("a reviewer's task must be review-<task>, and a Reviewer without --content is refused", () => {
   const bad = stubClaude([]);
   const r = hire(bad, [...pmArgs, "reviewer", "reviewer-api", "api", BRIEF]);
   expect(r.err).toContain("a Reviewer's task is review-<task>");
   expect(bad.argv()).toBeNull();
   const content = stubClaude([]);
   expect(hire(content, ["--content", ...pmArgs, "reviewer", "reviewer-api", "api", BRIEF]).err).toContain("a Reviewer's task is review-<task>");
-  const targeted = stubClaude([]);
-  hire(targeted, [...pmArgs, "reviewer", "reviewer-review-checkout-form", "review-checkout-form", BRIEF]);
-  expect(prompt(targeted)).toStartWith("/code-review medium worktree-checkout-form Before you start");
+  const code = stubClaude([]);
+  expect(hire(code, [...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]).err).toContain("a Reviewer reviews a branch with no code: hire it with --content");
+  expect(code.argv()).toBeNull();
 });
 
 test("a reviewer starts with no --worktree, so it runs in the main checkout; every other specialist still gets one", () => {
   const reviewer = stubClaude([]);
-  hire(reviewer, [...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF]);
+  hire(reviewer, ["--content", ...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF]);
   expect(reviewer.argv()!.slice(0, 5)).toEqual(["--bg", "--agent", "f1rm:reviewer", "--name", "reviewer-review-api"]);
   expect(reviewer.argv()).not.toContain("--worktree");
   for (const role of ["designer", "frontend-dev", "backend-dev", "researcher"]) {
@@ -373,8 +362,8 @@ test("a reviewer starts with no --worktree, so it runs in the main checkout; eve
 
 test("only a reviewer hire carries the no-push deny rule, after the prompt so it cannot swallow it", () => {
   const reviewer = stubClaude([]);
-  hire(reviewer, [...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(reviewer.argv()!.slice(6)).toEqual(["--settings", FULL, "--disallowedTools", "Bash(git push *)"]);
+  hire(reviewer, ["--content", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
+  expect(reviewer.argv()!.slice(6)).toEqual(["--settings", FULL, "--model", "sonnet", "--disallowedTools", "Bash(git push *)"]);
   const designer = stubClaude([]);
   hire(designer, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(designer.argv()).not.toContain("--disallowedTools");
@@ -487,6 +476,29 @@ test.each([
   expect(stub.argv()).toBeNull();
 });
 
+test("f1rm hire --simple starts one dev with no lead and no team: <role>-<task> in its own worktree, reporting to the PM; with --team, for a lead or a reviewer it is refused and starts nothing", () => {
+  const repo = repoDir();
+  const stub = stubClaude([]);
+  const r = hire(stub, ["--simple", ...pmArgs, "backend-dev", "backend-dev-x", "x", BRIEF], repo);
+  expect([r.code, r.err]).toEqual([0, ""]);
+  expect(stub.argv()!.slice(0, 7)).toEqual(["--bg", "--agent", "f1rm:backend-dev", "--name", "backend-dev-x", "--worktree", "x"]);
+  expect(prompt(stub)).toContain("Report to: pm-shop");
+  const refused = [
+    [["--simple", "--team", "checkout", "designer", "checkout.designer-x", "x", BRIEF], "--simple is for one dev"],
+    [["--simple", "lead", "lead-checkout", "checkout", BRIEF], "--simple is for one dev"],
+    [["--simple", "--content", "reviewer", "reviewer-review-x", "review-x", BRIEF], "--simple is for one dev"],
+    [["--simple", "backend-dev", "backend-dev-y", "x", BRIEF], 'name must be "backend-dev-x"'],
+    [["--team", "checkout", "backend-dev", "checkout.backend-dev-x", "x", BRIEF], "an owner runs implementer subagents"],
+    [["reviewer", "reviewer-review-x", "review-x", BRIEF], "hire it with --content"],
+  ] as const;
+  for (const [args, message] of refused) {
+    const none = stubClaude([bg("done", "lead-checkout", repo)]);
+    const out = hire(none, [...pmArgs, ...args], repo);
+    expect([args.join(" "), out.code === 0, out.err.includes(message)]).toEqual([args.join(" "), false, true]);
+    expect(none.argv()).toBeNull();
+  }
+});
+
 test("a project runs at most 2 teams: a third lead is refused, leads elsewhere do not count, and --override passes", () => {
   const repo = repoDir();
   const two = [bg("done", "lead-checkout", repo), bg("working", "lead-search", repo), bg("working", "lead-blog", "/code/blog")];
@@ -565,12 +577,12 @@ test("one Reviewer per task: a second live session with the reviewer's name is r
   const live = [bg("done", "reviewer-review-api", repo)];
   for (const flags of [[], ["--override"]]) {
     const stub = stubClaude(live);
-    const r = hire(stub, [...flags, ...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF], repo);
+    const r = hire(stub, ["--content", ...flags, ...pmArgs, "reviewer", "reviewer-review-api", "review-api", BRIEF], repo);
     expect(r.code).not.toBe(0);
     expect(r.err).toContain('a session named "reviewer-review-api" is already running');
     expect(stub.argv()).toBeNull();
   }
-  expect(hire(stubClaude(live), [...pmArgs, "reviewer", "reviewer-review-form", "review-form", BRIEF], repo).code).toBe(0);
+  expect(hire(stubClaude(live), ["--content", ...pmArgs, "reviewer", "reviewer-review-form", "review-form", BRIEF], repo).code).toBe(0);
 });
 
 test("a hire into a paused project is refused with a pointer to resume, and starts nothing; once resumed it hires", () => {

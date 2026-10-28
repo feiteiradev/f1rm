@@ -303,6 +303,48 @@ test("a lead is woken when the PM's board has it doing; a Reviewer when the row 
   expect(o.w.woke.map((x) => x.name)).toEqual(["lead-shop", "shop.reviewer-review-checkout"]);
 });
 
+// A simple task's dev has no team: its row is on the PM's board, it reports to the PM, and the tick treats it like a team member otherwise.
+const SOLO = "backend-dev-x";
+function soloDev(o: ReturnType<typeof office>, last: string[], dev: Listed) {
+  o.w.list = [live("pm-shop", "pm-sid", REPO, { status: "idle" }), dev];
+  o.w.transcripts["solo-1"] = [say("working on it", 30), ...last];
+  o.w.mtimes["solo-1"] = T0;
+  o.w.boards.pm = [row(SOLO, "doing", "x")];
+}
+
+test("a simple dev whose session ended is woken when the PM's board has it doing, and its Report to is the PM; a row on a team board is not its row", async () => {
+  const o = office();
+  soloDev(o, [say("still going", 1)], ended(SOLO, "solo-1", wt("x")));
+  await o.tick();
+  expect(o.w.woke).toEqual([{ repo: REPO, name: SOLO, note: NOTE_ENDED }]);
+  const limit = office();
+  soloDev(limit, [limitStop(null, 0)], ended(SOLO, "solo-1", wt("x")));
+  await limit.tick();
+  expect(limit.w.told).toEqual([{ to: "pm-shop", message: `${SOLO} stopped at the session limit; f1rm wake ${SOLO}` }]);
+  const other = office();
+  soloDev(other, [say("still going", 1)], ended(SOLO, "solo-1", wt("x")));
+  other.w.boards = { pm: [], shop: [row(SOLO, "doing", "x")] };
+  await other.tick();
+  expect(other.w.woke).toEqual([]);
+});
+
+test("a live idle simple dev whose turn ended without a report is nudged in its own inbox; NEEDS YOU, DONE and BLOCKED sent to the PM are reports", async () => {
+  const idle = (o: ReturnType<typeof office>, lines: string[]) => {
+    soloDev(o, lines, live(SOLO, "solo-1", wt("x"), { status: "idle" }));
+    o.w.mtimes["solo-1"] = o.w.now - 25 * MIN;
+  };
+  const quiet = office();
+  idle(quiet, [say("Review complete.", 25, quiet.w.now)]);
+  await quiet.tick();
+  expect(quiet.w.told).toEqual([{ to: SOLO, message: NUDGE }]);
+  for (const word of ["NEEDS YOU x: a second review still blocks", "DONE x", "BLOCKED x: no key"]) {
+    const o = office();
+    idle(o, sent(word, "I sent it to pm-shop.", 25, o.w.now));
+    await o.tick();
+    expect([word, o.w.told]).toEqual([word, []]);
+  }
+});
+
 test("the caps are the same code as hire and wake: a full team is not woken past its cap, and its Report to is told", async () => {
   // The wake is planWake itself, against the fake listing: its refusals are the ones `f1rm wake` gives.
   const planning = () => {

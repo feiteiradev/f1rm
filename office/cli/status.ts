@@ -8,7 +8,7 @@ import { sleepGrace } from "../server/sleep.ts";
 import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
-import { readReport, reportFile, reportSlug } from "./report.ts";
+import { readReport, reportFile, reportSlug, SHOWN } from "./report.ts";
 
 export type Hire = {
   name: string;
@@ -294,7 +294,7 @@ export function parseArgs(argv: string[]): Args {
 }
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
-const lastReport = (h: Hire, now: number) => (h.report ? `${h.report.kind} #${h.report.seq} ${ago(Math.max(0, Math.floor((now - Date.parse(h.report.at)) / 60_000)))}` : "-");
+const lastReport = (h: Hire, now: number) => (h.report ? `${SHOWN[h.report.kind] ?? h.report.kind} #${h.report.seq} ${ago(Math.max(0, Math.floor((now - Date.parse(h.report.at)) / 60_000)))}` : "-");
 const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : "", h.recovery ?? ""].filter(Boolean).join(", ");
 
 function table(list: Hire[], now: number): string {
@@ -385,7 +385,7 @@ export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result
       const r = reportOf(deps.home, deps.repo, n.name);
       if (!r || r.seq <= (seqs[n.name] ?? 0)) return [];
       seqs[n.name] = r.seq;
-      return [`${n.name}: reported ${r.kind === "CHANGES" ? "CHANGES REQUESTED" : r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
+      return [`${n.name}: reported ${SHOWN[r.kind] ?? r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
     });
     if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
     // Nobody is stalled in a paused project (its sessions are stopped on purpose) or just after the Mac slept (a poll that came more than 2 minutes late); a report still wakes the watcher.

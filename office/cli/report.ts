@@ -6,8 +6,10 @@ import { writePrivate } from "../server/private.ts";
 import { SLUG } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 
-/** CHANGES stands for CHANGES REQUESTED. */
-export const KINDS = ["DONE", "APPROVED", "CHANGES", "BLOCKED", "ESCALATE"] as const;
+/** CHANGES stands for CHANGES REQUESTED, and NEEDS for NEEDS YOU. */
+export const KINDS = ["DONE", "APPROVED", "CHANGES", "BLOCKED", "ESCALATE", "NEEDS"] as const;
+/** The words a kind is announced with. */
+export const SHOWN: Record<string, string> = { CHANGES: "CHANGES REQUESTED", NEEDS: "NEEDS YOU" };
 export type Report = { kind: string; slug: string; commit: string | null; note: string | null; at: string; seq: number };
 type Result = { out: string; err: string; code: number };
 

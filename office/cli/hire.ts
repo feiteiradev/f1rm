@@ -7,7 +7,7 @@ import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from ".
 import { claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
-  "usage: f1rm hire [--override] [--report-to <pm session>] [--team <team>] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
+  "usage: f1rm hire [--override] [--report-to <pm session>] [--team <team>] [--simple] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
   "       f1rm hire lead lead-<team> <team> <brief>";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
@@ -21,11 +21,12 @@ export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A dev's own first skill is poteto-mode, so no other slash-only skill can be added to a dev; architect and how are for a lead.
 const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
-// /security-review reviews the git state where it runs, so it never runs at the start: a high-level Reviewer runs it on the merge.
-// The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold.
+// The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold (SECURITY: only a session from before the Reviewer left the normal flow carries it, and a wake keeps it).
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
 export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
 const LEVELS = ["low", "medium", "high"];
+/** The two roles that write code: they review their own work (see `reviewParagraph`), and a lead's team has none of them. */
+const DEVS = ["frontend-dev", "backend-dev"];
 /** What a content review (no code) drops from the reviewer's skills. */
 const CODE_REVIEW = ["code-review", "mattpocock-skills:code-review", "ponytail:ponytail-review", "security-review"];
 // The office's delegation gate refuses every push in any form; this deny rule is the fallback for when the office is down and the hooks fail open.
@@ -120,10 +121,12 @@ export type HireRequest = {
   override?: boolean;
   /** Skills added to the brief's list; a slash-only one becomes its first command. */
   skills?: string[];
-  /** The reviewer's `/code-review` level: low, medium (the default) or high, which also loads `security-review`. */
+  /** The level of a dev's own review: low, medium (the default) or high, which also runs `security-review` on the diff. The two devs only. */
   level?: string | null;
-  /** A reviewer of a branch with no code: the guidelines' content checklist, on sonnet unless a model is given. */
+  /** A reviewer of a branch with no code: the guidelines' content checklist, on sonnet unless a model is given. The only Reviewer there is. */
   content?: boolean;
+  /** A simple task: the PM's one dev, designer or researcher with no lead and no team. It counts as a team of one in the project's cap. */
+  simple?: boolean;
   /** Flags that go to claude as given. */
   extra?: string[];
   /** The project's pause, when it is paused: nothing is hired into it. */
@@ -135,10 +138,12 @@ export type LiveHires = { name: string; state: string; cwd: string; status?: "bu
 
 /**
  * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
- * (8 working on the machine, 2 teams per project, 2 working per team). Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
+ * (8 working on the machine, 2 teams per project, 2 working per team). A simple task is a team of one: live leads and live simple tasks make up the teams. Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
  */
 export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean }): void {
   const lead = role === "lead";
+  // A hire with no team that is no lead and no Reviewer is a team of one, whoever starts it (the PM's --simple, the Hire dialog) and whether it is started or woken.
+  const simple = !lead && !team && role !== "reviewer";
   const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
   if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
   // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
@@ -147,20 +152,34 @@ export function checkSlots(live: LiveHires, { role, name, task, team, cwd, overr
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {
     if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
-    const leads = live.filter((s) => s.name.startsWith("lead-") && s.cwd === cwd).length;
-    if (lead && leads >= TEAMS) throw new HireRefused(`this project already has ${leads} teams (the cap is ${TEAMS}).`, busy.length);
+    // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
+    const worktrees = join(cwd, ".claude", "worktrees") + "/";
+    const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
+    const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
+    if ((lead || simple) && teams >= TEAMS) throw new HireRefused(`this project already has ${teams} teams (the cap is ${TEAMS}).`, busy.length);
     // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
     const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
     if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
   }
 }
 
+/** The paragraph a dev's prompt carries ahead of its brief: its own review, in its session, at the level the PM or lead chose. `repo` is the repo folder's name, `task` the dev's report slug. */
+const reviewParagraph = (task: string, repo: string, level: string) =>
+  `Review inside your session. After your checks pass, run ONE review in a fresh context: start a general-purpose subagent with the Agent tool and tell it to run the code-review skill at level ${level} on \`git diff <base>...HEAD\` (<base> is the branch your task started from)` +
+  `${level === "high" ? ", and the security-review skill on that same diff" : ""}. Have it sort its findings as blocking or non-blocking. Fix the blocking findings ONCE and run your checks again. ` +
+  `Send the non-blocking findings to ~/.f1rm/kept/${repo}/findings.md as lines in its table format (| date | area | status | finding | evidence |). ` +
+  `If a second review would still have blocking findings, run \`f1rm report NEEDS ${task}\` and send \`NEEDS YOU ${task}\` to your Report to session instead of fixing again. ` +
+  `Implement inline and never delegate the implementation: the one subagent you start is this reviewer (and at most 2 interns, as before). Your DONE states the review round count and the review level. ` +
+  `Put at least one failing test in every task: a branch of test-only or renamed tests has no failing new test, and \`f1rm merge\` will not land it. If the task cannot have one, send \`NEEDS YOU ${task}\` to ask.`;
+
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
  * and a HireRefused when the cap is full, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
  */
 export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions" | "gitCommonDir"> = machine): Promise<string[]> {
-  const { role, task, team, cwd, brief, model, override, level, content, skills: added = [], extra = [] } = req;
+  const { role, task, team, cwd, brief, model, override, level, simple, skills: added = [], extra = [] } = req;
+  const content = role === "reviewer"; // the only Reviewer left reviews a branch with no code
+  const dev = DEVS.includes(role);
   const roles = readRoles();
   if (!roles.some((r) => r.id === role)) {
     throw new Error(`unknown role "${role}": hire one of ${roles.map((r) => r.id).join(", ")}. The PM is started with \`f1rm pm\`.`);
@@ -168,13 +187,18 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (!task || !brief) throw new Error(USAGE);
   if (!SLUG.test(task)) throw new Error(`${role === "lead" ? "team" : "task"} "${task}" must be lowercase words joined by hyphens`);
   if (team != null && !SLUG.test(team)) throw new Error(`team "${team}" must be lowercase words joined by hyphens`);
+  if (simple && (team != null || role === "lead" || role === "reviewer")) throw new Error("--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer");
   if (role === "reviewer" && !task.startsWith("review-")) throw new Error(`a Reviewer's task is review-<task>, for the task it reviews, not "${task}"`);
   if (team != null && role === "lead") throw new Error("a lead heads a team and joins none: only the PM hires leads, without --team");
+  if (team != null && dev) throw new Error(`an owner runs implementer subagents, not a session per task; hire a designer, a researcher, or a --content reviewer, not a ${role}`);
   if (model && !MODELS.includes(model)) throw new Error(`model "${model}" must be one of ${MODELS.join(", ")}`);
   if (level != null && !LEVELS.includes(level)) throw new Error(`level "${level}" must be one of ${LEVELS.join(", ")}`);
-  if ((level != null || content) && role !== "reviewer") throw new Error(`--level and --content are for the reviewer only, not ${role}`);
-  if (level != null && content) throw new Error("--level is for a code review, and --content has none");
-  if (added.includes("security-review")) throw new Error("security-review runs on the merge, not at the start: hire the reviewer with --level high");
+  if (level != null && !dev) throw new Error(`--level is for the two devs (frontend-dev, backend-dev): it sets the level of their own review, not ${role}'s`);
+  if (req.content && role !== "reviewer") throw new Error(`--content is for the reviewer only, not ${role}`);
+  if (role === "reviewer" && !req.content) throw new Error("a Reviewer reviews a branch with no code: hire it with --content");
+  const own_ = extra.find((a) => /^(?:--(?:agent|name|worktree)|-n|-w)(?:=|$)/.test(a));
+  if (own_) throw new Error(`${own_.split("=")[0]} is the hire's own: f1rm hire sets its agent, name and worktree`);
+  if (added.includes("security-review")) throw new Error("security-review runs in a dev's own review, at --level high: it is not added to a hire");
   // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three pstack skills in SLASH_ONLY can be a first command.
   const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
   if (unwired) throw new Error(`${unwired} is not wired inside hires; the user can run it by hand`);
@@ -183,7 +207,6 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   let own = roles.find((r) => r.id === role)!.skills;
   if (content) own = own.filter((s) => !CODE_REVIEW.includes(s));
   const slashes = [...new Set([...own.slice(0, 1), ...added])].filter((s) => SLASH_ONLY.includes(s));
-  if (role === "reviewer" && !content && slashes.length) throw new Error(`${slashes[0]} is slash-only, and a code Reviewer's first command is /code-review <level> worktree-<task>: drop it`);
   if (added.includes("pstack:poteto-mode") && own[0] !== "pstack:poteto-mode") throw new Error(`pstack:poteto-mode is for the two devs only: its playbooks would replace a ${role}'s own work`);
   if (slashes.length > 1) {
     throw new Error(
@@ -214,13 +237,11 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   // Every added skill loads ahead of the role's later ones (a bug's diagnosing-bugs before tdd).
   const slash = added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = [...new Set([slash ?? own[0], ...added, ...own])];
-  // The branch under review is named, so the review reads it and not the main checkout's working tree.
-  const command = role === "reviewer" && !content ? `${first} ${level ?? "medium"} worktree-${task.replace(/^review-/, "")}` : first;
-  const more = (rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "") + (level === "high" ? SECURITY : "");
+  const more = rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "";
   const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
-  const prompt = `/${command}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${brief}`;
+  const prompt = `/${first}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${dev ? reviewParagraph(task, basename(cwd), level ?? "medium") + "\n\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
-  // A lead writes no code, and a Reviewer merges into the main checkout (from its own scratch worktree), so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
+  // A lead writes no code, and a content Reviewer reads the branch from its own scratch worktree, so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
   const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withPonytail(role, extra)];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
@@ -231,7 +252,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 /** The flags `f1rm hire` takes before the role, and the words after them. The delegation gate reads a hire with this too, so the two can't drift. */
 export function parseHireFlags(words: string[]) {
   const args = [...words];
-  let override = false;
+  let override = false, simple = false;
   let reportTo: string | undefined, team: string | undefined, level: string | undefined, content = false, skills: string[] = [];
   for (;;) {
     if (args[0] === "--override") override = !!args.shift();
@@ -240,14 +261,15 @@ export function parseHireFlags(words: string[]) {
     else if (args[0] === "--skills") (args.shift(), (skills = (args.shift() ?? "").split(",").map((s) => s.trim().replace(/^\//, "")).filter(Boolean)));
     else if (args[0] === "--level") (args.shift(), (level = args.shift()));
     else if (args[0] === "--content") content = !!args.shift();
+    else if (args[0] === "--simple") simple = !!args.shift();
     else break;
   }
-  return { override, reportTo, team, level, content, skills, args };
+  return { override, reportTo, team, level, content, simple, skills, args };
 }
 
 /** Runs `f1rm hire` and returns the exit code. */
 export async function hire(words: string[]): Promise<number> {
-  const { override, reportTo, team, level, content, skills, args } = parseHireFlags(words);
+  const { override, reportTo, team, level, content, simple, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
@@ -258,7 +280,7 @@ export async function hire(words: string[]): Promise<number> {
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
   try {
-    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
+    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
   } catch (err) {
     if (err instanceof HireRefused && err.working !== null) {
       throw new Error(

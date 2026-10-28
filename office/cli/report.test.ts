@@ -58,6 +58,14 @@ test("an unknown kind, a bad slug or commit, or a missing slug is refused and wr
   expect(existsSync(join(home, ".f1rm", "evidence", "escape"))).toBe(false);
 });
 
+test("NEEDS (the NEEDS YOU report) is a kind of its own: written with its seq, and named in the usage", async () => {
+  const { repo, home, file } = setup();
+  const r = await reportIn(["NEEDS", "task-a", "--note", "second review still blocks"], repo, deps(home));
+  expect(r.code).toBe(0);
+  expect(saved(file)).toMatchObject({ kind: "NEEDS", slug: "task-a", seq: 1, note: "second review still blocks" });
+  expect((await reportIn(["NOPE", "task-a"], repo, deps(home))).err).toContain("DONE|APPROVED|CHANGES|BLOCKED|ESCALATE|NEEDS");
+});
+
 test("outside a git repo it refuses", async () => {
   const { home } = setup();
   const r = await reportIn(["DONE", "task-a"], mkdtempSync(join(tmpdir(), "f1rm-nogit-")), deps(home));

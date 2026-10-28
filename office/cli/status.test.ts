@@ -631,6 +631,27 @@ test("a Reviewer's report is read from review-<task>, a CHANGES one reads as CHA
   expect(r.out).toBe("reviewer-review-x: reported CHANGES REQUESTED (report.json seq 1)\n");
 });
 
+test("a simple dev (no team) is watched like a team member: its report is read from its task, NEEDS reads as NEEDS YOU, and it stalls when quiet", async () => {
+  const solo = { name: "backend-dev-x", ago: 3 };
+  const needs = await watchFleet(["backend-dev-x"], [solo], 100, (n, h) => n === 2 && report(h, "x", 1, { kind: "NEEDS", commit: null }));
+  expect(needs.out).toBe("backend-dev-x: reported NEEDS YOU (report.json seq 1)\n");
+  expect((await watchFleet(["backend-dev-x"], [solo], 100, (n, h) => n === 1 && report(h, "x", 1))).out).toBe("backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n");
+  expect(await watchFleet(["backend-dev-x"], [solo])).toMatchObject({ woke: true, out: "backend-dev-x: idle 20 minutes\n" });
+  expect((await watchFleet(["backend-dev-x:waiting"], [solo], 100)).woke).toBe(false);
+  expect(await watchFleet(["backend-dev-x"], [{ ...solo, ended: true }])).toMatchObject({ out: "backend-dev-x: ended\n" });
+  const h = home();
+  const table = (await status({ json: false }, { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => fleet(h, [solo]) })).out.split("\n");
+  expect(table[1]).toStartWith("backend-dev-x  backend-dev  -");
+});
+
+test("f1rm status shows a NEEDS report as NEEDS YOU, as the watcher does", async () => {
+  const h = home();
+  const listed = fleet(h, [dev]);
+  report(h, "x", 1, { kind: "NEEDS", commit: null });
+  const table = (await status({ json: false }, { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => listed })).out;
+  expect(table).toContain("NEEDS YOU #1");
+});
+
 test("a waiting name is woken by a new report, though it writes nothing", async () => {
   const r = await watchFleet(["shop.backend-dev-x:waiting"], [dev], 100, (n, h) => n === 4 && report(h, "x", 1));
   expect([r.woke, r.sleeps, r.out]).toEqual([true, 4, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n"]);
