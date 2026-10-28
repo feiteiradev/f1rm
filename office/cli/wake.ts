@@ -16,7 +16,7 @@ export const isSimple = (h: HireName): boolean => h.role !== "lead" && !h.team &
 
 /** Who may wake a hire follows who may hire it: the PM wakes leads and its simple tasks' hires, a lead wakes the members of its own team, a specialist wakes nobody. */
 export const mayWake = (waker: { role: string | null; team: string | null }, target: HireName): boolean =>
-  waker.role === "pm" ? target.role === "lead" || isSimple(target) :waker.role === "lead" ? target.role !== "lead" && !!waker.team && target.team === waker.team : false;
+  waker.role === "pm" ? target.role === "lead" || isSimple(target) : waker.role === "lead" ? target.role !== "lead" && !!waker.team && target.team === waker.team : false;
 
 export type WakeRequest = {
   /** A session's name, session id or short id. */
@@ -124,7 +124,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
     .filter((a) => !(a.name === name && !a.pid))
     .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }) }));
   // A Reviewer's task is review-<task>, as `f1rm hire` names it; hireName gives the task it reviews, whose dev may be idle in its worktree.
-  checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override, simple: isSimple(hire) });
+  checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override });
 
   // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);

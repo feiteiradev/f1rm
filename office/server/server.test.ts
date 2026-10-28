@@ -47,7 +47,7 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
     if (tellFails || socket.includes("dead")) throw new Error(tellFails || "its inbox socket is gone, so the session has ended");
   },
   workingHires: async () => working,
-  backgroundSessions: async () => (working === null ? null : Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" }))),
+  backgroundSessions: async () => (working === null ? null : [...Array.from({ length: working }, (_, i) => ({ name: `hire-${i}`, state: "working", cwd: "/elsewhere" })), ...liveToo]),
   startPmInIterm: async (folder: string) => {
     calls.push(`pm ${folder}`);
     if (pmFails) throw new Error(pmFails);
@@ -75,6 +75,7 @@ let mergedBranches = new Set<string>();
 let sessionsAsked = 0; // how many times the server asked `claude agents --json --all`
 let sessionsGate: Promise<void> | undefined; // a test sets one that never settles: `claude agents` hanging
 let working: number | null = 0;
+let liveToo: { name: string; state: string; cwd: string }[] = [];
 let spawnFails = "";
 let pmFails = "";
 let spawned: { argv: string[]; cwd: string }[] = [];
@@ -99,6 +100,7 @@ afterEach(() => {
   sessionsGate = undefined;
   sessionsAsked = 0;
   working = 0;
+  liveToo = [];
   spawnFails = "";
   pmFails = "";
   spawned = [];
@@ -835,11 +837,25 @@ test("Hire follows the flat rules of `f1rm hire`: no frontend-dev or backend-dev
     expect([role, res.status]).toEqual([role, 400]);
     expect(((await res.json()) as any).error).toContain("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, or a --content reviewer");
   }
-  const reviewer = await hireOf({ ...ASSIGN, role: "reviewer", task: "review-login-page" });
-  expect([reviewer.status, ((await reviewer.json()) as any).error]).toEqual([400, "a Reviewer reviews a branch with no code: hire it with --content"]);
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, role: "backend-dev" })).status).toBe(200);
   expect(spawned[0].argv[8]).toContain("After your checks pass, run ONE review in a fresh context");
+  // the only Reviewer there is reviews a branch with no code: the dialog hires it as a content one
+  expect((await hireOf({ ...ASSIGN, role: "reviewer", task: "review-login-page" })).status).toBe(200);
+  expect(spawned[1].argv[6]).toContain("This branch holds no code: use the content checklist.");
+});
+
+test("Hire is held to the project's cap of 2 teams like f1rm hire and f1rm wake: a lead and a simple task fill it, a third team-less hire is refused unless the dialog's override is set", async () => {
+  start(SHOP);
+  await hook(sessionStart("s1", "/code/shop"));
+  await office((s) => ROOM in s.rooms);
+  liveToo = [{ name: "lead-checkout", state: "done", cwd: "/code/shop" }, { name: "backend-dev-y", state: "working", cwd: "/code/shop/.claude/worktrees/y" }];
+  const refused = await hireOf({ ...ASSIGN, role: "backend-dev" });
+  expect([refused.status, ((await refused.json()) as any).error]).toEqual([409, "this project already has 2 teams (the cap is 2)."]);
+  expect(spawned).toEqual([]);
+  expect((await hireOf({ ...ASSIGN, role: "backend-dev", override: true })).status).toBe(200);
+  liveToo = liveToo.slice(1);
+  expect((await hireOf({ ...ASSIGN, role: "researcher", task: "other" })).status).toBe(200);
 });
 
 test("Hire refuses a project whose path is over 150 characters with the path message, hires one of 150, and spawns nothing for the first", async () => {
@@ -1561,7 +1577,7 @@ test("a PM's or lead's landing git commands are refused, past global options; re
     for (const command of landing) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toBe("Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
+      expect(out.permissionDecisionReason).toBe("Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
     }
     for (const command of readOnly) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
@@ -1738,11 +1754,12 @@ test("nobody pushes or merges a PR: a specialist's and a Reviewer's git push and
     for (const command of ["git log --oneline", "git status", "echo git push", "git log --grep 'git push'", "gh pr view 3", "gh pr list", "gh pr checkout 3", "gh api repos/o/r/pulls/3/merge", "gh api -X GET repos/o/r/pulls/3/merge", "gh api --method GET repos/o/r/pulls/3/merge", "gh api --method=get repos/o/r/pulls/3", "gh api -XGET repos/o/r/pulls/3", "gh api -i repos/o/r/pulls/3", "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/3", "gh api repos/o/r/pulls --jq '.[].number'", "gh api --method POST repos/o/r/issues/3/dependencies/blocked_by -F issue_id=9", "gh api --method POST repos/o/r/issues/3/sub_issues -F sub_issue_id=9", "gh api --method POST repos/o/r/issues/3/comments -f body=x", "gh api -X POST repos/o/r/issues/3/labels -f 'labels[]=bug'", "gh api -X PATCH repos/o/r/issues/3 -f state=closed", "gh api --method POST repos/o/r/issues -f title=x", "gh api -X PUT repos/o/r/issues/3/lock", "gh api -X", "gh api -X GET repos/o/r/git/refs/heads/main", "gh api repos/o/r/contents/f", "gh api repos/o/r/merges", "gh api graphql -F query=@q.graphql", "gh api graphql --input q.json", "gh api graphql -f query='mutation{addSubIssue(input:{issueId:\"a\",subIssueId:\"b\"}){clientMutationId}}'", "gh api graphql -f query='{viewer{login}}'", "gh api graphql -F owner=o -f query='query($owner:String!){repository(owner:$owner,name:\"r\"){id}}'", "gh api repos/o/r/pulls/3", "gh api repos/o/r/pulls/3/merge -qfiles", "gh api -HIf-None-Match:x repos/o/r/contents/f", "gh api -HIf-None-Match:x repos/o/r/git/refs/heads/main", "gh api -iq .sha repos/o/r/contents/f", "timeout 60 git log --oneline", "nice -n 10 git status", "stdbuf -oL git diff", "echo timeout 60 git push", "gh -R o/r pr view 3", "git diff -m 'git push later'", "if git diff --quiet; then echo ok; fi"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
   for (const command of PUSHES) expect([command, await bash("f", command)]).toEqual([command, null]);
+  expect(await bash("d", "git commit -m 'git push later'")).toBeNull();
 });
 
 test("a Reviewer's git is read-only plus its own scratch worktrees: every writing command is refused, reading and adding or removing a scratch worktree are not", async () => {
   const bash = await gateOffice();
-  const refused = ["git reset --hard HEAD~1", "git -C x rebase main", "git cherry-pick abc", "git revert abc", "git am fix.patch", "git pull origin main", "git clean -fd", "git branch -D worktree-a", "git branch -Df worktree-a", "git merge --force x", "git checkout -f main", "git worktree remove --force .claude/worktrees/review-a", "git worktree remove -f ../x", "git worktree remove --force .claude/worktrees/red-a ../x", "git worktree remove --force .claude/worktrees/red-a/../../..", "git worktree add -f x", "git fetch origin -f", "cd x && git reset --hard", "then git reset --hard", "git branch -fD x", "git branch -M x", "git checkout -B x", "git switch -C x", "git update-ref -d refs/heads/x", "git stash drop", "git stash clear", "git stash", "git stash list", "git stash push -m x", "git stash pop", "git stash apply", "git -C x stash", "git commit --amend", "git commit --amend --no-edit", "git commit -m x --amend", "git commit --am", "git commit -mtest --amend", "git commit -mfmt --amend", "git commit -mwip --amend", "timeout 5 git commit --amend", "git restore .", "git checkout -- .", "git checkout -- src/a.ts", "git checkout -q -- a.ts b.ts", "git checkout .", "git restore a.ts", "git restore ./a.ts", "git restore --worktree a.ts", "git restore --source=HEAD a.ts", "git restore --staged --worktree a.ts", "git restore -s HEAD~1 a.ts", "git -C x restore a.ts", "git checkout --ours a.ts", "git checkout --theirs a.ts", "git checkout --theirs -- a.ts", "git -C /other/repo worktree remove --force .claude/worktrees/red-a", "git --git-dir=/x/.git worktree remove --force .claude/worktrees/red-a", "git worktree remove --force /code/shop/.claude/worktrees/red-a", "git worktree remove --force ./.claude/worktrees/red-a", "git clean -fdX", "git tag -f v1", "git merge --no-ff worktree-a -m 'Merge a'", "git merge --ff-only main", "git merge --abort", "git commit -m 'conflict fix'", "git commit -m 'amend the docs'", "git commit -fm x", "git add .", "git rm a.ts", "git mv a b", "git apply fix.patch", "git tag v1", "git branch -d worktree-a", "git branch -m x", "git branch x", "git checkout main", "git checkout -b x", "git checkout worktree-a -- tests/a.test.ts", "git checkout HEAD -- a.ts", "git switch main", "git restore --staged a.ts", "git fetch origin", "git config user.name x", "git remote add o x", "git worktree add --force x", "if true; then git merge --no-ff a; fi"];  for (const command of refused) {
+  const refused = ["git reset --hard HEAD~1", "git -C x rebase main", "git cherry-pick abc", "git revert abc", "git am fix.patch", "git pull origin main", "git clean -fd", "git branch -D worktree-a", "git branch -Df worktree-a", "git merge --force x", "git checkout -f main", "git worktree remove --force .claude/worktrees/review-a", "git worktree remove -f ../x", "git worktree remove --force .claude/worktrees/red-a ../x", "git worktree remove --force .claude/worktrees/red-a/../../..", "git worktree add -f x", "git fetch origin -f", "cd x && git reset --hard", "then git reset --hard", "git branch -fD x", "git branch -M x", "git checkout -B x", "git switch -C x", "git update-ref -d refs/heads/x", "git stash drop", "git stash clear", "git stash", "git stash list", "git stash push -m x", "git stash pop", "git stash apply", "git -C x stash", "git commit --amend", "git commit --amend --no-edit", "git commit -m x --amend", "git commit --am", "git commit -mtest --amend", "git commit -mfmt --amend", "git commit -mwip --amend", "timeout 5 git commit --amend", "git restore .", "git checkout -- .", "git checkout -- src/a.ts", "git checkout -q -- a.ts b.ts", "git checkout .", "git restore a.ts", "git restore ./a.ts", "git restore --worktree a.ts", "git restore --source=HEAD a.ts", "git restore --staged --worktree a.ts", "git restore -s HEAD~1 a.ts", "git -C x restore a.ts", "git checkout --ours a.ts", "git checkout --theirs a.ts", "git checkout --theirs -- a.ts", "git -C /other/repo worktree remove --force .claude/worktrees/red-a", "git --git-dir=/x/.git worktree remove --force .claude/worktrees/red-a", "git worktree remove --force /code/shop/.claude/worktrees/red-a", "git worktree remove --force ./.claude/worktrees/red-a", "git clean -fdX", "git tag -f v1", "git merge --no-ff worktree-a -m 'Merge a'", "git merge --ff-only main", "git merge --abort", "git commit -m 'conflict fix'", "git commit -m 'amend the docs'", "git commit -fm x", "git add .", "git rm a.ts", "git mv a b", "git apply fix.patch", "git tag v1", "git worktree move a b", "git worktree lock x", "git worktree unlock x", "git worktree repair", "git worktree add -B x .claude/worktrees/review-a", "git worktree", "git branch -d worktree-a", "git branch -m x", "git branch x", "git checkout main", "git checkout -b x", "git checkout worktree-a -- tests/a.test.ts", "git checkout HEAD -- a.ts", "git switch main", "git restore --staged a.ts", "git fetch origin", "git config user.name x", "git remote add o x", "git worktree add --force x", "if true; then git merge --no-ff a; fi"];  for (const command of refused) {
     const out = await bash("v", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
     expect(out.permissionDecisionReason).toContain("Reviewer");
@@ -1953,7 +1970,7 @@ test("the user's own session lands anything; the Reviewer has no exception left 
     for (const command of ["git merge worktree-add-a", "git commit -m x", "git rebase main", "git cherry-pick abc1234"]) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Landing, merging and pushing");
+      expect(out.permissionDecisionReason).toContain("Landing goes through `f1rm merge <task>`");
     }
   }
   // Everyone's `git push` stays refused, `push .` included.
@@ -2556,7 +2573,7 @@ async function flatOffice() {
   await office((s) => Object.keys(s.employees).length === seats.length && Object.keys(s.interns).length === 1);
   return {
     send: async (id: string, to: string, message = "the contract is ready") => held(await hook({ ...preToolUse(id, "SendMessage", { to, message }), cwd: cwds[id] })),
-    bash: async (id: string, command: string) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: cwds[id] })),
+    bash: async (id: string, command: string, extra: object = {}) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: cwds[id], ...extra })),
   };
 }
 
@@ -2619,7 +2636,13 @@ test("only the PM hires with --simple, one dev, designer or researcher with no t
   }
   expect(await bash("l", "f1rm hire --team checkout designer checkout.designer-x x b")).toBeNull();
   for (const id of ["s", "d", "m", "rv"]) expect([id, (await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b"))?.permissionDecision]).toEqual([id, "deny"]);
-  expect(await bash("f", "f1rm hire --simple backend-dev backend-dev-q q b")).toBeNull();
+  // Nobody else: not the PM's intern, not a session with no role (the user's terminal or `!` still runs it).
+  for (const [who, id, extra] of [["the PM's intern", "p", { agent_id: "i-p" }], ["a role-less session", "f", {}]] as const) {
+    const out = await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b", extra);
+    expect([who, out?.permissionDecision]).toEqual([who, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Only the PM hires with --simple");
+  }
+  expect(await bash("f", "f1rm hire designer designer-q q b")).toBeNull();
   expect(await bash("p", "git log --grep='f1rm hire --simple backend-dev x'")).toBeNull();
 });
 

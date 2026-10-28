@@ -294,7 +294,7 @@ export function parseArgs(argv: string[]): Args {
 }
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
-const lastReport = (h: Hire, now: number) => (h.report ? `${h.report.kind} #${h.report.seq} ${ago(Math.max(0, Math.floor((now - Date.parse(h.report.at)) / 60_000)))}` : "-");
+const lastReport = (h: Hire, now: number) => (h.report ? `${SHOWN[h.report.kind] ?? h.report.kind} #${h.report.seq} ${ago(Math.max(0, Math.floor((now - Date.parse(h.report.at)) / 60_000)))}` : "-");
 const note = (h: Hire) => [h.ended ? "ended" : "", h.limitUntil ? `limit until ${h.limitUntil}` : "", h.recovery ?? ""].filter(Boolean).join(", ");
 
 function table(list: Hire[], now: number): string {

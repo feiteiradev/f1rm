@@ -644,6 +644,14 @@ test("a simple dev (no team) is watched like a team member: its report is read f
   expect(table[1]).toStartWith("backend-dev-x  backend-dev  -");
 });
 
+test("f1rm status shows a NEEDS report as NEEDS YOU, as the watcher does", async () => {
+  const h = home();
+  const listed = fleet(h, [dev]);
+  report(h, "x", 1, { kind: "NEEDS", commit: null });
+  const table = (await status({ json: false }, { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => listed })).out;
+  expect(table).toContain("NEEDS YOU #1");
+});
+
 test("a waiting name is woken by a new report, though it writes nothing", async () => {
   const r = await watchFleet(["shop.backend-dev-x:waiting"], [dev], 100, (n, h) => n === 4 && report(h, "x", 1));
   expect([r.woke, r.sleeps, r.out]).toEqual([true, 4, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n"]);

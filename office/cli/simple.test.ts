@@ -38,6 +38,13 @@ test("a lead's team is refused a frontend-dev or backend-dev; a designer, a rese
   expect((await plan({ role: "reviewer", task: "review-x", team: "checkout", content: true }, [LEAD]))[5]).toBe("checkout.reviewer-review-x");
 });
 
+test("claude flags after the brief cannot change the hire's agent, name or worktree", async () => {
+  for (const extra of [["--agent", "f1rm:backend-dev"], ["--agent=f1rm:lead"], ["--name", "a.b"], ["--name=x"], ["-n", "x"], ["--worktree", "w"], ["--model", "haiku", "--worktree=w"]]) {
+    await expect(plan({ role: "designer", extra })).rejects.toThrow("is the hire's own");
+  }
+  expect(await plan({ role: "designer", extra: ["--allowedTools", "Bash", "--model", "haiku"] })).toContain("--allowedTools");
+});
+
 test("a reviewer is hired only with --content", async () => {
   await expect(plan({ role: "reviewer", task: "review-x", team: "checkout" }, [LEAD])).rejects.toThrow("a Reviewer reviews a branch with no code: hire it with --content");
   await expect(plan({ role: "reviewer", task: "review-x", level: "high", team: "checkout" }, [LEAD])).rejects.toThrow("--level is for the two devs");
@@ -75,7 +82,7 @@ test("the dev's prompt carries the Review: one fresh-context subagent, fixed onc
 test("the cap counts a simple task as a team of one: live leads and live simple tasks together make 2 teams, a third is refused, and --override, another repo and a team's member do not count", async () => {
   const solo = session("backend-dev-y", wt("y"));
   const ask = (live: LiveHires, over: Partial<Parameters<typeof checkSlots>[1]> = {}) =>
-    checkSlots(live, { role: "backend-dev", name: "backend-dev-x", task: "x", cwd: REPO, simple: true, ...over });
+    checkSlots(live, { role: "backend-dev", name: "backend-dev-x", task: "x", cwd: REPO, ...over });
   const lead = (name: string) => ({ role: "lead", name, task: name.slice(5), cwd: REPO });
   // a lead and a simple task are two teams
   expect(() => ask([LEAD, solo])).toThrow("this project already has 2 teams (the cap is 2)");
@@ -89,8 +96,13 @@ test("the cap counts a simple task as a team of one: live leads and live simple 
   expect(() => ask([LEAD, solo], { override: true })).not.toThrow();
   expect(() => ask([LEAD, session("backend-dev-q", "/code/blog/.claude/worktrees/q")])).not.toThrow();
   expect(() => ask([LEAD, session("checkout.backend-dev-w", wt("w"))])).not.toThrow();
-  // a hire that is not marked simple (the Hire dialog's) keeps its old rules
-  expect(() => ask([LEAD, solo], { simple: false })).not.toThrow();
+  // the cap does not depend on a flag: a team-less hire the Hire dialog or a plain session starts is a team too, and what refuses a wake refuses it
+  expect(() => checkSlots([LEAD, solo], { role: "designer", name: "designer-x", task: "x", cwd: REPO })).toThrow("this project already has 2 teams");
+  // a team's member, a Reviewer and a lead's own hires are not hired as a team of one
+  expect(() => checkSlots([LEAD, solo], { role: "designer", name: "checkout.designer-x", task: "x", team: "checkout", cwd: REPO })).not.toThrow();
+  expect(() => checkSlots([LEAD, solo], { role: "reviewer", name: "reviewer-review-x", task: "review-x", cwd: REPO })).not.toThrow();
+  // a session of the user's own (a name that is no hire's) working in a worktree of the repo is no team
+  expect(() => ask([LEAD, session("my-own-session", wt("mine"))])).not.toThrow();
   // the machine cap of 8 counts everyone
   expect(() => ask(Array(8).fill(session("elsewhere-x", "/elsewhere")))).toThrow("8 hires are already working");
 });

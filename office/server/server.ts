@@ -160,6 +160,7 @@ const ghLands = ([program, ...words]: string[]) => {
   return args[i] === "pr" && args[skipOptions(args, i + 1, GH_OPTIONS_WITH_VALUE)] === "merge";
 };
 // A Reviewer (a content review, of a branch with no code) reads and works in scratch worktrees of its own; nothing else of git runs. `f1rm merge`, run by the lead or the PM, is the one way to land.
+// ponytail: like `sh -c` below, a reading command that runs another program (`git grep -O<cmd>`, `git -c core.pager=<cmd> log`, `--ext-diff`) is not seen.
 const REVIEWER_READS = new Set(["status", "log", "diff", "show", "rev-parse", "rev-list", "merge-base", "ls-files", "ls-tree", "cat-file", "blame", "grep", "shortlog", "describe", "show-ref", "for-each-ref", "diff-tree", "name-rev"]);
 // `git branch` lists with these; any other flag, or a bare name with none of the listing ones, creates, moves or deletes.
 const BRANCH_FLAGS = /^(?:--(?:list|all|remotes|verbose|show-current|contains|no-contains|merged|no-merged|points-at)(?:=.*)?|-[alrv]+)$/;
@@ -172,8 +173,9 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const { sub, rest, options } = call;
   if (sub === "branch") return !rest.every((a) => !a.startsWith("-") || BRANCH_FLAGS.test(a)) || (rest.some((a) => !a.startsWith("-")) && !rest.some((a) => BRANCH_LISTS.test(a)));
   if (sub !== "worktree") return !REVIEWER_READS.has(sub);
-  if (!rest.some((a) => /^--force/.test(a) || /^-[A-Za-z]*f/.test(a))) return false;
   const flags = rest.filter((a) => a.startsWith("-")), paths = rest.filter((a) => !a.startsWith("-"));
+  if (!["add", "list", "prune", "remove"].includes(paths[0]) || flags.some((a) => /^-B/.test(a))) return true;
+  if (!rest.some((a) => /^--force/.test(a) || /^-[A-Za-z]*f/.test(a))) return false;
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
   return !(here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
 };
@@ -551,6 +553,10 @@ export function startServer({
       if (commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)?.includes("--all")))) {
         return refuse("pause-all", "`--all` is for the user's terminal: a session pauses and resumes only its own project, and only the PM does that.");
       }
+      // A simple task is the PM's alone: no lead, no specialist, no intern (the PM's included) and no session with no role; the user's terminal or `!` still runs it.
+      if (commands.some((c) => hireOf(hireArgs(c))?.simple) && (role !== "pm" || payload.agent_id)) {
+        return refuse("hire", "Only the PM hires with --simple, from its own session: a lead hires into its own team, with --team, and anyone else asks the PM.");
+      }
     }
     if (!role) return null;
     // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
@@ -654,7 +660,6 @@ export function startServer({
     }
     if (role === "lead") {
       const team = teamOf(state.employees[sessionId]);
-      if (hires.some((h) => h.simple)) return refuse("hire", "Only the PM hires with --simple: a lead hires into its own team, with --team.");
       if (hires.some((h) => h.role === "lead")) return refuse("hire", "A lead hires specialists for its own team, never another lead. Ask the PM for a new team.");
       if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
     }
@@ -668,7 +673,7 @@ export function startServer({
       }
     }
     if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghLands(w))) {
-      return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
+      return refuse("landing", "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
     // Nothing lands on the base branch but `f1rm merge`, for every role.
@@ -1184,7 +1189,7 @@ export function startServer({
         const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), content: role === "reviewer", reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

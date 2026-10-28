@@ -140,8 +140,10 @@ export type LiveHires = { name: string; state: string; cwd: string; status?: "bu
  * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
  * (8 working on the machine, 2 teams per project, 2 working per team). A simple task is a team of one: live leads and live simple tasks make up the teams. Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
  */
-export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override, simple }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean; simple?: boolean }): void {
+export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean }): void {
   const lead = role === "lead";
+  // A hire with no team that is no lead and no Reviewer is a team of one, whoever starts it (the PM's --simple, the Hire dialog) and whether it is started or woken.
+  const simple = !lead && !team && role !== "reviewer";
   const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
   if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
   // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
@@ -150,9 +152,10 @@ export function checkSlots(live: LiveHires, { role, name, task, team, cwd, overr
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {
     if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
-    // A simple task is a specialist with no team prefix in a worktree of this repo (a team's member has a `.` in its name; a Reviewer and a lead work in the repo itself).
+    // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
     const worktrees = join(cwd, ".claude", "worktrees") + "/";
-    const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (!s.name.includes(".") && s.cwd.startsWith(worktrees))).length;
+    const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
+    const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
     if ((lead || simple) && teams >= TEAMS) throw new HireRefused(`this project already has ${teams} teams (the cap is ${TEAMS}).`, busy.length);
     // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
     const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
@@ -193,6 +196,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (level != null && !dev) throw new Error(`--level is for the two devs (frontend-dev, backend-dev): it sets the level of their own review, not ${role}'s`);
   if (req.content && role !== "reviewer") throw new Error(`--content is for the reviewer only, not ${role}`);
   if (role === "reviewer" && !req.content) throw new Error("a Reviewer reviews a branch with no code: hire it with --content");
+  const own_ = extra.find((a) => /^(?:--(?:agent|name|worktree)|-n|-w)(?:=|$)/.test(a));
+  if (own_) throw new Error(`${own_.split("=")[0]} is the hire's own: f1rm hire sets its agent, name and worktree`);
   if (added.includes("security-review")) throw new Error("security-review runs in a dev's own review, at --level high: it is not added to a hire");
   // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three pstack skills in SLASH_ONLY can be a first command.
   const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
@@ -225,7 +230,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
-  checkSlots(live, { role, name, task, team, cwd, override, simple });
+  checkSlots(live, { role, name, task, team, cwd, override });
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
