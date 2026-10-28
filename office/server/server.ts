@@ -175,6 +175,58 @@ const reviewerRefused = (call: ReturnType<typeof gitCall>) => {
   const here = !options.some((o) => /^(-C|--git-dir|--work-tree)/.test(o));
   return !(sub === "worktree" && here && paths[0] === "remove" && flags.every((a) => a === "--force" || a === "-f") && paths.length === 2 && RED_WORKTREE.test(paths[1]));
 };
+// What lands on the base branch when run in the main checkout. `f1rm merge` is the one way to land there (see the gate in refusal()); a dev's own worktree keeps its normal git.
+const LANDS_IN_MAIN = new Set(["merge", "cherry-pick", "rebase", "reset", "commit", "am", "pull", "revert"]);
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** The branch the main checkout has checked out, read from the git dir's HEAD; main and master when that can't be read. */
+const baseBranches = (gitDir: string) => {
+  try {
+    const m = /^ref: refs\/heads\/(.+)$/m.exec(readFileSync(join(gitDir, "HEAD"), "utf8"));
+    if (m) return [m[1].trim()];
+  } catch {} // a room that is not a repo has no HEAD
+  return ["main", "master"];
+};
+/**
+ * Whether a Bash line lands anything on the base branch of the repo whose main working directory is `main`. History-changing git run in the main checkout lands (or rewrites) there,
+ * as does `checkout <ref> -- <path>`, `checkout -B` / `switch -C` and `restore --source`, which put a branch's files into it. Moving the base branch's ref lands from any folder: `update-ref`,
+ * `branch -f` and `fetch . x:<base>`. The folder of a command is the session's cwd, moved by an earlier `cd` or `pushd` and by `-C <dir>` and `--work-tree <dir>`.
+ */
+// ponytail: a `cd` in a subshell or a branch of `||` moves the folder for the rest of the line, and a folder built by a variable or `~` is not followed; a refused line is the only cost.
+// Files written into the main checkout without git (cp, a redirect) are not seen. `git apply` and `git read-tree` are not listed.
+const landsOnMain = (commands: string[][], cwd: string, main: string, bases: string[]) => {
+  const mainKey = homeKey(main), worktreesKey = homeKey(join(main, ".claude", "worktrees"));
+  const inMain = (dir: string) => inside(mainKey, homeKey(dir)) && !inside(worktreesKey, homeKey(dir));
+  const base = new RegExp(`^(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
+  const intoBase = new RegExp(`:(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
+  let dir = resolve(cwd);
+  for (const words of commands) {
+    if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
+      const to = unquoted(words[1] ?? "");
+      if (to && !/^[-~]|\$/.test(to)) dir = resolve(dir, to);
+      continue;
+    }
+    const call = gitCall(words);
+    if (!call) continue;
+    let at = dir;
+    call.options.forEach((o, i) => {
+      if (o === "-C" || o === "--work-tree") at = resolve(at, call.options[i + 1] ?? "");
+      else if (o.startsWith("--work-tree=")) at = resolve(at, o.slice("--work-tree=".length));
+    });
+    const { sub, rest } = call;
+    const any = (re: RegExp) => rest.some((a) => re.test(a));
+    const dashDash = rest.indexOf("--");
+    const named = rest.filter((a) => !a.startsWith("-"));
+    if (sub === "update-ref" && (rest.some((a) => base.test(a)) || (inMain(at) && rest.includes("HEAD")))) return true;
+    if (sub === "branch" && any(/^(?:--force|--move|--copy|-[A-Za-z]*[fMC])/) && named.some((a) => base.test(a))) return true;
+    if (sub === "fetch" && rest.includes(".") && any(intoBase)) return true;
+    if (!inMain(at)) continue;
+    if (LANDS_IN_MAIN.has(sub)) return true;
+    if (sub === "checkout" && ((dashDash > 0 && rest.slice(0, dashDash).some((a) => !a.startsWith("-"))) || any(/^-[A-Za-z]*B/))) return true;
+    if (sub === "switch" && any(/^(-[A-Za-z]*C|--force-create)/)) return true;
+    if (sub === "restore" && any(/^(-s|--source)/)) return true;
+  }
+  return false;
+};
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
@@ -551,6 +603,10 @@ export function startServer({
     // `f1rm pause` and `f1rm resume` act on the project of the folder they run in: of the company's sessions only its PM runs them, never its intern (`--all` is refused above, for everyone).
     const pausing = commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)));
     if (pausing && (role !== "pm" || payload.agent_id)) return refuse("pause", "Only the PM pauses and resumes its project. Send what you need to the session named in your brief's Report to.");
+    // `f1rm merge` lands a reviewed branch on main: the PM runs it for a simple task and a lead for its milestone; an intern, any specialist and a Reviewer do not.
+    if ((!COORDINATORS.has(role) || payload.agent_id) && commands.some((c) => hireArgs(c, "merge"))) {
+      return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
+    }
     if (role === "pm" && hires.some((h) => h.role !== "lead")) return refuse("hire", "PMs hire leads; send this to a lead. A lead hires the specialists of its team.");
     if (role === "lead") {
       const team = teamOf(state.employees[sessionId]);
@@ -570,6 +626,11 @@ export function startServer({
       return refuse("landing", "Landing, merging and pushing belong to the Reviewer and the user. Hire for it, or ask the user to run it with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    // Nothing lands on the base branch but `f1rm merge`. F3b: a Reviewer keeps its old `--no-ff` and `--ff-only` steps in the main checkout until that task removes the role's merge flow and this exception.
+    const me = state.employees[sessionId];
+    if (role !== "reviewer" && me && me.room !== ELSEWHERE.id && landsOnMain(commands, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
+      return refuse("main", "Nothing lands on the base branch except `f1rm merge <task>`, run by the PM or a lead in the main working directory. Your own git works inside your worktree: merge main into your branch, rebase your unpushed branch. Send `DONE` to the session in your Report to.");
+    }
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {
       return refuse("history", "A Reviewer merges with --no-ff or --ff-only and rewrites nothing: no reset, rebase, cherry-pick, revert, am, pull, clean, stash, commit --amend, checkout -- <path>, branch -D or force. Only `git worktree remove --force .claude/worktrees/red-<task>` may force.");
     }
