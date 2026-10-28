@@ -42,12 +42,45 @@ const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", 
 const BEFORE_COMMAND = new Set(["bun", "if", "then", "do", "else", "elif", "while", "until", "!", "{", "time", "env", "command", "exec", "nohup", "xargs", "sudo", "timeout", "nice", "stdbuf"]);
 // The options of those wrappers that take the next word as their value.
 const WRAPPER_VALUE_OPTIONS: Record<string, string[]> = { timeout: ["-k", "-s", "--kill-after", "--signal"], nice: ["-n", "--adjustment"], stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"], env: ["-u", "--unset"], sudo: ["-u"] };
-/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. */
-// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A heredoc body is split into commands too,
-// so a body line `git push` is refused (it fails closed; write the file with the Write tool); a wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
+// What the heredoc scan steps over, in order: a quoted string, an escaped character, a comment, an arithmetic `((…))` (whose `<<` is a shift), a here-string `<<<`, a heredoc opener `<<[-]WORD`
+// (groups: dash, "double", 'single', backslash, bare word; a bare word followed by a quote or backslash is a partly quoted delimiter and is not read as one), a newline, or any other character.
+const HEREDOC_SCAN = /"(?:\\.|[^"\\])*"|'[^']*'|\\[^]|(?<=^|\s)#[^\n]*|\$?\(\((?:(?!\)\))[^])*\)\)|<<<|<<(-?)[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|(\\?)([^\s;&|()<>`"'\\]+)(?![\\"']))|\n|[^]/y;
+const COMMAND_SUBSTITUTION = /\$\((?:[^()]|\([^()]*\))*\)|`[^`]*`/g;
+/**
+ * The line without its heredoc bodies and terminators: a body is data to the shell, so a body line `git push` is no command. What stays is the opening line, whatever follows the
+ * terminator, and, for an unquoted delimiter, the command substitutions of the body, which the shell does run. A body with no terminator runs to the end, as in the shell.
+ */
+// ponytail: a digits-only delimiter (`<<2`) is read as a shift, so its body is read as commands (it fails closed); a heredoc inside `$(…)` is cut like any other.
+const withoutHeredocBodies = (command: string) => {
+  let out = "";
+  const pending: { end: string; tabs: boolean; quoted: boolean }[] = [];
+  HEREDOC_SCAN.lastIndex = 0;
+  for (let m; HEREDOC_SCAN.lastIndex < command.length && (m = HEREDOC_SCAN.exec(command)); ) {
+    const [token, dash, double, single, backslash, bare] = m;
+    const end = double ?? single ?? bare;
+    out += token;
+    if (end !== undefined && !/^\d+$/.test(end)) pending.push({ end, tabs: dash === "-", quoted: double !== undefined || single !== undefined || backslash === "\\" });
+    if (token !== "\n" || !pending.length) continue;
+    let at = HEREDOC_SCAN.lastIndex;
+    for (const h of pending.splice(0)) {
+      let body = "";
+      while (at < command.length) {
+        const nl = command.indexOf("\n", at), line = command.slice(at, nl < 0 ? command.length : nl);
+        at = nl < 0 ? command.length : nl + 1;
+        if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.end) break;
+        body += line + "\n";
+      }
+      if (!h.quoted) for (const [sub] of body.matchAll(COMMAND_SUBSTITUTION)) out += sub + "\n";
+    }
+    HEREDOC_SCAN.lastIndex = at;
+  }
+  return out;
+};
+/** The words of each simple command in a shell line, split on `; & | ( )`, backticks and newlines outside quotes, past `VAR=x` prefixes, shell keywords, wrappers such as `env` and `bun`, and their flags. Heredoc bodies are data and are not read. */
+// ponytail: not a shell parser; a command inside double quotes (`"$(git push)"`) or an alias is not seen. A wrapper flag not in WRAPPER_VALUE_OPTIONS (`sudo -g x git push`) takes its value for the command.
 const splitCommands = (command: string) => {
   const out: string[][] = [[]];
-  for (const [, op, word] of command.matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
+  for (const [, op, word] of withoutHeredocBodies(command).matchAll(/([;&|()`\n])|((?:[^\s"';&|()`]|"(?:\\.|[^"\\])*"|'[^']*')+)/g)) op ? out.push([]) : out.at(-1)!.push(word);
   return out.map((words) => {
     let i = 0, wrapper = "";
     for (; i < words.length; i++) {

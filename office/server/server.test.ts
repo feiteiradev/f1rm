@@ -1738,6 +1738,69 @@ test("a Reviewer's history-rewriting and forcing git commands are refused; its m
   for (const command of ["git commit --amend", "git stash", "git checkout -- a.ts", "git rebase main", "git reset --hard", "git pull", "git clean -fd", "git branch -D x", "git checkout -f main"]) expect([command, await bash("d", command)]).toEqual([command, null]);
 });
 
+// The gate reads a heredoc body as data, as the shell does: a brief or a note written with `cat <<EOF` may mention any command, and the command after the terminator is still read.
+test("a heredoc body is data, not commands: its lines pass the push, landing and hire rules, in every form of the heredoc", async () => {
+  const bash = await gateOffice();
+  const body = "run git push when done\ngit push origin main\ngit commit -m x\nf1rm hire designer checkout.designer-a a b\ngit merge worktree-a";
+  const data = [
+    `cat > brief.md <<EOF\n${body}\nEOF`,
+    `cat > brief.md <<EOF\n${body}\nEOF\n`,
+    `cat <<'EOF'\n${body}\nEOF`,
+    `cat <<"EOF"\n${body}\nEOF`,
+    `cat <<\\EOF\n${body}\nEOF`,
+    `cat <<-EOF\n\t${body.replaceAll("\n", "\n\t")}\n\tEOF`,
+    `cat <<-'EOF' > brief.md\n\t${body.replaceAll("\n", "\n\t")}\n\tEOF`,
+    `cat<<EOF\n${body}\nEOF`,
+    `cat << EOF\n${body}\nEOF`,
+    `cat <<EOF >> notes.md\n${body}\nEOF\necho done`,
+    `cat <<A <<B\ngit push\nA\ngit commit -m x\nB`,
+    `cat <<EOF\ngit push\nEOF2\n EOF\ngit commit -m x\nEOF`,
+    `cat <<EOF2\nx\nEOF\ngit push\nEOF2\n`,
+    `cat <<EOF\n${body}`,
+    `cat <<EOF\n$(echo plain) and \${HOME} text\nEOF`,
+    `sh <<'EOF'\n${body}\nEOF`,
+    `cat <<< "git push"`,
+    `cat <<< 'git push; git commit -m x'`,
+    `cat <<< "git push\ngit commit -m x"`,
+    `cat <<EOF # note\n${body}\nEOF`,
+  ];
+  for (const id of ["p", "l", "d", "v"]) {
+    for (const command of data) expect([id, command, (await bash(id, command))?.permissionDecision ?? null]).toEqual([id, command, null]);
+  }
+});
+
+test("a command after a heredoc's terminator, on its opening line, or in an unquoted command substitution is still read; so is a line after a here-string", async () => {
+  const bash = await gateOffice();
+  const read = [
+    "cat <<EOF\nnote\nEOF\ngit push",
+    "cat <<'EOF'\nnote\nEOF\ngit push origin main",
+    "cat <<-EOF\n\tnote\n\tEOF\ngit push",
+    "cat <<EOF | git push\nnote\nEOF",
+    "cat <<EOF && git push\nnote\nEOF",
+    "cat <<A <<B\nx\nA\ny\nB\ngit push",
+    "cat <<EOF\n$(git push)\nEOF",
+    "cat <<EOF\nstamp `git push`\nEOF",
+    "cat <<< x\ngit push",
+    "cat <<<EOF\ngit push\nEOF",
+    "cat <<< \"x\"; git push",
+    "cat <<<EOF\nx\ngit push",
+    'echo "a <<EOF"\ngit push\nEOF',
+    "echo 'a <<EOF'\ngit push\nEOF",
+    "echo hi # <<EOF\ngit push\nEOF",
+    "echo $((1 << 2))\ngit push\n2",
+  ];
+  const passed: string[] = [];
+  for (const command of read) {
+    const out = await bash("d", command);
+    if (out?.permissionDecision !== "deny") passed.push(command);
+    else expect(out.permissionDecisionReason).toContain("Only the user pushes");
+  }
+  expect(passed).toEqual([]);
+  // The same lines are read by the PM and lead rules too.
+  expect((await bash("l", "cat <<EOF\nnote\nEOF\ngit commit -m x"))?.permissionDecision).toBe("deny");
+  expect((await bash("p", "cat <<EOF\nnote\nEOF\nf1rm hire designer checkout.designer-a a b"))?.permissionDecision).toBe("deny");
+});
+
 test("the hire and push refusals are logged with the rule and never the command", async () => {
   const bash = await gateOffice();
   const lines: string[] = [];
