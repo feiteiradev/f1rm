@@ -48,6 +48,7 @@ let stopped: string[] = [];
 let spawned = 0;
 let stopFails: string[] = []; // sessions `claude stop` refuses
 let procsError: string | null = null; // a process table that cannot be read
+let procsFailures = 0; // the next reads that fail, then it works again
 // What `claude agents --json --all` lists after the stop: the sessions the resume can wake.
 let listed: { id: string; name: string; kind: string; state: string; cwd: string; sessionId: string; pid?: number; startedAt?: number; status?: string }[] = [];
 const sessionPids = new Map<string, number>();
@@ -68,6 +69,10 @@ const machine = (repo: string) => ({
 });
 const fullStop = () => ({
   procs: async () => {
+    if (procsFailures > 0) {
+      procsFailures--;
+      throw new Error("lsof timed out");
+    }
     if (procsError) throw new Error(procsError);
     return table;
   },
@@ -90,6 +95,7 @@ afterEach(() => {
   spawned = 0;
   stopFails = [];
   procsError = null;
+  procsFailures = 0;
   listed = [];
   sessionPids.clear();
 });
@@ -472,4 +478,29 @@ test("a manual pause out of hours stays paused after the override expires, and a
   const off = scheduled(q, utc("10-31T11:00:00"), { ...DEFAULTS, enabled: false });
   await settle(300);
   expect(readPaused(pausedFile(off.pausedDir, q.room))).toBeNull();
+});
+
+test("--all goes on past a project whose process table cannot be read: the others are paused and checkpointed, the failure is named, and the state is pushed", async () => {
+  const p = project();
+  const q = project();
+  world(p);
+  sessionPids.set("dev2", 520);
+  table.push(proc(520, 300, "claude --bg dev2", q.wt));
+  const both = { ...machine(p.repo), gitCommonDir: (cwd: string) => (cwd.startsWith(p.repo) ? p.room : cwd.startsWith(q.repo) ? q.room : null) };
+  const o = start(p, { machine: both });
+  writeFileSync(projectFile(o.projectsDir, q.room), "{}\n");
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await seat(o.server, "dev2", "checkout.backend-dev-y", "f1rm:backend-dev", q.wt);
+  await settle();
+  procsFailures = 1; // the first project's table read fails, the second's works
+  const r = await post(o.server, "pause", { all: true });
+  const body: any = await r.json();
+  expect(r.status).toBe(500);
+  expect(body.ok).toBe(false);
+  expect(body.rooms).toHaveLength(2); // both flags were set
+  expect(body.error).toContain("could not check what still runs: lsof timed out");
+  expect(body.results).toHaveLength(1);
+  expect(body.results[0]).toMatchObject({ verified: true, stopped: ["checkout.backend-dev-y"] }); // the second project went through its whole stop
+  expect(readPaused(pausedFile(o.pausedDir, p.room))).toMatchObject({ by: "manual" }); // the first one's flag is set, its hires halt at the next step
+  expect(readPaused(pausedFile(o.pausedDir, q.room))).toMatchObject({ by: "manual", checkpoint: body.results[0].checkpoint });
 });

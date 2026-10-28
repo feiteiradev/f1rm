@@ -238,14 +238,17 @@ test("the PM pauses and resumes when the user says so and never waits for agents
     "the helpers inside them included", "background processes they started", "never the office, a terminal or the user's own sessions",
     "checks afterwards that nothing of the project still runs", "`refs/f1rm/checkpoint/<task>`", "without touching the files", "a manifest",
     "`All N stopped` and the checkpoint id only after that check", "does not see a detached job a lead or Reviewer started in the main checkout", "second office's own `claude` daemon", "is named `NOT saved`", "exits non-zero it names what still runs",
+    "An orphan a user's own `claude -w` left in `.claude/worktrees` with no terminal is killed with the rest", "an application started from a worktree (such as an editor opened with `code .`) never is",
+    "**Work hours.**", "Mon-Fri 09:00-19:00 Europe/Lisbon", "`~/.f1rm/config.json`", "`by: schedule`", "resumes only the projects the schedule paused, never one paused by hand", "lasts until the next 19:00", "a tick gap over 2 minutes", "judged stalled, woken or nudged for 5 minutes",
     "**Pause and close.**", "`paused at <time>, checkpoint <id>`", "\"safe to close\"",
     "**Restart.**", "`f1rm pm` on a paused project", "the board, the milestones file and the manifest", "say in one line where everything stopped",
     "**Resume.**", "`f1rm resume`", "leads first, one at a time within the cap of 8", "a note of where it stopped", "is named in the output",
     "`f1rm hire`, `f1rm wake` and the office's Hire dialog are refused", "`f1rm pause --all` and `f1rm resume --all` are for the user's terminal",
   ]) expect(pause).toContain(s);
+  expect(pause).not.toContain("or an orphan the user's own `claude -w` left"); // the old wording said the pause misses it
   const pm = role("pm").body;
   expect(pm).toContain("## Pause");
-  for (const s of ["run `f1rm pause [reason]` yourself", "never wait for the agents by message", "checkpoint id", "if it exits non-zero, tell the user what still runs", "`paused at <time>, checkpoint <id>`", "\"safe to close\"", "the manifest your first prompt names", "say in one line where everything stopped", "run `f1rm resume` only when the user says \"resume\""]) expect(pm).toContain(s);
+  for (const s of ["run `f1rm pause [reason]` yourself", "never wait for the agents by message", "checkpoint id", "if it exits non-zero, tell the user what still runs", "`paused at <time>, checkpoint <id>`", "\"safe to close\"", "the manifest your first prompt names", "pauses every project at the end of the work day", "say in one line where everything stopped", "run `f1rm resume` only when the user says \"resume\""]) expect(pm).toContain(s);
 });
 
 test("both READMEs list f1rm letgo, the hire flags and the Workflows section", () => {

@@ -2,7 +2,7 @@
 // The rule is conservative on purpose. A process is the project's when it sits in the process tree of one of its background sessions (read before the stop), or is an orphan
 // (parent launchd) whose cwd is inside the repo's worktrees. The office, whatever the caller protects (and their ancestors), a login shell, a `claude` that is no session of the project
 // and everything with a living parent outside the hires' trees (a terminal, the user's interactive session and what it runs) are never claimed.
-// An orphan is not claimed either when its tree holds a process with a controlling terminal (a tmux or screen server started in a worktree owns the user's panes), and its walk stops at a login shell or a `claude`.
+// An orphan that is an application (its command inside a .app/Contents/ bundle) is not claimed, nor is it walked into. An orphan is not claimed either when its tree holds a process with a controlling terminal (a tmux or screen server started in a worktree owns the user's panes), and its walk stops at a login shell or a `claude`.
 import { realpathSync } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { BoardRow } from "./board.ts";
@@ -20,6 +20,8 @@ const within = (dir: string, path: string) => {
   return r === "" || (!r.startsWith("..") && !isAbsolute(r));
 };
 const isClaude = (command: string) => /(?:^|\/)claude(?:\s|$)/.test(command);
+/** An application bundle's binary (VS Code started with `code .` from a worktree): the user's, whatever its cwd. */
+const inApp = (command: string) => command.includes(".app/Contents/");
 
 /** Everything of the project in `procs`: see the file's header. `roots` are the pids of the project's background sessions; `worktrees` is `<repo>/.claude/worktrees`. */
 export function claim(procs: Proc[], o: { roots: number[]; worktrees: string; protect: number[] }): Claimed[] {
@@ -41,7 +43,7 @@ export function claim(procs: Proc[], o: { roots: number[]; worktrees: string; pr
     }
     return seen;
   };
-  const orphans = alive.filter((q) => q.ppid === LAUNCHD && q.pid !== LAUNCHD && q.cwd && within(o.worktrees, q.cwd) && !stranger(q) && !subtree(q.pid, () => false).some((x) => x.tty));
+  const orphans = alive.filter((q) => q.ppid === LAUNCHD && q.pid !== LAUNCHD && q.cwd && within(o.worktrees, q.cwd) && !stranger(q) && !inApp(q.command) && !subtree(q.pid, () => false).some((x) => x.tty));
   const walk = (from: number[], first: Claimed["why"], next: Claimed["why"], stop: (q: Proc) => boolean) => {
     const queue = from.map((pid) => [pid, first] as const);
     for (const [pid, w] of queue) {
