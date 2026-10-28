@@ -195,18 +195,22 @@ const baseBranches = (gitDir: string) => {
 };
 /**
  * Whether a Bash line lands anything on the base branch of the repo whose main working directory is `main`. History-changing git run in the main checkout lands (or rewrites) there,
- * as does `checkout <ref> -- <path>`, `checkout -B` / `switch -C` and `restore --source`, which put a branch's files into it. Moving the base branch's ref lands from any folder: `update-ref`,
- * `branch -f` and `fetch . x:<base>`. The folder of a command is the session's cwd, moved by an earlier `cd` or `pushd` and by `-C <dir>` and `--work-tree <dir>`.
+ * as does `checkout <ref> -- <path>` (or `<ref> <path>`), `checkout -B` / `switch -C` and `restore --source`, which put a branch's files into it. Moving the base branch's ref lands from any folder: `update-ref`,
+ * `branch -f` and `fetch <this repo> x:<base>`, judged by the ref that moves, not by any word that names the base. The folder of a command is the session's cwd, moved by an earlier `cd` or `pushd`,
+ * by `-C <dir>`, `--work-tree` and `GIT_WORK_TREE`, and by a `--git-dir` or `GIT_DIR` that is the main repo's own `.git`.
  */
-// ponytail: a `cd` in a subshell or a branch of `||` moves the folder for the rest of the line, and a folder built by a variable or `~` is not followed; a refused line is the only cost.
-// Files written into the main checkout without git (cp, a redirect) are not seen. `git apply` and `git read-tree` are not listed.
-const landsOnMain = (commands: string[][], cwd: string, main: string, bases: string[]) => {
-  const mainKey = homeKey(main), worktreesKey = homeKey(join(main, ".claude", "worktrees"));
+// Limits (ponytail): a `cd` in a subshell or a branch of `||` moves the folder for the rest of the line (a refused line is the only cost), and a folder built by a variable, `~` or `cd -P` is not followed.
+// Not seen: git aliases (`-c alias.m=merge`), `update-ref --stdin`, `--ignore-other-worktrees`, git run in `.claude/worktrees` itself, `git apply` and `git read-tree`, files written into main without git (cp, a redirect),
+// and the command line of `sh -c` or a script file. `f1rm merge --check` is `sh -c` in the scratch worktree, so the PM or a lead can run any git through it by design. A branch that adds a dependency
+// fails the check until `bun install` runs in main, because the scratch worktrees link main's node_modules.
+const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string, main: string, bases: string[]) => {
+  const mainKey = homeKey(main), worktreesKey = homeKey(join(main, ".claude", "worktrees")), gitDirKey = homeKey(join(main, ".git"));
   const inMain = (dir: string) => inside(mainKey, homeKey(dir)) && !inside(worktreesKey, homeKey(dir));
   const base = new RegExp(`^(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
   const intoBase = new RegExp(`:(?:refs/heads/)?(?:${bases.map(escapeRe).join("|")})$`);
+  const pathLike = (w: string) => /^(?:\.|\.\.?\/.*|\/.*|file:.*)$/.test(w);
   let dir = resolve(cwd);
-  for (const words of commands) {
+  for (const { prefix, words } of split) {
     if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
       const to = unquoted(words[1] ?? "");
       if (to && !/^[-~]|\$/.test(to)) dir = resolve(dir, to);
@@ -214,21 +218,42 @@ const landsOnMain = (commands: string[][], cwd: string, main: string, bases: str
     }
     const call = gitCall(words);
     if (!call) continue;
-    let at = dir;
+    let at = dir, workTree = false, gitDir: string | undefined;
+    const setting = (name: string, value: string) => {
+      if (name === "-C") at = resolve(at, value);
+      else if (name === "--work-tree" || name === "GIT_WORK_TREE") (at = resolve(at, value)), (workTree = true);
+      else if (name === "--git-dir" || name === "GIT_DIR") gitDir = resolve(dir, value);
+    };
+    for (const w of prefix) {
+      const m = /^(GIT_WORK_TREE|GIT_DIR)=(.*)$/.exec(unquoted(w));
+      if (m) setting(m[1], unquoted(m[2]));
+    }
     call.options.forEach((o, i) => {
-      if (o === "-C" || o === "--work-tree") at = resolve(at, call.options[i + 1] ?? "");
-      else if (o.startsWith("--work-tree=")) at = resolve(at, o.slice("--work-tree=".length));
+      const eq = /^(--work-tree|--git-dir)=(.*)$/.exec(o);
+      if (eq) setting(eq[1], eq[2]);
+      else if (["-C", "--work-tree", "--git-dir"].includes(o)) setting(o, call.options[i + 1] ?? "");
     });
+    if (!workTree && gitDir !== undefined && homeKey(gitDir) === gitDirKey) at = main;
     const { sub, rest } = call;
     const any = (re: RegExp) => rest.some((a) => re.test(a));
     const dashDash = rest.indexOf("--");
     const named = rest.filter((a) => !a.startsWith("-"));
-    if (sub === "update-ref" && (rest.some((a) => base.test(a)) || (inMain(at) && rest.includes("HEAD")))) return true;
-    if (sub === "branch" && any(/^(?:--force|--move|--copy|-[A-Za-z]*[fMC])/) && named.some((a) => base.test(a))) return true;
-    if (sub === "fetch" && rest.includes(".") && any(intoBase)) return true;
+    // update-ref [-m <reason>] [-d] <ref> …: the ref is the first word that is no option.
+    const updated = (() => {
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "-m") i++;
+        else if (!rest[i].startsWith("-")) return rest[i];
+      }
+    })();
+    if (sub === "update-ref" && updated !== undefined && (base.test(updated) || (updated === "HEAD" && inMain(at)))) return true;
+    // `branch -f <name> [<start>]` moves <name>; a rename or copy (`-M <old> <new>`, `-C`) makes <new>, the last word.
+    const renames = any(/^(?:--move|--copy|-[A-Za-z]*[MC])/), forces = any(/^(?:--force|-[A-Za-z]*f)/);
+    const moved = renames ? named.at(-1) : named[0];
+    if (sub === "branch" && (renames || forces) && moved !== undefined && base.test(moved)) return true;
+    if (sub === "fetch" && named.some(pathLike) && any(intoBase)) return true;
     if (!inMain(at)) continue;
     if (LANDS_IN_MAIN.has(sub)) return true;
-    if (sub === "checkout" && ((dashDash > 0 && rest.slice(0, dashDash).some((a) => !a.startsWith("-"))) || any(/^-[A-Za-z]*B/))) return true;
+    if (sub === "checkout" && ((dashDash > 0 && rest.slice(0, dashDash).some((a) => !a.startsWith("-"))) || any(/^-[A-Za-z]*B/) || (dashDash < 0 && named.length >= 2 && !any(/^(?:-[A-Za-z]*b|--orphan)/)))) return true;
     if (sub === "switch" && any(/^(-[A-Za-z]*C|--force-create)/)) return true;
     if (sub === "restore" && any(/^(-s|--source)/)) return true;
   }
@@ -635,7 +660,7 @@ export function startServer({
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
     // Nothing lands on the base branch but `f1rm merge`. F3b: a Reviewer keeps its old `--no-ff` and `--ff-only` steps in the main checkout until that task removes the role's merge flow and this exception.
     const me = state.employees[sessionId];
-    if (role !== "reviewer" && me && me.room !== ELSEWHERE.id && landsOnMain(commands, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
+    if (role !== "reviewer" && me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {
       return refuse("main", "Nothing lands on the base branch except `f1rm merge <task>`, run by the PM or a lead in the main working directory. Your own git works inside your worktree: merge main into your branch, rebase your unpushed branch. Send `DONE` to the session in your Report to.");
     }
     if (role === "reviewer" && commands.some((w) => reviewerRefused(gitCall(w)))) {

@@ -1876,6 +1876,31 @@ test("nothing lands on the base branch in the main checkout except through `f1rm
   expect(await bash("bm", "cat > brief.md <<'EOF'\ngit merge x\ngit commit -m y\nEOF")).toBeNull();
 });
 
+test("the main checkout is also reached by --git-dir and GIT_DIR, a local fetch into the base, and checkout <ref> <path> without --; moving a ref other than the base is not landing", async () => {
+  const bash = await mainOffice();
+  const refused = [
+    "git --git-dir=/code/shop/.git merge x", "git --git-dir /code/shop/.git/ commit -m x", "GIT_DIR=/code/shop/.git git merge x", "GIT_DIR=/code/shop/.git GIT_WORK_TREE=/code/shop git commit -m x", "env GIT_DIR=/code/shop/.git git rebase main", "GIT_WORK_TREE=/code/shop git merge x",
+    "git fetch ./ x:main", "git fetch . +x:main", "git fetch /code/shop x:main", "git fetch ../../.. x:refs/heads/main", "git fetch ../../../ x:main",
+    "git update-ref -m 'moved' refs/heads/main abc1234", "git branch -M other main", "git branch -f main other",
+  ];
+  for (const command of refused) {
+    const out = await bash("b", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Nothing lands on the base branch");
+  }
+  for (const command of ["git checkout worktree-add-a src/a.ts", "git checkout abc1234 a.ts b.ts", "git checkout -q worktree-add-a ."]) {
+    const out = await bash("bm", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+  }
+  for (const command of ["git update-ref refs/heads/worktree-add-a main", "git update-ref -m 'main moved' refs/heads/other abc1234", "git branch -f other main", "git branch -f worktree-add-a main", "git branch -M worktree-add-a other", "git --git-dir=/code/shop/.git/worktrees/add-a log", "GIT_DIR=/code/shop/.git/worktrees/add-a git status", "git fetch origin x:main", "git fetch origin", "git fetch . main:other", "git fetch ./ main:other"]) {
+    expect([command, await bash("b", command)]).toEqual([command, null]);
+  }
+  for (const command of ["git checkout -b feature main", "git checkout main", "git checkout -q worktree-add-a", "git checkout -- a.ts", "git checkout main -- a.ts"]) {
+    // in the main checkout: a new branch and a switch are not landing; the last shape (a ref before `--`) is
+    expect([command, (await bash("bm", command))?.permissionDecision ?? null]).toEqual([command, command === "git checkout main -- a.ts" ? "deny" : null]);
+  }
+});
+
 test("a dev keeps its normal git inside its own worktree: merge main into its branch, rebase, amend, reset, cherry-pick, pull, commit and move its own refs; and it can read the main checkout", async () => {
   const bash = await mainOffice();
   const own = ["git merge main", "git merge --no-ff main", "git rebase main", "git rebase --continue", "git reset --hard HEAD~1", "git reset --soft main", "git commit -m x", "git commit --amend", "git cherry-pick abc1234", "git pull", "git pull --rebase origin main", "git revert abc1234", "git am fix.patch", "git checkout main -- src/a.ts", "git checkout abc1234 -- .", "git checkout -B scratch abc1234", "git switch -C scratch", "git restore --source=main src/a.ts",
