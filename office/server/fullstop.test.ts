@@ -114,6 +114,20 @@ test("an orphan's walk stops at a login shell or a claude, even without a termin
   expect(got).toEqual([700, 701]);
 });
 
+test("an app started from a worktree (`code .`) is never claimed, nor what it runs, while a browser a claimed orphan started still is", () => {
+  const VSCODE = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron .";
+  const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless";
+  const t = [
+    p(1, 0, "launchd", "/"),
+    p(800, 1, VSCODE, `${WT}/a`), // the editor: parent launchd, cwd in a worktree, no terminal
+    p(801, 800, "Code Helper (Renderer)", `${WT}/a`),
+    p(802, 801, "node extension-host.js", `${WT}/a`),
+    p(810, 1, "node dev-server.js", `${WT}/a`), // a hire's orphan
+    p(811, 810, CHROME, `${WT}/a`), // and the browser it started
+  ];
+  expect(claim(t, { roots: [], worktrees: WT, protect: [] }).map((c) => c.pid).sort()).toEqual([810, 811]);
+});
+
 test("the real process table parses the terminal of each process, and a ps or lsof that fails or times out is an error, not an empty table", async () => {
   const ok = (out: string) => ({ out, code: 0, timedOut: false });
   const ps = " 10 1 Ss ?? /sbin/launchd\n 11 10 S+ ttys004 -zsh\n 12 10 Z ?? defunct\n";

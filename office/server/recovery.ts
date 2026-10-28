@@ -11,6 +11,7 @@ import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } 
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, commitTimeArgs, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
+import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -19,7 +20,7 @@ const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const RESET = /^(?:([a-z]+)\s+)?(?:(\d{1,2})\s*(?:,|\bat\b)\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?$/i;
 
 /** The wall-clock parts of instant `t` in zone `tz` (a RangeError for a zone that does not exist). */
-function wall(t: number, tz: string) {
+export function wall(t: number, tz: string) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).formatToParts(new Date(t));
   const n = (type: string) => Number(parts.find((p) => p.type === type)!.value);
   return { year: n("year"), month: n("month") - 1, day: n("day"), hour: n("hour"), minute: n("minute"), second: n("second") };
@@ -36,7 +37,7 @@ const wallMs = (t: number, tz: string) => {
  * when a limit has surely lifted; a time that does not exist (clocks going forward) reads with the offset from before the gap, as JS Date does (2:30am becomes 3:30am).
  * ponytail: Claude Code prints its reset from a real instant, so a time in a gap is hypothetical; no search for the first instant after it.
  */
-function instant(tz: string, year: number, month: number, day: number, hour: number, minute: number): number {
+export function instant(tz: string, year: number, month: number, day: number, hour: number, minute: number): number {
   const asUtc = Date.UTC(year, month, day, hour, minute);
   // The zone's offset a day before and a day after the stated time, wherever it changes in between.
   const offsets = [-DAY, DAY].map((d) => wallMs(asUtc + d, tz) - (asUtc + d));
@@ -128,6 +129,10 @@ export type RecoveryDeps = {
   paused?: (repo: string) => boolean;
   /** Waits `ms`; the resume waits for a free slot with it. Defaults to a real wait. */
   sleep?: (ms: number) => Promise<void>;
+  /** Called at every tick with the clock: true while the machine is just back from a sleep (see sleep.ts). Defaults to the real rule; a test whose clock jumps between ticks passes `() => false`. */
+  resting?: (now: number) => boolean;
+  /** How often the tick runs, in ms: a gap of more than twice this, and at least 2 minutes, is a sleep. */
+  everyMs?: number;
 };
 
 /** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
@@ -404,12 +409,22 @@ export function createRecovery(d: RecoveryDeps) {
     }
   }
 
+  const resting = d.resting ?? sleepGrace(Math.max(SLEEP_GAP_MS, 2 * (d.everyMs ?? 0)));
+  let ticking = false;
   return {
     resume,
     async tick(repos: string[]) {
-      const all = repos.length ? await d.sessions() : null;
-      if (!all) return;
-      for (const repo of repos) await recoverRepo(repo, all).catch((err) => console.log(`recovery ${basename(repo)}: ${(err as Error).message}`));
+      // Every call is seen by the sleep rule, a call that finds the last tick still running included, so a slow tick is no sleep.
+      const asleep = resting(d.now()); // just back from a sleep: nobody is judged yet (the schedule runs on its own timer)
+      if (ticking || asleep) return;
+      ticking = true;
+      try {
+        const all = repos.length ? await d.sessions() : null;
+        if (!all) return;
+        for (const repo of repos) await recoverRepo(repo, all).catch((err) => console.log(`recovery ${basename(repo)}: ${(err as Error).message}`));
+      } finally {
+        ticking = false;
+      }
     },
   };
 }

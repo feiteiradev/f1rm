@@ -10,6 +10,7 @@ import { projectFile } from "./editions.ts";
 import type { Proc } from "./fullstop.ts";
 import { readPaused, pausedFile } from "./pause.ts";
 import { startServer } from "./server.ts";
+import { DEFAULTS, overrideFile, readOverride, type WorkHours } from "./workhours.ts";
 
 const SECRET = "ingest-secret";
 const TOKEN = "ui-token";
@@ -47,6 +48,7 @@ let stopped: string[] = [];
 let spawned = 0;
 let stopFails: string[] = []; // sessions `claude stop` refuses
 let procsError: string | null = null; // a process table that cannot be read
+let procsFailures = 0; // the next reads that fail, then it works again
 // What `claude agents --json --all` lists after the stop: the sessions the resume can wake.
 let listed: { id: string; name: string; kind: string; state: string; cwd: string; sessionId: string; pid?: number; startedAt?: number; status?: string }[] = [];
 const sessionPids = new Map<string, number>();
@@ -67,6 +69,10 @@ const machine = (repo: string) => ({
 });
 const fullStop = () => ({
   procs: async () => {
+    if (procsFailures > 0) {
+      procsFailures--;
+      throw new Error("lsof timed out");
+    }
     if (procsError) throw new Error(procsError);
     return table;
   },
@@ -89,6 +95,7 @@ afterEach(() => {
   spawned = 0;
   stopFails = [];
   procsError = null;
+  procsFailures = 0;
   listed = [];
   sessionPids.clear();
 });
@@ -367,4 +374,181 @@ test("a worktree with no commit to save on top of is named as not saved, in the 
   expect(res.saved.map((s: any) => s.task)).toEqual(["x"]);
   expect(readManifest(checkpointDirOf(o.checkpointsDir, p.room), res.checkpoint)?.unsaved).toEqual(["fresh"]);
   expect(readFileSync(join(fresh, "wip.txt"), "utf8")).toBe("unborn\n");
+});
+
+// ── work hours ─────────────────────────────────────────────────────────────
+// The schedule runs on the office's own timer and clock: `clockNow` is the fake wall clock, in UTC (Lisbon is UTC+0 from 2026-10-25 to 2027-03-28).
+let clockNow = 0;
+const utc = (d: string) => Date.parse(`2026-${d}Z`);
+const scheduled = (p: ReturnType<typeof project>, from: number, cfg: { current: WorkHours } = { current: DEFAULTS }, extra: object = {}) => {
+  clockNow = from;
+  const home = mkdtempSync(join(root, "home-"));
+  const r = recoveryDeps();
+  const o = start(p, { clock: () => clockNow, recovery: r.recovery, workHours: { config: () => cfg.current, overridesDir: join(home, "overrides"), everyMs: 30 }, ...extra }, home);
+  return { ...o, r, flag: () => readPaused(pausedFile(o.pausedDir, p.room)), override: () => readOverride(overrideFile(join(home, "overrides"), p.room)) };
+};
+const stoppedListing = (p: ReturnType<typeof project>) => [
+  { id: "dev00001", name: "checkout.backend-dev-x", kind: "background", state: "stopped", cwd: p.repo, sessionId: "dev" },
+];
+
+test("at 19:00 the office pauses every registered project by the schedule, with the full stop and a checkpoint; at 09:00 it resumes them", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-27T14:00:00"));
+  const other = join(root, "other-shop", ".git"); // registered, no session has been in it
+  writeFileSync(projectFile(o.projectsDir, other), "{}\n");
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  expect(o.flag()).toBeNull(); // in hours: nothing to do
+
+  clockNow = utc("10-27T19:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule", stopped: ["checkout.backend-dev-x"], checkpoint: expect.stringMatching(/^cp-/) });
+  expect(stopped).toEqual(["dev"]);
+  expect(readPaused(pausedFile(o.pausedDir, other))).toMatchObject({ by: "schedule" });
+  expect(readManifest(checkpointDirOf(o.checkpointsDir, p.room), o.flag()!.checkpoint!)?.sessions.map((s) => s.name)).toEqual(["checkout.backend-dev-x"]);
+  expect(git(p.wt, "rev-parse", "refs/f1rm/checkpoint/x")).toMatch(/^[0-9a-f]{40}$/);
+
+  listed = stoppedListing(p);
+  clockNow = utc("10-28T09:00:00");
+  await settle(500);
+  expect(o.flag()).toBeNull();
+  expect(readPaused(pausedFile(o.pausedDir, other))).toBeNull();
+  expect(o.r.woke.map((w) => w.name)).toEqual(["checkout.backend-dev-x"]);
+  expect(o.r.woke[0]!.note).toContain("resumed after a pause");
+});
+
+test("a project paused by hand stays paused through 19:00 and the next 09:00; a manual resume in hours is just a resume", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-27T14:00:00"));
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  await post(o.server, "pause", { room: p.room, why: "lunch" });
+  const at = o.flag()!.at;
+  for (const t of ["10-27T19:00:00", "10-28T09:00:00", "10-28T12:00:00"]) {
+    clockNow = utc(t);
+    await settle(200);
+    expect(o.flag()).toMatchObject({ by: "manual", at, why: "lunch" });
+  }
+  await post(o.server, "resume", { room: p.room });
+  expect([o.flag(), o.override()]).toEqual([null, null]); // in hours: no override
+  clockNow = utc("10-28T19:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" }); // and the schedule pauses it at the evening boundary all the same
+});
+
+test("an office that starts out of hours with nothing paused pauses at once; a manual resume then lasts until the next 19:00 and the schedule pauses again", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-31T11:00:00")); // Saturday
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" });
+  listed = stoppedListing(p);
+
+  clockNow = utc("10-31T11:30:00");
+  await post(o.server, "resume", { room: p.room });
+  expect(o.override()).toEqual({ until: utc("11-02T19:00:00") }); // Monday's 19:00, the weekend skipped
+  await settle(300);
+  expect(o.flag()).toBeNull(); // the schedule leaves it alone while the override holds
+  clockNow = utc("11-02T09:00:00");
+  await settle(200);
+  expect(o.flag()).toBeNull();
+  clockNow = utc("11-02T19:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" });
+});
+
+test("a pause by hand out of hours, with the override still live, stays paused after the override expires, and the expired override is removed", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-31T11:00:00"));
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle(300);
+  clockNow = utc("10-31T11:30:00");
+  await post(o.server, "resume", { room: p.room });
+  expect(o.override()).toEqual({ until: utc("11-02T19:00:00") }); // before the expiry
+  await post(o.server, "pause", { room: p.room, why: "bed" }); // by hand, with the override still live
+  clockNow = utc("11-02T19:30:00"); // past the override's expiry
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "manual", why: "bed" });
+  expect(o.override()).toBeNull(); // after it
+});
+
+test("turning the schedule off lifts the pause it made and pauses nothing; a pause by hand then stays", async () => {
+  const p = project();
+  world(p);
+  const cfg = { current: DEFAULTS };
+  const o = scheduled(p, utc("10-31T11:00:00"), cfg);
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" }); // seeded: the schedule paused it
+  listed = stoppedListing(p);
+  cfg.current = { ...DEFAULTS, enabled: false };
+  await settle(300);
+  expect(o.flag()).toBeNull(); // off: its own pause is lifted
+  await post(o.server, "pause", { room: p.room, why: "lunch" });
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "manual", why: "lunch" });
+});
+
+test("a pause by hand on a project the schedule already paused makes it a pause by hand: the 09:00 look leaves it paused", async () => {
+  const p = project();
+  world(p);
+  const o = scheduled(p, utc("10-27T20:00:00")); // Tuesday evening
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule" });
+  clockNow = utc("10-27T23:00:00");
+  await post(o.server, "pause", { room: p.room, why: "bed" }); // "I'm going to bed"
+  expect(o.flag()).toMatchObject({ by: "manual", why: "bed", checkpoint: expect.stringMatching(/^cp-/) });
+  clockNow = utc("10-28T09:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "manual", why: "bed" });
+});
+
+test("a manual resume out of hours holds even while its own wake-up is slow: a look of the schedule in the middle of it does not pause the project again", async () => {
+  const p = project();
+  world(p);
+  let delay = 0;
+  const slow = { ...machine(p.repo), sessions: async () => (await new Promise((r) => setTimeout(r, delay)), listed) }; // the resume reads this after it clears the flag
+  const o = scheduled(p, utc("10-27T14:00:00"), { current: DEFAULTS }, { machine: slow });
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  clockNow = utc("10-27T19:00:00");
+  await settle(300);
+  expect(o.flag()).toMatchObject({ by: "schedule", checkpoint: expect.stringMatching(/^cp-/) });
+  listed = stoppedListing(p);
+  clockNow = utc("10-27T20:00:00");
+  delay = 400;
+  await post(o.server, "resume", { room: p.room });
+  await settle(300);
+  expect(o.flag()).toBeNull();
+  expect(o.override()).toEqual({ until: utc("10-28T19:00:00") });
+});
+
+test("--all goes on past a project whose process table cannot be read: the others are paused and checkpointed, the failure is named, and the state is pushed", async () => {
+  const p = project();
+  const q = project();
+  world(p);
+  sessionPids.set("dev2", 520);
+  table.push(proc(520, 300, "claude --bg dev2", q.wt));
+  const both = { ...machine(p.repo), gitCommonDir: (cwd: string) => (cwd.startsWith(p.repo) ? p.room : cwd.startsWith(q.repo) ? q.room : null) };
+  const o = start(p, { machine: both });
+  writeFileSync(projectFile(o.projectsDir, q.room), "{}\n");
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await seat(o.server, "dev2", "checkout.backend-dev-y", "f1rm:backend-dev", q.wt);
+  await settle();
+  procsFailures = 1; // the first project's table read fails, the second's works
+  const r = await post(o.server, "pause", { all: true });
+  const body: any = await r.json();
+  expect(r.status).toBe(500);
+  expect(body.ok).toBe(false);
+  expect(body.rooms).toHaveLength(2); // both flags were set
+  expect(body.error).toContain("could not check what still runs: lsof timed out");
+  expect(body.results).toHaveLength(1);
+  expect(body.results[0]).toMatchObject({ verified: true, stopped: ["checkout.backend-dev-y"] }); // the second project went through its whole stop
+  expect(readPaused(pausedFile(o.pausedDir, p.room))).toMatchObject({ by: "manual" }); // the first one's flag is set, its hires halt at the next step
+  expect(readPaused(pausedFile(o.pausedDir, q.room))).toMatchObject({ by: "manual", checkpoint: body.results[0].checkpoint });
 });

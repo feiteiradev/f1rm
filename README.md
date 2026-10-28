@@ -58,6 +58,26 @@ The office keeps running after you close Claude Code and starts again at login, 
 | `f1rm demo` | Opens the recorded demo, with no server and no Claude Code. Needs `bun run build` first. |
 | `f1rm serve` | Runs the office server in the foreground. This is what `service` runs. |
 
+## Work hours
+
+The office rests when you do. At the end of the work day it pauses every project it knows, with the same full stop and checkpoint as `f1rm pause`; at the start of the next work day it resumes only the projects it paused itself. A project you paused by hand stays paused. A `f1rm resume` out of work hours lasts until the next 19:00, when the schedule pauses it again. The Mac is free to sleep: f1rm never keeps it awake, and after a sleep (a gap of more than 2 minutes between the office's ticks) nobody is judged stalled, woken or nudged for 5 minutes.
+
+`~/.f1rm/config.json` sets the hours. Without the file the office works Monday to Friday, 09:00 to 19:00 in Europe/Lisbon. Every field is optional, and a field that is missing or impossible keeps its default. The office reads the file at every look, so an edit applies within 30 seconds, no restart.
+
+```json
+{
+  "workHours": {
+    "enabled": true,
+    "days": ["mon", "tue", "wed", "thu", "fri"],
+    "start": "09:00",
+    "end": "19:00",
+    "timezone": "Europe/Lisbon"
+  }
+}
+```
+
+`"enabled": false` turns the schedule off (it then lifts a pause it made itself and pauses nothing). A work day ends the same day; a window that crosses midnight is not supported.
+
 ## The company
 
 Start a PM in the repo you want to work on: run `f1rm pm` in a terminal in that folder.
