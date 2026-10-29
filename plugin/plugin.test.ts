@@ -55,27 +55,24 @@ test.each(Object.keys(ROLES))("%s prompt is about the work, with no persona", (n
   expect(body).toStartWith("\nRole: ");
 });
 
-test("the PM interviews before it plans, and only the Reviewer merges and never pushes", () => {
+test("the PM interviews before it plans, and the Reviewer never pushes", () => {
   const pm = role("pm");
   expect(pm.body).toMatch(/Make no plan, board entry or hire before that confirmation/);
   expect(pm.body).toContain("f1rm hire");
   const reviewer = role("reviewer");
   expect(reviewer.fm.disallowedTools).toBeUndefined(); // a Bash(...) deny removes the whole Bash tool
-  expect(reviewer.body).toContain("Never push");
+  expect(reviewer.body).toContain("never push");
 });
 
-test("the Reviewer merges in a scratch worktree, fast-forwards the main checkout, and approves only once main has moved", () => {
-  const flow = section("Review and merge flow");
-  expect(flow).toContain("git worktree add --detach .claude/worktrees/review-<task> <base>");
-  expect(flow).toContain("git merge --no-ff <branch>");
-  expect(flow).toContain("git merge --ff-only <merge sha>");
-  expect(flow).toContain("git worktree remove");
+test("f1rm merge fast-forwards the base only after the new tests fail on it and the suite passes on the merge, and never pushes", () => {
+  const flow = section("Review and landing");
+  expect(flow).toContain("merges the branch in a scratch worktree");
+  expect(flow).toContain("`--ff-only`");
+  expect(flow.indexOf("must fail")).toBeLessThan(flow.indexOf("`--ff-only`"));
+  expect(flow).toContain("It never pushes");
   expect(flow).not.toContain("reset --hard");
   expect(role("reviewer").body).not.toContain("reset --hard");
-  expect(flow.indexOf("--ff-only")).toBeLessThan(flow.indexOf("`APPROVED`"));
-  expect(flow).toMatch(/only after main has moved/);
-  expect(role("reviewer").body).toContain("scratch worktree");
-  expect(role("reviewer").body).toContain("--ff-only");
+  expect(role("reviewer").body).toContain("`f1rm merge`");
 });
 
 test("the guidelines cover every item the spec lists", () => {
@@ -84,24 +81,24 @@ test("the guidelines cover every item the spec lists", () => {
     "Brief format",
     "Handoff via SendMessage",
     "Board format",
-    "Review and merge flow",
+    "Review and landing",
     "Cap rule",
     "Definition of done",
   ]) {
     expect(section(h).trim().length).toBeGreaterThan(100);
   }
   expect(section("Handoff via SendMessage")).toContain("commits on the hire's worktree branch");
-  expect(section("Review and merge flow")).toContain("Never run `git push`");
-  expect(section("Review and merge flow")).toContain("--ff-only");
+  expect(section("Review and landing")).toContain("Never run `git push`");
+  expect(section("Review and landing")).toContain("`--ff-only`");
   expect(section("Cap rule")).toContain("**8 background sessions working at once**");
   expect(section("Cap rule")).toMatch(/override flag.*only after the user has approved/s);
-  expect(section("Definition of done")).toContain("Reviewer has signed off");
+  expect(section("Definition of done")).toContain("`f1rm merge` has landed it");
 });
 
 test("the guidelines run teams: when to form them, the team brief, NEEDS YOU/DONE, who talks to whom, the caps, interns, team boards and installed skills", () => {
   for (const h of ["Teams", "Team brief", "Who talks to whom", "Interns", "Use what is installed"]) expect(section(h).trim().length).toBeGreaterThan(100);
   const teams = section("Teams");
-  for (const s of ["Every milestone runs through one or two teams", "At most 2 teams", "hires only leads", "No nested teams", "`DONE <team>`"]) expect(teams).toContain(s);
+  for (const s of ["Every milestone runs through one or two teams", "At most 2 teams", "Only the PM hires leads", "No nested teams", "`DONE <team>`"]) expect(teams).toContain(s);
   expect(section("Who talks to whom")).toContain("The user talks to each lead directly");
   expect(section("Who talks to whom")).toMatch(/lead .*messages the other leads directly/s);
   const caps = section("Cap rule");
@@ -134,8 +131,8 @@ test("the guidelines run editions: Work and Founder, the founder playbook, draft
   for (const s of ["the customer, the problem they have, the offer, and the channel", "**Strategist first**", "`growth/brand.md`", "`growth/marketing/`", "`launch` team"]) expect(playbook).toContain(s);
   const drafts = section("Drafts only");
   for (const s of ["never post, publish, send, schedule or spend", "paid credits", "`publish`"]) expect(drafts).toContain(s);
-  expect(section("Review and merge flow")).toContain("**content checklist**");
-  expect(section("Board format")).toContain("`publish` means approved founder work waiting for the user to put it out");
+  expect(section("Review and landing")).toContain("**content checklist**");
+  expect(section("Board format")).toContain("`publish` means landed founder work waiting for the user to put it out");
   for (const r of ["marketer", "seo-specialist", "social-media", "sales", "strategist"]) {
     const { body } = role(r);
     expect(body).toContain("Drafts only: never post, publish, send, schedule or spend");
@@ -154,8 +151,8 @@ test("the roster table names each hireable role with the commands `f1rm hire` lo
   expect(rows.map((r) => r[1])).toEqual(Object.keys(ROLES));
   for (const [, name, cell] of rows) {
     const listed = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    // The PM is never hired, so its row lists only what `f1rm pm` loads.
-    const skills = name === "pm" ? ROLES[name].filter((s) => s !== GUIDELINES) : ROLES[name];
+    // The PM is never hired, so its row lists only what `f1rm pm` loads. A Reviewer is hired with --content, which drops its code-review skills.
+    const skills = name === "pm" ? ROLES[name].filter((s) => s !== GUIDELINES) : name === "reviewer" ? [GUIDELINES] : ROLES[name];
     expect(listed.sort()).toEqual([...skills].sort());
   }
 });
@@ -177,9 +174,10 @@ test("research and security-review are slash commands: --skills research and --l
 const WORKFLOW_SKILLS: Record<string, string[]> = {
   "frontend-dev": ["run", "design-pipeline"],
   "backend-dev": ["mattpocock-skills:diagnosing-bugs"],
-  reviewer: ["security-review"],
   researcher: ["research"],
 };
+// A Reviewer is hired with --content, which drops the code-review skills its role file lists.
+const WORKFLOW_ROLE_SKILLS = (r: string) => (r === "reviewer" ? [GUIDELINES] : ROLES[r]);
 const bare = (skill: string) => skill.split(":").pop()!;
 
 test("the Workflows section has an entry for every role, naming its skills, and every skill it names is in a role file or the roster", () => {
@@ -188,7 +186,7 @@ test("the Workflows section has an entry for every role, naming its skills, and 
   for (const r of Object.keys(ROLES)) {
     const entry = entries.find((e) => e.startsWith(`${r}**`));
     expect(entry, `${r} has a Workflows entry`).toBeDefined();
-    for (const s of [...ROLES[r], ...(WORKFLOW_SKILLS[r] ?? [])]) expect(entry!, `${r} names ${s}`).toContain(bare(s));
+    for (const s of [...WORKFLOW_ROLE_SKILLS(r), ...(WORKFLOW_SKILLS[r] ?? [])]) expect(entry!, `${r} names ${s}`).toContain(bare(s));
   }
   const everything = [section("Roster and hiring playbook"), ...Object.keys(ROLES).map((r) => readFileSync(join(PLUGIN, "agents", `${r}.md`), "utf8"))].join("\n");
   const named = [...flows.matchAll(/`\/?([a-z][a-z0-9-]*(?::[a-z0-9-]+)?)`/g)].map((m) => m[1]);
@@ -202,8 +200,8 @@ test("the Workflows section has an entry for every role, naming its skills, and 
 test("the guidelines carry the evidence handoff: the DONE block, BLOCKED permission, ESCALATE, f1rm letgo and the base-fails rule", () => {
   const handoff = section("Handoff via SendMessage");
   for (const s of ["exit code", "screenshot", "skills used", "~/.f1rm/evidence/<repo>/<task>/", "`BLOCKED <slug> permission`", "`ESCALATE <slug>`", "one `BLOCKED` message"]) expect(handoff).toContain(s);
-  const flow = section("Review and merge flow");
-  for (const s of ["passes on the base proves nothing", "red-<task>", "`ESCALATE <slug>`", "research a brief puts in the repo"]) expect(flow).toContain(s);
+  const flow = section("Review and landing");
+  for (const s of ["passes on the base proves nothing", "`ESCALATE <slug>`", "research a brief puts in the repo"]) expect(flow).toContain(s);
   expect(section("Teams")).toContain("`f1rm letgo");
   expect(section("Who talks to whom")).toContain("`BLOCKED <slug> permission`");
   expect(guidelines).toContain("Nobody pushes; the user pushes.");
@@ -215,7 +213,7 @@ test("the guidelines say what each gate holds and the way out, and a cap refusal
   const gates = section("Gates");
   for (const s of ["skill gate", "delegation gate", "boards, milestones, kept files, memory, evidence and scratch", "`f1rm:*`", "load the skills", "security-review"]) expect(gates).toContain(s);
   const skillGate = gates.split("\n").find((l) => l.includes("**skill gate**")) ?? "";
-  for (const s of ["Only a session's first prompt arms it", "a later message that quotes that prompt's skill list changes nothing", "resumed with its own id is not armed again", "A woken session (`f1rm wake`) is a new session whose first prompt is the wake note", "names no skills to load (its history has them)", "a high-level Reviewer's note repeats the security sentence, so the APPROVED hold arms again on purpose", "a Reviewer of any level whose first prompt cannot be read is also held at APPROVED", "a skill the Skill tool refuses counts as tried, read from the session's own transcript", "disable-model-invocation, go on without that skill", "Unknown skill, go on and send `BLOCKED <slug>`"]) expect(skillGate, s).toContain(s);
+  for (const s of ["Only a session's first prompt arms it", "a later message that quotes that prompt's skill list changes nothing", "resumed with its own id is not armed again", "A woken session (`f1rm wake`) is a new session whose first prompt is the wake note", "names no skills to load (its history has them)", "A Reviewer session started before the Reviewer became content-only may still carry the security sentence in its first prompt", "a content Reviewer carries none", "a skill the Skill tool refuses counts as tried, read from the session's own transcript", "disable-model-invocation, go on without that skill", "Unknown skill, go on and send `BLOCKED <slug>`"]) expect(skillGate, s).toContain(s);
   const cap = section("Cap rule");
   expect(cap).toMatch(/lead.*tells? the PM/s);
   expect(cap).toMatch(/PM.*tells? the user/s);
@@ -227,7 +225,7 @@ test("pm.md turns handed work into a board task, sends exploration to a Haiku Ex
   const lead = role("lead").body;
   expect(lead).toContain("f1rm letgo");
   expect(lead).toMatch(/cap.*Tell the PM/s);
-  expect(role("reviewer").body).toContain("only after main has moved");
+  expect(role("reviewer").body).toContain("Nothing is merged by you");
 });
 
 test("the PM pauses and resumes when the user says so and never waits for agents by message; the guidelines say what a pause stops, verifies and saves, 'pause and close', the restart and the resume", () => {
@@ -357,7 +355,7 @@ test("the guidelines state the milestones file and the decisions log, and the pl
   for (const s of ["`docs/decisions.md`", "a feature or behaviour the user chose", "a refactor or architecture choice", "a cap, limit, dependency or version change", "anything rejected for a reason", "Bug fixes and wording tweaks get no entry", "append-only, oldest first", "## <YYYY-MM-DD> <title>", "`- Decision:`", "`- Why:`", "`- Rejected:`", "`- Where:`", "docs/decisions.md has the entry <title>", "a missing entry blocks", "`docs/adr/`", "links to the ADR"]) expect(md, s).toContain(s);
   expect(section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))).toContain("milestones file");
   expect(section("Brief format")).toContain("docs/decisions.md");
-  expect(section("Review and merge flow")).toContain("docs/decisions.md");
+  expect(section("Review and landing")).toContain("docs/decisions.md");
 });
 
 test("pm.md reads the milestones file at pickup, writes the milestone's section with the board, and replaces it with a record at the end of the milestone", () => {
@@ -387,7 +385,7 @@ test("B1: every milestone runs through one or two leads, and the PM hires only l
   for (const text of [guidelines, role("pm").body, role("lead").body, readFileSync(join(PLUGIN, "README.md"), "utf8"), readFileSync(join(REPO, "README.md"), "utf8"), pmPromptText()]) for (const re of stale) expect(text).not.toMatch(re);
   expect(section("Teams")).toContain("even a milestone of one task");
   expect(section("Teams")).toContain("Haiku Explore interns");
-  expect(guidelines.split("\n").find((l) => l.startsWith("Hierarchy:"))).toContain("hires only leads");
+  expect(guidelines.split("\n").find((l) => l.startsWith("Hierarchy:"))).toContain("hires leads for a milestone");
   const forms = section("Roster and hiring playbook").split("```")[1];
   expect(forms).not.toContain("the PM, no teams");
   expect(forms).toContain('f1rm hire lead lead-<team> <team> "<team brief>"');
@@ -400,12 +398,12 @@ test("B1: no line says a specialist reports to the PM or that the PM lets specia
   const stale = [/otherwise the PM/, /the PM or the team's lead/, /the PM or your team's lead/, /your team's lead, or the PM/, /the PM, or its team's lead/, /the specialists, the PM or/];
   const texts = [guidelines, readFileSync(join(PLUGIN, "README.md"), "utf8"), readFileSync(join(REPO, "README.md"), "utf8"), ...Object.keys(ROLES).filter((r) => r !== "pm" && r !== "lead").map((r) => role(r).body)];
   for (const t of texts) for (const re of stale) expect(t).not.toMatch(re);
-  expect(section("Who talks to whom")).toContain("A specialist reports only to the session in its `Report to`, its team's lead, and messages only who the Messaging table allows.");
+  expect(section("Who talks to whom")).toContain("A specialist reports only to the session in its `Report to`, its team's lead (the PM for a simple task), and messages only who the Messaging table allows.");
   expect(section("Who talks to whom")).not.toContain("another specialist");
   expect(section("Handoff via SendMessage")).toContain("A hire reports to the session in its `Report to` and messages only who the Messaging table allows.");
   expect(section("Handoff via SendMessage")).not.toContain("another hire");
-  expect(section("Review and merge flow")).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...`");
-  for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toContain("Report only to the session in your `Report to`: your team's lead. Message only who the Messaging table in the guidelines allows.");
+  expect(section("Review and landing")).toContain("the PM (a simple task) or the team's lead marks the task's row `done` and lets the session go with `f1rm letgo <name>...`");
+  for (const r of ["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...SPECIALISTS]) expect(role(r).body, r).toMatch(/Report only to the session in your `Report to`: your team's lead( \(the PM on a simple task\))?\. Message only who the Messaging table in the guidelines allows\./);
 });
 
 test("the PM resolves a blocked lead, and its cleanup moves and removes files with Bash only after the user replies", () => {
@@ -447,9 +445,9 @@ test("three gates, the README's hiring line, and the content checklist match the
   expect(section("Gates")).toContain("With the office stopped, none runs.");
   expect(section("Gates")).not.toContain("neither runs");
   const readme = readFileSync(join(REPO, "README.md"), "utf8");
-  expect(readme).toContain("The PM hires team leads, who hire the rest.");
+  expect(readme).toContain("The PM hires team leads, or one specialist directly for a simple task.");
   expect(readme).not.toContain("The PM hires the rest.");
-  for (const text of [section("Review and merge flow"), role("reviewer").body]) {
+  for (const text of [section("Review and landing"), role("reviewer").body]) {
     expect(text).toContain("research a brief puts in the repo");
     expect(text).not.toContain("docs/research/");
   }
@@ -463,9 +461,9 @@ test("B3-B5: leads filter team traffic, so the PM tells the user only what needs
   expect(section("Team brief")).toContain("Report: NEEDS YOU <team>: <topic> for what needs the user, DONE <team> when the slice is merged. Nothing else goes to the PM.");
   for (const text of [guidelines, role("lead").body]) expect(text).not.toMatch(/status report/i);
   const teams = section("Teams");
-  for (const s of ["checks each specialist's `DONE` against its brief", "before it hires the Reviewer", "sends the work back", "~/.f1rm/evidence/<repo>/findings.md", "5-line summary", "only role that merges"]) expect(teams, s).toContain(s);
+  for (const s of ["checks each task's `DONE` against its brief", "sends the work back", "~/.f1rm/kept/<repo>/findings.md", "5-line summary", "runs `f1rm merge <task>`"]) expect(teams, s).toContain(s);
   const lead = role("lead").body;
-  for (const s of ["receive every message from your team", "~/.f1rm/evidence/<repo>/findings.md", "`NEEDS YOU <team>: <topic>` and `DONE <team>`"]) expect(lead, s).toContain(s);
+  for (const s of ["receive every message from your team", "~/.f1rm/kept/<repo>/findings.md", "`NEEDS YOU <team>: <topic>` and `DONE <team>`"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
   for (const s of ["big decisions", "git push"]) expect(pm, s).toContain(s);
   expect(pmPromptText()).toContain("NEEDS YOU <team>");
@@ -485,7 +483,7 @@ test("R8b: the three workflows are said once in the guidelines; pm.md and the PM
   const w = section("Picking the workflow");
   for (const s of [
     "`Simple workflow: <what, which role>`", 'saying "milestone"', "**Ops**", "no file changes (run, start, open, install, status)", "at once",
-    "**Simple**", "one deliverable", "one specialist role", "no business, product-scope, design or strategy decision", "fits one session", "at most one clarifying question", "no milestone section", "one board row", "one lead with a short team brief",
+    "**Simple**", "one deliverable", "one specialist role", "no business, product-scope, design or strategy decision", "fits one session", "at most one clarifying question", "no milestone section", "one board row", "ONE dev, designer or researcher",
     "**Milestone**", "2 or more tasks or roles", "a big decision", "research needed", '"milestone" or "grill"', "the full interview and teams",
   ]) expect(w, s).toContain(s);
   expect(guidelines.split("no business, product-scope, design or strategy decision")).toHaveLength(2);
@@ -553,7 +551,7 @@ test("R8b: the talk rules are stated once in the guidelines and pointed to from 
     "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
     "approve <name>'s request in the office", "helps the user decide when asked", "writes the end-of-milestone report",
     "In ops and the simple workflow the PM stays the user's contact", "Status, `BLOCKED`, `ESCALATE` and a cap override reach the user through the lead",
-    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the office's permission card for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the PM asks the user the question on the team board and answers the lead; a cap still goes to that session, and a permission to the office's card.",
+    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the office's permission card for a permission, the lead for anything else, a cap included (the override needs the approval in the lead's own conversation). In the simple workflow the dev reports to the PM, so a dev's `NEEDS YOU <slug>` or `BLOCKED` is the PM's to put to the user, and the PM answers the dev; a cap goes to the user, and a permission to the office's card.",
   ]) expect(talk, s).toContain(s);
   expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
   expect(guidelines).not.toMatch(/claude attach <id>/);
@@ -585,16 +583,16 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   const held = "enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)";
   expect(srows[3].split("|")[2]).toContain(held);
   expect(srows[3].split("|")[6]).toContain(held);
-  expect(srows[0]).toContain("Leads only (enforced)");
-  expect(srows[1]).toContain("own team, never a lead (enforced)");
+  expect(srows[0]).toContain("Leads, and one dev, designer or researcher with `--simple` (enforced)");
+  expect(srows[1]).toContain("of its own team, never a dev or a lead (enforced)");
   expect(srows[2]).toContain("Nothing (enforced)");
   for (const s of ["At most 2", "never an `f1rm:*` role", "Never (enforced)", "`--bg --resume`", "temporary HOME", "bash -c", "not parsed"]) expect(spawn, s).toContain(s);
   expect(srows[2].split("|")[5]).toContain("rule only");
   const talk = section("Messaging table");
   expect(talk).toContain("| Sender | May message | Message types | When | Why |");
   const trows = rowsOf(talk, "| Sender");
-  expect(trows.map((r) => r.split("|")[1].trim())).toEqual(["The user", "PM", "Lead", "Team member", "Intern", "Anyone", "Anyone, to an ended hire"]);
-  for (const r of trows.slice(1, 5)) {
+  expect(trows.map((r) => r.split("|")[1].trim())).toEqual(["The user", "PM", "Lead", "Team member", "Simple task's dev", "Intern", "Anyone", "Anyone, to an ended hire"]);
+  for (const r of trows.slice(1, 6)) {
     const cells = r.split("|").slice(2, -1);
     expect(cells, r).toHaveLength(4);
     expect(r, r).toContain("enforced");
@@ -603,18 +601,19 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   expect(trows[0]).toContain("Ask");
   expect(trows[0]).toContain("Tell");
   expect(trows[0]).toContain("(a lead records it on its team board)");
-  expect(trows[1]).toContain("Leads of its project only (enforced)");
+  expect(trows[1]).toContain("Leads of its project and its simple tasks' devs only (enforced)");
   for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "`resume`"]) expect(talk, s).toContain(s);
   expect(trows[2]).toContain("The PM, other leads and the members of its own team");
   expect(trows[3]).toContain("`DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE`");
   expect(trows[3]).toContain("only to its lead");
-  expect(trows[4]).toContain("parent session");
-  expect(trows[5]).toContain("enforced");
-  expect(trows[5]).toContain("A team member never messages another team; leads message each other");
-  expect(trows[5]).not.toContain("Never another team");
-  expect(trows[5]).toContain("another team");
-  expect(trows[5]).toContain("another project");
-  expect(trows[5]).toContain("Elsewhere is no room");
+  expect(trows[4]).toContain("The PM only, its reports included (enforced)");
+  expect(trows[5]).toContain("parent session");
+  expect(trows[6]).toContain("enforced");
+  expect(trows[6]).toContain("A team member never messages another team; leads message each other");
+  expect(trows[6]).not.toContain("Never another team");
+  expect(trows[6]).toContain("another team");
+  expect(trows[6]).toContain("another project");
+  expect(trows[6]).toContain("Elsewhere is no room");
   expect(talk).toContain("rule only");
 });
 
@@ -623,19 +622,18 @@ test("R8b: docs/decisions.md has the entries PM picks the workflow and Who talks
   for (const t of ["PM picks the workflow", "Who talks to whom"]) expect(titles).toContain(`2026-10-22 ${t}`);
 });
 
-test("C1: the Reviewer sends conflicts back to the dev, refuses a moved tip, and retries an index.lock", () => {
-  const flow = section("Review and merge flow");
-  for (const s of ["git merge --abort", "`CHANGES REQUESTED <slug> conflict`", "never resolves a conflict itself", "rebases its unpushed branch onto the current main", "equals the commit in the dev's `DONE`", "`BLOCKED <slug> tip moved`", "index.lock", "after a few seconds"]) expect(flow, s).toContain(s);
-  const reviewer = role("reviewer").body;
-  for (const s of ["git merge --abort", "`CHANGES REQUESTED <slug> conflict`", "`BLOCKED <slug> tip moved`", "index.lock"]) expect(reviewer, s).toContain(s);
-  expect(section("Handoff via SendMessage")).toContain("`CHANGES REQUESTED <slug> conflict`");
-  expect(section("Handoff via SendMessage")).toContain("`BLOCKED <slug> tip moved`");
+test("C1: f1rm merge sends a conflict or a moved tip back to the dev, who rebases and sends a new DONE", () => {
+  const flow = section("Review and landing");
+  for (const s of ["a conflict", "\"tip moved\"", "`CHANGES REQUESTED <slug> conflict`"]) expect(flow, s).toContain(s);
+  const handoff = section("Handoff via SendMessage");
+  for (const s of ["`CHANGES REQUESTED <slug> conflict`", "rebases its unpushed branch onto the current main", "\"tip moved\""]) expect(handoff, s).toContain(s);
+  expect(handoff).not.toContain("`BLOCKED <slug> tip moved`");
   for (const name of SPECIALISTS) expect(role(name).body, name).toContain("`CHANGES REQUESTED <slug> conflict`");
 });
 
-test("C2: the gate refuses every push and the Reviewer's history rewrites, and the Reviewer file no longer calls the no-push rule prompt-only", () => {
+test("C2: the gate refuses every push, lands only f1rm merge on the base, and holds the Reviewer's git to an allowlist", () => {
   const gates = section("Gates");
-  for (const s of ["`git push` in any form", "`gh pr merge`", "`reset`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `clean`, `stash`, `commit --amend`, `checkout -- <path>`, `checkout --ours` or `--theirs`, `restore` unless `--staged` is its only option, `branch -D`, `--force` and `-f`", "except `git worktree remove --force .claude/worktrees/red-<task>`", "`gh api` call that writes to code-landing endpoints", "pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations", "other `gh api` calls stay allowed", "behind `timeout`, `nice` or `stdbuf`", "`git checkout <branch> -- <check files>` stays allowed"]) expect(gates, s).toContain(s);
+  for (const s of ["`git push` in any form", "`gh pr merge`", "The Reviewer's git is an allowlist: reading commands, `git branch` as a listing, and `git worktree` add, list, prune and remove (a forced remove only of `.claude/worktrees/red-<task>`)", "merge, commit, checkout, switch, fetch, config and the rest are refused", "`gh api` call that writes to code-landing endpoints", "pull request and branch merges and updates, refs, commits, trees, blobs and contents, and graphql merge, update and ref mutations", "other `gh api` calls stay allowed", "behind `timeout`, `nice` or `stdbuf`", "`merge`, `cherry-pick`, `rebase`, `reset`, `commit`, `am`, `pull`, `revert`, `checkout <ref> -- <path>`, `checkout -B`, `switch -C` and `restore --source`", "`update-ref`, `branch -f` and `fetch . x:<base>`", "A dev's git in its own worktree is unchanged"]) expect(gates, s).toContain(s);
   expect(role("pm").body).toContain("Write and Edit work there too");
   const reviewer = readFileSync(join(PLUGIN, "agents", "reviewer.md"), "utf8");
   expect(reviewer).not.toContain("prompt-only");
@@ -702,19 +700,20 @@ test("the guidelines say once that every hire but a lead starts at ponytail full
 const LEAN_ENTRY = "2026-10-23 Lean review and test runs";
 const NON_BLOCKING = "Non-blocking (for the batch task)";
 
-test("lean review: only blocking findings go back, a Reviewer lands when none is left, the rest wait for one batch task", () => {
-  const flow = section("Review and merge flow");
-  const step4 = /^4\. .*$/m.exec(flow)?.[0] ?? "";
-  for (const s of ["blocking or non-blocking", "a wrong or missing behaviour against the brief, a bypass or security hole, a false positive in a main flow, or a test that does not test what it claims", "a wording nit, a style point, a hypothetical edge or a cleanup is not", "with the blocking findings only", "A Reviewer lands when no blocking finding is left", NON_BLOCKING, "ponytail-review", "At most 2 blocking rounds per branch", "`ESCALATE <slug>`", "never counts toward ESCALATE", "counts once, for the finding", "or any item of the content checklist is missed"]) expect(step4, s).toContain(s);
-  // The guidelines state each rule once, in the review flow; the other places point to it.
-  for (const s of ["wrong or missing behaviour", "A Reviewer lands when no blocking finding is left", "At most 2 blocking rounds per branch"]) expect(guidelines.split(s).length - 1, s).toBe(1);
+test("lean review: only blocking findings go back, the rest wait for one batch task", () => {
+  const flow = section("Review and landing");
+  const step2 = /^2\. .*$/m.exec(flow)?.[0] ?? "";
+  for (const s of ["blocking or non-blocking", "a wrong or missing behaviour against the brief, a bypass or security hole, a false positive in a main flow, or a test that does not test what it claims", "a wording nit, a style point, a hypothetical edge or a cleanup is not"]) expect(step2, s).toContain(s);
+  for (const s of ["with the blocking findings only", NON_BLOCKING, "At most 2 blocking rounds per branch", "`ESCALATE <slug>`"]) expect(flow, s).toContain(s);
+  // The guidelines state each rule once, in Review and landing; the other places point to it.
+  for (const s of ["wrong or missing behaviour", "At most 2 blocking rounds per branch"]) expect(guidelines.split(s).length - 1, s).toBe(1);
   const handoff = section("Handoff via SendMessage");
-  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from the Reviewer, then the blocking findings with file and line/);
-  expect(handoff).toMatch(/`ESCALATE <slug>` from the Reviewer in place of a third blocking round \(see the review flow\)/);
+  expect(handoff).toMatch(/`CHANGES REQUESTED <slug>` from a content Reviewer, then the blocking findings with file and line/);
+  expect(handoff).toMatch(/`ESCALATE <slug>` from a content Reviewer in place of a third blocking round \(see Review and landing\)/);
   const teams = section("Teams");
-  for (const s of ["copies the verdict's non-blocking findings to `~/.f1rm/evidence/<repo>/findings.md`", "hires one batch task for the non-blocking findings", "a normal task with its own Reviewer, under the same rules", "skips it, and says so in its `DONE <team>`, when the list is empty or the user says to leave them", "each finding as `fixed` or `left`"]) expect(teams, s).toContain(s);
+  for (const s of ["copies the non-blocking ones to `~/.f1rm/kept/<repo>/findings.md`", "runs one batch task for the non-blocking findings", "a normal task through the same flow", "skips it, and says so in its `DONE <team>`, when the list is empty or the user says to leave them", "each finding as `fixed` or `left`"]) expect(teams, s).toContain(s);
   const reviewer = role("reviewer").body;
-  for (const s of [NON_BLOCKING, "the blocking findings", "step 4"]) expect(reviewer, s).toContain(s);
+  for (const s of [NON_BLOCKING, "the blocking findings", "Review and landing"]) expect(reviewer, s).toContain(s);
   const lead = role("lead").body;
   for (const s of [NON_BLOCKING, "batch task", "`ESCALATE <slug>`", "with blocking findings goes back to its dev"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
@@ -725,13 +724,13 @@ test("lean review: only blocking findings go back, a Reviewer lands when none is
   for (const [name, text] of Object.entries({ guidelines, reviewer, lead, pm })) expect(text, name).not.toMatch(old);
 });
 
-test("lean review: the dev runs the suite once per round and records it; the lead checks the record; the Reviewer runs the new tests on the base and the suite once on the merge", () => {
+test("lean review: the dev runs the suite once per round and records it; the PM or owner checks the record; f1rm merge runs the new tests on the base and the suite once on the merge", () => {
   const handoff = section("Handoff via SendMessage");
-  for (const s of ["**Test runs.**", "once per round, on its final commit", "`{commit, exit code, pass/fail counts}`", "`check-record.json`", "its `DONE` names the file", "runs the suite once more and records again", "checks the record against the branch tip (same commit, exit 0) and does not rerun the suite", "runs only the new tests on the base (red) and the full suite once on the scratch merge"]) expect(handoff, s).toContain(s);
+  for (const s of ["**Test runs.**", "once per round, on its final commit", "`{commit, exit code, pass/fail counts}`", "`check-record.json`", "its `DONE` names the file", "runs the suite once more and records again", "checks the record against the branch tip (same commit, exit 0) and does not rerun the suite", "`f1rm merge` runs only the new tests on the base (red) and the full suite once on the merge"]) expect(handoff, s).toContain(s);
   for (const s of ["{commit, exit code, pass/fail counts}", "does not rerun the suite"]) expect(guidelines.split(s).length - 1, s).toBe(1);
   expect(handoff).not.toContain("the full check command and its exit code");
-  const flow = section("Review and merge flow");
-  for (const s of ["run the new tests only", "the repo's full check command once (see Test runs in Handoff)"]) expect(flow, s).toContain(s);
+  const flow = section("Review and landing");
+  for (const s of ["runs the branch's new tests on the base, where they must fail", "runs the full suite once on the merge"]) expect(flow, s).toContain(s);
   const teams = section("Teams");
   expect(teams).toContain("its check record (see Test runs in Handoff)");
   expect(section("Workflows")).not.toMatch(/rerun/);
@@ -744,9 +743,7 @@ test("lean review: the dev runs the suite once per round and records it; the lea
     expect(body, name).not.toMatch(/rerun your checks/);
   }
   for (const name of SPECIALISTS) expect(role(name).body, name).not.toMatch(/rerun your checks/);
-  expect(role("reviewer").body).toContain("full check command on that result once");
-  expect(role("reviewer").body).not.toContain("not only on the branch");
-  expect(role("reviewer").body).toContain("the new tests only");
+  expect(role("reviewer").body).not.toMatch(/full check command|new tests only|red-<task>/);
 });
 
 test("the decisions log holds the lean review entry, and the entries it supersedes say so", () => {
@@ -761,8 +758,7 @@ test("the decisions log holds the lean review entry, and the entries it supersed
   }
 });
 
-test("the plugin is 0.4.0, and its README names both documents", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.4.0");
+test("the plugin README names both documents", () => {
   const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
   expect(readme).toContain("~/.f1rm/milestones/<repo>.md");
   expect(readme).toContain("docs/decisions.md");
@@ -796,11 +792,11 @@ test("P2: every role keeps only facts about the user and lessons that hold in an
   expect(md).toContain("`~/.f1rm/kept/<repo>/notes/` is in neither group; it stays.");
 });
 
-test("P3: a hire that creates the decisions log adds its merge=union line to .gitattributes, and Reviewers still resolve no conflict", () => {
+test("P3: a hire that creates the decisions log adds its merge=union line to .gitattributes, and nobody resolves a conflict by hand", () => {
   const md = section("Milestones and decisions");
   for (const s of ["the decisions log file, whatever its path", "`<that path> merge=union`", ".gitattributes", "a line of its own"]) expect(md, s).toContain(s);
   expect(md).toContain("docs/decisions.md merge=union");
-  expect(section("Review and merge flow")).toContain("never resolves a conflict itself");
+  expect(md).toContain("Nobody resolves a conflict by hand: `f1rm merge` sends it back to the dev.");
   expect(readFileSync(join(REPO, ".gitattributes"), "utf8").split("\n")).toContain("docs/decisions.md merge=union");
   // Union folds an entry's identical first and last lines, so an HTML entry opens with an id and closes with a comment; one sentence, everywhere.
   const html = "an HTML entry needs an opening tag with an id and a closing comment after its closing tag";
@@ -912,7 +908,7 @@ test("R9b: the guidelines say the office wakes first and the watcher is the seco
   const closing = section("Teams");
   for (const s of ["marks each task's row `done` on its team board, lets its specialists go", "The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`"]) expect(closing, s).toContain(s);
   expect(role("lead").body).toContain("mark each task's row `done`, let your specialists");
-  expect(guidelines).toContain("The team's lead marks the task's row `done`, then lets them go with `f1rm letgo <name>...` after `APPROVED`");
+  expect(guidelines).toContain("the PM (a simple task) or the team's lead marks the task's row `done` and lets the session go with `f1rm letgo <name>...`");
   expect(w).toContain("so does a hire still ended two minutes after the reset (a limit stop) or after the end (any other stop), unless its NOTE says `reported`");
   expect(w).toContain("A NOTE that says `reported` needs no wake: send your answer with `f1rm wake <name> \"<answer>\"` when you have one.");
   // F1: the report is the turn's last tool call, so the checkpoint comes first.
@@ -956,7 +952,7 @@ test("the Skill stack and Ask-the-user decisions entries and the plugin README s
   expect(ask).toMatch(/- Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae/);
   const readme = readFileSync(join(PLUGIN, "README.md"), "utf8");
   // Both READMEs say which --skills are refused.
-  const refusals = "any `pstack:` skill other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only) is refused, and a code Reviewer refuses a slash-only skill";
+  const refusals = "any `pstack:` skill other than `pstack:poteto-mode` (devs only), `pstack:architect` and `pstack:how` (leads only) is refused";
   for (const text of [readme, readFileSync(join(REPO, "README.md"), "utf8")]) expect(text).toContain(refusals);
   expect(readme).not.toContain("made and logged for you");
   expect(readme).toContain("technical choices are made by the PM or the lead, and the hires log the core ones");
@@ -997,13 +993,12 @@ test("K2: devs start with /pstack:poteto-mode, pick its playbook, skip Opening a
   expect(entry("backend-dev").indexOf("diagnosing-bugs")).toBeLessThan(entry("backend-dev").indexOf("mattpocock-skills:tdd"));
 });
 
-test("K3: leads get pstack:architect or pstack:how only as a first command the PM names with --skills; the Reviewer adds mattpocock-skills:code-review and not interrogate; the PM keeps grilling", () => {
+test("K3: leads get pstack:architect or pstack:how only as a first command the PM names with --skills; the Reviewer runs no interrogate; the PM keeps grilling", () => {
   const lead = role("lead").body;
   for (const s of ["pstack:architect", "pstack:how", "tell the PM", "Haiku Explore"]) expect(lead, s).toContain(s);
   expect(role("lead").fm.skills).toEqual([GUIDELINES, "f1rm:hire"]);
   const reviewer = role("reviewer").body;
-  for (const s of ["mattpocock-skills:code-review", "Spec", "the brief"]) expect(reviewer, s).toContain(s);
-  expect(reviewer).toMatch(/first command stays `\/code-review`|`\/code-review` stays first/);
+  expect(reviewer).toContain("the brief");
   expect(reviewer).not.toContain("interrogate");
   expect(role("pm").fm.skills).toContain("mattpocock-skills:grilling");
   const playbook = section("Roster and hiring playbook");
@@ -1025,10 +1020,10 @@ test("K3b: a lead says which of pstack:how or a Haiku Explore intern applies, an
   expect(step3.split("tell the PM")).toHaveLength(2);
 });
 
-test("K3c: the Reviewer runs the Spec axis inline, with no sub-agents, against worktree-<task> and not the main checkout's HEAD", () => {
-  const line = /^- Your first command stays.*$/m.exec(role("reviewer").body)?.[0] ?? "";
-  for (const s of ["inline, with no sub-agents", "`<base>...worktree-<task>`, not the main checkout's HEAD"]) expect(line, s).toContain(s);
-  expect(section("Skill stack")).toContain("`mattpocock-skills:code-review` for the Spec axis, inline, against the brief");
+test("K3c: the Skill stack's Review row names the dev's one review subagent, and a content Reviewer reads against worktree-<task>", () => {
+  expect(section("Skill stack")).toContain("the dev's one review subagent runs the `code-review` skill on its diff, and `security-review` at `--level high`");
+  expect(role("reviewer").body).toContain("`git diff <base>...worktree-<task>`");
+  expect(role("reviewer").body).toContain("so your first command is `/f1rm:f1rm-guidelines`");
 });
 
 test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, pstack skill, the f1rm rule that wins, and what never runs inside a hire", () => {
@@ -1038,8 +1033,8 @@ test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, psta
   expect(rows.length).toBeGreaterThanOrEqual(6);
   for (const r of rows) expect(r.split("|").length, r).toBe(6); // four cells
   for (const s of [
-    "`mattpocock-skills:grilling`", "`mattpocock-skills:tdd`", "`mattpocock-skills:diagnosing-bugs`", "`mattpocock-skills:code-review`", "`pstack:poteto-mode`", "`pstack:architect`", "`pstack:how`", "`pstack:interrogate`",
-    "`feature`, `bug-fix`, `refactoring`, `perf-issue`", "slash-only", "disable-model-invocation", "/code-review", "the user can run it by hand",
+    "`mattpocock-skills:grilling`", "`mattpocock-skills:tdd`", "`mattpocock-skills:diagnosing-bugs`", "`code-review`", "`pstack:poteto-mode`", "`pstack:architect`", "`pstack:how`", "`pstack:interrogate`",
+    "`feature`, `bug-fix`, `refactoring`, `perf-issue`", "slash-only", "disable-model-invocation", "the user can run it by hand",
   ]) expect(md, s).toContain(s);
   for (const s of ["no PR opening", "no babysit loops", "no `/loop` ticks", "no `afk`", "`pstack:arena` and `pstack:swarm` are not wired inside hires", "at most 2 interns", "pushing stays the user's"]) expect(md, s).toContain(s);
   // arena and swarm can't be run inside a hire (the Skill tool refuses them): the Parallel work row says the user runs them by hand, and a brief never asks for them.
@@ -1050,7 +1045,7 @@ test("K4: the guidelines hold a Skill stack table: phase, mattpocock skill, psta
   expect(md).toContain("Every pstack skill but its setup skill carries `disable-model-invocation`");
   expect(md).toContain(`\`f1rm hire\` ${rule}`);
   const bullet = /^   - `--skills a,b`.*$/m.exec(section("Roster and hiring playbook"))?.[0] ?? "";
-  for (const s of [rule, "`pstack:poteto-mode` (devs only)", "A code Reviewer refuses any slash-only skill"]) expect(bullet, s).toContain(s);
+  for (const s of [rule, "`pstack:poteto-mode` (devs only)"]) expect(bullet, s).toContain(s);
   // Any pstack skill's question to the human is routed, not only poteto-mode's (a lead started with architect or how follows the same rule).
   expect(md).toContain("A question a pstack skill would put to the human goes to the session in your `Report to` as `BLOCKED`");
   // Only pstack skills that exist are named.
@@ -1074,14 +1069,11 @@ test("K5: `f1rm edition` sets the edition only once `f1rm pm` has registered the
   expect(readFileSync(cli[0], "utf8")).toMatch(/after \\?`f1rm pm\\?` has registered the project/);
 });
 
-test("K7: a conflict round never counts toward ESCALATE; the review flow says so once and the Handoff line and reviewer.md point to it", () => {
-  const rule = "A round whose only item is `CHANGES REQUESTED conflict` never counts toward ESCALATE. A round with a conflict and a blocking finding counts once, for the finding.";
-  expect(/^4\. .*$/m.exec(section("Review and merge flow"))?.[0]).toContain(rule);
-  expect(guidelines.split(rule)).toHaveLength(2);
+test("K7: a conflict is no blocking round: f1rm merge sends it back to the dev, and the ESCALATE line points to Review and landing", () => {
   const line = /^ *- `ESCALATE <slug>`.*$/m.exec(section("Handoff via SendMessage"))?.[0] ?? "";
-  expect(line).toContain("(see the review flow)");
+  expect(line).toContain("(see Review and landing)");
   expect(line).not.toContain("only item");
-  expect(role("reviewer").body).toMatch(/conflict round never counts[^\n]*review flow/);
+  expect(section("Review and landing")).toContain("A conflict or a moved tip goes back to the dev as `CHANGES REQUESTED <slug> conflict`");
   expect(role("reviewer").body).not.toContain("only item");
   expect(role("lead").body).not.toContain("only item");
   const titles = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1).map((e) => e.split("\n")[0]);
@@ -1102,7 +1094,7 @@ test("W1: the guidelines name `f1rm wake` once in Watching and waking, and the E
   for (const s of [
     "**No live session**", "no live session; f1rm wake <name>", "`f1rm wake <name> \"<the message you meant to send>\"`", "resumes that hire in place", "from its own worktree", "with its history, name and `Report to`",
     "`resumed; continue your task`", "new session id", "counts against the caps like a hire", "refuses a hire that was let go, another project's hire, a live one (message it instead) and an unknown name",
-    "The PM wakes leads and a lead wakes the members of its own team (enforced); a specialist wakes nobody.",
+    "The PM wakes leads and its simple tasks' devs, and a lead wakes the members of its own team (enforced); a specialist wakes nobody.",
     "**Ended**: the office wakes it within a minute", "a NOTE that says the office could not wake it (or that it stopped again) means you run `f1rm wake <name>`", "Re-hire only a hire that was let go or whose wake failed",
     "**Address a woken or re-hired session**",
   ]) expect(w, s).toContain(s);
@@ -1127,7 +1119,7 @@ test("W2: the Spawning table names `f1rm wake` as the wrapper of `claude --bg --
   expect(gates).toContain("`f1rm wake` follows the hire rules (**No live session** in Watching and waking)");
   expect(gates).toMatch(/with no live process \(way out: \*\*No live session\*\* in Watching and waking\)/);
   expect(gates).not.toContain("else ask your lead");
-  expect(gates).toContain("A specialist cannot run `f1rm hire` or `f1rm wake`.");
+  expect(gates).toContain("A specialist cannot run `f1rm hire`, `f1rm wake` or `f1rm merge`");
 });
 
 test("W3: the pm and lead pickup steps wake any doing or review row whose hire has no live process, and their watcher rules wake an ended session", () => {
@@ -1222,4 +1214,79 @@ test("report-files: the guidelines say once that every report is also a file, ev
   expect(readFileSync(join(PLUGIN, "README.md"), "utf8")).toContain("`f1rm report <KIND> <slug> [--commit <sha>] [--note \"<one line>\"]`");
   const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
   expect(log.split("## 2026-10-23 Reports are also files")).toHaveLength(2);
+});
+
+// F3c: the text describes the flat workflow that `f1rm hire --simple`, `f1rm merge` and the owner sub-agent gate put in code.
+const hireSkill = () => readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
+const pmDecides = () => /const PM_DECIDES =\s*("[^\n]*");/.exec(readFileSync(join(REPO, "office", "server", "server.ts"), "utf8"))![1];
+
+test("flat: a simple task is one specialist hired with --simple, landed by f1rm merge, then let go", () => {
+  const w = section("Picking the workflow");
+  for (const s of ["`f1rm hire --simple <role> <name> <task> \"<brief>\"`", "no lead, no team", "named `<role>-<task>`", "reports to the PM", "`f1rm merge <task>`", "`f1rm letgo <name>`", "a team of one in the project's cap of 2"]) expect(w, s).toContain(s);
+  expect(w).not.toContain("one lead with a short team brief");
+  const forms = section("Roster and hiring playbook").split("```")[1];
+  expect(forms).toContain('f1rm hire --simple <role> <name> <task> "<brief>"');
+  for (const [name, text] of [["pm.md", role("pm").body], ["prompt", pmPromptText()]] as const) {
+    for (const s of ["f1rm hire --simple", "f1rm merge", "f1rm letgo", "Hire only leads for a milestone"]) expect(text, `${name}: ${s}`).toContain(s);
+  }
+  expect(pmDecides()).toContain("f1rm hire --simple");
+  expect(pmDecides()).toContain("f1rm hire lead");
+  expect(hireSkill()).toContain("--simple");
+  expect(section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))).toContain("`f1rm merge <task>`");
+});
+
+test("flat: a dev reviews its own branch inside its session, once, and a second blocking round is NEEDS YOU", () => {
+  const flow = section("Review and landing");
+  for (const s of [
+    "**Review inside the session.**", "ONE review in a fresh context", "general-purpose subagent", "`code-review` skill", "`git diff <base>...HEAD`", "`security-review`", "`--level high`",
+    "so tell the subagent to read the diff itself", "Fix the blocking findings ONCE", "~/.f1rm/kept/<repo>/findings.md", "| date | area | status | finding | evidence |",
+    "If a second review would still have blocking findings, do not fix again: send `NEEDS YOU <slug>`", "never delegates the implementation", "at least one failing test", "`f1rm merge` does not land it",
+    "The `DONE` states the review round count and the review level",
+  ]) expect(flow, s).toContain(s);
+  for (const r of ["frontend-dev", "backend-dev"]) {
+    const body = role(r).body;
+    for (const s of ["Review inside your session", "Review and landing in the guidelines", "`NEEDS YOU <slug>`", "never delegate the implementation", "the review round count and level", "at least one failing test"]) expect(body, `${r}: ${s}`).toContain(s);
+    expect(body, r).not.toContain("Leave merging to the Reviewer");
+    expect(body, r).toContain("`f1rm merge`");
+  }
+  expect(section("Handoff via SendMessage")).toContain("`NEEDS YOU <slug>`");
+  expect(section("Handoff via SendMessage")).toContain("review round count");
+  expect(section("Roster and hiring playbook")).toContain("`--level low|medium|high` sets the level of a dev's own review");
+});
+
+test("flat: only f1rm merge lands on the base branch, and the content Reviewer does not merge", () => {
+  const flow = section("Review and landing");
+  for (const s of ["**Landing.**", "Only `f1rm merge <task>` lands on the base branch", "the PM (a simple task) or the owner (a milestone)", "a main with uncommitted changes", "no `DONE` report", "\"tip moved\"", "a conflict", "code without tests", "a branch that changes how the suite runs", "must fail", "the full suite once", "`--ff-only`", "never pushes"]) expect(flow, s).toContain(s);
+  expect(section("Gates")).toContain("Only `f1rm merge` lands on the base branch");
+  expect(section("Definition of done")).toContain("`f1rm merge`");
+  expect(section("Definition of done")).not.toContain("Reviewer has signed off");
+  expect(flow).toContain("**Content review.**");
+  expect(flow).toContain("does not merge");
+  const rev = role("reviewer");
+  expect(String(rev.fm.description)).not.toMatch(/merge/);
+  for (const s of ["`--content`", "content checklist", "does not merge", "`f1rm merge`"]) expect(rev.body, s).toContain(s);
+  expect(rev.body).not.toMatch(/--ff-only|--no-ff|\/code-review|reset --hard/);
+});
+
+test("flat: owners run implementer subagents, plan once, get the plan approved once, and cannot hire devs", () => {
+  const teams = section("Teams");
+  for (const s of ["implementer subagents", "`implement-spec`", "plans once", "asks the user to approve the plan once", "`NEEDS YOU <team>: plan`", "then runs without asking again", "at most 2 implementers at a time", "its own worktree", "`worktree-<task>`", "`f1rm merge <task>`", "cannot hire a frontend-dev or a backend-dev"]) expect(teams, s).toContain(s);
+  const lead = role("lead").body;
+  for (const s of ["implementer subagent", "Plan once", "`NEEDS YOU <team>: plan`", "`f1rm merge", "never a dev", "`implement-spec`"]) expect(lead, s).toContain(s);
+  expect(section("Spawning table").split("\n").find((l) => l.startsWith("| Lead"))).toContain("never a dev or a lead (enforced)");
+  expect(section("Roster and hiring playbook")).toContain("never a dev");
+  expect(section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("lead**"))).toContain("implementer");
+});
+
+test("flat: no sentence says a Reviewer reviews code or merges, that a lead hires a dev, or that the Reviewer is the only role that merges", () => {
+  const stale = [/only role that merges/i, /\bReviewer\b[^.\n]*\bmerges\b/i, /Review and merge flow/i, /review-and-merge flow/i, /\bhire a Reviewer\b/i, /Reviewer after every/i, /lead hires? (?:a |its |the )?(?:frontend|backend)/i, /APPROVED[^\n]*merged=/, /Leave merging to the Reviewer/, /Reviewer's merge flow/i, /\bwho hire the rest\b/];
+  const { hire: _hire, ...texts } = { ...WORKFLOW_FILES(), "hire skill": hireSkill(), PM_DECIDES: pmDecides() }; // hire.ts holds the dev's own-review paragraph
+  for (const [name, text] of Object.entries(texts)) for (const re of stale) expect(text, `${name} ${re}`).not.toMatch(re);
+});
+
+test("flat: the plugin is 0.5.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.5.0");
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const flat = entries.find((e) => e.startsWith("2026-10-28 Flat workflow\n")) ?? "";
+  for (const s of ["f1rm hire --simple", "f1rm merge", "implementer", "plan once", "baseline-2026-10.md", "11099a6", "f517e70", "flat-prose"]) expect(flat, s).toContain(s);
 });
