@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | status | report | merge
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | archives | status | report | merge
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -14,6 +14,7 @@ import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong } from "./hire.ts";
+import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 import { mergeIn } from "./merge.ts";
 import { wake } from "./wake.ts";
@@ -530,10 +531,16 @@ const commands: Record<string, () => void | Promise<void>> = {
   resume: pauseOrResume("resume"),
   letgo: async () => {
     const names = process.argv.slice(3);
-    if (!names.length) throw new Error("usage: f1rm letgo <name>...");
+    if (!names.length) throw new Error("usage: f1rm letgo <name>... | f1rm letgo --leftovers");
     const r = await letgo(names, machine, process.cwd());
     console.log(r.lines.join("\n"));
     process.exit(r.ok ? 0 : 1);
+  },
+  archives: () => {
+    const r = archivesIn(process.argv.slice(3), machine, process.cwd());
+    process.stdout.write(r.out);
+    if (r.err) console.error(r.err);
+    process.exitCode = r.code;
   },
   status: async () => {
     const r = await statusIn(process.argv.slice(3), process.cwd());
@@ -553,7 +560,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>]";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>]";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

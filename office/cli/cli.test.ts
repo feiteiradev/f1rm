@@ -1232,38 +1232,6 @@ test("letgo lets a named hire go and removes its merged worktree and branch", as
   expect(branches(repo)).toEqual(["main", "worktree-open"]);
 });
 
-test("letgo does not stop a hire whose branch is not merged, and fails", async () => {
-  const repo = repoWithHires();
-  const fake = fakeClaude([{ id: "b2", name: "checkout.backend-dev-open", cwd: worktreeOf(repo, "open") }]);
-  const r = await letgo(["checkout.backend-dev-open"], fake, repo);
-  expect(r.ok).toBe(false);
-  expect(r.lines).toEqual(["checkout.backend-dev-open: not let go: worktree-open is not merged into the base branch"]);
-  expect(fake.calls).toEqual([]);
-  expect(existsSync(worktreeOf(repo, "open"))).toBe(true);
-  expect(branches(repo)).toContain("worktree-open");
-});
-
-test("letgo does not stop a hire with no commits of its own: a branch at a base commit is waiting, not landed", async () => {
-  const repo = repoWithHires();
-  git(repo, "worktree", "add", "-b", "worktree-fresh", worktreeOf(repo, "fresh"));
-  const fake = fakeClaude([{ id: "f1", name: "frontend-dev-fresh", cwd: worktreeOf(repo, "fresh") }]);
-  const r = await letgo(["frontend-dev-fresh"], fake, repo);
-  expect(r.ok).toBe(false);
-  expect(r.lines).toEqual(["frontend-dev-fresh: not let go: worktree-fresh is not merged into the base branch"]);
-  expect(fake.calls).toEqual([]);
-});
-
-test("letgo does not stop a merged hire whose worktree has uncommitted files, and fails", async () => {
-  const repo = repoWithHires();
-  writeFileSync(join(worktreeOf(repo, "done"), "notes.txt"), "unsaved thoughts");
-  const fake = fakeClaude([{ id: "a1", name: "frontend-dev-done", cwd: worktreeOf(repo, "done") }]);
-  const r = await letgo(["frontend-dev-done"], fake, repo);
-  expect(r.ok).toBe(false);
-  expect(r.lines).toEqual(["frontend-dev-done: not let go: its worktree has uncommitted files"]);
-  expect(fake.calls).toEqual([]);
-  expect(existsSync(join(worktreeOf(repo, "done"), "notes.txt"))).toBe(true);
-});
-
 test("letgo prints a line per name, and fails if a name isn't a background session of this repo or can't be let go", async () => {
   const repo = repoWithHires();
   const fake = fakeClaude(

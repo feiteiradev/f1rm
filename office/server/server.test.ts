@@ -1480,6 +1480,39 @@ test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member o
   for (const command of ['git log --grep "mentions f1rm wake x"', 'grep "f1rm wake" README.md', "f1rm woke"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
 });
 
+test("`f1rm letgo` follows the wake rules: the PM lets go leads and its simple hires and runs --leftovers, a lead the members of its own team, a specialist, an intern and a Reviewer nobody", async () => {
+  await talkOffice();
+  const run = async (id: string, command: string, extra = {}) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: "/code/shop", ...extra }));
+  const decision = async (id: string, command: string, extra = {}) => (await run(id, command, extra))?.permissionDecision ?? null;
+  for (const id of ["c1", "rv"]) {
+    for (const command of ["f1rm letgo checkout.backend-dev-old", "bun office/cli/f1rm.ts letgo lead-checkout", "f1rm letgo --leftovers", "ls && f1rm letgo designer-landing"]) {
+      const out = await run(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the PM and team leads let go");
+    }
+  }
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo checkout.reviewer-review-old checkout.designer-a", "ls && f1rm letgo checkout.backend-dev-b", "f1rm letgo ghost"]) {
+    expect([command, await decision("l1", command)]).toEqual([command, null]);
+  }
+  for (const command of ["f1rm letgo search.backend-dev-x", "f1rm letgo lead-search", "f1rm letgo lead-checkout", "f1rm letgo designer-landing", "f1rm letgo checkout.backend-dev-old search.backend-dev-x", "f1rm letgo --leftovers"]) {
+    const out = await run("l1", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toMatch(/A lead lets go only the members of its own team|PM lets go leads|Only the PM runs/);
+  }
+  for (const command of ["f1rm letgo lead-old", "f1rm letgo lead-search lead-checkout", "f1rm letgo designer-landing", "f1rm letgo --leftovers", "f1rm letgo ghost"]) {
+    expect([command, await decision("pm", command)]).toEqual([command, null]);
+  }
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo lead-old checkout.reviewer-review-old"]) {
+    const out = await run("pm", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("The PM lets go leads and its simple tasks' devs");
+  }
+  for (const id of ["pm", "l1"]) expect([id, await decision(id, "f1rm letgo lead-old", { agent_id: "agent-1", agent_type: "Explore" })]).toEqual([id, "deny"]); // an intern
+  expect(await decision("free", "f1rm letgo checkout.backend-dev-old")).toBeNull(); // the user's own session
+  expect(await decision("free", "f1rm letgo --leftovers")).toBeNull();
+  for (const command of ['git log --grep "mentions f1rm letgo x"', 'grep "f1rm letgo" README.md', "f1rm letgone", "f1rm archives --prune"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
+});
+
 test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a Reviewer and a PM's intern are refused, no session runs --all, and the user's own session runs the rest", async () => {
   await delegationOffice();
   await hook({ ...common("v", "UserPromptSubmit"), prompt: "go", session_title: "checkout.reviewer-review-a", agent_type: "f1rm:reviewer" });
