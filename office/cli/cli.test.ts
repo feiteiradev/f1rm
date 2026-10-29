@@ -1233,6 +1233,21 @@ test("letgo lets a named hire go and removes its merged worktree and branch", as
   expect(branches(repo)).toEqual(["main", "worktree-open"]);
 });
 
+test("letgo of a hire with an unmerged branch and uncommitted files archives them under refs/f1rm/archive/<task>, then removes the worktree and branch", async () => {
+  const repo = repoWithHires();
+  writeFileSync(join(worktreeOf(repo, "open"), "notes.txt"), "unsaved thoughts");
+  const tip = git(worktreeOf(repo, "open"), "rev-parse", "HEAD");
+  const fake = fakeClaude([{ id: "b2", name: "checkout.backend-dev-open", cwd: worktreeOf(repo, "open") }]);
+  const r = await letgo(["checkout.backend-dev-open"], fake, repo);
+  expect(r.ok).toBe(true);
+  expect(r.lines).toEqual(["checkout.backend-dev-open: let go, archived its work as refs/f1rm/archive/open (1 file), removed its worktree and branch worktree-open"]);
+  expect(fake.calls).toEqual(["letgo b2"]);
+  expect(existsSync(worktreeOf(repo, "open"))).toBe(false);
+  expect(branches(repo)).toEqual(["main", "worktree-done"]);
+  expect(git(repo, "show", "refs/f1rm/archive/open:notes.txt")).toBe("unsaved thoughts");
+  expect(git(repo, "merge-base", "--is-ancestor", tip, "refs/f1rm/archive/open")).toBe(""); // the unmerged commit is reachable
+});
+
 test("letgo prints a line per name, and fails if a name isn't a background session of this repo or can't be let go", async () => {
   const repo = repoWithHires();
   const fake = fakeClaude(
