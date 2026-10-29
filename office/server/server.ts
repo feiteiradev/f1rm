@@ -1,7 +1,7 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { closeSync, constants, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
@@ -258,6 +258,73 @@ const landsOnMain = (split: { prefix: string[]; words: string[] }[], cwd: string
   }
   return false;
 };
+// An implementer or reviewer sub-agent of the PM or a lead (its calls carry its parent's session id and an agent_id) works in a worktree of its own: the folder under
+// `<main>/.claude/worktrees/` that its cwd is in. Its writes and its `git commit` stay inside that worktree; every other rule of its parent holds for it.
+// ponytail: links are resolved on the path and a link as the file itself is refused, but a dangling link in a folder part of the path is not seen; a Bash redirect or `cp` writes anywhere, as for every role.
+/** The worktree (a folded key, see homeKey) under `<main>/.claude/worktrees/` that `dir` is inside, links resolved; null in the main checkout, beside the repo, or in the worktrees folder itself. */
+const worktreeOf = (main: string, dir: string) => {
+  const root = homeKey(join(main, ".claude", "worktrees")), real = homeKey(dir);
+  const name = real !== root && inside(root, real) ? real.slice(root.length + 1).split("/")[0] : "";
+  return name ? `${root}/${name}` : null;
+};
+/** Whether every git call of a Bash line works inside `worktree`: it starts in `cwd`, `cd` and `-C` move it only to a folder inside (never through `..`: git follows a link before it, the gate reads text), and `--git-dir` and `--work-tree` are not used. */
+const confinedTo = (split: { prefix: string[]; words: string[] }[], cwd: string, worktree: string) => {
+  let dir = resolve(cwd);
+  // A home, the last folder, a variable or a substitution is the shell's to expand, and `..` is followed by git past a link: none is followed here.
+  const unfollowed = (to: string) => /^[-~]|\$/.test(to) || to.split("/").includes("..");
+  for (const { words } of split) {
+    if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
+      const to = unquoted(words[1] ?? "");
+      if (!to || unfollowed(to)) return false;
+      dir = resolve(dir, to);
+      continue;
+    }
+    const call = gitCall(words);
+    if (!call) continue;
+    if (call.options.some((o) => /^--(git-dir|work-tree)/.test(o))) return false;
+    let at = dir;
+    for (const [i, o] of call.options.entries()) {
+      if (o !== "-C") continue;
+      const to = call.options[i + 1] ?? "";
+      if (unfollowed(to)) return false;
+      at = resolve(at, to);
+    }
+    if (!inside(worktree, homeKey(at))) return false;
+  }
+  return true;
+};
+/** Whether a Bash line changes what the next git call of the line would see: it links, moves, copies or removes a file, writes one with a redirect, or moves HEAD or git's config. The gate judges the line before it runs, so a commit on such a line is not judged at all. */
+const changesState = (split: { words: string[] }[]) => split.some(({ words }) => {
+  const call = gitCall(words);
+  if (call) return ["symbolic-ref", "checkout", "switch", "update-ref", "config"].includes(call.sub);
+  return ["ln", "mv", "cp", "rm"].includes(basename(unquoted(words[0] ?? ""))) || words.some((w) => w.replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, "").includes(">"));
+});
+/** `git checkout -B <name> <start>`, or `git switch -C`: it resets a branch to where it is told. */
+const movesBranch = ({ sub, rest }: NonNullable<ReturnType<typeof gitCall>>) => (sub === "checkout" && rest.some((a) => /^-[A-Za-z]*B/.test(a))) || (sub === "switch" && rest.some((a) => /^(-[A-Za-z]*C|--force-create)/.test(a)));
+/** Whether `git checkout -B <name> <start>` only moves the branch forward onto the base branch: <start> is the base branch's tip and <name> is new or an ancestor of it, so no commit is lost. */
+const movesForwardOnto = (cwd: string, bases: string[], rest: string[]) => {
+  const named = rest.filter((a) => !a.startsWith("-"));
+  if (named.length !== 2 || bases.includes(named[0].replace(/^refs\/heads\//, ""))) return false;
+  const git = (...args: string[]) => Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "ignore", timeout: 5000 });
+  const rev = (ref: string) => { const r = git("rev-parse", "--verify", "--quiet", `${ref}^{commit}`); return r.success ? r.stdout.toString().trim() : null; };
+  const tip = bases.map((b) => rev(`refs/heads/${b}`)).find(Boolean);
+  const mine = rev(`refs/heads/${named[0]}`);
+  return !!tip && rev(named[1]) === tip && (mine === null || git("merge-base", "--is-ancestor", mine, tip).success);
+};
+/** Whether `cwd` is in a linked worktree of the repo (`gitDir` is its common git dir) with a branch other than the base checked out: a plain folder, a `.git` file that points at main's git dir, or main checked out there is no place to commit. */
+const linkedWorktree = (cwd: string, gitDir: string, bases: string[], worktree: string) => {
+  const git = (...args: string[]) => Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "ignore", timeout: 5000 });
+  const dir = git("rev-parse", "--git-dir"), head = git("symbolic-ref", "-q", "--short", "HEAD");
+  if (!dir.success || bases.includes(head.stdout.toString().trim())) return false;
+  const mine = resolve(cwd, dir.stdout.toString().trim());
+  // The git dir must be this worktree's own: it records the worktree's `.git` file, whose folder is the worktree (a rewritten pointer names another worktree's).
+  try {
+    return inside(homeKey(join(gitDir, "worktrees")), homeKey(mine)) && homeKey(dirname(readFileSync(join(mine, "gitdir"), "utf8").trim())) === worktree;
+  } catch {
+    return false;
+  }
+};
+const isLink = (file: string) => { try { return lstatSync(file).isSymbolicLink(); } catch { return false; } };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
 export const INTERNS = 2;
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
@@ -570,7 +637,7 @@ export function startServer({
         missing = missing.filter((r) => !gate.loaded.has(r));
       }
       if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send \`BLOCKED <task>\` with its name to the session in your Report to.`);
-      if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && String(input.message ?? "").trimStart().startsWith("APPROVED")) {
+      if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && FORMAL_REPORT.exec(String(input.message ?? ""))?.[0].includes("APPROVED")) {
         return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
       }
     }
@@ -628,6 +695,13 @@ export function startServer({
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
     }
+    // The PM's or a lead's sub-agent (an implementer or a reviewer) works in its worktree and hires nobody: its parent decides who joins the team.
+    const subOfCoordinator = COORDINATORS.has(role) && !!payload.agent_id;
+    if (subOfCoordinator && commands.some((c) => hireArgs(c))) {
+      return refuse("hire", "Only the PM and team leads hire, from their own session: a sub-agent does not. Put what you need in your result for the session that started you.");
+    }
+    const here = state.employees[sessionId]?.room;
+    const worktree = subOfCoordinator && here && here !== ELSEWHERE.id && typeof payload.cwd === "string" ? worktreeOf(folderOf(here), payload.cwd) : null;
     // `f1rm wake` follows the hire rules: whoever may hire a name may wake it. The target is a name, or a session id the listing resolves to one; an unknown one is the command's own refusal.
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
       return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
@@ -668,11 +742,25 @@ export function startServer({
       const home = process.env.HOME ?? "";
       const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".f1rm", "kept"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
-      if (!dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
+      const inItsWorktree = !!worktree && inside(worktree, homeKey(file)) && !isLink(file) && !file.split("/").some((part) => part.toLowerCase() === ".git"); // the .git file says which repo the worktree is of (APFS ignores case)
+      if (!inItsWorktree && !dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
         return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    if (COORDINATORS.has(role) && commands.some((w) => LANDING.has(gitCall(w)?.sub ?? "") || ghLands(w))) {
+    // The sub-agent's one exception to its parent's landing rule is `git commit` inside its worktree (see confinedTo) and the move forward of its branch onto main.
+    // The line sets no GIT_ variable (`export GIT_DIR=…; git commit` points git at main), and the folder is a linked worktree with a branch other than the base checked out.
+    let confined = !!worktree && !/\bGIT_[A-Z_]/.test(String(input.command ?? "")) && confinedTo(split, payload.cwd, worktree);
+    const lands = (w: string[]) => {
+      const call = gitCall(w);
+      if (confined && (call?.sub === "commit" || (call && movesBranch(call))) && !linkedWorktree(payload.cwd, here!, baseBranches(here!), worktree!)) confined = false;
+      if (confined && call?.sub === "commit" && !changesState(split)) return false; // only as the one state-changing command of the line: the gate sees the state before the line runs
+      if (subOfCoordinator && call && movesBranch(call)) return !(confined && call.sub === "checkout" && movesForwardOnto(payload.cwd, baseBranches(here!), call.rest));
+      return LANDING.has(call?.sub ?? "") || ghLands(w);
+    };
+    // A commit hidden in nested quotes of a substitution (`git -C "$(dirname "$(…)")" commit`) is not split into words: a sub-agent's line that names `commit` next to a substitution and has no commit call to read is refused.
+    const line = String(input.command ?? "");
+    const unreadCommit = subOfCoordinator && /\bcommit\b/.test(line) && /\$\(|`/.test(line) && !commands.some((w) => gitCall(w)?.sub === "commit");
+    if (COORDINATORS.has(role) && (unreadCommit || commands.some(lands))) {
       return refuse("landing", "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
