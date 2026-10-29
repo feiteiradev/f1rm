@@ -237,7 +237,7 @@ test("the PM pauses and resumes when the user says so and never waits for agents
     "checks afterwards that nothing of the project still runs", "`refs/f1rm/checkpoint/<task>`", "without touching the files", "a manifest",
     "`All N stopped` and the checkpoint id only after that check", "does not see a detached job a lead or Reviewer started in the main checkout", "second office's own `claude` daemon", "is named `NOT saved`", "exits non-zero it names what still runs",
     "An orphan a user's own `claude -w` left in `.claude/worktrees` with no terminal is killed with the rest", "an application started from a worktree (such as an editor opened with `code .`) never is",
-    "**Work hours.**", "Mon-Fri 09:00-19:00 Europe/Lisbon", "`~/.f1rm/config.json`", "`by: schedule`", "resumes only the projects the schedule paused, never one paused by hand", "lasts until the next 19:00", "a tick gap over 2 minutes", "judged stalled, woken or nudged for 5 minutes",
+    "**Work hours.**", "Mon-Fri 09:00-19:00 Europe/Lisbon", "`~/.f1rm/config.json`", "`by: schedule`", "resumes only the projects the schedule paused, never one paused by hand", "lasts until the next end of a work day", "a tick gap over 2 minutes", "judged stalled, woken or nudged for 5 minutes",
     "**Pause and close.**", "`paused at <time>, checkpoint <id>`", "\"safe to close\"",
     "**Restart.**", "`f1rm pm` on a paused project", "the board, the milestones file and the manifest", "say in one line where everything stopped",
     "**Resume.**", "`f1rm resume`", "leads first, one at a time within the cap of 8", "a note of where it stopped", "is named in the output",
@@ -715,7 +715,7 @@ test("lean review: only blocking findings go back, the rest wait for one batch t
   const reviewer = role("reviewer").body;
   for (const s of [NON_BLOCKING, "the blocking findings", "Review and landing"]) expect(reviewer, s).toContain(s);
   const lead = role("lead").body;
-  for (const s of [NON_BLOCKING, "batch task", "`ESCALATE <slug>`", "with blocking findings goes back to its dev"]) expect(lead, s).toContain(s);
+  for (const s of [NON_BLOCKING, "batch task", "`ESCALATE <slug>`", "with blocking findings goes back to its implementer, designer or researcher"]) expect(lead, s).toContain(s);
   const pm = role("pm").body;
   for (const s of ["only blocking findings", "batch task"]) expect(pm, s).toContain(s);
   for (const f of ["README.md", join("plugin", "README.md")]) expect(readFileSync(join(REPO, f), "utf8"), f).toContain("batch task");
@@ -1217,6 +1217,7 @@ test("report-files: the guidelines say once that every report is also a file, ev
 });
 
 // F3c: the text describes the flat workflow that `f1rm hire --simple`, `f1rm merge` and the owner sub-agent gate put in code.
+const pluginReadme = () => readFileSync(join(PLUGIN, "README.md"), "utf8");
 const hireSkill = () => readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
 const pmDecides = () => /const PM_DECIDES =\s*("[^\n]*");/.exec(readFileSync(join(REPO, "office", "server", "server.ts"), "utf8"))![1];
 
@@ -1282,6 +1283,23 @@ test("flat: no sentence says a Reviewer reviews code or merges, that a lead hire
   const stale = [/only role that merges/i, /\bReviewer\b[^.\n]*\bmerges\b/i, /Review and merge flow/i, /review-and-merge flow/i, /\bhire a Reviewer\b/i, /Reviewer after every/i, /lead hires? (?:a |its |the )?(?:frontend|backend)/i, /APPROVED[^\n]*merged=/, /Leave merging to the Reviewer/, /Reviewer's merge flow/i, /\bwho hire the rest\b/];
   const { hire: _hire, ...texts } = { ...WORKFLOW_FILES(), "hire skill": hireSkill(), PM_DECIDES: pmDecides() }; // hire.ts holds the dev's own-review paragraph
   for (const [name, text] of Object.entries(texts)) for (const re of stale) expect(text, `${name} ${re}`).not.toMatch(re);
+});
+
+test("flat: a simple task whose DONE has no landable commit is checked by the PM and let go without f1rm merge", () => {
+  const w = section("Picking the workflow");
+  for (const s of ["has no repo change, or only files `f1rm merge` refuses", "the PM checks the result against the brief and the content checklist itself", "marks the row `done` without running `f1rm merge`", "`f1rm letgo`, which archives any unmerged work first", "A simple designer or researcher gets no review session"]) expect(w, s).toContain(s);
+  const wf = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))!;
+  expect(wf).toContain("without running `f1rm merge`");
+  expect(role("pm").body).toContain("without running `f1rm merge`");
+  expect(pmPromptText()).toContain("without running f1rm merge");
+  expect(section("Teams")).toContain("`git worktree remove` and `git branch -d`");
+  expect(section("Teams")).toContain("git worktree add -b worktree-<task> .claude/worktrees/<task> <base>");
+  expect(section("Definition of done")).toContain("the PM's own check against the brief and the content checklist");
+  expect(section("Review and landing")).not.toContain("as before");
+  expect(section("Messaging table")).not.toContain("back to a dev");
+  expect(role("lead").body).not.toContain("back to its dev");
+  expect(section("Pause and checkpoint")).toContain("until the next end of a work day (Monday 19:00 from a Friday evening or the weekend)");
+  expect(pluginReadme()).toContain("its simple tasks' devs");
 });
 
 test("flat: the plugin is 0.5.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
