@@ -1774,7 +1774,7 @@ test("a Reviewer's git is read-only plus its own scratch worktrees: every writin
 // The gate reads a heredoc body as data, as the shell does: a brief or a note written with `cat <<EOF` may mention any command, and the command after the terminator is still read.
 test("a heredoc body is data, not commands: its lines pass the push, landing and hire rules, in every form of the heredoc", async () => {
   const bash = await gateOffice();
-  const body = "run git push when done\ngit push origin main\ngit commit -m x\nf1rm hire designer checkout.designer-a a b\ngit merge worktree-a";
+  const body = "run git push when done\ngit push origin main\ngit commit -m x\nf1rm hire designer checkout.designer-a a b\ngit merge worktree-a\nf1rm pause back at two\nf1rm resume\nf1rm merge worktree-a";
   const data = [
     `cat > brief.md <<EOF\n${body}\nEOF`,
     `cat > brief.md <<EOF\n${body}\nEOF\n`,
@@ -1987,6 +1987,146 @@ test("the base branch is the one the main checkout has checked out: a repo on de
   for (const command of ["git branch -f develop abc1234", "git update-ref refs/heads/develop abc1234", "git fetch . x:develop", `git -C ${repo} merge x`]) expect([command, await bash(command)]).toEqual([command, "deny"]);
   for (const command of ["git branch -f main abc1234", "git update-ref refs/heads/main abc1234", "git fetch . x:main"]) expect([command, await bash(command)]).toEqual([command, null]);
   rmSync(repo, { recursive: true, force: true });
+});
+
+// The PM, a lead, a dev and a designer in a real repo (the gate reads real paths) with two worktrees; a folder beside it; and links out of a worktree.
+// The worktree add-a is behind main by one commit and add-b holds a commit main does not.
+async function ownerOffice() {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-owner-")));
+  const beside = `${repo}-beside`;
+  const git = (...args: string[]) => {
+    const r = Bun.spawnSync(["/usr/bin/git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdout: "pipe", stderr: "pipe" });
+    if (!r.success) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    return r.stdout.toString().trim();
+  };
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "base");
+  git("worktree", "add", "-q", ".claude/worktrees/add-a", "-b", "worktree-add-a");
+  git("worktree", "add", "-q", ".claude/worktrees/add-b", "-b", "worktree-add-b");
+  const [a, b] = [`${repo}/.claude/worktrees/add-a`, `${repo}/.claude/worktrees/add-b`];
+  git("-C", b, "commit", "-q", "--allow-empty", "-m", "b only");
+  git("commit", "-q", "--allow-empty", "-m", "main moves on");
+  mkdirSync(join(repo, "src"));
+  mkdirSync(beside);
+  symlinkSync(join(repo, "src"), join(a, "out"));
+  symlinkSync(join(repo, "later.ts"), join(a, "dangling.ts"));
+  symlinkSync(repo, join(beside, "to-main"));
+  afterEachRestore = () => (rmSync(repo, { recursive: true, force: true }), rmSync(beside, { recursive: true, force: true }));
+  start({ [repo]: join(repo, ".git") }, undefined, undefined, { junkRoots: [] });
+  for (const [id, type, session_title] of [["p", "f1rm:pm", "p-title"], ["l", "f1rm:lead", "lead-checkout"], ["b", "f1rm:backend-dev", "checkout.backend-dev-add-a"], ["d", "f1rm:designer", "d-title"]] as const) {
+    await hook({ ...common(id, "UserPromptSubmit"), cwd: repo, prompt: "go", session_title, agent_type: type });
+  }
+  await office((s) => Object.keys(s.employees).length === 4 && Object.values(s.employees).every((e) => e.room === join(repo, ".git")));
+  // The sub-agent's calls carry its parent's session id, an agent_id and the folder it works in.
+  const call = async (id: string, tool: string, input: object, cwd: string, sub = true) =>
+    held(await hook({ ...preToolUse(id, tool, input), cwd, ...(sub && { agent_id: "impl-1", agent_type: "general-purpose" }) }));
+  const bash = async (id: string, command: string, cwd: string, sub = true) => call(id, "Bash", { command }, cwd, sub);
+  return { repo, beside, a, b, main: git("rev-parse", "main"), behind: git("rev-parse", "worktree-add-a"), diverged: git("rev-parse", "worktree-add-b"), call, bash };
+}
+const WRITE_REFUSAL = "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.";
+const LANDING_REFUSAL = "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.";
+
+test("a PM's or lead's sub-agent writes inside its own worktree; the same writes from the parent, in the main checkout, another worktree, a folder beside it, through a link or `..` are refused", async () => {
+  const { repo, beside, a, b, call } = await ownerOffice();
+  const write = (id: string, tool: string, file: string, cwd: string, sub = true) => call(id, tool, tool === "NotebookEdit" ? { notebook_path: file } : { file_path: file }, cwd, sub);
+  for (const id of ["p", "l"]) {
+    for (const tool of ["Write", "Edit", "NotebookEdit"]) {
+      const allowed: [string, string][] = [[`${a}/src/x.ts`, a], [`${a}/new/deeper/x.ts`, a], ["src/x.ts", a], [`${a}/x.ts`, `${a}/src`], ["../x.ts", `${a}/src`], [`${a}/src/../x.ts`, a], ["x.ts", `${a}/not/made/yet`]];
+      for (const [file, cwd] of allowed) expect([id, tool, file, cwd, await write(id, tool, file, cwd)]).toEqual([id, tool, file, cwd, null]);
+      const refused: [string, string][] = [
+        [`${repo}/src/x.ts`, a], [`${repo}/src/x.ts`, repo], ["src/x.ts", repo], [`${repo}/x.ts`, `${repo}/.claude`], // the main checkout, as the file and as the folder
+        [`${b}/x.ts`, a], [`${a}/x.ts`, b], [`${a}/../add-b/x.ts`, a], ["../add-b/x.ts", a], // another worktree
+        [`${beside}/x.ts`, a], [`${beside}/x.ts`, beside], [`${a}/x.ts`, beside], [`${repo}-beside-not/x.ts`, a], // a folder beside the repo
+        [`${a}/out/x.ts`, a], [`${a}/dangling.ts`, a], [`${beside}/to-main/x.ts`, a], ["x.ts", `${beside}/to-main`], ["x.ts", `${a}/out`], // links into the main checkout
+        [`${a}/../../../src/x.ts`, a], ["../../../src/x.ts", a], [`${a}/../x.ts`, a], [`${a}/x.ts`, `${repo}/.claude/worktrees`], // `..` out of the worktree; no worktree at all
+        [`${repo}/.claude/worktrees-evil/x.ts`, a], [`${a}-evil/x.ts`, a],
+      ];
+      for (const [file, cwd] of refused) {
+        const out = await write(id, tool, file, cwd);
+        expect([id, tool, file, cwd, out?.permissionDecision]).toEqual([id, tool, file, cwd, "deny"]);
+        expect(out.permissionDecisionReason).toBe(WRITE_REFUSAL);
+      }
+      // The parent session itself is no sub-agent.
+      for (const [file, cwd] of [[`${a}/src/x.ts`, a], ["src/x.ts", a], [`${a}/x.ts`, repo]]) {
+        const out = await write(id, tool, file, cwd, false);
+        expect([id, tool, file, cwd, out?.permissionDecision]).toEqual([id, tool, file, cwd, "deny"]);
+      }
+    }
+  }
+  // A sub-agent keeps what its parent may write anywhere.
+  expect(await write("l", "Write", join(process.env.HOME!, ".f1rm", "evidence", "x", "n.md"), a)).toBeNull();
+});
+
+test("a PM's or lead's sub-agent commits in its own worktree; in the main checkout, another worktree, a folder beside it, or with the repo moved by an option, its parent's commit and the same line stay refused", async () => {
+  const { repo, beside, a, b, bash } = await ownerOffice();
+  for (const id of ["p", "l"]) {
+    for (const [command, cwd] of [
+      ["git add -A && git commit -m 'task: x; y'", a], ["git commit -m x", `${a}/src`], [`git -C ${a} commit -m x`, a], [`cd ${a}/src && git commit -m x`, a], ["cd src && git commit -m x", a], ["git -C . commit -m x", a], ["git -C src -C .. commit -m x", a],
+      ["git add -A", a], ["git status", a], ["git diff HEAD", a], ["git log --oneline", a], ["git branch -m worktree-new", a], ["git commit --amend --no-edit", a], ["time git commit -m x", a],
+    ] as const) expect([id, command, cwd, await bash(id, command, cwd)]).toEqual([id, command, cwd, null]);
+    for (const [command, cwd] of [
+      ["git commit -m x", repo], ["git commit -m x", beside], ["git commit -m x", `${repo}/.claude`], ["git commit -m x", `${repo}/.claude/worktrees`], ["git commit -m x", `${a}/out`], ["git commit -m x", `${beside}/to-main`],
+      [`git -C ${a} commit -m x`, repo], [`git -C ${a} commit -m x`, beside], [`cd ${a} && git commit -m x`, repo], [`git -C ${repo} commit -m x`, a], [`git -C ${b} commit -m x`, a], [`git -C ${beside} commit -m x`, a], ["git -C .. commit -m x", a], ["git -C ../add-b commit -m x", a], ["git -C ../../.. commit -m x", a],
+      [`cd ${repo} && git commit -m x`, a], [`cd ${b} && git commit -m x`, a], ["cd ../../.. && git commit -m x", a], ["cd ~ && git commit -m x", a], ["cd - && git commit -m x", a], ["cd $HOME && git commit -m x", a],
+      [`git --git-dir=${repo}/.git commit -m x`, a], [`git --git-dir ${repo}/.git commit -m x`, a], [`git --work-tree=${repo} commit -m x`, a], [`GIT_DIR=${repo}/.git git commit -m x`, a], [`GIT_WORK_TREE=${repo} git commit -m x`, a], [`env GIT_DIR=${repo}/.git git commit -m x`, a], [`git --git-dir=${a}/.git commit -m x`, a],
+      ["git commit -m x && git -C .. commit -m y", a],
+    ] as const) {
+      const out = await bash(id, command, cwd);
+      expect([id, command, cwd, out?.permissionDecision]).toEqual([id, command, cwd, "deny"]);
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
+    }
+    // The parent session is no sub-agent.
+    for (const [command, cwd] of [["git commit -m x", a], ["git add -A && git commit -m x", a], [`git -C ${a} commit -m x`, repo]] as const) {
+      const out = await bash(id, command, cwd, false);
+      expect([id, command, cwd, out?.permissionDecision]).toEqual([id, command, cwd, "deny"]);
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
+    }
+  }
+});
+
+test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push, no landing shapes, no checkout -B off main, no hire, no f1rm merge, no pause", async () => {
+  const { a, main, behind, diverged, bash } = await ownerOffice();
+  const landing = ["git merge main", "git merge --no-ff worktree-add-b", "git rebase main", "git reset --hard HEAD~1", "git cherry-pick abc1234", "git pull", "git am fix.patch", "git revert abc1234", "gh pr merge 3", "git commit -m x && git merge main",
+    `git checkout -B worktree-add-a ${behind}`, `git checkout -B worktree-add-b ${main}`, `git checkout -B scratch ${diverged}`, `git checkout -B scratch HEAD~1`, "git checkout -B worktree-add-a", "git checkout -B worktree-add-a main extra", `git checkout -q -B worktree-add-b ${main}`, `git checkout -Bworktree-add-a ${main}`, "git switch -C worktree-add-a main", `git checkout -B worktree-add-a ${main}; git merge main`];
+  for (const id of ["p", "l"]) {
+    for (const command of landing) {
+      const out = await bash(id, command, a);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
+    }
+    // The one move forward it needs: its branch is behind main, so main's tip loses nothing.
+    for (const command of [`git checkout -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main.slice(0, 9)}`, "git checkout -B worktree-add-a main", `git checkout -B worktree-new ${main}`, `git checkout -q -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main} && git commit -m x`]) {
+      expect([id, command, await bash(id, command, a)]).toEqual([id, command, null]);
+    }
+    for (const command of ["git push", "git push origin HEAD", "git -C . push --force", "git commit -m x && git push"]) {
+      const out = await bash(id, command, a);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+    }
+    const hire = await bash(id, `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a);
+    expect([id, "hire", hire?.permissionDecision]).toEqual([id, "hire", "deny"]);
+    for (const [command, reason] of [["f1rm merge add-a", "Only the PM and the leads run `f1rm merge"], ["f1rm pause", "Only the PM pauses and resumes"], ["f1rm resume", "Only the PM pauses and resumes"]] as const) {
+      const out = await bash(id, command, a);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain(reason);
+    }
+  }
+  // What the parent does (hire its own team) is not changed by this.
+  expect(await bash("l", `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a, false)).toBeNull();
+});
+
+test("a dev's or a designer's sub-agent is held by no more than its parent: writes anywhere, commits in its worktree, and the base branch still closed", async () => {
+  const { repo, a, bash, call } = await ownerOffice();
+  for (const id of ["b", "d"]) {
+    expect([id, await call(id, "Write", { file_path: `${repo}/src/x.ts` }, repo)]).toEqual([id, null]);
+    expect([id, await call(id, "Write", { file_path: `${a}/x.ts` }, a)]).toEqual([id, null]);
+    for (const command of ["git commit -m x", "git merge main", "git rebase main", "git reset --hard HEAD~1", "git checkout -B scratch HEAD~1"]) expect([id, command, await bash(id, command, a)]).toEqual([id, command, null]);
+    for (const command of ["git commit -m x", "git merge main"]) {
+      const out = await bash(id, command, repo);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]); // nothing lands on the base branch, for every role
+    }
+  }
+  const hire = await bash("b", "f1rm hire designer designer-a a b", a);
+  expect(hire?.permissionDecision).toBe("deny");
 });
 
 test("the hire and push refusals are logged with the rule and never the command", async () => {
@@ -2334,6 +2474,16 @@ test("a --level high Reviewer's APPROVED message is held until security-review h
   expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
   await skillLoaded("r", "security-review");
   expect(await send("APPROVED shop-1")).toBeNull();
+});
+
+test("the security hold reads APPROVED as a formal report does: past markdown and a list number, not as the start of a longer word", async () => {
+  start();
+  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
+  await skillLoaded("r", "ponytail:ponytail-review");
+  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
+  const send = async (message: string) => (await held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message }))))?.permissionDecision ?? null;
+  for (const message of ["**APPROVED** shop-1", "> APPROVED shop-1", "1. APPROVED shop-1", "\n\nAPPROVED shop-1"]) expect([message, await send(message)]).toEqual([message, "deny"]);
+  for (const message of ["APPROVEDLY shop-1", "not APPROVED yet", "CHANGES shop-1: fix x"]) expect([message, await send(message)]).toEqual([message, null]);
 });
 
 test("a woken --level high Reviewer, whose first prompt is the wake note, is held at APPROVED the same way, and its tools are not held", async () => {
