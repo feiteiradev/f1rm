@@ -44,10 +44,12 @@ export function archiveWork(repo: string, task: string): Archive | null {
     if (tip && tree) from = { head: tip, tree, dirty: false };
   }
   if (!from || (!from.dirty && inBase(repo, from.head))) return null;
-  const sha = git(repo, ["commit-tree", from.tree, "-p", from.head, "-m", `wip: ${task}`]);
-  if (!sha) throw new Error("git commit-tree failed");
   const ref = PREFIX + task;
   const old = git(repo, ["rev-parse", "--verify", "-q", ref]);
+  // The same work again (a let-go retried after `claude rm` failed) is already kept.
+  if (old && git(repo, ["rev-parse", `${old}^{tree}`]) === from.tree && git(repo, ["rev-parse", `${old}^`]) === from.head) return listArchives(repo).find((a) => a.ref === ref)!;
+  const sha = git(repo, ["commit-tree", from.tree, "-p", from.head, "-m", `wip: ${task}`]);
+  if (!sha) throw new Error("git commit-tree failed");
   if (old) {
     let n = 1;
     while (refExists(repo, `${ref}-${n}`)) n++;

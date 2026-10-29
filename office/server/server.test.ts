@@ -1491,18 +1491,18 @@ test("`f1rm letgo` follows the wake rules: the PM lets go leads and its simple h
       expect(out.permissionDecisionReason).toContain("Only the PM and team leads let go");
     }
   }
-  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo checkout.reviewer-review-old checkout.designer-a", "ls && f1rm letgo checkout.backend-dev-b", "f1rm letgo ghost"]) {
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo checkout.reviewer-review-old checkout.designer-a", "ls && f1rm letgo checkout.backend-dev-b"]) {
     expect([command, await decision("l1", command)]).toEqual([command, null]);
   }
-  for (const command of ["f1rm letgo search.backend-dev-x", "f1rm letgo lead-search", "f1rm letgo lead-checkout", "f1rm letgo designer-landing", "f1rm letgo checkout.backend-dev-old search.backend-dev-x", "f1rm letgo --leftovers"]) {
+  for (const command of ["f1rm letgo search.backend-dev-x", "f1rm letgo lead-search", "f1rm letgo lead-checkout", "f1rm letgo designer-landing", "f1rm letgo checkout.backend-dev-old search.backend-dev-x", "f1rm letgo --leftovers", "f1rm letgo ghost", "f1rm letgo my-own-session"]) {
     const out = await run("l1", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
     expect(out.permissionDecisionReason).toMatch(/A lead lets go only the members of its own team|PM lets go leads|Only the PM runs/);
   }
-  for (const command of ["f1rm letgo lead-old", "f1rm letgo lead-search lead-checkout", "f1rm letgo designer-landing", "f1rm letgo --leftovers", "f1rm letgo ghost"]) {
+  for (const command of ["f1rm letgo lead-old", "f1rm letgo lead-search lead-checkout", "f1rm letgo designer-landing", "f1rm letgo --leftovers"]) {
     expect([command, await decision("pm", command)]).toEqual([command, null]);
   }
-  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo lead-old checkout.reviewer-review-old"]) {
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo lead-old checkout.reviewer-review-old", "f1rm letgo ghost"]) { // a name that is no hire's too
     const out = await run("pm", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
     expect(out.permissionDecisionReason).toContain("The PM lets go leads and its simple tasks' devs");

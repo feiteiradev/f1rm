@@ -120,6 +120,15 @@ test("a second archive of a task keeps the first under <task>-1", () => {
   expect(refs(repo)).toEqual(["refs/f1rm/archive/again", "refs/f1rm/archive/again-1", "refs/f1rm/archive/again-2"]);
 });
 
+test("archiving the same work again (a retried let-go) keeps the archive it has instead of piling up copies", () => {
+  const repo = repoWith("retry");
+  writeFileSync(join(wt(repo, "retry"), "a.txt"), "a\n");
+  const first = archiveWork(repo, "retry")!;
+  const again = archiveWork(repo, "retry")!;
+  expect(again.sha).toBe(first.sha);
+  expect(refs(repo)).toEqual(["refs/f1rm/archive/retry"]);
+});
+
 test("archiveWork throws when it cannot write the ref, and for a task that is no ref name", () => {
   const repo = repoWith("clash");
   writeFileSync(join(wt(repo, "clash"), "a.txt"), "a\n");

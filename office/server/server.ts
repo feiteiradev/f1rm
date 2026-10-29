@@ -726,9 +726,10 @@ export function startServer({
       const team = teamOf(state.employees[sessionId]);
       for (const args of letgoCalls) {
         if (role !== "pm" && args.includes("--leftovers")) return refuse("letgo", "Only the PM runs `f1rm letgo --leftovers`, at the end of a milestone. Ask the PM.");
-        for (const hire of args.filter((a) => !a.startsWith("-")).flatMap((a) => hireName(a) ?? [])) {
-          if (!mayWake({ role, team }, hire)) {
-            return refuse("letgo", role === "pm" ? "The PM lets go leads and its simple tasks' devs; a lead lets go the members of its own team. Ask that lead to let it go." : `A lead lets go only the members of its own team (${team ?? "<team>"}.…); the PM lets go leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
+        // A name that is no hire's (the user's own background session) is nobody's to let go: the command resolves it by name and would stop it.
+        for (const hire of args.filter((a) => !a.startsWith("-")).map((a) => hireName(a))) {
+          if (!hire || !mayWake({ role, team }, hire)) {
+            return refuse("letgo", role === "pm" ? "The PM lets go leads and its simple tasks' devs; a lead lets go the members of its own team. Ask that lead to let it go." : `A lead lets go only the members of its own team (${team ?? "<team>"}.…); the PM lets go leads. Ask ${hire?.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
           }
         }
       }
