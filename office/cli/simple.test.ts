@@ -107,19 +107,17 @@ test("the cap counts a simple task as a team of one: live leads and live simple 
   expect(() => ask(Array(8).fill(session("elsewhere-x", "/elsewhere")))).toThrow("8 hires are already working");
 });
 
-test("f1rm letgo lets a simple dev go like a team member: its session, then its worktree and branch once the branch is merged, and nothing while it is not", async () => {
+test("f1rm letgo lets a simple dev go like a team member: its session, then its worktree and branch", async () => {
   const calls: string[] = [];
-  const merged = { value: false };
   const m = {
     gitCommonDir: () => `${REPO}/.git`,
     sessions: async () => [{ kind: "background", name: "backend-dev-x", cwd: wt("x"), id: "i1", sessionId: "s1" }],
-    mergedBranch: (_repo: string, branch: string) => merged.value && branch === "worktree-x",
-    letGo: async (id: string) => void calls.push(`letgo ${id}`),
+    letGo: async (id: string, o?: { afterStop?: () => void }) => {
+      o?.afterStop?.();
+      calls.push(`letgo ${id}`);
+    },
     removeWorktree: (_repo: string, task: string) => void calls.push(`rm ${task}`),
   } as unknown as Parameters<typeof letgo>[1];
-  expect(await letgo(["backend-dev-x"], m, REPO)).toEqual({ lines: ["backend-dev-x: not let go: worktree-x is not merged into the base branch"], ok: false });
-  expect(calls).toEqual([]);
-  merged.value = true;
   expect(await letgo(["backend-dev-x"], m, REPO)).toEqual({ lines: ["backend-dev-x: let go, removed its worktree and branch worktree-x"], ok: true });
-  expect(calls).toEqual(["letgo i1", "rm x"]);
+  expect(calls).toEqual(["rm x", "letgo i1"]); // the worktree goes after the stop and before claude rm
 });

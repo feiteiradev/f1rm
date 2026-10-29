@@ -719,6 +719,23 @@ export function startServer({
         }
       }
     }
+    // `f1rm letgo` follows the wake rules, names are all it needs: the PM lets go leads and its simple hires, a lead its own team's members, nobody else (an intern included). `--leftovers` is the PM's milestone clean-up.
+    const letgoCalls = commands.map((c) => hireArgs(c, "letgo")).filter((a): a is string[] => !!a);
+    if (letgoCalls.length) {
+      if (!COORDINATORS.has(role) || payload.agent_id) return refuse("letgo", "Only the PM and team leads let go a hire, from their own session. Send what you need to the session named in your brief's Report to.");
+      const team = teamOf(state.employees[sessionId]);
+      for (const args of letgoCalls) {
+        if (role !== "pm" && args.includes("--leftovers")) return refuse("letgo", "Only the PM runs `f1rm letgo --leftovers`, at the end of a milestone. Ask the PM.");
+        // A name that is no hire's (the user's own background session) is nobody's to let go: the command resolves it by name and would stop it.
+        for (const hire of args.filter((a) => !a.startsWith("-")).map((a) => hireName(a))) {
+          if (!hire || !mayWake({ role, team }, hire)) {
+            return refuse("letgo", role === "pm" ? "The PM lets go leads and its simple tasks' devs; a lead lets go the members of its own team. Ask that lead to let it go." : `A lead lets go only the members of its own team (${team ?? "<team>"}.…); the PM lets go leads. Ask ${hire?.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
+          }
+        }
+      }
+    }
+    // `f1rm archives --prune` deletes archives (any spelling of the flag): the PM's, and the user's terminal's.
+    if (commands.some((c) => hireArgs(c, "archives")?.some((a) => a.includes("prune"))) && (role !== "pm" || payload.agent_id)) return refuse("prune", "Only the PM prunes the archives (`f1rm archives --prune`), at the end of a milestone. Ask the PM.");
     // `f1rm pause` and `f1rm resume` act on the project of the folder they run in: of the company's sessions only its PM runs them, never its intern (`--all` is refused above, for everyone).
     const pausing = commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)));
     if (pausing && (role !== "pm" || payload.agent_id)) return refuse("pause", "Only the PM pauses and resumes its project. Send what you need to the session named in your brief's Report to.");
@@ -1434,7 +1451,7 @@ export function startServer({
       reading = false;
     }
   }
-  // The safety net for hires nobody let go: a done f1rm hire whose branch is merged goes, with its worktree and branch.
+  // The safety net for hires nobody let go: a done f1rm hire whose branch is merged goes, with its worktree and branch, after anything it left uncommitted is archived (see letGoHire).
   // ponytail: idleness is counted from when this office first saw the session done, so a restart waits another stretch; it also asks `claude agents --json --all` every tick.
   const doneSince = new Map<string, number>();
   let letting = false;
@@ -1445,15 +1462,22 @@ export function startServer({
       const now = clock();
       const all = (await machine.sessions()) ?? [];
       const seen = new Set<string>();
+      // A task another session still works on (a woken hire, a stopped or blocked one that `f1rm wake` may resume) keeps its worktree, whatever stale done entry of its name is listed.
+      const taskOf = (name: string) => {
+        const h = hireTask(name);
+        return h && !h.reviewer ? h.task : undefined;
+      };
+      const inUse = new Set(all.filter((s) => s.state !== "done").flatMap((s) => [taskOf(s.name), s.cwd.split("/.claude/worktrees/")[1]?.split("/")[0]]));
       for (const s of all) {
         const hire = s.kind === "background" && s.state === "done" ? hireTask(s.name) : null;
         if (!hire) continue;
         seen.add(s.id);
+        if (inUse.has(hire.task)) continue;
         const since = doneSince.get(s.id) ?? now;
         doneSince.set(s.id, since);
         const repo = repoOf(s.cwd);
         if (now - since < letGoAfterMs || !machine.mergedBranch(repo, `worktree-${hire.task}`)) continue;
-        doneSince.set(s.id, now); // a session that can't be let go (uncommitted work) is tried again a stretch later, not every tick
+        doneSince.set(s.id, now); // a session that can't be let go (its archive or `claude rm` failed) is tried again a stretch later, not every tick
         await letGoHire(machine, s, repo).catch(() => {});
       }
       for (const id of doneSince.keys()) if (!seen.has(id)) doneSince.delete(id);

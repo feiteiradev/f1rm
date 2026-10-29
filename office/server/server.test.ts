@@ -31,8 +31,9 @@ const fakeMachine = (repos: Record<string, string> = {}) => ({
   isRepo: (folder: string) => Object.values(repos).includes(folder + "/.git"),
   liveSessions: async () => new Map([...listing].map(([id, pid]) => [id, { pid }])),
   backgroundId: async (sessionId: string) => backgroundIds[sessionId] ?? null,
-  letGo: async (id: string) => {
+  letGo: async (id: string, o?: { afterStop?: () => void }) => {
     calls.push(`letgo ${id}`);
+    o?.afterStop?.();
     if (letGoFails) throw new Error(letGoFails);
   },
   stop: async () => true,
@@ -1480,6 +1481,51 @@ test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member o
   for (const command of ['git log --grep "mentions f1rm wake x"', 'grep "f1rm wake" README.md', "f1rm woke"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
 });
 
+test("`f1rm letgo` follows the wake rules: the PM lets go leads and its simple hires and runs --leftovers, a lead the members of its own team, a specialist, an intern and a Reviewer nobody", async () => {
+  await talkOffice();
+  const run = async (id: string, command: string, extra = {}) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: "/code/shop", ...extra }));
+  const decision = async (id: string, command: string, extra = {}) => (await run(id, command, extra))?.permissionDecision ?? null;
+  for (const id of ["c1", "rv"]) {
+    for (const command of ["f1rm letgo checkout.backend-dev-old", "bun office/cli/f1rm.ts letgo lead-checkout", "f1rm letgo --leftovers", "ls && f1rm letgo designer-landing"]) {
+      const out = await run(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the PM and team leads let go");
+    }
+  }
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo checkout.reviewer-review-old checkout.designer-a", "ls && f1rm letgo checkout.backend-dev-b"]) {
+    expect([command, await decision("l1", command)]).toEqual([command, null]);
+  }
+  for (const command of ["f1rm letgo search.backend-dev-x", "f1rm letgo lead-search", "f1rm letgo lead-checkout", "f1rm letgo designer-landing", "f1rm letgo checkout.backend-dev-old search.backend-dev-x", "f1rm letgo --leftovers", "f1rm letgo ghost", "f1rm letgo my-own-session"]) {
+    const out = await run("l1", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toMatch(/A lead lets go only the members of its own team|PM lets go leads|Only the PM runs/);
+  }
+  for (const command of ["f1rm letgo lead-old", "f1rm letgo lead-search lead-checkout", "f1rm letgo designer-landing", "f1rm letgo --leftovers"]) {
+    expect([command, await decision("pm", command)]).toEqual([command, null]);
+  }
+  for (const command of ["f1rm letgo checkout.backend-dev-old", "f1rm letgo lead-old checkout.reviewer-review-old", "f1rm letgo ghost"]) { // a name that is no hire's too
+    const out = await run("pm", command);
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("The PM lets go leads and its simple tasks' devs");
+  }
+  for (const id of ["pm", "l1"]) expect([id, await decision(id, "f1rm letgo lead-old", { agent_id: "agent-1", agent_type: "Explore" })]).toEqual([id, "deny"]); // an intern
+  expect(await decision("free", "f1rm letgo checkout.backend-dev-old")).toBeNull(); // the user's own session
+  expect(await decision("free", "f1rm letgo --leftovers")).toBeNull();
+  for (const command of ['git log --grep "mentions f1rm letgo x"', 'grep "f1rm letgo" README.md', "f1rm letgone", "f1rm archives"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
+  // pruning deletes archives: the PM's alone, in any spelling
+  const prunes = ["f1rm archives --prune", "f1rm archives --prune=1", "bun office/cli/f1rm.ts archives --prune", "ls && f1rm archives --list --prune", "f1rm archives -- --prune"];
+  for (const id of ["c1", "rv", "l1"]) {
+    for (const command of prunes) {
+      const out = await run(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the PM prunes");
+    }
+  }
+  for (const command of prunes) expect([command, await decision("pm", command)]).toEqual([command, null]);
+  expect(await decision("pm", "f1rm archives --prune", { agent_id: "agent-1", agent_type: "Explore" })).toBe("deny");
+  expect(await decision("free", "f1rm archives --prune")).toBeNull();
+});
+
 test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a Reviewer and a PM's intern are refused, no session runs --all, and the user's own session runs the rest", async () => {
   await delegationOffice();
   await hook({ ...common("v", "UserPromptSubmit"), prompt: "go", session_title: "checkout.reviewer-review-a", agent_type: "f1rm:reviewer" });
@@ -2340,9 +2386,27 @@ test("the safety net starts the wait over when a hire works again, and keeps wha
   letGoFails = "rm refused: uncommitted work";
   now += 200;
   await Bun.sleep(400);
-  expect(calls).toEqual(["letgo d1"]); // tried once; it threw, so no worktree or branch was removed
+  expect(calls).toEqual(["letgo d1", `remove ${repo} done`]); // tried once; the removal of the session failed after its work was kept and its worktree removed
   await Bun.sleep(400);
-  expect(calls).toEqual(["letgo d1"]); // and not again every tick
+  expect(calls).toEqual(["letgo d1", `remove ${repo} done`]); // and not again every tick
+});
+
+test("the safety net leaves a merged hire's worktree alone while another session of its name or in its worktree is not done", async () => {
+  const repo = "/code/shop", tree = `${repo}/.claude/worktrees/done`;
+  const s = (id: string, name: string, state: string) => ({ id, name, kind: "background", state, cwd: tree });
+  sessionList = [s("d1", "designer-done", "done"), s("d2", "designer-done", "working"), s("a1", "frontend-dev-other", "done"), s("a2", "my-own-session", "stopped")];
+  mergedBranches = new Set(["worktree-done"]);
+  let now = 1_000_000;
+  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, clock: () => now, letGoAfterMs: 400 });
+  await Bun.sleep(250);
+  now += 1000;
+  await Bun.sleep(600);
+  expect(calls).toEqual([]); // the stale done entries (same name, same worktree) do not take the live one's worktree
+  sessionList = sessionList.filter((x) => x.state === "done" && x.id === "d1");
+  await Bun.sleep(250); // done and alone: counted from here
+  now += 1000;
+  await Bun.sleep(600);
+  expect(calls).toEqual(["letgo d1", `remove ${repo} done`]); // once nothing else works there, it goes
 });
 
 // The skill gate: a hire is held until it loads the skills its first prompt names.

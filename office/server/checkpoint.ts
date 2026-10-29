@@ -12,37 +12,47 @@ export type Snapshot = { ref: string; sha: string; dirty: boolean };
 export type CheckSession = { name: string; role: string; task: string; row: BoardRow | null; sessionId: string; cwd: string; snapshot: Snapshot | null };
 export type Manifest = { id: string; at: number; repo: string; why: string; sessions: CheckSession[]; killed: Pick<Killed, "pid" | "command" | "cwd" | "signal">[]; verified: boolean; unsaved?: string[] };
 
-const TASK = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const TASK = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ID = /^cp-\d{8}-\d{6}(?:-\d+)?$/;
 
-const git = (cwd: string, args: string[], env: Record<string, string> = {}) => {
+export const git = (cwd: string, args: string[], env: Record<string, string> = {}) => {
   const r = Bun.spawnSync(["git", "-c", "user.name=f1rm", "-c", "user.email=f1rm@localhost", ...args], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
   return r.success ? r.stdout.toString().trim() : null;
 };
 
 /**
- * Saves the worktree at `dir`, uncommitted, staged and untracked files included (ignored ones are not), as a commit on top of its HEAD under `refs/f1rm/checkpoint/<task>`.
- * A clean worktree is recorded at its own tip. Null when `dir` is no worktree with a commit. Throws for a task that is no ref name.
+ * The tree of the worktree at `dir` as it is: HEAD plus uncommitted, staged and untracked files (ignored ones are not, nor the untracked ones matching the globs in `exclude`), built in a temporary index.
+ * `dirty` says the tree differs from HEAD's. Null when `dir` is no worktree with a commit.
  * ponytail: synchronous git, so a very big worktree holds the office's event loop for as long as `git add -A` takes; make it async if that is felt.
  */
-export function snapshotWorktree(dir: string, task: string): Snapshot | null {
-  if (!TASK.test(task) || task.includes("..")) throw new Error(`"${task}" is no task name`);
+export function snapshotTree(dir: string, exclude: string[] = []): { head: string; tree: string; dirty: boolean } | null {
   const head = git(dir, ["rev-parse", "--verify", "-q", "HEAD"]);
   if (!head) return null;
-  const ref = `refs/f1rm/checkpoint/${task}`;
   const scratch = mkdtempSync(join(tmpdir(), "f1rm-checkpoint-"));
   try {
     const env = { GIT_INDEX_FILE: join(scratch, "index") };
-    if (git(dir, ["read-tree", "HEAD"], env) === null || git(dir, ["add", "-A"], env) === null) return null;
+    if (git(dir, ["read-tree", "HEAD"], env) === null || git(dir, ["add", "-A", "--", ".", ...exclude.map((g) => `:(exclude,glob)${g}`)], env) === null) return null;
+    // An exclude pathspec also hides a tracked file's edits and deletion: the excludes are for untracked files only.
+    if (exclude.length && git(dir, ["add", "-u"], env) === null) return null;
     const tree = git(dir, ["write-tree"], env);
-    if (!tree) return null;
-    const dirty = tree !== git(dir, ["rev-parse", "HEAD^{tree}"]);
-    const sha = dirty ? git(dir, ["commit-tree", tree, "-p", head, "-m", `f1rm checkpoint of ${task}`]) : head;
-    if (!sha || git(dir, ["update-ref", ref, sha]) === null) return null;
-    return { ref, sha, dirty };
+    return tree ? { head, tree, dirty: tree !== git(dir, ["rev-parse", "HEAD^{tree}"]) } : null;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Saves the worktree at `dir`, uncommitted, staged and untracked files included (ignored ones are not), as a commit on top of its HEAD under `refs/f1rm/checkpoint/<task>`.
+ * A clean worktree is recorded at its own tip. Null when `dir` is no worktree with a commit. Throws for a task that is no ref name.
+ */
+export function snapshotWorktree(dir: string, task: string): Snapshot | null {
+  if (!TASK.test(task) || task.includes("..")) throw new Error(`"${task}" is no task name`);
+  const snap = snapshotTree(dir);
+  if (!snap) return null;
+  const ref = `refs/f1rm/checkpoint/${task}`;
+  const sha = snap.dirty ? git(dir, ["commit-tree", snap.tree, "-p", snap.head, "-m", `f1rm checkpoint of ${task}`]) : snap.head;
+  if (!sha || git(dir, ["update-ref", ref, sha]) === null) return null;
+  return { ref, sha, dirty: snap.dirty };
 }
 
 /** `~/.f1rm/checkpoints`, where the office keeps the manifests: one folder per project. */

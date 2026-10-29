@@ -640,6 +640,14 @@ test("C2: the gate refuses every push, lands only f1rm merge on the base, and ho
   expect(reviewer).toMatch(/gate refuses/i);
 });
 
+test("archive: the milestone cleanup runs f1rm letgo --leftovers and f1rm archives --prune and reports what was archived and pruned; the decision is logged", () => {
+  const md = section("Milestones and decisions");
+  for (const s of ["the PM cleans up with `f1rm letgo --leftovers`", "`refs/f1rm/archive/<task>`", "never running `claude rm`", "`f1rm archives --prune`", "older than 30 days", "The report says what was archived and what was pruned."]) expect(md, s).toContain(s);
+  for (const s of ["`f1rm letgo --leftovers`", "`f1rm archives --prune`", "list in the report what was archived and what was pruned"]) expect(role("pm").body, s).toContain(s);
+  expect(readFileSync(join(REPO, "docs", "decisions.md"), "utf8")).toContain("## 2026-10-29 Archive, then remove\n");
+  expect(readFileSync(join(REPO, "README.md"), "utf8")).toMatch(/^\| `f1rm archives` \|/m);
+});
+
 test("D1: a milestone ends with a cleanup the user answers, and working files stay out of the repo", () => {
   const md = section("Milestones and decisions");
   for (const s of ["Milestone cleanup", "**Persist**", "~/.f1rm/kept/<repo>/", "never deleted automatically", "**Delete**", "done board rows", "move items between the groups", "only after the user replies", "5-line record", "task ids and landing commits", "how to try it", "what is open", "`docs/decisions.md` and git history stay"]) expect(md, s).toContain(s);

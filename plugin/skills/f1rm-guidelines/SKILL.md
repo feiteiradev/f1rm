@@ -389,6 +389,8 @@ Two documents keep the why of the work: a milestones file outside the repo, whic
   - **Persist**: what the hires' `keep:` lines named, and anything else a later milestone will need. It moves to `~/.f1rm/kept/<repo>/` (with `mv`) and is never deleted automatically.
   - **Delete**: the milestone's evidence folders, briefs, research, plans and done board rows.
 
+  Before it writes that report, the PM cleans up with `f1rm letgo --leftovers`, which archives the unfinished work of every worktree under `.claude/worktrees` and every `worktree-*` branch that no live session works in (under `refs/f1rm/archive/<task>`) and then removes them, listing the live sessions it skipped and never running `claude rm`, and then `f1rm archives --prune`, which deletes the archives older than 30 days. The report says what was archived and what was pruned.
+
   `~/.f1rm/kept/<repo>/notes/` is in neither group; it stays. So does `~/.f1rm/kept/<repo>/findings.md`, whose rows say `fixed` or `left`.
 
   The user may move items between the groups. The PM moves and deletes only after the user replies. Then it replaces the milestone's section in the milestones file with a 5-line record: what shipped (task ids and landing commits), how to try it, and what is open (ponytail-review findings and anything the user must decide). `docs/decisions.md` and git history stay.

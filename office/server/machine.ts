@@ -230,15 +230,19 @@ export const machine = {
     return !chain.includes(tip);
   },
 
-  /** Removes the hire's worktree `.claude/worktrees/<task>` and its merged branch `worktree-<task>`. Never forced: throws what git said if it refuses (uncommitted files, an unmerged branch). */
-  removeWorktree(repo: string, task: string): void {
+  /**
+   * Removes the hire's worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`. Throws what git said if it refuses (uncommitted files, an unmerged branch).
+   * `force` (after the work is archived, see archiveWork) removes a worktree that has files or is locked, and a branch that is not merged.
+   */
+  removeWorktree(repo: string, task: string, force = false): void {
     const git = (...args: string[]) => {
       const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" });
       if (!r.success) throw new Error(r.stderr.toString().trim().split("\n").pop() || `git ${args[0]} failed`);
     };
-    if (statSync(`${repo}/.claude/worktrees/${task}`, { throwIfNoEntry: false })) git("worktree", "remove", `.claude/worktrees/${task}`);
+    // A stopped Claude Code session leaves its worktree locked, which takes `--force` twice.
+    if (statSync(`${repo}/.claude/worktrees/${task}`, { throwIfNoEntry: false })) git("worktree", "remove", ...(force ? ["--force", "--force"] : []), `.claude/worktrees/${task}`);
     // `claude rm` may already have taken the branch with the worktree.
-    if (Bun.spawnSync(["git", "-C", repo, "rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`], { stdout: "ignore" }).success) git("branch", "-d", `worktree-${task}`);
+    if (Bun.spawnSync(["git", "-C", repo, "rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`], { stdout: "ignore" }).success) git("branch", force ? "-D" : "-d", `worktree-${task}`);
   },
 
   /** Every session Claude Code lists, finished ones too (`claude agents --json --all`); null if it can't say. A session with a live process carries its pid; an ended one (done, stopped, failed, blocked on a limit) has none. */
@@ -300,17 +304,19 @@ export const machine = {
    * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
    * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
    */
-  async letGo(id: string, { tries = 10, waitMs = 1000, discardIn = "" } = {}): Promise<void> {
+  async letGo(id: string, { tries = 10, waitMs = 1000, discardIn = "", discardAny = false, afterStop }: { tries?: number; waitMs?: number; discardIn?: string; discardAny?: boolean; afterStop?: () => void | Promise<void> } = {}): Promise<void> {
     if (!SAFE_ID.test(id)) throw new Error("bad background session id");
     // A session that already ended makes `stop` fail, and `rm` works on it all the same.
     await claude("stop", id);
+    // What the caller does once the session writes no more (archive its worktree, remove it): if it throws, nothing is removed.
+    await afterStop?.();
     // `rm` refuses a worktree whose commits are on no remote, and nobody pushes here. With `discardIn` (the repo's main working
-    // directory), the commits it names are discarded only when they are already in the branch checked out there: merged work.
+    // directory), the commits it names are discarded only when they are already in the branch checked out there: merged work. `discardAny` is for work that was archived first.
     let discard: string[] = [];
     for (let i = 0; i < tries; i++) {
       const rm = await claude("rm", id, ...discard);
       const token = /--discard-unpushed ([0-9a-f]{7,64}@[0-9a-f]+)/.exec(rm.text)?.[1];
-      if (rm.code !== 0 && token && discardIn && !discard.length && inBase(discardIn, token.split("@")[0])) {
+      if (rm.code !== 0 && token && !discard.length && (discardAny || (discardIn && inBase(discardIn, token.split("@")[0])))) {
         discard = ["--discard-unpushed", token];
         continue;
       }
