@@ -270,10 +270,12 @@ const worktreeOf = (main: string, dir: string) => {
 /** Whether every git call of a Bash line works inside `worktree`: it starts in `cwd`, `cd` and `-C` move it only to a folder inside (never through `..`: git follows a link before it, the gate reads text), and `--git-dir` and `--work-tree` are not used. */
 const confinedTo = (split: { prefix: string[]; words: string[] }[], cwd: string, worktree: string) => {
   let dir = resolve(cwd);
+  // A home, the last folder, a variable or a substitution is the shell's to expand, and `..` is followed by git past a link: none is followed here.
+  const unfollowed = (to: string) => /^[-~]|\$/.test(to) || to.split("/").includes("..");
   for (const { words } of split) {
     if (["cd", "pushd"].includes(basename(unquoted(words[0] ?? "")))) {
       const to = unquoted(words[1] ?? "");
-      if (!to || /^[-~]|\$/.test(to) || to.split("/").includes("..")) return false; // a home, the last folder or a variable: not followed
+      if (!to || unfollowed(to)) return false;
       dir = resolve(dir, to);
       continue;
     }
@@ -284,13 +286,19 @@ const confinedTo = (split: { prefix: string[]; words: string[] }[], cwd: string,
     for (const [i, o] of call.options.entries()) {
       if (o !== "-C") continue;
       const to = call.options[i + 1] ?? "";
-      if (to.split("/").includes("..")) return false;
+      if (unfollowed(to)) return false;
       at = resolve(at, to);
     }
     if (!inside(worktree, homeKey(at))) return false;
   }
   return true;
 };
+/** Whether a Bash line changes what the next git call of the line would see: it links, moves, copies or removes a file, writes one with a redirect, or moves HEAD or git's config. The gate judges the line before it runs, so a commit on such a line is not judged at all. */
+const changesState = (split: { words: string[] }[]) => split.some(({ words }) => {
+  const call = gitCall(words);
+  if (call) return ["symbolic-ref", "checkout", "switch", "update-ref", "config"].includes(call.sub);
+  return ["ln", "mv", "cp", "rm"].includes(basename(unquoted(words[0] ?? ""))) || words.some((w) => w.replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, "").includes(">"));
+});
 /** `git checkout -B <name> <start>`, or `git switch -C`: it resets a branch to where it is told. */
 const movesBranch = ({ sub, rest }: NonNullable<ReturnType<typeof gitCall>>) => (sub === "checkout" && rest.some((a) => /^-[A-Za-z]*B/.test(a))) || (sub === "switch" && rest.some((a) => /^(-[A-Za-z]*C|--force-create)/.test(a)));
 /** Whether `git checkout -B <name> <start>` only moves the branch forward onto the base branch: <start> is the base branch's tip and <name> is new or an ancestor of it, so no commit is lost. */
@@ -304,10 +312,17 @@ const movesForwardOnto = (cwd: string, bases: string[], rest: string[]) => {
   return !!tip && rev(named[1]) === tip && (mine === null || git("merge-base", "--is-ancestor", mine, tip).success);
 };
 /** Whether `cwd` is in a linked worktree of the repo (`gitDir` is its common git dir) with a branch other than the base checked out: a plain folder, a `.git` file that points at main's git dir, or main checked out there is no place to commit. */
-const linkedWorktree = (cwd: string, gitDir: string, bases: string[]) => {
+const linkedWorktree = (cwd: string, gitDir: string, bases: string[], worktree: string) => {
   const git = (...args: string[]) => Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "ignore", timeout: 5000 });
   const dir = git("rev-parse", "--git-dir"), head = git("symbolic-ref", "-q", "--short", "HEAD");
-  return dir.success && inside(homeKey(join(gitDir, "worktrees")), homeKey(resolve(cwd, dir.stdout.toString().trim()))) && !bases.includes(head.stdout.toString().trim());
+  if (!dir.success || bases.includes(head.stdout.toString().trim())) return false;
+  const mine = resolve(cwd, dir.stdout.toString().trim());
+  // The git dir must be this worktree's own: it records the worktree's `.git` file, whose folder is the worktree (a rewritten pointer names another worktree's).
+  try {
+    return inside(homeKey(join(gitDir, "worktrees")), homeKey(mine)) && homeKey(dirname(readFileSync(join(mine, "gitdir"), "utf8").trim())) === worktree;
+  } catch {
+    return false;
+  }
 };
 const isLink = (file: string) => { try { return lstatSync(file).isSymbolicLink(); } catch { return false; } };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
@@ -727,7 +742,7 @@ export function startServer({
       const home = process.env.HOME ?? "";
       const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".f1rm", "kept"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
-      const inItsWorktree = !!worktree && inside(worktree, homeKey(file)) && !isLink(file) && !file.split("/").includes(".git"); // the .git file says which repo the worktree is of
+      const inItsWorktree = !!worktree && inside(worktree, homeKey(file)) && !isLink(file) && !file.split("/").some((part) => part.toLowerCase() === ".git"); // the .git file says which repo the worktree is of (APFS ignores case)
       if (!inItsWorktree && !dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
         return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
@@ -737,12 +752,15 @@ export function startServer({
     let confined = !!worktree && !/\bGIT_[A-Z_]/.test(String(input.command ?? "")) && confinedTo(split, payload.cwd, worktree);
     const lands = (w: string[]) => {
       const call = gitCall(w);
-      if (confined && (call?.sub === "commit" || (call && movesBranch(call))) && !linkedWorktree(payload.cwd, here!, baseBranches(here!))) confined = false;
-      if (confined && call?.sub === "commit") return false;
+      if (confined && (call?.sub === "commit" || (call && movesBranch(call))) && !linkedWorktree(payload.cwd, here!, baseBranches(here!), worktree!)) confined = false;
+      if (confined && call?.sub === "commit" && !changesState(split)) return false; // only as the one state-changing command of the line: the gate sees the state before the line runs
       if (subOfCoordinator && call && movesBranch(call)) return !(confined && call.sub === "checkout" && movesForwardOnto(payload.cwd, baseBranches(here!), call.rest));
       return LANDING.has(call?.sub ?? "") || ghLands(w);
     };
-    if (COORDINATORS.has(role) && commands.some(lands)) {
+    // A commit hidden in nested quotes of a substitution (`git -C "$(dirname "$(…)")" commit`) is not split into words: a sub-agent's line that names `commit` next to a substitution and has no commit call to read is refused.
+    const line = String(input.command ?? "");
+    const unreadCommit = subOfCoordinator && /\bcommit\b/.test(line) && /\$\(|`/.test(line) && !commands.some((w) => gitCall(w)?.sub === "commit");
+    if (COORDINATORS.has(role) && (unreadCommit || commands.some(lands))) {
       return refuse("landing", "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
     }
     if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");

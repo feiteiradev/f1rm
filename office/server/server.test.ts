@@ -2017,6 +2017,9 @@ async function ownerOffice() {
   mkdirSync(`${repo}/.claude/worktrees/hijack`);
   writeFileSync(`${repo}/.claude/worktrees/hijack/.git`, `gitdir: ${repo}/.git\n`);
   git("worktree", "add", "-q", "--force", ".claude/worktrees/on-main", "main");
+  // A folder whose .git file points at ANOTHER worktree's git dir (a rewritten pointer).
+  mkdirSync(`${repo}/.claude/worktrees/swap`);
+  writeFileSync(`${repo}/.claude/worktrees/swap/.git`, `gitdir: ${repo}/.git/worktrees/add-b\n`);
   afterEachRestore = () => (rmSync(repo, { recursive: true, force: true }), rmSync(beside, { recursive: true, force: true }));
   start({ [repo]: join(repo, ".git") }, undefined, undefined, { junkRoots: [] });
   for (const [id, type, session_title] of [["p", "f1rm:pm", "p-title"], ["l", "f1rm:lead", "lead-checkout"], ["b", "f1rm:backend-dev", "checkout.backend-dev-add-a"], ["d", "f1rm:designer", "d-title"]] as const) {
@@ -2068,7 +2071,7 @@ test("a PM's or lead's sub-agent commits in its own worktree; in the main checko
   for (const id of ["p", "l"]) {
     for (const [command, cwd] of [
       ["git add -A && git commit -m 'task: x; y'", a], ["git commit -m x", `${a}/src`], [`git -C ${a} commit -m x`, a], [`cd ${a}/src && git commit -m x`, a], ["cd src && git commit -m x", a], ["git -C . commit -m x", a], ["git -C src commit -m x", a],
-      ["git add -A", a], ["git status", a], ["git diff HEAD", a], ["git log --oneline", a], ["git branch -m worktree-new", a], ["git commit --amend --no-edit", a], ["time git commit -m x", a],
+      ["git add -A", a], ["git status", a], ["git diff HEAD", a], ["git log --oneline", a], ["git branch -m worktree-new", a], ["git commit --amend --no-edit", a], ["time git commit -m x", a], ["bun test && git add -A && git commit -m 'a > b'", a], ["git status && git diff --stat && git commit -am x", a],
     ] as const) expect([id, command, cwd, await bash(id, command, cwd)]).toEqual([id, command, cwd, null]);
     for (const [command, cwd] of [
       ["git commit -m x", repo], ["git commit -m x", beside], ["git commit -m x", `${repo}/.claude`], ["git commit -m x", `${repo}/.claude/worktrees`], ["git commit -m x", `${a}/out`], ["git commit -m x", `${beside}/to-main`],
@@ -2101,7 +2104,7 @@ test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push,
       expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
     }
     // The one move forward it needs: its branch is behind main, so main's tip loses nothing.
-    for (const command of [`git checkout -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main.slice(0, 9)}`, "git checkout -B worktree-add-a main", `git checkout -B worktree-new ${main}`, `git checkout -q -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main} && git commit -m x`]) {
+    for (const command of [`git checkout -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main.slice(0, 9)}`, "git checkout -B worktree-add-a main", `git checkout -B worktree-new ${main}`, `git checkout -q -B worktree-add-a ${main}`, `git checkout -B worktree-add-a ${main} && git status`]) {
       expect([id, command, await bash(id, command, a)]).toEqual([id, command, null]);
     }
     for (const command of ["git push", "git push origin HEAD", "git -C . push --force", "git commit -m x && git push"]) {
@@ -2124,8 +2127,8 @@ test("a PM's or lead's sub-agent cannot turn its worktree into the main checkout
   const { repo, a, main, bash, call } = await ownerOffice();
   const plain = `${repo}/.claude/worktrees/plain`, hijack = `${repo}/.claude/worktrees/hijack`, onMain = `${repo}/.claude/worktrees/on-main`;
   for (const id of ["p", "l"]) {
-    for (const file of [`${a}/.git`, `${a}/sub/.git/config`, "../.git"]) {
-      const out = await call(id, "Write", { file_path: file }, file === "../.git" ? `${a}/sub` : a);
+    for (const file of [`${a}/.git`, `${a}/.GIT`, `${a}/.Git`, `${a}/sub/.GiT/config`, `${a}/sub/.git/config`, "../.git", "../.GIT"]) {
+      const out = await call(id, "Write", { file_path: file }, file.startsWith("../") ? `${a}/sub` : a);
       expect([id, file, out?.permissionDecision]).toEqual([id, file, "deny"]);
       expect(out.permissionDecisionReason).toBe(WRITE_REFUSAL);
     }
@@ -2135,6 +2138,14 @@ test("a PM's or lead's sub-agent cannot turn its worktree into the main checkout
       [`export GIT_DIR=${repo}/.git; git commit -m x`, a], [`GIT_AUTHOR_NAME=x git commit -m x`, a], ["declare -x GIT_WORK_TREE=/x; git commit -m x", a],
       ["git -C out/.. commit -m x", a], ["cd out/.. && git commit -m x", a], ["git -C src/../.. commit -m x", a],
       [`git checkout -B main ${main}`, a], [`git checkout --ignore-other-worktrees -B main ${main}`, a],
+      // the pointer file names another worktree's git dir
+      ["git commit -m x", `${repo}/.claude/worktrees/swap`],
+      // a home, a variable or a substitution in -C is not followed
+      [`git -C ~/${basename(repo)} commit -m x`, a], [`git -C '$HOME/${basename(repo)}' commit -m x`, a], [`git -C "$HOME/${basename(repo)}" commit -a -m x`, a], [`git -C "$(dirname "$(git rev-parse --git-common-dir)")" commit -m x`, a], ["git -C $REPO commit -m x", a], ["git -C ~ commit -m x", a],
+      // a state change on the same line is judged before the line runs
+      ["git symbolic-ref HEAD refs/heads/main && git commit --allow-empty -m x", a], ["git checkout --ignore-other-worktrees main && git commit -m x", a], ["git checkout worktree-add-b && git commit -m x", a], ["git switch main && git commit -m x", a],
+      [`ln -s ${repo} m && git -C m commit -a -m x`, a], [`ln -s ${repo} m && cd m && git commit -m x`, a], [`git update-ref HEAD ${main} && git commit -m x`, a], ["mv .git .gone && git commit -m x", a], ["cp x y && git commit -m x", a], ["rm .git && git commit -m x", a],
+      [`git config core.worktree ${repo} && git commit -m x`, a], ["printf 'gitdir: x' > .git && git commit -m x", a], ["echo x >.git; git commit -m x", a], [`git checkout -B worktree-add-a ${main} && git commit -m x`, a],
     ] as const) {
       const out = await bash(id, command, cwd);
       expect([id, command, cwd, out?.permissionDecision]).toEqual([id, command, cwd, "deny"]);
