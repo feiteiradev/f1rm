@@ -1,7 +1,10 @@
 // `f1rm letgo`, and the office's safety net: let a finished hire go, archive what it left unfinished, then remove its worktree and branch.
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname } from "node:path";
 import { git, worktreesOf } from "../server/checkpoint.ts";
 import type { machine, Session } from "../server/machine.ts";
+import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { archiveWork, filesText } from "./archive.ts";
 import { readRoles, SLUG } from "./hire.ts";
 
@@ -37,8 +40,9 @@ export function hireTask(name: string): { task: string; reviewer: boolean } | nu
 export const repoOf = (cwd: string) => cwd.split("/.claude/worktrees/")[0];
 
 /**
- * Lets a session go, archives the worktree's unfinished work under refs/f1rm/archive/<task> first (the session that is `first` of its name does), and, if it is the `last` of its name, removes the worktree and branch.
- * Nothing is refused for uncommitted files or an unmerged branch: it is all archived. A failing archive lets nobody go and removes nothing. Throws if the session can't be let go.
+ * Lets a session go: stops it, then (for the `first` session of its name) archives the worktree's unfinished work under refs/f1rm/archive/<task>, so nothing it writes while stopping is lost,
+ * then (for the `last` one) removes the worktree and branch with git before `claude rm` runs, so that has no files to refuse.
+ * Nothing is refused for uncommitted files or an unmerged branch: it is all archived. A failing archive removes nothing and lets nobody go. Throws if the session can't be let go.
  */
 export async function letGoHire(m: Pick<M, "letGo" | "removeWorktree">, s: Session, repo: string, { first = true, last = true } = {}): Promise<string> {
   const hire = hireTask(s.name);
@@ -50,36 +54,65 @@ export async function letGoHire(m: Pick<M, "letGo" | "removeWorktree">, s: Sessi
   }
   const branch = `worktree-${task}`;
   let kept = "";
-  if (first) {
-    try {
-      const a = archiveWork(repo, task);
-      kept = a ? `archived its work as ${a.ref} (${filesText(a)})` : "";
-    } catch (err) {
-      return `${s.name}: ${NOT_LET_GO} could not archive its work: ${(err as Error).message}`;
+  let archiveError: Error | null = null;
+  let removeError = "";
+  const afterStop = () => {
+    if (first) {
+      try {
+        const a = archiveWork(repo, task);
+        kept = a ? `archived its work as ${a.ref} (${filesText(a)})` : "";
+      } catch (err) {
+        archiveError = err as Error;
+        throw err;
+      }
     }
-  }
-  // What is archived may be discarded: `claude rm` refuses a worktree with uncommitted files or unpushed commits otherwise.
-  await m.letGo(s.id, { discardIn: repo, discardAny: true });
-  if (!last) return `${s.name}: let go${kept && `, ${kept}`}`; // another session of this name is still to go: the worktree and branch are removed after it
+    if (!last) return; // another session of this name is still to go: the worktree and branch are removed after it
+    try {
+      m.removeWorktree(repo, task, true);
+    } catch (err) {
+      removeError = (err as Error).message;
+    }
+  };
   try {
-    m.removeWorktree(repo, task, true);
+    // What is archived may be discarded: the removal of an earlier session of the name still meets the worktree, which it refuses with uncommitted files or unpushed commits otherwise.
+    await m.letGo(s.id, { discardIn: repo, discardAny: true, afterStop });
   } catch (err) {
-    return `${s.name}: let go, ${kept && `${kept}, `}kept ${branch} and its worktree: ${(err as Error).message}`;
+    if (archiveError) return `${s.name}: ${NOT_LET_GO} could not archive its work (the session is stopped): ${(archiveError as Error).message}`;
+    throw err;
   }
-  return `${s.name}: let go, ${kept && `${kept}, `}removed its worktree and branch ${branch}`;
+  if (!last) return `${s.name}: let go${kept && `, ${kept}`}`;
+  const said = kept && `${kept}, `;
+  return removeError ? `${s.name}: let go, ${said}kept ${branch} and its worktree: ${removeError}` : `${s.name}: let go, ${said}removed its worktree and branch ${branch}`;
 }
 
-/** Archives and removes every worktree under `.claude/worktrees` and every `worktree-*` branch of `repo` that no live session works in; the live ones are listed and skipped. It never runs `claude rm`. */
-function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[]): { lines: string[]; ok: boolean } {
-  const taskIn = (cwd: string) => (repoOf(cwd) === repo ? cwd.split("/.claude/worktrees/")[1]?.split("/")[0] : undefined);
-  const live = new Map(all.filter((s) => s.pid && taskIn(s.cwd)).map((s) => [taskIn(s.cwd)!, s.name]));
+/**
+ * Archives and removes every worktree under `.claude/worktrees` and every `worktree-*` branch of `repo` that no session works in. A worktree with a session that is not done (stopped by a pause,
+ * blocked on a limit, failed, running, or a finished one whose process lives) is listed and skipped: `f1rm wake` may resume it. It never stops or removes a session. Refuses while the project is paused.
+ */
+function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[], home: string): { lines: string[]; ok: boolean } {
+  const paused = readPaused(pausedFile(pausedDirOf(home), repo));
+  if (paused) throw new Error(`${basename(repo)} is paused (${paused.by}${paused.why ? `: ${paused.why}` : ""}): its stopped sessions are resumed by \`f1rm resume\`, so nothing is cleaned up until then`);
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const root = real(repo) + "/.claude/worktrees/";
+  const taskIn = (cwd: string) => {
+    const at = real(cwd);
+    return at.startsWith(root) ? at.slice(root.length).split("/")[0] : undefined;
+  };
+  const busy = new Map(all.filter((s) => (s.state !== "done" || s.pid) && taskIn(s.cwd)).map((s) => [taskIn(s.cwd)!, s]));
   const branches = (git(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads/worktree-*"]) ?? "").split("\n").filter(Boolean).map((b) => b.slice("worktree-".length));
   const tasks = [...new Set([...worktreesOf(repo).map((p) => basename(p)), ...branches])].sort();
   const lines: string[] = [];
   let ok = true;
   for (const task of tasks) {
-    if (live.has(task)) {
-      lines.push(`${task}: live session ${live.get(task)} works in it, skipped`);
+    const s = busy.get(task);
+    if (s) {
+      lines.push(`${task}: session ${s.name} (${s.state}) works in it, skipped`);
       continue;
     }
     let kept = "";
@@ -102,8 +135,8 @@ function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[]): 
   return { lines, ok };
 }
 
-/** Runs `f1rm letgo <name>...` or `f1rm letgo --leftovers` in `cwd`: one line per name, and `ok` false if any name wasn't found or couldn't be let go. */
-export async function letgo(names: string[], m: M, cwd: string): Promise<{ lines: string[]; ok: boolean }> {
+/** Runs `f1rm letgo <name>...` or `f1rm letgo --leftovers` in `cwd`: one line per name, and `ok` false if any name wasn't found or couldn't be let go. `home` is where the pause flags are. */
+export async function letgo(names: string[], m: M, cwd: string, home = process.env.HOME ?? homedir()): Promise<{ lines: string[]; ok: boolean }> {
   const common = m.gitCommonDir(cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
@@ -111,7 +144,7 @@ export async function letgo(names: string[], m: M, cwd: string): Promise<{ lines
   if (!all) throw new Error("can't list the sessions (`claude agents --json --all` failed)");
   if (names.includes("--leftovers")) {
     if (names.length > 1) throw new Error("usage: f1rm letgo --leftovers (it takes no names)");
-    return leftovers(m, repo, all);
+    return leftovers(m, repo, all, home);
   }
   const lines: string[] = [];
   let ok = true;

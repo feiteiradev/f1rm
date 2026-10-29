@@ -21,7 +21,7 @@ export const git = (cwd: string, args: string[], env: Record<string, string> = {
 };
 
 /**
- * The tree of the worktree at `dir` as it is: HEAD plus uncommitted, staged and untracked files (ignored ones are not, nor the globs in `exclude`), built in a temporary index.
+ * The tree of the worktree at `dir` as it is: HEAD plus uncommitted, staged and untracked files (ignored ones are not, nor the untracked ones matching the globs in `exclude`), built in a temporary index.
  * `dirty` says the tree differs from HEAD's. Null when `dir` is no worktree with a commit.
  * ponytail: synchronous git, so a very big worktree holds the office's event loop for as long as `git add -A` takes; make it async if that is felt.
  */
@@ -32,6 +32,8 @@ export function snapshotTree(dir: string, exclude: string[] = []): { head: strin
   try {
     const env = { GIT_INDEX_FILE: join(scratch, "index") };
     if (git(dir, ["read-tree", "HEAD"], env) === null || git(dir, ["add", "-A", "--", ".", ...exclude.map((g) => `:(exclude,glob)${g}`)], env) === null) return null;
+    // An exclude pathspec also hides a tracked file's edits and deletion: the excludes are for untracked files only.
+    if (exclude.length && git(dir, ["add", "-u"], env) === null) return null;
     const tree = git(dir, ["write-tree"], env);
     return tree ? { head, tree, dirty: tree !== git(dir, ["rev-parse", "HEAD^{tree}"]) } : null;
   } finally {

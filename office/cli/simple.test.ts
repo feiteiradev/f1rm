@@ -112,9 +112,12 @@ test("f1rm letgo lets a simple dev go like a team member: its session, then its 
   const m = {
     gitCommonDir: () => `${REPO}/.git`,
     sessions: async () => [{ kind: "background", name: "backend-dev-x", cwd: wt("x"), id: "i1", sessionId: "s1" }],
-    letGo: async (id: string) => void calls.push(`letgo ${id}`),
+    letGo: async (id: string, o?: { afterStop?: () => void }) => {
+      o?.afterStop?.();
+      calls.push(`letgo ${id}`);
+    },
     removeWorktree: (_repo: string, task: string) => void calls.push(`rm ${task}`),
   } as unknown as Parameters<typeof letgo>[1];
   expect(await letgo(["backend-dev-x"], m, REPO)).toEqual({ lines: ["backend-dev-x: let go, removed its worktree and branch worktree-x"], ok: true });
-  expect(calls).toEqual(["letgo i1", "rm x"]);
+  expect(calls).toEqual(["rm x", "letgo i1"]); // the worktree goes after the stop and before claude rm
 });

@@ -734,6 +734,8 @@ export function startServer({
         }
       }
     }
+    // `f1rm archives --prune` deletes archives (any spelling of the flag): the PM's, and the user's terminal's.
+    if (commands.some((c) => hireArgs(c, "archives")?.some((a) => a.includes("prune"))) && (role !== "pm" || payload.agent_id)) return refuse("prune", "Only the PM prunes the archives (`f1rm archives --prune`), at the end of a milestone. Ask the PM.");
     // `f1rm pause` and `f1rm resume` act on the project of the folder they run in: of the company's sessions only its PM runs them, never its intern (`--all` is refused above, for everyone).
     const pausing = commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)));
     if (pausing && (role !== "pm" || payload.agent_id)) return refuse("pause", "Only the PM pauses and resumes its project. Send what you need to the session named in your brief's Report to.");
@@ -1460,10 +1462,17 @@ export function startServer({
       const now = clock();
       const all = (await machine.sessions()) ?? [];
       const seen = new Set<string>();
+      // A task another session still works on (a woken hire, a stopped or blocked one that `f1rm wake` may resume) keeps its worktree, whatever stale done entry of its name is listed.
+      const taskOf = (name: string) => {
+        const h = hireTask(name);
+        return h && !h.reviewer ? h.task : undefined;
+      };
+      const inUse = new Set(all.filter((s) => s.state !== "done").flatMap((s) => [taskOf(s.name), s.cwd.split("/.claude/worktrees/")[1]?.split("/")[0]]));
       for (const s of all) {
         const hire = s.kind === "background" && s.state === "done" ? hireTask(s.name) : null;
         if (!hire) continue;
         seen.add(s.id);
+        if (inUse.has(hire.task)) continue;
         const since = doneSince.get(s.id) ?? now;
         doneSince.set(s.id, since);
         const repo = repoOf(s.cwd);

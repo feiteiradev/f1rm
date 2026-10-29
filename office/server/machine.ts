@@ -304,10 +304,12 @@ export const machine = {
    * Stops a background session and removes it. `rm` right after `stop` can exit 0 and leave the session, so it
    * is repeated until `claude agents --json --all` no longer lists the id. Throws what claude said if `rm` refuses (uncommitted or unpushed work), or if the session is still listed after `tries`.
    */
-  async letGo(id: string, { tries = 10, waitMs = 1000, discardIn = "", discardAny = false } = {}): Promise<void> {
+  async letGo(id: string, { tries = 10, waitMs = 1000, discardIn = "", discardAny = false, afterStop }: { tries?: number; waitMs?: number; discardIn?: string; discardAny?: boolean; afterStop?: () => void | Promise<void> } = {}): Promise<void> {
     if (!SAFE_ID.test(id)) throw new Error("bad background session id");
     // A session that already ended makes `stop` fail, and `rm` works on it all the same.
     await claude("stop", id);
+    // What the caller does once the session writes no more (archive its worktree, remove it): if it throws, nothing is removed.
+    await afterStop?.();
     // `rm` refuses a worktree whose commits are on no remote, and nobody pushes here. With `discardIn` (the repo's main working
     // directory), the commits it names are discarded only when they are already in the branch checked out there: merged work. `discardAny` is for work that was archived first.
     let discard: string[] = [];

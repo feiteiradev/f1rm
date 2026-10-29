@@ -1208,7 +1208,8 @@ function fakeClaude(sessions: { id: string; name: string; kind?: string; state?:
   return {
     calls,
     sessions: async () => live.slice(),
-    letGo: async (id: string) => {
+    letGo: async (id: string, o?: { afterStop?: () => void }) => {
+      o?.afterStop?.();
       if (failRm.has(id)) throw new Error("rm refused: uncommitted work");
       calls.push(`letgo ${id}`);
       live.splice(live.findIndex((s) => s.id === id), 1);

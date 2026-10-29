@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { machine } from "../server/machine.ts";
+import { pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
 import { archiveWork, archivesIn, listArchives, pruneArchives } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 
@@ -84,6 +85,8 @@ test("archiveWork keeps a clean worktree's unmerged commits, and nothing of a me
   symlinkSync(join(repo, "node_modules"), join(junky, "node_modules"));
   mkdirSync(join(junky, "pkg", "node_modules", "dep"), { recursive: true });
   writeFileSync(join(junky, "pkg", "node_modules", "dep", "i.js"), "1");
+  writeFileSync(join(junky, ".impeccable", "hook.cache.json"), "{}");
+  writeFileSync(join(repo, ".git", "info", "exclude"), ".claude/settings.local.json\n.impeccable/hook.cache.json\n"); // a gitignore that names a junk file too
   writeFileSync(join(junky, "base.txt.swp"), "swap");
   writeFileSync(join(junky, "base.txt~"), "backup");
   expect(archiveWork(repo, "merged")).toBeNull();
@@ -99,10 +102,14 @@ test("archiveWork keeps junk out of a snapshot that has real work next to it", (
   const dir = wt(repo, "mixed");
   writeFileSync(join(dir, "real.txt"), "real\n");
   writeFileSync(join(dir, ".DS_Store"), "x");
-  mkdirSync(join(dir, ".impeccable"), { recursive: true });
-  writeFileSync(join(dir, ".impeccable", "a.json"), "{}");
+  mkdirSync(join(dir, ".impeccable", "review"), { recursive: true });
+  writeFileSync(join(dir, ".impeccable", "review", "desktop.png"), "png");
+  writeFileSync(join(dir, ".impeccable", "config.json"), "{}");
+  mkdirSync(join(dir, ".claude", "skills", "foo"), { recursive: true });
+  writeFileSync(join(dir, ".claude", "skills", "foo", "SKILL.md"), "skill");
+  writeFileSync(join(dir, ".claude", "settings.local.json"), "{}");
   const a = archiveWork(repo, "mixed")!;
-  expect(git(repo, "ls-tree", "-r", "--name-only", a.ref).split("\n")).toEqual(["base.txt", "real.txt"]);
+  expect(git(repo, "ls-tree", "-r", "--name-only", a.ref).split("\n")).toEqual([".claude/skills/foo/SKILL.md", ".impeccable/config.json", "base.txt", "real.txt"]);
 });
 
 test("a second archive of a task keeps the first under <task>-1", () => {
@@ -172,18 +179,28 @@ test("archives prints a line when there are none, and refuses a flag it does not
 });
 
 // letgo over a fake claude (the sessions it lists, stop and rm) with the real repo, so the archive and the removal are real git.
-function fakeClaude(sessions: { id: string; name: string; kind?: string; state?: string; cwd: string; pid?: number }[]) {
+function fakeClaude(sessions: { id: string; name: string; kind?: string; state?: string; cwd: string; pid?: number }[], onStop: (cwd: string) => void = () => {}) {
   const live = sessions.map((s) => ({ kind: "background", state: "done", ...s }));
   const calls: string[] = [];
+  const stops: string[] = [];
   const opts: unknown[] = [];
+  const worktreeAtRm: boolean[] = [];
   return {
     calls,
+    stops,
     opts,
+    worktreeAtRm,
     sessions: async () => live.slice(),
-    letGo: async (id: string, o?: unknown) => {
+    // As machine.letGo: stop, then afterStop, then rm.
+    letGo: async (id: string, o?: { discardIn?: string; discardAny?: boolean; afterStop?: () => void | Promise<void> }) => {
+      const s = live.find((x) => x.id === id)!;
+      stops.push(id);
+      onStop(s.cwd);
+      await o?.afterStop?.();
+      worktreeAtRm.push(existsSync(s.cwd));
       calls.push(`letgo ${id}`);
-      opts.push(o);
-      live.splice(live.findIndex((s) => s.id === id), 1);
+      opts.push(o && { discardIn: o.discardIn, discardAny: o.discardAny });
+      live.splice(live.indexOf(s), 1);
     },
     gitCommonDir: machine.gitCommonDir,
     removeWorktree: machine.removeWorktree,
@@ -223,7 +240,8 @@ test("letgo whose archive fails lets nobody go and removes nothing", async () =>
   const fake = fakeClaude([{ id: "c1", name: "backend-dev-clash", cwd: wt(repo, "clash") }]);
   const r = await letgo(["backend-dev-clash"], fake, repo);
   expect(r.ok).toBe(false);
-  expect(r.lines[0]).toMatch(/^backend-dev-clash: not let go: could not archive its work: /);
+  expect(r.lines[0]).toMatch(/^backend-dev-clash: not let go: could not archive its work \(the session is stopped\): /);
+  expect(fake.stops).toEqual(["c1"]); // stopped first, so nothing more is written, but not removed
   expect(fake.calls).toEqual([]);
   expect(existsSync(join(wt(repo, "clash"), "a.txt"))).toBe(true);
   expect(branches(repo)).toEqual(["main", "worktree-clash"]);
@@ -255,12 +273,12 @@ test("letgo --leftovers archives and removes every worktree and worktree-* branc
   git(repo, "branch", "elsewhere"); // not ours
   const fake = fakeClaude([
     { id: "b1", name: "backend-dev-busy", cwd: wt(repo, "busy"), state: "working", pid: 4242 },
-    { id: "d1", name: "backend-dev-dead", cwd: wt(repo, "dead"), state: "stopped" },
+    { id: "d1", name: "backend-dev-dead", cwd: wt(repo, "dead"), state: "done" },
   ]);
-  const r = await letgo(["--leftovers"], fake, repo);
+  const r = await letgo(["--leftovers"], fake, repo, tmp());
   expect(r.ok).toBe(true);
   expect(r.lines).toEqual([
-    "busy: live session backend-dev-busy works in it, skipped",
+    "busy: session backend-dev-busy (working) works in it, skipped",
     "clean: removed its worktree and branch worktree-clean",
     "dead: archived its work as refs/f1rm/archive/dead (1 file), removed its worktree and branch worktree-dead",
     "orphan: archived its work as refs/f1rm/archive/orphan (0 files), removed its worktree and branch worktree-orphan",
@@ -278,10 +296,103 @@ test("letgo --leftovers takes no names, and fails and removes nothing of a task 
   writeFileSync(join(wt(repo, "clash"), "a.txt"), "a\n");
   git(repo, "update-ref", "refs/f1rm/archive/clash/inner", "HEAD");
   const fake = fakeClaude([]);
-  const r = await letgo(["--leftovers"], fake, repo);
+  const r = await letgo(["--leftovers"], fake, repo, tmp());
   expect(r.ok).toBe(false);
   expect(r.lines[0]).toMatch(/^clash: not removed: could not archive its work: /);
   expect(existsSync(join(wt(repo, "clash"), "a.txt"))).toBe(true);
   expect(branches(repo)).toEqual(["main", "worktree-clash"]);
   await expect(letgo(["--leftovers", "backend-dev-x"], fake, repo)).rejects.toThrow(/--leftovers/);
+});
+
+test("archiveWork keeps edits and deletions of TRACKED files under junk paths: only untracked junk is left out", () => {
+  const repo = tmp();
+  git(repo, "init", "-b", "main");
+  for (const [f, c] of [["base.txt", "base"], [".claude/settings.json", "{}"], [".impeccable/config.json", "{}"], ["notes~", "n"], ["vendor/node_modules/x.js", "1"], [".DS_Store", "d"], ["gone.swp", "g"]] as const) {
+    mkdirSync(join(repo, f, ".."), { recursive: true });
+    writeFileSync(join(repo, f), c);
+  }
+  git(repo, "add", "-f", ".");
+  git(repo, "commit", "-m", "start");
+  git(repo, "worktree", "add", "-b", "worktree-tracked", wt(repo, "tracked"));
+  const dir = wt(repo, "tracked");
+  for (const f of [".claude/settings.json", ".impeccable/config.json", "notes~", "vendor/node_modules/x.js", ".DS_Store"]) writeFileSync(join(dir, f), "edited");
+  rmSync(join(dir, "gone.swp"));
+  writeFileSync(join(dir, "other.swp"), "untracked junk");
+  const a = archiveWork(repo, "tracked")!;
+  for (const f of [".claude/settings.json", ".impeccable/config.json", "notes~", "vendor/node_modules/x.js", ".DS_Store"]) expect([f, git(repo, "show", `${a.ref}:${f}`)]).toEqual([f, "edited"]);
+  const kept = git(repo, "ls-tree", "-r", "--name-only", a.ref);
+  expect(kept).not.toContain("gone.swp");
+  expect(kept).not.toContain("other.swp");
+});
+
+test("archiveWork also keeps the branch tip when the worktree's HEAD is another branch, since the branch is deleted", () => {
+  const repo = repoWith("moved");
+  const dir = wt(repo, "moved");
+  git(dir, "checkout", "-b", "other");
+  writeFileSync(join(dir, "o.txt"), "o\n");
+  git(dir, "add", "o.txt");
+  git(dir, "commit", "-m", "on other");
+  const tip = git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "on the task branch");
+  git(repo, "branch", "-f", "worktree-moved", tip);
+  const a = archiveWork(repo, "moved")!;
+  expect(git(repo, "merge-base", "--is-ancestor", tip, a.ref)).toBe("");
+  expect(git(repo, "merge-base", "--is-ancestor", "other", a.ref)).toBe("");
+});
+
+test("archiveWork refuses a worktree with a repository inside it: its files would be lost as an empty gitlink", () => {
+  const repo = repoWith("nested");
+  const inner = join(wt(repo, "nested"), "inner");
+  mkdirSync(inner);
+  git(inner, "init", "-b", "main");
+  writeFileSync(join(inner, "f.txt"), "f");
+  git(inner, "add", "f.txt");
+  git(inner, "commit", "-m", "inner");
+  expect(() => archiveWork(repo, "nested")).toThrow(/repository inside it: inner/);
+  expect(refs(repo)).toEqual([]);
+});
+
+test("pruneArchives skips a ref whose date it cannot read, and the archive of a task whose worktree still exists", () => {
+  const repo = repoWith("alive");
+  const now = Date.UTC(2026, 9, 29, 12);
+  oldCommit(repo, "alive", 45, now);
+  oldCommit(repo, "gone", 45, now);
+  git(repo, "update-ref", "refs/f1rm/archive/weird", git(repo, "rev-parse", "HEAD^{tree}")); // a ref with no commit date
+  expect(pruneArchives(repo, now).map((a) => a.task)).toEqual(["gone"]);
+  expect(refs(repo)).toEqual(["refs/f1rm/archive/alive", "refs/f1rm/archive/weird"]);
+});
+
+test("letgo stops the session first and archives after, so what it writes while stopping is kept; git removes the worktree before claude rm", async () => {
+  const repo = repoWith("late");
+  const fake = fakeClaude([{ id: "l1", name: "backend-dev-late", cwd: wt(repo, "late") }], (cwd) => writeFileSync(join(cwd, "late.txt"), "written as it stopped\n"));
+  const r = await letgo(["backend-dev-late"], fake, repo);
+  expect(r.ok).toBe(true);
+  expect(git(repo, "show", "refs/f1rm/archive/late:late.txt")).toBe("written as it stopped");
+  expect(fake.worktreeAtRm).toEqual([false]); // claude rm meets no worktree, so there is nothing for it to refuse
+  expect(branches(repo)).toEqual(["main"]);
+});
+
+test("letgo --leftovers skips every worktree with a session that is not done (stopped, blocked, failed, running, through a linked path too), and removes the one whose sessions are done", async () => {
+  const tasks = ["paused", "limit", "failed", "linked", "finished"];
+  const repo = repoWith(...tasks);
+  for (const t of tasks) writeFileSync(join(wt(repo, t), "w.txt"), t);
+  const link = join(tmp(), "link");
+  symlinkSync(repo, link);
+  const fake = fakeClaude([
+    { id: "p1", name: "backend-dev-paused", cwd: wt(repo, "paused"), state: "stopped" },
+    { id: "b1", name: "backend-dev-limit", cwd: wt(repo, "limit"), state: "blocked" },
+    { id: "f1", name: "backend-dev-failed", cwd: wt(repo, "failed"), state: "failed" },
+    { id: "k1", name: "backend-dev-linked", cwd: join(link, ".claude", "worktrees", "linked"), state: "working", pid: 7 },
+    { id: "d1", name: "backend-dev-finished", cwd: wt(repo, "finished"), state: "done" },
+  ]);
+  const r = await letgo(["--leftovers"], fake, repo, tmp());
+  expect(r.lines.map((l) => `${l.split(":")[0]} ${l.includes("skipped") ? "skipped" : "removed"}`)).toEqual(["failed skipped", "finished removed", "limit skipped", "linked skipped", "paused skipped"]);
+  expect(branches(repo)).toEqual(["main", "worktree-failed", "worktree-limit", "worktree-linked", "worktree-paused"]);
+});
+
+test("letgo --leftovers refuses while the project is paused", async () => {
+  const repo = repoWith("held");
+  const home = tmp();
+  writePaused(pausedFile(pausedDirOf(home), repo), { by: "manual", at: Date.now(), why: "lunch" });
+  await expect(letgo(["--leftovers"], fakeClaude([]), repo, home)).rejects.toThrow(/is paused/);
+  expect(existsSync(wt(repo, "held"))).toBe(true);
 });

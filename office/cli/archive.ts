@@ -9,8 +9,11 @@ export type Archive = { task: string; ref: string; sha: string; at: number; file
 const PREFIX = "refs/f1rm/archive/";
 const KEEP_MS = 30 * 86_400_000;
 
-/** Tool litter that is never work: `claude`'s own folder, Impeccable's live state, Finder's file, installed packages (a symlink too), editor swap and backup files. */
-export const JUNK = [".claude/**", ".impeccable/**", "**/.DS_Store", "**/node_modules", "**/node_modules/**", "**/*.swp", "**/*.swo", "**/*~", "**/.#*"];
+/**
+ * Untracked tool litter that is never work: Claude Code's worktrees, local settings and lock, Impeccable's cache, logs, screenshots and live state, Finder's file, installed packages (a symlink too),
+ * editor swap and backup files. No literal file name stands alone: `git add` fails when an excluded path is also in a gitignore. Narrow on purpose: a new `.claude/skills/x/SKILL.md` or `.impeccable/config.json` is work. A TRACKED file is never junk (see snapshotTree).
+ */
+export const JUNK = [".claude/worktrees/**", ".claude/*.local.json", ".claude/*.lock", ".impeccable/hook.cache.*", ".impeccable/live/**", ".impeccable/questions/**", ".impeccable/review/**", ".impeccable/shots/**", "**/.DS_Store", "**/node_modules", "**/node_modules/**", "**/*.swp", "**/*.swo", "**/*~", "**/.#*"];
 
 const inBase = (repo: string, rev: string) => git(repo, ["merge-base", "--is-ancestor", rev, "HEAD"]) !== null;
 const refExists = (repo: string, ref: string) => git(repo, ["rev-parse", "--verify", "-q", ref]) !== null;
@@ -43,12 +46,20 @@ export function archiveWork(repo: string, task: string): Archive | null {
     const tree = tip && git(repo, ["rev-parse", `${tip}^{tree}`]);
     if (tip && tree) from = { head: tip, tree, dirty: false };
   }
-  if (!from || (!from.dirty && inBase(repo, from.head))) return null;
+  if (!from) return null;
+  // A worktree on another branch leaves `worktree-<task>` out of its HEAD, and removing the task deletes that branch: its tip is kept as a second parent.
+  const branchTip = git(repo, ["rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`]);
+  const extra = branchTip && branchTip !== from.head && !inBase(repo, branchTip) ? branchTip : null;
+  if (!from.dirty && !extra && inBase(repo, from.head)) return null;
+  // A repository inside the worktree would be saved as an empty gitlink and its files lost.
+  const nested = (git(repo, ["diff-tree", "-r", "--raw", "--no-renames", from.head, from.tree]) ?? "").split("\n").filter((l) => /^:\d+ 160000 \S+ \S+ A\t/.test(l)).map((l) => l.split("\t")[1]);
+  if (nested.length) throw new Error(`the worktree has a git repository inside it: ${nested[0]}; move or remove it first`);
+  const parents = extra ? [from.head, extra] : [from.head];
   const ref = PREFIX + task;
   const old = git(repo, ["rev-parse", "--verify", "-q", ref]);
   // The same work again (a let-go retried after `claude rm` failed) is already kept.
-  if (old && git(repo, ["rev-parse", `${old}^{tree}`]) === from.tree && git(repo, ["rev-parse", `${old}^`]) === from.head) return listArchives(repo).find((a) => a.ref === ref)!;
-  const sha = git(repo, ["commit-tree", from.tree, "-p", from.head, "-m", `wip: ${task}`]);
+  if (old && git(repo, ["rev-parse", `${old}^{tree}`]) === from.tree && git(repo, ["rev-list", "--parents", "-n1", old]) === [old, ...parents].join(" ")) return listArchives(repo).find((a) => a.ref === ref)!;
+  const sha = git(repo, ["commit-tree", from.tree, ...parents.flatMap((p) => ["-p", p]), "-m", `wip: ${task}`]);
   if (!sha) throw new Error("git commit-tree failed");
   if (old) {
     let n = 1;
@@ -64,17 +75,17 @@ export function listArchives(repo: string): Archive[] {
   const out = git(repo, ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(committerdate:unix)", PREFIX]) ?? "";
   return out.split("\n").filter(Boolean).map((line) => {
     const [ref, sha, at] = line.split("\t");
-    return archiveOf(repo, ref.slice(PREFIX.length), sha, Number(at) * 1000);
+    return archiveOf(repo, ref.slice(PREFIX.length), sha, at ? Number(at) * 1000 : NaN); // a ref with no commit date has no age
   });
 }
 
-/** Deletes the archives older than 30 days and returns them. */
+/** Deletes the archives older than 30 days and returns them. A ref with no readable date, and the archive of a task whose worktree still exists, stay. */
 export function pruneArchives(repo: string, now: number): Archive[] {
-  return listArchives(repo).filter((a) => now - a.at > KEEP_MS && git(repo, ["update-ref", "-d", a.ref]) !== null);
+  return listArchives(repo).filter((a) => now - a.at > KEEP_MS && !existsSync(join(repo, ".claude", "worktrees", a.task)) && git(repo, ["update-ref", "-d", a.ref]) !== null);
 }
 
 export const filesText = (a: Pick<Archive, "files">) => `${a.files} file${a.files === 1 ? "" : "s"}`;
-const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const day = (ms: number) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : "no date");
 
 /** `f1rm archives [--prune]`: the archives with task, date and size, or the ones it just deleted. */
 export function archivesIn(args: string[], m: { gitCommonDir(cwd: string): string | null }, cwd: string, now = Date.now()): { out: string; err?: string; code: number } {
