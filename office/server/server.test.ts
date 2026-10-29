@@ -2008,9 +2008,15 @@ async function ownerOffice() {
   git("commit", "-q", "--allow-empty", "-m", "main moves on");
   mkdirSync(join(repo, "src"));
   mkdirSync(beside);
+  mkdirSync(join(a, "src"));
   symlinkSync(join(repo, "src"), join(a, "out"));
   symlinkSync(join(repo, "later.ts"), join(a, "dangling.ts"));
   symlinkSync(repo, join(beside, "to-main"));
+  // Folders under worktrees/ that are no linked worktree of this repo: a plain one, one whose .git file points at main's git dir, and a worktree with main checked out.
+  mkdirSync(`${repo}/.claude/worktrees/plain`);
+  mkdirSync(`${repo}/.claude/worktrees/hijack`);
+  writeFileSync(`${repo}/.claude/worktrees/hijack/.git`, `gitdir: ${repo}/.git\n`);
+  git("worktree", "add", "-q", "--force", ".claude/worktrees/on-main", "main");
   afterEachRestore = () => (rmSync(repo, { recursive: true, force: true }), rmSync(beside, { recursive: true, force: true }));
   start({ [repo]: join(repo, ".git") }, undefined, undefined, { junkRoots: [] });
   for (const [id, type, session_title] of [["p", "f1rm:pm", "p-title"], ["l", "f1rm:lead", "lead-checkout"], ["b", "f1rm:backend-dev", "checkout.backend-dev-add-a"], ["d", "f1rm:designer", "d-title"]] as const) {
@@ -2061,7 +2067,7 @@ test("a PM's or lead's sub-agent commits in its own worktree; in the main checko
   const { repo, beside, a, b, bash } = await ownerOffice();
   for (const id of ["p", "l"]) {
     for (const [command, cwd] of [
-      ["git add -A && git commit -m 'task: x; y'", a], ["git commit -m x", `${a}/src`], [`git -C ${a} commit -m x`, a], [`cd ${a}/src && git commit -m x`, a], ["cd src && git commit -m x", a], ["git -C . commit -m x", a], ["git -C src -C .. commit -m x", a],
+      ["git add -A && git commit -m 'task: x; y'", a], ["git commit -m x", `${a}/src`], [`git -C ${a} commit -m x`, a], [`cd ${a}/src && git commit -m x`, a], ["cd src && git commit -m x", a], ["git -C . commit -m x", a], ["git -C src commit -m x", a],
       ["git add -A", a], ["git status", a], ["git diff HEAD", a], ["git log --oneline", a], ["git branch -m worktree-new", a], ["git commit --amend --no-edit", a], ["time git commit -m x", a],
     ] as const) expect([id, command, cwd, await bash(id, command, cwd)]).toEqual([id, command, cwd, null]);
     for (const [command, cwd] of [
@@ -2112,6 +2118,29 @@ test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push,
   }
   // What the parent does (hire its own team) is not changed by this.
   expect(await bash("l", `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a, false)).toBeNull();
+});
+
+test("a PM's or lead's sub-agent cannot turn its worktree into the main checkout: not by its .git file, a folder that is no worktree, main checked out in it, GIT_DIR set earlier, a link followed by `..`, or the base branch as the branch it resets", async () => {
+  const { repo, a, main, bash, call } = await ownerOffice();
+  const plain = `${repo}/.claude/worktrees/plain`, hijack = `${repo}/.claude/worktrees/hijack`, onMain = `${repo}/.claude/worktrees/on-main`;
+  for (const id of ["p", "l"]) {
+    for (const file of [`${a}/.git`, `${a}/sub/.git/config`, "../.git"]) {
+      const out = await call(id, "Write", { file_path: file }, file === "../.git" ? `${a}/sub` : a);
+      expect([id, file, out?.permissionDecision]).toEqual([id, file, "deny"]);
+      expect(out.permissionDecisionReason).toBe(WRITE_REFUSAL);
+    }
+    expect([id, await call(id, "Write", { file_path: `${a}/.github/ci.yml` }, a)]).toEqual([id, null]);
+    for (const [command, cwd] of [
+      ["git commit -m x", plain], ["git commit -m x", hijack], ["git commit -m x", onMain], [`git checkout -B worktree-add-a ${main}`, plain],
+      [`export GIT_DIR=${repo}/.git; git commit -m x`, a], [`GIT_AUTHOR_NAME=x git commit -m x`, a], ["declare -x GIT_WORK_TREE=/x; git commit -m x", a],
+      ["git -C out/.. commit -m x", a], ["cd out/.. && git commit -m x", a], ["git -C src/../.. commit -m x", a],
+      [`git checkout -B main ${main}`, a], [`git checkout --ignore-other-worktrees -B main ${main}`, a],
+    ] as const) {
+      const out = await bash(id, command, cwd);
+      expect([id, command, cwd, out?.permissionDecision]).toEqual([id, command, cwd, "deny"]);
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
+    }
+  }
 });
 
 test("a dev's or a designer's sub-agent is held by no more than its parent: writes anywhere, commits in its worktree, and the base branch still closed", async () => {
