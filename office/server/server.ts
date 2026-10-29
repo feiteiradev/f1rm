@@ -409,7 +409,7 @@ const MAX_BRIEF = 8000;
 /** How long the SendMessage gate waits for `claude agents --json --all`. The hook gives up after 5 s and then lets the call through, so a slower listing must read as "can't say" and end in the unknown-name refusal. */
 export const GATE_LISTING_MS = 3000;
 const PM_DECIDES =
-  "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, one task per hire, with `f1rm hire`. Tell the user whom you hired.\n\nThe need:\n";
+  "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Decide which roles this need takes, and hire them per the f1rm guidelines (load f1rm:f1rm-guidelines): interview first if the need is unclear, a simple task is ONE dev, designer or researcher with `f1rm hire --simple` (no lead), a milestone is leads with `f1rm hire lead`. Tell the user whom you hired.\n\nThe need:\n";
 const INTERN =
   "The user asked, from the f1rm office, that you hand a subtask to an intern: spawn a sub-agent for it, give it everything it needs to work alone, and use its result in your own work. Keep going on your own task meanwhile.\n\nThe subtask:\n";
 
