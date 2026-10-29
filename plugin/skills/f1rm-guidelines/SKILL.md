@@ -7,7 +7,7 @@ description: How the f1rm company works. Roster and hiring, each role's workflow
 
 These rules bind every f1rm role. Nothing here needs the office app. The office only displays the sessions and the board.
 
-Hierarchy: the user, then one PM per repo. The PM hires leads for a milestone, one or two, and one specialist directly for a simple task (`--simple`). A lead runs its tasks with implementer subagents and hires only designers, researchers and content Reviewers into its team. Nobody else hires, and there is no layer below a lead.
+Hierarchy: the user, then one PM per repo. The PM hires leads for a milestone, one or two, and one specialist directly for a simple task (`--simple`). A lead runs its tasks with implementer subagents and hires only specialists other than devs (designers, researchers, Founder roles) and content Reviewers into its team. Nobody else hires, and there is no layer below a lead.
 
 ## Roster and hiring playbook
 
@@ -40,7 +40,7 @@ Playbook:
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
    - The PM collects what the user must provide (accounts, keys, copy, decisions) while it plans, and hires only once those inputs exist.
    - The same task goes to the same session: a `CHANGES REQUESTED` and a conflict from `f1rm merge` go back to the same dev or specialist. A new task gets a fresh hire, with the previous `DONE` report in its Inputs. Hires are not reused across tasks.
-5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the caps live in `f1rm hire`. Only the PM and leads hire: the PM hires leads, and for a simple task one dev, designer or researcher with `--simple`; a lead hires designers, researchers and `--content` Reviewers into its team, never a dev (an owner's code is built by its implementer subagents, see Teams); the office blocks `f1rm hire` for every specialist.
+5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the caps live in `f1rm hire`. Only the PM and leads hire: the PM hires leads, and for a simple task one dev, designer or researcher with `--simple`; a lead hires specialists other than devs (designers, researchers, Founder roles) and `--content` Reviewers into its team, never a dev (an owner's code is built by its implementer subagents, see Teams); the office blocks `f1rm hire` for every specialist.
 
    ```
    f1rm hire lead lead-<team> <team> "<team brief>"             # the PM, for a milestone
@@ -48,7 +48,7 @@ Playbook:
    f1rm hire --team <team> <role> <team>.<role>-<task> <task> "<brief>"  # a lead, into its team
    ```
 
-   - `<role>` is `designer`, `researcher` or `reviewer` (with `--content`) for a lead's hire, `lead` for the PM's milestone hire, and `frontend-dev`, `backend-dev`, `designer` or `researcher` for `--simple`. A lead's `--team` hire of a dev is refused.
+   - `<role>` is `designer`, `researcher`, a Founder role or `reviewer` (with `--content`) for a lead's hire, `lead` for the PM's milestone hire, and `frontend-dev`, `backend-dev`, `designer` or `researcher` for `--simple`. A lead's `--team` hire of a dev is refused.
    - `<name>` and `<task>` follow rule 6. The task slug becomes the worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`.
    - `<brief>` is one quoted argument in the brief format below, without the `Report to` line. `f1rm hire` adds it.
    - Flags after the brief go to `claude`, for example `--model haiku`.
@@ -170,7 +170,7 @@ In a Founder project the PM follows this on top of everything else here.
 1. **Interview the business too.** Ask about the customer, the problem they have, the offer, and the channel that reaches them, as well as what to build.
 2. **Strategist first** when the idea is not validated, that is, when no customer has confirmed the problem. A plan built on an untested idea waits for the Strategist's verdict, the way a task waits for the Researcher's facts.
 3. **Brand first.** If the repo has no `growth/brand.md`, the Marketer's first task writes it: the voice, the audience, words to avoid, and the claims the product can back. Every Founder role reads it before drafting.
-4. **Go-to-market alongside the build.** Put launch work (landing copy, SEO, social, outreach, pricing) on the board next to the engineering tasks, ordered by what the launch needs. A team can mix roles, for example a `launch` team with a Frontend dev, a Marketer and an SEO specialist.
+4. **Go-to-market alongside the build.** Put launch work (landing copy, SEO, social, outreach, pricing) on the board next to the engineering tasks, ordered by what the launch needs. A team can mix roles, for example a `launch` team with a Designer, a Marketer and an SEO specialist, its code built by the lead's implementer subagents.
 5. **Where it lands.** Founder work is files in the repo, under `growth/marketing/`, `growth/seo/`, `growth/social/`, `growth/sales/` and `growth/strategy/`, delivered as commits on the hire's worktree branch, read by a content Reviewer when the lead hired one, and landed by `f1rm merge` like code.
 
 ## Drafts only
@@ -185,7 +185,7 @@ In a Founder project the PM follows this on top of everything else here.
 1. **Every milestone runs through one or two teams**, even a milestone of one task. A simple workflow is one specialist, a team of one (see Picking the workflow). The PM hires only leads for a milestone, so hire traffic stays out of its chat with the user. Its own Haiku Explore interns are the one exception.
 2. **What a team owns.** One vertical slice of the milestone, end to end (design, frontend, backend), with its own acceptance criteria. Name the team after its slice, for example `checkout`.
 3. **At most 2 teams** work in a project at once, live leads and simple tasks together. Every task of a milestone goes through a team.
-4. **No nested teams.** Only the PM hires leads, and a lead hires only designers, researchers and `--content` Reviewers, only into its own team.
+4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists other than devs and `--content` Reviewers, only into its own team.
 5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
 6. **Plan once, approve once.** A lead plans once: it writes its team board, one row per task, each with acceptance criteria a check can prove and files of its own. It asks the user to approve the plan once, as a numbered round with its recommendation, the open question on its board and `NEEDS YOU <team>: plan` to the PM, and then runs without asking again. Only a decision the user alone can make (Who talks to whom) interrupts it, and it starts nothing that answer could change until it has the answer.
 7. **Owners run implementer subagents.** A lead cannot hire a frontend-dev or a backend-dev (`f1rm hire` refuses it) and writes no product code. It runs each task with an implementer subagent, in the shape of the `implement-spec` skill with the team board as its ticket list: a general-purpose subagent (Agent tool) that works test-first in its own worktree, `.claude/worktrees/<task>` on branch `worktree-<task>`, where the gate lets it write and commit and nowhere else, and that sends `f1rm report DONE <task> --commit <sha>` when its checks pass. It runs at most 2 implementers at a time, the review subagent counting among the 2 sub-agents. A designer or a researcher is a separate session only when its work stands alone, and a `--content` Reviewer reads a branch with no code.
@@ -298,7 +298,7 @@ Who may start what. **Enforced** means the gate or the hire command refuses a br
 | Role | `f1rm hire` | Sub-agents | `/loop` and `/schedule` | Background shell watchers | `claude --bg` and `claude -p` |
 | :- | :- | :- | :- | :- | :- |
 | PM | Leads, and one dev, designer or researcher with `--simple` (enforced) | At most 2, never an `f1rm:*` role; an implementer or reviewer sub-agent may write and commit in its own worktree under `.claude/worktrees/` (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
-| Lead | Designers, researchers and `--content` Reviewers of its own team, never a dev or a lead (enforced) | At most 2, never an `f1rm:*` role; an implementer or reviewer sub-agent may write and commit in its own worktree under `.claude/worktrees/` (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
+| Lead | Specialists other than devs (designers, researchers, Founder roles) and `--content` Reviewers of its own team, never a dev or a lead (enforced) | At most 2, never an `f1rm:*` role; an implementer or reviewer sub-agent may write and commit in its own worktree under `.claude/worktrees/` (enforced) | Never (enforced) | `f1rm status --watch` and wake timers (rule only: no command is refused) | Never outside `f1rm hire`, except `--bg --resume` to wake a session (enforced: the forms the gate reads) |
 | Specialist or Reviewer | Nothing (enforced) | At most 2, never an `f1rm:*` role (enforced) | Never (enforced) | A check or a dev server only (rule only: none is refused) | Never (enforced: the forms the gate reads) |
 | Intern | Nothing (enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)) | Counts against its parent's 2 (enforced) | Never (enforced) | A check only (rule only: none is refused) | Never (enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)) |
 

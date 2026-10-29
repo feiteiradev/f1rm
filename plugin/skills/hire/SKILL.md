@@ -9,6 +9,6 @@ argument-hint: <role> <name> <task> "<brief>"
 Run `f1rm hire $ARGUMENTS` with the Bash tool from the repo's main working directory, and report what it prints.
 
 - Roles, names, task slugs and the brief format are in the `f1rm:f1rm-guidelines` skill. Load it first if it is not in context.
-- The PM hires a lead for a milestone (`f1rm hire lead lead-<team> <team> "<team brief>"`) and, for a simple task, one dev, designer or researcher with `f1rm hire --simple <role> <name> <task> "<brief>"`: no lead, no team, named `<role>-<task>`, reporting to the PM. A lead hires only designers, researchers and `--content` Reviewers into its team (`--team <team>`), never a dev.
+- The PM hires a lead for a milestone (`f1rm hire lead lead-<team> <team> "<team brief>"`) and, for a simple task, one dev, designer or researcher with `f1rm hire --simple <role> <name> <task> "<brief>"`: no lead, no team, named `<role>-<task>`, reporting to the PM. A lead hires only specialists other than devs and `--content` Reviewers into its team (`--team <team>`), never a dev.
 - Never start a hire by calling `claude` yourself. The cap lives in `f1rm hire`.
 - If it refuses at the cap, do not retry. Leave the task `todo` and tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.
