@@ -64,12 +64,8 @@ test("a wake message never starts with a slash: a resumed session expands its fi
   // f1rm's own notes (no message: the default note, the office's) are not slash commands and still plan.
   const noted = await plan("shop.backend-dev-checkout", [lead, dev]);
   expect(noted.argv).toContain(`${DEFAULT_NOTE}\nReport to: lead-shop`);
-  const { wake, SLASH_RULE } = await import("./wake.ts");
-  const logged: string[] = [];
-  const log = console.log;
-  console.log = (...a: unknown[]) => void logged.push(a.join(" "));
-  try { await wake(["--help"]); } finally { console.log = log; }
-  expect(logged.join("\n")).toContain(SLASH_RULE);
+  const { SLASH_RULE } = await import("./wake.ts");
+  expect(() => parseWakeArgs(["lead-shop", "please", "rerun"])).toThrow(SLASH_RULE); // the usage error carries the rule
   expect(SLASH_RULE).toContain("cannot start with a slash");
 });
 

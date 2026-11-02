@@ -81,7 +81,7 @@ export type WakePlan = { argv: string[]; cwd: string; name: string; sessionId: s
 
 const background = (list: any[]) => list.filter((a) => a?.kind === "background" && typeof a.name === "string");
 
-/** What `f1rm wake --help` adds to its usage line, and the start of the refusal. */
+/** The rule of a wake message, said in the refusal and in the usage error. */
 export const SLASH_RULE = "A wake message cannot start with a slash: the resumed session would run it as a slash command.";
 
 /**
@@ -151,7 +151,7 @@ export function parseWakeArgs(words: string[]): { target: string | undefined; me
   const at = words.findIndex((a) => a.startsWith("-") && a !== "--override");
   const own = at < 0 ? words : words.slice(0, at);
   const positional = own.filter((a) => a !== "--override");
-  if (positional.length > 2) throw new Error(`${USAGE}: quote the message, as one word`);
+  if (positional.length > 2) throw new Error(`${USAGE}: quote the message, as one word. ${SLASH_RULE}`);
   const [target, message] = positional;
   return { target, message, override: own.includes("--override"), extra: at < 0 ? [] : words.slice(at) };
 }
@@ -170,7 +170,7 @@ export function realWakeDeps(home: string): WakeDeps {
 
 /** Runs `f1rm wake` and returns the exit code. */
 export async function wake(words: string[]): Promise<number> {
-  if (words[0] === "--help" || words[0] === "-h") return console.log(`${USAGE}\n${SLASH_RULE}`), 0;
+  if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
   const { target, message, override, extra: rest } = parseWakeArgs(words);
   if (!target) throw new Error(USAGE);
   let plan: WakePlan;
