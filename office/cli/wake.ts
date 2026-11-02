@@ -8,7 +8,7 @@ import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, ro
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
-export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...] (a message cannot start with a slash)";
+export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
 
 /** A simple task's hire: a specialist with no team, whose lead is the PM. */
@@ -81,6 +81,9 @@ export type WakePlan = { argv: string[]; cwd: string; name: string; sessionId: s
 
 const background = (list: any[]) => list.filter((a) => a?.kind === "background" && typeof a.name === "string");
 
+/** What `f1rm wake --help` adds to its usage line, and the start of the refusal. */
+export const SLASH_RULE = "A wake message cannot start with a slash: the resumed session would run it as a slash command.";
+
 /**
  * Checks a wake and returns the `claude --bg --resume` argv that does it, with the folder it runs in (the hire's own, so the resumed session works in its worktree).
  * Throws an Error for a hire that can't be woken (let go, another project's, live, unknown, not a hire), and a HireRefused when a cap, the team's lead or the task's one specialist stops it,
@@ -88,7 +91,7 @@ const background = (list: any[]) => list.filter((a) => a?.kind === "background" 
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
   // The note is the resumed session's prompt, and a prompt that starts with a slash runs as that slash command, as typed by the user: `/f1rm:stop-all` would pause every project past the office's gate.
-  if (req.message?.trim().startsWith("/")) throw new Error("a wake message cannot start with a slash: the resumed session would run it as a slash command. Start with words.");
+  if (req.message?.trim().startsWith("/")) throw new Error(`${SLASH_RULE} Start with words.`);
   const common = await d.gitCommonDir(req.cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
@@ -167,7 +170,7 @@ export function realWakeDeps(home: string): WakeDeps {
 
 /** Runs `f1rm wake` and returns the exit code. */
 export async function wake(words: string[]): Promise<number> {
-  if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
+  if (words[0] === "--help" || words[0] === "-h") return console.log(`${USAGE}\n${SLASH_RULE}`), 0;
   const { target, message, override, extra: rest } = parseWakeArgs(words);
   if (!target) throw new Error(USAGE);
   let plan: WakePlan;

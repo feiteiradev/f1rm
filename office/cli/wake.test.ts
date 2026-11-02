@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder, SECURITY } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { clearPaused, pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
-import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake, USAGE } from "./wake.ts";
+import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
 
 setDefaultTimeout(30_000);
 const made: string[] = [];
@@ -64,7 +64,13 @@ test("a wake message never starts with a slash: a resumed session expands its fi
   // f1rm's own notes (no message: the default note, the office's) are not slash commands and still plan.
   const noted = await plan("shop.backend-dev-checkout", [lead, dev]);
   expect(noted.argv).toContain(`${DEFAULT_NOTE}\nReport to: lead-shop`);
-  expect(USAGE).toContain("a message cannot start with a slash");
+  const { wake, SLASH_RULE } = await import("./wake.ts");
+  const logged: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void logged.push(a.join(" "));
+  try { await wake(["--help"]); } finally { console.log = log; }
+  expect(logged.join("\n")).toContain(SLASH_RULE);
+  expect(SLASH_RULE).toContain("cannot start with a slash");
 });
 
 test("a hire of a paused project is not woken, and the refusal points at `f1rm resume`; once resumed it is woken as before", async () => {
