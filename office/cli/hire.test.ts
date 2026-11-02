@@ -179,6 +179,16 @@ test.each([
 
 const prompt = (stub: ReturnType<typeof stubClaude>) => stub.argv()!.find((a) => a.startsWith("/"))!;
 
+test.each(["frontend-dev", "backend-dev"])("a %s prompt sends ESCALATE, not NEEDS YOU, for a second blocking round and a task with no failing test", (role) => {
+  const stub = stubClaude([]);
+  hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);
+  const text = prompt(stub);
+  expect(text).toContain("f1rm report ESCALATE x");
+  expect(text.match(/send `ESCALATE x`/g)).toHaveLength(2);
+  expect(text).not.toContain("NEEDS");
+  expect(text).toContain("its owner decides");
+});
+
 test("--skills adds to the list; a slash-only skill becomes the first command and the role's own first skill moves into the list", () => {
   const dev = stubClaude([]);
   hire(dev, ["--skills", "ponytail:ponytail,vercel:nextjs", ...pmArgs, "frontend-dev", "frontend-dev-x", "x", BRIEF]);
@@ -222,7 +232,7 @@ test.each(["pstack:arena", "pstack:swarm", "pstack:interrogate"])("--skills %s i
     const stub = stubClaude([]);
     const r = hire(stub, [...(role === "reviewer" ? ["--content"] : []), "--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
     expect(r.code, `${role} ${skill}`).not.toBe(0);
-    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires`);
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
   }
 });
@@ -233,7 +243,7 @@ test.each(["pstack:typescript-best-practices", "pstack:tdd"])("--skills %s is re
     const stub = stubClaude([]);
     const r = hire(stub, [...(role === "reviewer" ? ["--content"] : []), "--skills", skill, ...pmArgs, role, role === "lead" ? `lead-${task}` : `${role}-${task}`, task, BRIEF], repoDir());
     // setup-pstack is the one pstack skill the Skill tool loads, so the message does not say it refuses the skill.
-    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires; the user can run it by hand`);
+    expect(r.err, `${role} ${skill}`).toContain(`${skill} is not wired inside hires`);
     expect(r.err, `${role} ${skill}`).not.toContain("the Skill tool refuses it");
     expect(stub.argv(), `${role} ${skill}`).toBeNull();
   }
