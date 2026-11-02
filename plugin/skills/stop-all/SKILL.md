@@ -9,4 +9,4 @@ allowed-tools: Bash(f1rm pause --all)
 
 !`f1rm pause --all`
 
-Tell the user what the command printed above, in its own words, and nothing more. Run nothing yourself.
+Show the user what the command printed above, as it is, and add nothing. Run nothing yourself.
