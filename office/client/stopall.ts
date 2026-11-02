@@ -17,7 +17,7 @@ async function stopAll(): Promise<Said> {
   const bad = results.filter((r) => !r.verified);
   if (error || bad.length) return { failed: true, status: [error, ...bad.map(running)].filter(Boolean).join(" ") };
   const n = results.reduce((sum, r) => sum + r.stopped.length + r.killed.length, 0);
-  const checkpoints = results.flatMap((r) => (r.checkpoint ? [r.checkpoint] : []));
+  const checkpoints = [...new Set(results.flatMap((r) => (r.checkpoint ? [r.checkpoint] : [])))];
   return { failed: false, status: `All ${n} stopped.${checkpoints.length ? ` ${checkpoints.length === 1 ? "Checkpoint" : "Checkpoints"} ${checkpoints.join(", ")}.` : ""}` };
 }
 
