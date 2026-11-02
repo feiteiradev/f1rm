@@ -2,7 +2,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { IDLE, stopAllControls, type View } from "./stopall.ts";
+import { OUT_OF_DATE } from "./post.ts";
+import { escapeCancels, IDLE, keepsStatus, OWN_MS, stopAllControls, type View } from "./stopall.ts";
 import { StopAll, StopAllView } from "./stopall.tsx";
 
 const real = { fetch: globalThis.fetch, location: (globalThis as any).location, mode: process.env.MODE };
@@ -106,4 +107,95 @@ test("Resume all posts all:true to resume and says who woke and who did not", as
   office({ ok: true, rooms: [], waking: 0, lost: [] });
   await c.resume();
   expect(now().status).toBe("No project was paused.");
+});
+
+/** A page whose fetch is `fetch`. */
+const page = (fetch: (url: URL, init: RequestInit) => Promise<Response>) => Object.assign(globalThis, { location: { href: "http://127.0.0.1:4170/tok/" }, fetch });
+const stopWith = async () => {
+  const k = controls();
+  await k.c.confirm();
+  return k.now();
+};
+
+test("no results never reads as All 0 stopped: it says what the office paused, or that there was nothing to stop", async () => {
+  office({ ok: true, rooms: ["shop", "blog"], results: [] });
+  expect(await stopWith()).toEqual({ phase: "idle", status: "Paused shop, blog; nothing was running to check.", failed: false });
+  office({ ok: true, rooms: [], results: [] });
+  expect((await stopWith()).status).toBe("Nothing to stop: every project is already paused.");
+});
+
+test("a 200 that is no JSON is an error, for Stop all and Resume all", async () => {
+  page(async () => new Response("<html>", { status: 200 }));
+  const stop = await stopWith();
+  expect([stop.failed, stop.status]).toEqual([true, expect.stringContaining("could not be read")]);
+  expect(stop.status).not.toContain("All ");
+  const k = controls();
+  await k.c.resume();
+  expect([k.now().failed, k.now().status]).toEqual([true, expect.stringContaining("could not be read")]);
+});
+
+test("an old link, an office that is gone and one that does not answer each say so and leave the button usable", async () => {
+  page(async () => new Response("unauthorized", { status: 401 }));
+  expect(await stopWith()).toMatchObject({ phase: "idle", failed: true, status: expect.stringContaining(OUT_OF_DATE) });
+  page(async () => Promise.reject(new TypeError("fetch failed")));
+  expect(await stopWith()).toMatchObject({ phase: "idle", failed: true, status: expect.stringContaining("The office isn't reachable.") });
+  page(async () => Promise.reject(new DOMException("timed out", "TimeoutError")));
+  expect(await stopWith()).toMatchObject({ phase: "idle", failed: true, status: expect.stringContaining("did not answer in time") });
+});
+
+test("the stop waits at most two minutes for the office", async () => {
+  let signal: AbortSignal | null | undefined;
+  page(async (_url, init) => ((signal = init.signal), Response.json({ ok: true, rooms: [], results: [] })));
+  await stopWith();
+  expect(signal).toBeInstanceOf(AbortSignal);
+});
+
+test("whatever goes wrong while it runs, the button comes back to idle with a failure text", async () => {
+  office({ ok: true, rooms: ["shop"], results: [null] }); // a reply the page cannot read
+  expect(await stopWith()).toMatchObject({ phase: "idle", failed: true, status: expect.stringContaining("Something went wrong") });
+  const k = controls();
+  await k.c.confirm();
+  expect(k.views.map((v) => v.phase)).toEqual(["stopping", "idle"]);
+});
+
+test("a second click while a stop runs does nothing: one post, and nothing else opens until it is done", async () => {
+  let release!: () => void;
+  const posts: string[] = [];
+  page(async (url) => (posts.push(url.pathname), await new Promise<void>((r) => (release = r)), Response.json({ ok: true, rooms: [], results: [] })));
+  const k = controls();
+  const first = k.c.confirm();
+  await Promise.resolve();
+  await k.c.confirm();
+  await k.c.resume();
+  k.c.ask();
+  k.c.cancel();
+  expect(posts).toEqual(["/tok/pause"]);
+  expect(k.now().phase).toBe("stopping");
+  release();
+  await first;
+  expect(k.now().phase).toBe("idle");
+  k.c.ask();
+  expect(k.now().phase).toBe("confirm");
+});
+
+test("a stop that failed half-way names who did stop, says what the error was, and how to try again", async () => {
+  office({ ok: false, error: "blog: could not take the checkpoint", rooms: ["shop"], results: [stopped("shop")] }, 500);
+  const done = await stopWith();
+  expect(done.failed).toBe(true);
+  expect(done.status).toContain("blog: could not take the checkpoint");
+  expect(done.status).toContain("Stopped: shop.");
+  expect(done.status).toContain("`f1rm pause --all` again");
+  expect(done.status).toContain("press Stop all again");
+  office({ ok: true, rooms: ["a"], results: [stopped("a", { verified: false, remaining: [{ pid: 9, command: "node s.js", cwd: null }] })] });
+  expect((await stopWith()).status).toContain("`f1rm pause --all` again");
+});
+
+test("Escape closes the question only while it is open; a result text is stale only when no action of the page made it", () => {
+  const view = (phase: View["phase"]): View => ({ ...IDLE, phase });
+  expect(escapeCancels(view("confirm"), "Escape")).toBe(true);
+  expect(escapeCancels(view("confirm"), "Enter")).toBe(false);
+  for (const phase of ["idle", "stopping", "resuming"] as const) expect(escapeCancels(view(phase), "Escape")).toBe(false);
+  expect(keepsStatus(view("idle"), OWN_MS + 1)).toBe(false);
+  expect(keepsStatus(view("idle"), 10)).toBe(true);
+  expect(keepsStatus(view("stopping"), OWN_MS + 1)).toBe(true);
 });

@@ -10,16 +10,17 @@ export const failure = (status: number, own: string | undefined, fallback = `Fai
 export type Reply = { ok?: boolean; error?: string; ended?: boolean; [key: string]: unknown };
 
 /** POSTs an action. `error` is null when the office did it, otherwise why it didn't; `reply` is the JSON body, if there was one. */
-export async function send(path: string, body?: object): Promise<{ error: string | null; reply: Reply | null }> {
+export async function send(path: string, body?: object, timeoutMs?: number): Promise<{ error: string | null; reply: Reply | null }> {
   try {
     const res = await fetch(new URL(path, location.href), {
       method: "POST",
       ...(body && { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      ...(timeoutMs && { signal: AbortSignal.timeout(timeoutMs) }),
     });
     const reply: Reply | null = await res.json().catch(() => null);
     return { error: res.ok ? null : failure(res.status, reply?.error), reply };
-  } catch {
-    return { error: "The office isn't reachable.", reply: null };
+  } catch (e) {
+    return { error: (e as Error)?.name === "TimeoutError" ? "The office did not answer in time." : "The office isn't reachable.", reply: null };
   }
 }
 
