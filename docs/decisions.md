@@ -452,6 +452,18 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user decided that a refused hire always waits for a free slot, and is never asked and never overridden. A lead that asked "wait or exceed?" put the user in the loop for a thing that a slot freeing solves by itself, and the overrides pushed the machine past the 8 sessions the user set to keep the load down.
 - Rejected: asking the user wait-or-exceed (the old rule: it interrupts for nothing); a session-held override (the point of a cap is that no session can raise it); waiting forever in one call (a Bash call ends at 10 minutes, so the wait is 8 and the session runs the same command again).
 - Where: caps-wait
+## 2026-11-02 No commands for the user
+
+- Decision: no session hands the user a shell command, a script, a `!` line or a file to run, and none asks him to run, push, merge, approve in a terminal or retry anything. Only five things reach him: product scope, design direction, business (strategy, spend, messaging or publishing to people), deleting data outside the repo, and a Claude Code permission outside the approved command list, plus one end-of-milestone report and status when he asks. Everything else is the PM's or lead's call, logged in `~/.f1rm/kept/<repo>/calls.md`: a plan without a product, design or business choice, the milestone cleanup, a second blocking review round, a test-only branch, a merge conflict, a cap, the push. Each refusal names the company's way out (`f1rm merge --check`, `--no-red`, `f1rm push`, a wait for a slot); a failure with none goes to `f1rm feedback: <problem> -> <suggestion>` and the task stays `todo` or `blocked`. The guidelines, role files, hire skill, PM prompt and README say so, and plugin/plugin.test.ts pins the retired phrases as absent.
+- Why: the user wants a company that takes only big decisions; sessions kept handing him scripts (`sh .../land-w15.sh`) and questions about caps, pushes and plans that the company can settle.
+- Rejected: handing a script when a gate refuses (the example case: a script that re-did `f1rm merge` by hand); asking the user to push (`f1rm push` is the PM's, after the full suite); asking him to approve a plan, the cleanup lists or a test-only branch (they are logged calls).
+- Where: no-user-commands
+## 2026-11-02 Interview asks at most three scope questions
+
+- Decision: the PM asks at most 3 open scope questions per milestone, each with a recommended answer; every other gap gets a default written under an `Assumptions` line of the brief and listed in the end report, and a technical question is never asked. Before the first hire the PM checks the board: every acceptance criterion has a task, every task serves a criterion, every criterion has a "proved by"; it fixes gaps itself and logs the call.
+- Why: spec-kit's `clarify` and `specify` cap open questions (3 markers, 5 questions) and make informed guesses the default, which removes asks; its `analyze` cross-check catches rework before a hire starts.
+- Rejected: spec-kit's constitution, spec/plan/tasks files, `converge` loop and OpenSpec change folders (the board, the briefs and this log already hold those artifacts); `analyze`'s closing question to the user (plan approval is the PM's call).
+- Where: no-user-commands
 
 ## 2026-11-02 Stop all and resume all in three places
 

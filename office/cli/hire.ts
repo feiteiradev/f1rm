@@ -168,9 +168,9 @@ const reviewParagraph = (task: string, repo: string, level: string) =>
   `Review inside your session. After your checks pass, run ONE review in a fresh context: start a general-purpose subagent with the Agent tool and tell it to run the code-review skill at level ${level} on \`git diff <base>...HEAD\` (<base> is the branch your task started from)` +
   `${level === "high" ? ", and the security-review skill on that same diff" : ""}. Have it sort its findings as blocking or non-blocking. Fix the blocking findings ONCE and run your checks again. ` +
   `Send the non-blocking findings to ~/.f1rm/kept/${repo}/findings.md as lines in its table format (| date | area | status | finding | evidence |). ` +
-  `If a second review would still have blocking findings, run \`f1rm report NEEDS ${task}\` and send \`NEEDS YOU ${task}\` to your Report to session instead of fixing again. ` +
+  `If a second review would still have blocking findings, run \`f1rm report ESCALATE ${task}\` and send \`ESCALATE ${task}\` to your Report to session instead of fixing again: its owner decides (re-scope, one more fix pass, or accept with the finding logged). ` +
   `Implement inline and never delegate the implementation: the one subagent you start is this reviewer (and at most 2 interns, as before). Your DONE states the review round count and the review level. ` +
-  `Put at least one failing test in every task: a branch of test-only or renamed tests has no failing new test, and \`f1rm merge\` will not land it. If the task cannot have one, send \`NEEDS YOU ${task}\` to ask.`;
+  `Put at least one failing test in every task: a branch of test-only or renamed tests has no failing new test, and \`f1rm merge\` will not land it. If the task cannot have one, send \`ESCALATE ${task}\`: its owner decides.`;
 
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
@@ -201,7 +201,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (added.includes("security-review")) throw new Error("security-review runs in a dev's own review, at --level high: it is not added to a hire");
   // Every pstack skill but setup-pstack carries disable-model-invocation, so the Skill tool refuses it: only the three pstack skills in SLASH_ONLY can be a first command.
   const unwired = added.find((s) => s.startsWith("pstack:") && !SLASH_ONLY.includes(s));
-  if (unwired) throw new Error(`${unwired} is not wired inside hires; the user can run it by hand`);
+  if (unwired) throw new Error(`${unwired} is not wired inside hires`);
   const leadOnly = added.find((s) => LEAD_ONLY.includes(s));
   if (leadOnly && role !== "lead") throw new Error(`${leadOnly} is for a lead only: the PM gives it when it hires one`);
   let own = roles.find((r) => r.id === role)!.skills;

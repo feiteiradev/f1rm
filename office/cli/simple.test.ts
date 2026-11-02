@@ -60,17 +60,17 @@ test("--level low, medium or high sets the dev's own review; any other role, and
   await expect(plan({ role: "designer", content: true })).rejects.toThrow("--content is for the reviewer only");
 });
 
-test("the dev's prompt carries the Review: one fresh-context subagent, fixed once, NEEDS YOU on a second blocking round, the findings file, and the test-only rule", async () => {
+test("the dev's prompt carries the Review: one fresh-context subagent, fixed once, ESCALATE on a second blocking round, the findings file, and the test-only rule", async () => {
   const text = promptOf(await plan({ level: "high", task: "merge-cmd", cwd: "/Users/x/dev/shop" }));
   expect(text).toContain("After your checks pass, run ONE review in a fresh context: start a general-purpose subagent with the Agent tool and tell it to run the code-review skill at level high on `git diff <base>...HEAD`");
   expect(text).toContain("and the security-review skill on that same diff");
   expect(text).toContain("Fix the blocking findings ONCE and run your checks again.");
   expect(text).toContain("Send the non-blocking findings to ~/.f1rm/kept/shop/findings.md as lines in its table format");
-  expect(text).toContain("If a second review would still have blocking findings, run `f1rm report NEEDS merge-cmd` and send `NEEDS YOU merge-cmd` to your Report to session instead of fixing again.");
+  expect(text).toContain("If a second review would still have blocking findings, run `f1rm report ESCALATE merge-cmd` and send `ESCALATE merge-cmd` to your Report to session instead of fixing again: its owner decides (re-scope, one more fix pass, or accept with the finding logged).");
   expect(text).toContain("Implement inline and never delegate the implementation: the one subagent you start is this reviewer");
   expect(text).toContain("Your DONE states the review round count and the review level.");
   expect(text).toContain("Put at least one failing test in every task");
-  expect(text).toContain("send `NEEDS YOU merge-cmd` to ask");
+  expect(text).toContain("send `ESCALATE merge-cmd`: its owner decides");
   // medium and low run no security-review; the paragraph sits before the brief
   const medium = promptOf(await plan({ brief: "BRIEF-TEXT" }));
   expect(medium).not.toContain("security-review");
