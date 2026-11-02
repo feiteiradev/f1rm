@@ -1,7 +1,7 @@
-// `f1rm merge <task> [--check "<cmd>"]`: lands a reviewed branch on main, and nothing else lands there (see the gate in server.ts).
+// `f1rm merge <task> [--check "<cmd>"] [--no-red "<reason>"]`: lands a reviewed branch on main, and nothing else lands there (see the gate in server.ts).
 // The steps are the Reviewer's mechanical part, as a command: refuse what is not ready, merge in a scratch worktree, prove the new tests fail on the base,
 // run the full check once on the merge behind the suite lock, then fast-forward main to that merge. It never pushes and never touches a remote or another ref.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { machine } from "../server/machine.ts";
 import { writePrivate } from "../server/private.ts";
@@ -11,7 +11,14 @@ import { readReport, reportFile } from "./report.ts";
 type Result = { out: string; err: string; code: number };
 export type MergeDeps = { home: string; now: () => number; say: (line: string) => void; env: Record<string, string> };
 
-const usage = 'usage: f1rm merge <task> [--check "<command>"]';
+const usage = 'usage: f1rm merge <task> [--check "<command>"] [--no-red "<reason>"]';
+// A merged settings file would widen every later session's permissions (decision 4).
+// Case-insensitive (macOS folds case), and a bare `hooks`/`commands` entry (a symlink) counts as well as the files under them.
+const SETTINGS_FILE = /^(\.claude\/(settings(\.local)?\.json$|(hooks|commands|agents|skills)(\/|$))|\.mcp\.json$)/i;
+// A suite command that pushes or merges: the gate refuses such a `--check`, and a remembered command is read here, where the gate never sees it.
+const LANDS = /\bgit\b[^;&|\n]*\bpush\b|\bgh\s+pr\s+merge\b|\bgh\s+api\b[^\n]*\b(merges?|refs?)\b|\bf1rm\s+(push|merge)\b/i;
+const CHECK_FAILED_WAY_OUT = "the dev fixes it and sends a new DONE; if the dev cannot, the lead hires a fresh implementer on a branch from the current main";
+const NO_RED_WAY_OUT = 'a branch that cannot fail on the base (test-only, renamed or deleted tests, a refactor with no new behaviour) lands with `--no-red "<reason>"`: the PM\'s or lead\'s call, logged in calls.md';
 const LOCK_SCRIPT = join(import.meta.dir, "..", "..", "scripts", "check-lock.ts");
 const TAIL_LINES = 15;
 // A changed file is a test when it is named or placed like one. ponytail: bun's `*.test.ts` and the usual folders; a repo with another convention passes `--check` only for the suite, not for this.
@@ -72,27 +79,29 @@ export async function mergeIn(argv: string[], cwd: string, deps: Partial<MergeDe
   const lines: string[] = [];
   const say = (line: string) => (lines.push(line), deps.say?.(line));
   const [task, ...flags] = argv;
-  let check = "bun run check", custom = false;
+  let check: string | undefined, noRed: string | undefined;
   for (let i = 0; i < flags.length; i += 2) {
-    if (flags[i] !== "--check" || !flags[i + 1]?.trim()) return { out: "", err: usage + "\n", code: 1 };
-    [check, custom] = [flags[i + 1], true];
+    if (!["--check", "--no-red"].includes(flags[i]) || !flags[i + 1]?.trim()) return { out: "", err: usage + "\n", code: 1 };
+    if (/[\r\n]/.test(flags[i + 1])) return { out: "", err: `f1rm merge: the ${flags[i]} value is one line\n`, code: 1 };
+    if (flags[i] === "--check") check = flags[i + 1];
+    else noRed = flags[i + 1];
   }
   if (!SLUG.test(task ?? "")) return { out: "", err: usage + "\n", code: 1 };
   try {
-    await land(task, check, custom, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
+    await land(task, check, noRed, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
     return { out: lines.join("\n") + "\n", err: "", code: 0 };
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
-    return { out: lines.length ? lines.join("\n") + "\n" : "", err: `f1rm merge: ${e.message}\n`, code: 1 };
+    const way = e.message.startsWith("check failed") ? `\n${CHECK_FAILED_WAY_OUT}` : "";
+    return { out: lines.length ? lines.join("\n") + "\n" : "", err: `f1rm merge: ${e.message}${way}\n`, code: 1 };
   }
 }
 
-async function land(task: string, check: string, custom: boolean, cwd: string, deps: Pick<MergeDeps, "home" | "now" | "env">, say: (line: string) => void) {
+async function land(task: string, flagCheck: string | undefined, noRed: string | undefined, cwd: string, deps: Pick<MergeDeps, "home" | "now" | "env">, say: (line: string) => void) {
   const branch = `worktree-${task}`;
   const main = mainDir(cwd);
   if (!run(main, ["symbolic-ref", "-q", "HEAD"]).ok) throw new Refused("the main working directory has a detached HEAD: there is no base branch to land on");
   const baseBranch = git(main, "symbolic-ref", "--short", "HEAD");
-  if (git(main, "status", "--porcelain", "--", ".", ":(exclude).claude/worktrees")) throw new Refused("the main working directory has uncommitted changes: it is the user's to commit or discard, never stashed or discarded here");
 
   const reportPath = reportFile(deps.home, basename(main), task);
   const report = readReport(reportPath);
@@ -102,10 +111,11 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
   if (!tip.startsWith(report.commit.toLowerCase())) throw new Refused(`tip moved: send the work back to the dev (${branch} is at ${tip.slice(0, 9)}, its DONE says ${report.commit.slice(0, 9)})`);
   say(`tip ${tip.slice(0, 9)} is the DONE commit`);
   if (run(main, ["merge-base", "--is-ancestor", tip, "HEAD"]).ok) throw new Refused(`${branch} is already on ${baseBranch}`);
-  if (!custom && !hasCheckScript(main)) throw new Refused('the repo has no `check` script in package.json: pass --check "<command>"');
+  const check = suiteCommand(main, deps.home, flagCheck);
+  const custom = flagCheck !== undefined;
 
   const base0 = git(main, "rev-parse", "HEAD");
-  // The default check is the merged package.json's own script, which no one reads the diff of any more: a branch that changes it, or the lock script, lands by hand. Against the merge-base, so a branch forked
+  // The default check is the merged package.json's own script, which no one reads the diff of any more: a branch that changes it, or the lock script, lands only with an explicit --check. Against the merge-base, so a branch forked
   // before main changed them is not refused for it. ponytail: `typecheck`, `build`, tsconfig and bunfig can still weaken the suite; compare every script `suite` calls if that is felt.
   const suiteOf = (rev: string) => {
     try {
@@ -115,12 +125,25 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
       return "";
     }
   };
-  const changed = git(main, "diff", "--name-only", `${base0}...${tip}`).split("\n").filter(Boolean);
-  if (!custom && (changed.includes("scripts/check-lock.ts") || suiteOf(git(main, "merge-base", base0, tip)) !== suiteOf(tip))) throw new Refused("the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts): land it by hand with the user, or pass --check");
-  const tests = git(main, "diff", "--name-only", "--diff-filter=ACMR", `${base0}...${tip}`).split("\n").filter((f) => f && TEST_FILE.test(f));
+  const changed = names(main, "diff", "--name-only", "--no-renames", `${base0}...${tip}`);
+  const settings = changed.filter((f) => SETTINGS_FILE.test(f));
+  if (settings.length) throw new Refused(`a merged settings file widens every later session's permissions; only the user changes Claude Code permissions (the office's project-commands card); touched: ${settings.join(", ")}`);
+  // A dirty file the merge does not change is left alone: the fast-forward keeps it, and git itself refuses a fast-forward that would overwrite one. 
+  const dirty = [...names(main, "diff", "--name-only", "--no-renames", "HEAD", "--", ".", ":(exclude).claude/worktrees"), ...names(main, "ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude).claude/worktrees")];
+  // A file where the merge adds a folder, or a folder's file where it adds a file, overlaps as well.
+  const overlap = dirty.filter((f) => changed.some((c) => c === f || c.startsWith(f + "/") || f.startsWith(c + "/")));
+  if (overlap.length) throw new Refused(`the main working directory has uncommitted changes in files this merge changes: ${overlap.join(", ")}. The merge is retried after they are committed or removed (they are never stashed or discarded here)`);
+  const calls: [string, string][] = [];
+  const suiteChanged = changed.includes("scripts/check-lock.ts") || suiteOf(git(main, "merge-base", base0, tip)) !== suiteOf(tip);
+  if (!custom && suiteChanged) throw new Refused('the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts) and nobody else reads that diff: read the branch\'s diff of scripts.check, scripts.suite and scripts/check-lock.ts yourself; if it is sound, land with `--check "bun run check"` (or the project\'s command), a call that is logged in calls.md');
+  if (custom && suiteChanged) calls.push(["merge --check on a suite change", check]);
+  const tests = names(main, "diff", "--name-only", "--no-renames", "--diff-filter=ACMR", `${base0}...${tip}`).filter((f) => TEST_FILE.test(f));
   let red: string[] = [];
   if (changed.every(isDoc)) say("red: skipped, every changed file is documentation");
-  else if (!tests.length) throw new Refused("the branch changes code and no test file: the dev adds the tests that fail without the change");
+  else if (noRed) {
+    say(`red: skipped, --no-red: ${noRed}`);
+    calls.push(["merge --no-red", noRed]);
+  } else if (!tests.length) throw new Refused(`the branch changes code and no test file: the dev adds the tests that fail without the change; ${NO_RED_WAY_OUT}`);
   else red = await redOnBase(main, task, tip, base0, tests, say);
 
   const evidence = dirname(reportPath);
@@ -136,6 +159,7 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
       say(`${baseBranch} fast-forwarded to ${sha.slice(0, 9)}`);
       writePrivate(join(evidence, "merge.json.tmp"), JSON.stringify({ merge: sha, base, tip, red, check: 0, at: new Date(deps.now()).toISOString() }, null, 2) + "\n");
       renameSync(join(evidence, "merge.json.tmp"), join(evidence, "merge.json"));
+      keep(deps, main, task, flagCheck, calls, say);
       say(`merged ${sha}`);
       return;
     }
@@ -143,6 +167,46 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
     if (attempt === 2) throw new Refused(`${baseBranch} moved again while the merge was checked: nothing landed, run \`f1rm merge ${task}\` again`);
     say(`${baseBranch} moved to ${git(main, "rev-parse", "--short", "HEAD")} while the merge was checked: merging again`);
   }
+}
+
+/** The paths a command lists with `-z`: whole, never quoted, and not trimmed (a path may start with a space). */
+function names(cwd: string, cmd: string, ...args: string[]) {
+  const r = Bun.spawnSync(["git", "-C", cwd, cmd, "-z", ...args], { stdout: "pipe", stderr: "pipe" });
+  if (!r.success) throw new Refused(`git ${cmd} failed in ${cwd}: ${r.stderr.toString().trim().split("\n").pop() || "no message"}`);
+  return r.stdout.toString().split("\0").filter(Boolean);
+}
+
+/** The suite command a landing runs: `--check` wins, else the repo's own `check` script, else the command an earlier `--check` that landed left for this repo. */
+export function suiteCommand(main: string, home: string, flag?: string) {
+  if (flag) return flag;
+  if (hasCheckScript(main)) return "bun run check";
+  try {
+    const remembered = readFileSync(join(kept(home, main), "check-command"), "utf8").trim();
+    if (remembered && LANDS.test(remembered)) throw new Refused("the remembered check command may not push or merge; pass --check again");
+    if (remembered) return remembered;
+  } catch (e) {
+    if (e instanceof Refused) throw e;
+  }
+  throw new Refused('the repo has no `check` script in package.json: pass --check "<the project\'s full suite command>" once; it is remembered for later merges');
+}
+
+const kept = (home: string, main: string) => join(home, ".f1rm", "kept", basename(main));
+/** After a landing: the `--check` that landed is remembered, and the company's calls are appended to calls.md (a row holds no bar). The branch has landed by now: a write that fails is a warning, never a failed run. ponytail: check-command holds the last one, not a history. */
+function keep(deps: { home: string; now: () => number }, main: string, task: string, flagCheck: string | undefined, calls: [string, string][], say: (line: string) => void) {
+  const dir = kept(deps.home, main);
+  const write = (file: string, text: string, append = false) => {
+    try {
+      mkdirSync(dir, { recursive: true });
+      (append ? appendFileSync : writeFileSync)(join(dir, file), text);
+    } catch (e) {
+      say(`warning: could not write ${join(dir, file)}: ${(e as Error).message}`);
+    }
+  };
+  if (flagCheck) write("check-command", flagCheck.trim() + "\n");
+  if (!calls.length) return;
+  const date = new Date(deps.now()).toISOString().slice(0, 10);
+  const header = existsSync(join(dir, "calls.md")) ? "" : "| date | task | call | detail |\n|---|---|---|---|\n";
+  write("calls.md", header + calls.map(([call, detail]) => `| ${date} | ${task} | ${call} | ${detail.trim().replaceAll("|", "/")} |\n`).join(""), true);
 }
 
 export const hasCheckScript = (main: string) => {
@@ -165,8 +229,8 @@ async function redOnBase(main: string, task: string, tip: string, base: string, 
       if (code === 0) passed.push(file);
       else if (!/^\s*[1-9]\d* fail\b/m.test(out + err)) unproven.push(file); // bun's summary: a failing test and a file that cannot load both say `1 fail`; a fixture says no test matched
     }
-    if (passed.length) throw new Refused(`these new tests pass on the base, so they prove nothing: ${passed.join(", ")}`);
-    if (unproven.length) throw new Refused(`these new test files do not fail on the base (no test in them, or not a test file), so they prove nothing: ${unproven.join(", ")}`);
+    if (passed.length) throw new Refused(`these new tests pass on the base, so they prove nothing: ${passed.join(", ")}; ${NO_RED_WAY_OUT}`);
+    if (unproven.length) throw new Refused(`these new test files do not fail on the base (no test in them, or not a test file), so they prove nothing: ${unproven.join(", ")}; ${NO_RED_WAY_OUT}`);
     say(`red: ${tests.join(", ")} fail on the base`);
     return tests;
   } finally {
@@ -182,7 +246,7 @@ async function mergeAndCheck(main: string, task: string, branch: string, tip: st
     if (!m.ok) {
       if (run(wt.path, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).ok) {
         run(wt.path, ["merge", "--abort"]);
-        throw new Refused("conflict: the dev rebases onto main and sends a new DONE");
+        throw new Refused("conflict: the dev rebases onto main and sends a new DONE; if the implementer cannot resolve it, the lead hires a fresh implementer on a branch from the current main, with this tip's diff as its Inputs");
       }
       throw new Refused(`git merge failed: ${m.err.split("\n").pop()}`);
     }

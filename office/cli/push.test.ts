@@ -160,6 +160,37 @@ test("the default suite is `bun run check` of package.json, run once in the main
   expect(existsSync(join(t.repo, ".git", "custom-ran"))).toBe(true);
 });
 
+test("a repo with no check script runs the command an earlier landing remembered, as the merge command does; --check still wins and a check script beats the file", async () => {
+  const s = setup();
+  writeFileSync(join(s.repo, "package.json"), "{}\n");
+  commit(s.repo, "a.txt");
+  const kept = join(s.home, ".f1rm", "kept", "shop");
+  mkdirSync(kept, { recursive: true });
+  writeFileSync(join(kept, "check-command"), "touch .git/remembered-ran\n");
+  expect((await run(s, ["--check", "true"])).code).toBe(0);
+  expect(existsSync(join(s.repo, ".git", "remembered-ran"))).toBe(false);
+  commit(s.repo, "b.txt");
+  const r = await run(s, []);
+  expect([r.err, r.code]).toEqual(["", 0]);
+  expect(existsSync(join(s.repo, ".git", "remembered-ran"))).toBe(true);
+  expect(readFileSync(join(kept, "check-command"), "utf8")).toBe("touch .git/remembered-ran\n"); // a push never rewrites it
+  commit(s.repo, "c.txt");
+  expect((await run(s, ["--check", "echo other"])).code).toBe(0);
+  expect(readFileSync(join(kept, "check-command"), "utf8")).toBe("touch .git/remembered-ran\n");
+  writeFileSync(join(kept, "check-command"), "git push origin main\n");
+  commit(s.repo, "d.txt");
+  const bad = await run(s, []);
+  expect([bad.code, bad.err]).toEqual([1, expect.stringContaining("the remembered check command may not push or merge; pass --check again")]);
+  expect(originMain(s)).not.toBe(git(s.repo, "rev-parse", "HEAD"));
+
+  const t = setup(); // has scripts.check
+  commit(t.repo, "a.txt");
+  const kept2 = join(t.home, ".f1rm", "kept", "shop");
+  mkdirSync(kept2, { recursive: true });
+  writeFileSync(join(kept2, "check-command"), "exit 9\n");
+  expect((await run(t, [])).code).toBe(0);
+});
+
 test("refused, changing nothing: no origin, a detached HEAD, a branch that is not the base, a worktree, uncommitted changes, a bad flag", async () => {
   const noOrigin = setup();
   git(noOrigin.repo, "remote", "remove", "origin");

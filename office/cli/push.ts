@@ -3,7 +3,7 @@
 // never force, never another branch, never tags, whatever the repo's push config says.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import { git, hasCheckScript, mainDir, Refused, run, runSuite } from "./merge.ts";
+import { git, mainDir, Refused, run, runSuite, suiteCommand } from "./merge.ts";
 
 type Result = { out: string; err: string; code: number };
 export type PushDeps = { home: string; now: () => number; say: (line: string) => void; env: Record<string, string> };
@@ -20,15 +20,15 @@ const net = (main: string, env: Record<string, string>, args: string[]) => {
 
 /** Runs `f1rm push` in `cwd`: one line per step through `deps.say`, all of them also in `out`; a non-zero `code` pushed nothing. */
 export async function pushIn(argv: string[], cwd: string, deps: Partial<PushDeps> = {}): Promise<Result> {
-  let check = "bun run check", custom = false;
+  let flagCheck: string | undefined;
   for (let i = 0; i < argv.length; i += 2) {
     if (argv[i] !== "--check" || !argv[i + 1]?.trim()) return { out: "", err: usage + "\n", code: 1 };
-    [check, custom] = [argv[i + 1], true];
+    flagCheck = argv[i + 1];
   }
   const lines: string[] = [];
   const say = (line: string) => (lines.push(line), deps.say?.(line));
   try {
-    const warning = await send(check, custom, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
+    const warning = await send(flagCheck, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
     return { out: lines.join("\n") + "\n", err: warning ? `warning: ${warning}\n` : "", code: 0 };
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
@@ -36,7 +36,7 @@ export async function pushIn(argv: string[], cwd: string, deps: Partial<PushDeps
   }
 }
 
-async function send(check: string, custom: boolean, cwd: string, deps: Pick<PushDeps, "home" | "now" | "env">, say: (line: string) => void) {
+async function send(flagCheck: string | undefined, cwd: string, deps: Pick<PushDeps, "home" | "now" | "env">, say: (line: string) => void) {
   const main = mainDir(cwd);
   if (!run(main, ["symbolic-ref", "-q", "HEAD"]).ok) throw new Refused("the main working directory has a detached HEAD: there is no base branch to push");
   const base = git(main, "symbolic-ref", "--short", "HEAD");
@@ -46,7 +46,7 @@ async function send(check: string, custom: boolean, cwd: string, deps: Pick<Push
   const bases = named ? [named] : ["main", "master"];
   if (!bases.includes(base)) throw new Refused(`${base} is not the base branch (${bases.join(" or ")}): only the base branch is pushed`);
   if (git(main, "status", "--porcelain", "--", ".", ":(exclude).claude/worktrees")) throw new Refused("the main working directory has uncommitted changes: the suite would not be run on what is pushed");
-  if (!custom && !hasCheckScript(main)) throw new Refused('the repo has no `check` script in package.json: pass --check "<command>"');
+  const check = suiteCommand(main, deps.home, flagCheck); // the same resolution as the merge command
 
   const ref = `refs/heads/${base}`;
   const ls = net(main, deps.env, ["ls-remote", "origin", ref]);
