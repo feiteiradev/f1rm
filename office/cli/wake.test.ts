@@ -52,6 +52,17 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
 });
 
+test("a wake message never starts with a slash: a resumed session expands its first prompt as a slash command, so `/f1rm:stop-all` here would run as the user's", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  for (const message of ["/f1rm:stop-all", "  /f1rm:resume-all  ", "\n/f1rm:stop-all\nplease"]) {
+    const refused = await failure(plan("shop.backend-dev-checkout", [lead, dev], { message }));
+    expect(refused?.message).toContain("slash");
+  }
+  // A slash inside the message is a message like any other.
+  const ok = await plan("shop.backend-dev-checkout", [lead, dev], { message: "fix round 2: see src/a.ts and /tmp/notes" });
+  expect(ok.argv).toContain("fix round 2: see src/a.ts and /tmp/notes\nReport to: lead-shop");
+});
+
 test("a hire of a paused project is not woken, and the refusal points at `f1rm resume`; once resumed it is woken as before", async () => {
   const home = tmp("f1rm-wake-home-");
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
@@ -408,15 +419,4 @@ test("f1rm wake that a cap refuses says so, tells the hire not to wake, and star
   expect(r.err).toContain("Do not wake");
   expect(await Bun.file(join(bin, "argv.log")).exists()).toBe(false);
   expect(run(bin, repo).err).toContain("usage: f1rm wake");
-});
-
-test("a wake message never starts with a slash: a resumed session expands its first prompt as a slash command, so `/f1rm:stop-all` here would run as the user's", async () => {
-  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
-  for (const message of ["/f1rm:stop-all", "  /f1rm:resume-all  ", "\n/f1rm:stop-all\nplease"]) {
-    const refused = await failure(plan("shop.backend-dev-checkout", [lead, dev], { message }));
-    expect(refused?.message).toContain("slash");
-  }
-  // A slash inside the message is a message like any other.
-  const ok = await plan("shop.backend-dev-checkout", [lead, dev], { message: "fix round 2: see src/a.ts and /tmp/notes" });
-  expect(ok.argv).toContain("fix round 2: see src/a.ts and /tmp/notes\nReport to: lead-shop");
 });
