@@ -54,6 +54,23 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
 });
 
+test("a wake message never starts with a slash: a resumed session expands its first prompt as a slash command, so `/f1rm:stop-all` here would run as the user's", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  for (const message of ["/f1rm:stop-all", "  /f1rm:resume-all  ", "\n/f1rm:stop-all\nplease"]) {
+    const refused = await failure(plan("shop.backend-dev-checkout", [lead, dev], { message }));
+    expect(refused?.message).toContain("slash");
+  }
+  // A slash inside the message is a message like any other.
+  const ok = await plan("shop.backend-dev-checkout", [lead, dev], { message: "fix round 2: see src/a.ts and /tmp/notes" });
+  expect(ok.argv).toContain("fix round 2: see src/a.ts and /tmp/notes\nReport to: lead-shop");
+  // f1rm's own notes (no message: the default note, the office's) are not slash commands and still plan.
+  const noted = await plan("shop.backend-dev-checkout", [lead, dev]);
+  expect(noted.argv).toContain(`${DEFAULT_NOTE}\nReport to: lead-shop`);
+  const { SLASH_RULE } = await import("./wake.ts");
+  expect(() => parseWakeArgs(["lead-shop", "please", "rerun"])).toThrow(SLASH_RULE); // the usage error carries the rule
+  expect(SLASH_RULE).toContain("cannot start with a slash");
+});
+
 test("a hire of a paused project is not woken, and the refusal points at `f1rm resume`; once resumed it is woken as before", async () => {
   const home = tmp("f1rm-wake-home-");
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
