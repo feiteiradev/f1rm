@@ -414,3 +414,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: letting go of a hire used to stop at "uncommitted files" or "branch not merged", so the PM or the user ended with `claude rm` and `git worktree remove --force` by hand, which Claude Code's auto mode blocks as destructive. When the work is kept first, nothing is lost and there is nothing to block, so the command can finish by itself. The age of an archive is the date of its own commit, so an old unmerged tip archived today is not pruned at once.
 - Rejected: asking the user before removing (the point is that nobody is asked); `claude rm` for leftovers (it is what auto mode blocks, and it needs a session id that a stale worktree no longer has); keeping stale worktrees until someone cleans them (they pile up, hold branches and make `claude rm` refuse); archiving the whole worktree folder as a copy (a git commit is smaller, cannot be half-written and is easy to inspect or restore); a gate rule that lets a lead let go the PM's simple hire (it is the PM's to merge and let go).
 - Where: archive-letgo
+
+## 2026-11-02 Work hours removed
+
+- Decision: the work-hours schedule is gone and supersedes "2026-10-28 Work hours": no pause at the end of the day, no resume in the morning, no `workHours` config, no overrides, no new pause with `by: schedule`. The office never pauses or resumes a project by itself. The sleep grace stays (after a gap of more than 2 minutes between ticks, nobody is judged stalled, woken or nudged for 5 minutes). A flag already on disk with `by: schedule` still reads as paused, `f1rm status` shows it as paused, and `f1rm resume` clears it and wakes its hires as usual; a project the old schedule paused stays paused until the user resumes it.
+- Why: the user wants nothing to stop or start by itself. He stops and resumes from the shell, a slash command or the top bar.
+- Rejected: a schedule that is off by default (code and config nobody uses, and a way to be surprised later); stopping on lid close or shutdown.
+- Where: S1 (work-hours-out)

@@ -227,7 +227,7 @@ The user can stop the whole project and come back to it later. Only the PM runs 
 - **Restart.** `f1rm pm` on a paused project starts a fresh PM with a note to read the board, the milestones file and the manifest, and to say in one line where everything stopped. Wake nothing yourself.
 - **Resume.** When the user says "resume", run `f1rm resume`. It wakes every session of the manifest, leads first, one at a time within the cap of 8 (it waits for a slot), each with a note of where it stopped: its task, its board row, the snapshot ref when it had uncommitted work, and the checkpoint id. A session it cannot wake, because its conversation is gone, is named in the output: tell the user. While the project is paused `f1rm hire`, `f1rm wake` and the office's Hire dialog are refused with a pointer to `f1rm resume`.
 - `f1rm pause --all` and `f1rm resume --all` are for the user's terminal, never a session.
-- **Work hours.** The office pauses by itself: at the end of the work day (Mon-Fri 09:00-19:00 Europe/Lisbon unless `~/.f1rm/config.json` says otherwise, or turns it off) every project it knows is paused with the same full stop and checkpoint, flagged `by: schedule`; at the start of the next work day it resumes only the projects the schedule paused, never one paused by hand. A `f1rm resume` out of work hours lasts until the next end of a work day (Monday 19:00 from a Friday evening or the weekend). After a sleep (a tick gap over 2 minutes) nobody is judged stalled, woken or nudged for 5 minutes. Do not run `f1rm pause` or `f1rm resume` to follow the schedule.
+- **Sleep.** After the Mac sleeps (a gap of more than 2 minutes between the office's ticks) nobody is judged stalled, woken or nudged for 5 minutes.
 
 ## Brief format
 

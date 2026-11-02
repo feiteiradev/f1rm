@@ -723,6 +723,12 @@ test("status says the project is paused on a line of its own above the table, an
   expect((await status({ json: true }, deps)).out).toBe(json); // the json stays one array of hires
 });
 
+test("a pause flag an old office wrote with by: schedule still shows as paused", async () => {
+  const h = home();
+  writePaused(pausedFile(pausedDirOf(h), REPO), { by: "schedule", at: NOW - 5 * MIN, why: "work hours" });
+  expect((await status({ json: false }, { ...base(h, []), loadAgents: async () => [] })).out).toBe(`PAUSED (schedule) since ${SINCE}: work hours; \`f1rm resume\` wakes it\nno hires\n`);
+});
+
 test("a watcher reports no stall while the project is paused, and the first poll after the resume does", async () => {
   const r = await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n, home) => {
     if (n === 1) pause(home);

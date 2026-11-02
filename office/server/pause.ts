@@ -10,7 +10,7 @@ export const PAUSE_ANSWER = { continue: false, stopReason: "project paused by th
 export const GRACE_MS = 30_000;
 
 /**
- * Who paused (`manual`, or `schedule` for the work-hours pause), when (ms), and why. `halted` is the names of the hires whose hook was answered continue:false (their turn ended at that step, the process lives);
+ * Who paused (always `manual` now; only a flag an old office wrote carries `schedule`, and it reads and resumes like any other), when (ms), and why. `halted` is the names of the hires whose hook was answered continue:false (their turn ended at that step, the process lives);
  * `stopped` the ones `claude stop` ended after the grace, absent until it ran. A resume picks both up.
  */
 export type Paused = { by: "manual" | "schedule"; at: number; why: string; halted?: string[]; stopped?: string[]; checkpoint?: string };
