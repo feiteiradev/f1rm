@@ -396,7 +396,9 @@ const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) =
   const bg = args.some((a) => a === "--bg" || a === "--background"), print = args.some((a) => a === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a));
   // A wake resumes the session it names; `--fork-session` starts a new one.
   const wake = args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) && !args.includes("--fork-session");
-  return bg || print ? { bg, print, wake, home: ownHome(prefix) } : null;
+  // The user's /f1rm:stop-all and /f1rm:resume-all (also spelled without the plugin's name) are slash commands, which a started or resumed claude runs when its prompt is one.
+  const slashAll = args.some((a) => /^\s*\/(?:f1rm:)?(?:stop|resume)-all\b/.test(a));
+  return bg || print ? { bg, print, wake, slashAll, home: ownHome(prefix) } : null;
 };
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
@@ -606,15 +608,19 @@ export function startServer({
     // The Bash line is split once; `$(mktemp -d)` is one word, so a HOME made of it stays in its command's prefix.
     const split = tool === "Bash" ? splitCommands(String(input.command ?? "").replaceAll(MKTEMP, MKTEMP_WORD)) : [];
     const commands = split.map((c) => c.words);
-    // Pausing every project is the user's terminal's alone, and so is the office's address for it: no session, a plain one included, runs `--all` or posts to the routes.
-    // A terminal (or the user's `!`) fires no hook, so it is never asked.
+    // Pausing every project is the user's alone, and so is the office's address for it: no session, a plain one included, runs `--all` or posts to the routes.
+    // The user's terminal, `!` and slash commands (/f1rm:stop-all, whose `!` block runs `f1rm pause --all`) fire no hook, so they are never asked. A session cannot type a slash command: the Skill tool refuses
+    // a skill with `disable-model-invocation`, a message from another session arrives wrapped in <cross-session-message>, and a `claude` it starts with that command as its prompt is refused here and in `f1rm wake`.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
+      if (split.some((c) => claudeStart(c)?.slashAll && !claudeStart(c)?.home)) {
+        return refuse("pause-all", "/f1rm:stop-all and /f1rm:resume-all are slash commands only the user types: no session starts or resumes a claude with one as its prompt.");
+      }
       if (/\b(?:pause|resume)\b/.test(line) && namesOffice(line)) {
         return refuse("pause-route", "Pause and resume go through `f1rm pause` and `f1rm resume`, never the office's own address.");
       }
       if (commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)?.includes("--all")))) {
-        return refuse("pause-all", "`--all` is for the user's terminal: a session pauses and resumes only its own project, and only the PM does that.");
+        return refuse("pause-all", "`--all` is the user's alone (their terminal, the /f1rm:stop-all and /f1rm:resume-all commands they type, the top bar): a session pauses and resumes only its own project, and only the PM does that.");
       }
       // A simple task is the PM's alone: no lead, no specialist, no intern (the PM's included) and no session with no role; the user's terminal or `!` still runs it.
       if (commands.some((c) => hireOf(hireArgs(c))?.simple) && (role !== "pm" || payload.agent_id)) {

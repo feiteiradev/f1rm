@@ -1545,7 +1545,7 @@ test("only the PM runs `f1rm pause` and `f1rm resume`; a lead, a specialist, a R
     for (const command of ["f1rm pause --all", "f1rm resume --all", "f1rm pause why --all", "bun office/cli/f1rm.ts resume --all"]) {
       const out = await run(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      if (id === "p") expect(out.permissionDecisionReason).toContain("`--all` is for the user's terminal");
+      if (id === "p") expect(out.permissionDecisionReason).toContain("`--all` is the user's alone");
     }
   }
   // A session with no company role runs its own project's pause and resume, but not --all: no session does. A plain terminal fires no hook at all, and so still may.
@@ -1681,6 +1681,25 @@ test("a company employee starts no session with claude --bg or claude -p; the PM
   for (const id of ["p", "l"]) for (const command of wake) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   for (const command of wake) expect([command, (await bash("d", command))?.permissionDecision]).toEqual([command, "deny"]);
   for (const command of [...refused, ...wake]) expect([command, await bash("f", command)]).toEqual([command, null]);
+});
+
+// The user's /f1rm:stop-all and /f1rm:resume-all run `f1rm pause --all` in a `!` block, which fires no hook; a session that starts or resumes another claude with that command as its prompt would run it too.
+test("no session starts or resumes a claude with /f1rm:stop-all or /f1rm:resume-all as its prompt, a plain one included; an ordinary resume and a second office's own HOME pass", async () => {
+  await delegationOffice();
+  const bash = async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
+  const refused = ['claude --bg --resume abc "/f1rm:stop-all"', "claude --bg --resume abc '/f1rm:resume-all'", 'claude --bg -r abc "  /stop-all"', 'claude -p "/f1rm:stop-all"', 'claude --bg x "/f1rm:resume-all now"', 'cd x && claude --resume abc --bg "/resume-all"'];
+  const allowed = ['claude --bg --resume abc "continue; /f1rm:stop-all is the user\'s"', "claude --bg --resume abc 'resumed; continue your task'", 'claude -p "/code-review"', 'HOME=/tmp/h-1 claude -p "/f1rm:stop-all"', 'echo "/f1rm:stop-all"'];
+  for (const id of ["p", "l", "d", "f"]) {
+    for (const command of refused) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("slash command");
+    }
+  }
+  for (const id of ["p", "l"]) for (const command of [allowed[0], allowed[1], allowed[3]]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  for (const command of allowed) expect([command, await bash("f", command)]).toEqual([command, null]);
+  // The session's own `--all` stays refused whoever it is: the slash command is the user's, typed.
+  for (const id of ["p", "l", "d", "f"]) expect([id, (await bash(id, "f1rm pause --all"))?.permissionDecision]).toEqual([id, "deny"]);
 });
 
 test("in a second office, whose own HOME is a temp folder, the user's real home still counts as the real one, for claude starts and for Elsewhere", async () => {

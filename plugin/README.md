@@ -1,6 +1,6 @@
 # f1rm plugin
 
-The f1rm company for Claude Code: twelve roles, the `f1rm-guidelines` skill, and the `hire` skill, which runs `f1rm hire`. It works from a plain terminal. The office app is only a view of it.
+The f1rm company for Claude Code: twelve roles, the `f1rm-guidelines` skill, and the `hire` skill, which runs `f1rm hire`, plus two commands only you can run: `/f1rm:stop-all` and `/f1rm:resume-all` pause and resume every project. It works from a plain terminal. The office app is only a view of it.
 
 ## Install
 

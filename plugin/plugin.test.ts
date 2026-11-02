@@ -241,7 +241,10 @@ test("the PM pauses and resumes when the user says so and never waits for agents
     "**Pause and close.**", "`paused at <time>, checkpoint <id>`", "\"safe to close\"",
     "**Restart.**", "`f1rm pm` on a paused project", "the board, the milestones file and the manifest", "say in one line where everything stopped",
     "**Resume.**", "`f1rm resume`", "leads first, one at a time within the cap of 8", "a note of where it stopped", "is named in the output",
-    "`f1rm hire`, `f1rm wake` and the office's Hire dialog are refused", "`f1rm pause --all` and `f1rm resume --all` are for the user's terminal",
+    "`f1rm hire`, `f1rm wake` and the office's Hire dialog are refused",
+    "**Stop all and resume all.**", "the shell (`f1rm pause --all`, `f1rm resume --all`)", "the slash commands the user types (/f1rm:stop-all and /f1rm:resume-all; agents cannot invoke them)",
+    "the Stop all / Resume all button in the office's top bar", "it asks once, then shows \"All N stopped\" with the checkpoint ids", "while any project is paused it shows Resume all",
+    "Nothing ever resumes by itself", "telling one PM \"resume\" still resumes just its project", "no agent runs `--all`",
   ]) expect(pause).toContain(s);
   for (const f of ["README.md", "plugin/skills/f1rm-guidelines/SKILL.md", "plugin/agents/pm.md"]) expect(readFileSync(join(REPO, f), "utf8"), f).not.toMatch(/work ?hours|work day/i); // the schedule is gone
   expect(readFileSync(join(REPO, "README.md"), "utf8").split("nobody is judged stalled, woken or nudged for 5 minutes").length).toBe(2); // the sleep grace, once
@@ -322,7 +325,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   expect(claude("plugin", "install", "f1rm@f1rm").code).toBe(0);
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
-  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire"]);
+  expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire", "resume-all", "stop-all"]);
   expect(details.out).toMatch(/Agents \(12\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
@@ -1312,9 +1315,42 @@ test("flat: a simple task whose DONE has no landable commit is checked by the PM
   expect(pluginReadme()).toContain("its simple tasks' devs");
 });
 
-test("flat: the plugin is 0.5.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.5.0");
+test("flat: the plugin is 0.5.1 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.5.1");
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const flat = entries.find((e) => e.startsWith("2026-10-28 Flat workflow\n")) ?? "";
   for (const s of ["f1rm hire --simple", "f1rm merge", "implementer", "plan once", "baseline-2026-10.md", "11099a6", "f517e70", "flat-prose"]) expect(flat, s).toContain(s);
+});
+
+// Stop all and resume all: two slash commands only the user types. The Skill tool refuses a skill with `disable-model-invocation` (probed live on Claude Code 2.1.312), and a `!` block of a slash command runs
+// with no PreToolUse hook, so the office's gate (which refuses a session's own `--all`) is not in the way of the user's command and never lets a model's.
+const COMMANDS: Record<string, string> = { "stop-all": "f1rm pause --all", "resume-all": "f1rm resume --all" };
+
+test("stop-all and resume-all are skills only the user can run, each running exactly its --all command in one pre-executed line", () => {
+  for (const [name, command] of Object.entries(COMMANDS)) {
+    const { fm, body } = parts(join(PLUGIN, "skills", name, "SKILL.md"));
+    expect(fm.name).toBe(name);
+    expect(fm["disable-model-invocation"]).toBe(true);
+    expect(typeof fm.description === "string" && fm.description.length > 20).toBe(true);
+    expect(fm["allowed-tools"]).toBe(`Bash(${command})`); // without it the pre-executed line waits for an approval and the invocation ends
+    expect(body.split("\n").filter((l) => l.startsWith("!"))).toEqual([`!\`${command}\``]);
+    expect(body).not.toContain("$ARGUMENTS");
+  }
+  expect(parts(join(PLUGIN, "skills", "stop-all", "SKILL.md")).fm.description).toContain("Pauses every registered project");
+  expect(parts(join(PLUGIN, "skills", "resume-all", "SKILL.md")).fm.description).toContain("Resumes every paused project");
+});
+
+test("the README and the plugin README say where the user stops and resumes every project, and the guidelines pin it once", () => {
+  const readme = readFileSync(join(REPO, "README.md"), "utf8");
+  for (const s of ["**Stop all and resume all.**", "`f1rm pause --all`", "`f1rm resume --all`", "/f1rm:stop-all", "/f1rm:resume-all", "Stop all / Resume all button", "top bar", "the office never pauses or resumes a project by itself"]) expect(readme, s).toContain(s);
+  expect(readme.split("**Stop all and resume all.**").length).toBe(2);
+  expect(readme).not.toContain("for your terminal only");
+  expect(pluginReadme()).toContain("/f1rm:stop-all");
+  expect(guidelines.split("/f1rm:stop-all").length).toBe(2);
+});
+
+test("docs/decisions.md has the Stop all and resume all entry with the mechanism and what it rejected", () => {
+  const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
+  const entry = entries.find((e) => e.startsWith("2026-11-02 Stop all and resume all in three places\n")) ?? "";
+  for (const s of ["- Decision:", "- Why:", "- Rejected:", "- Where:", "disable-model-invocation", "no hook", "allowed-tools", "f1rm wake", "lid", "nothing resumes by itself"]) expect(entry, s).toContain(s);
 });

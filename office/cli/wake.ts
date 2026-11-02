@@ -87,6 +87,8 @@ const background = (list: any[]) => list.filter((a) => a?.kind === "background" 
  * through the same checks as a hire. Who may wake is the gate's to judge (see mayWake), not this command's: it cannot tell who runs it.
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
+  // The note is the resumed session's prompt, and a prompt that starts with a slash runs as that slash command, as typed by the user: `/f1rm:stop-all` would pause every project past the office's gate.
+  if (req.message?.trim().startsWith("/")) throw new Error("a wake message cannot start with a slash: the resumed session would run it as a slash command. Start with words.");
   const common = await d.gitCommonDir(req.cwd);
   if (!common) throw new Error("not in a git repo");
   const repo = dirname(common);
