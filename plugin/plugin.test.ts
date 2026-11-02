@@ -1347,10 +1347,14 @@ test("the README and the plugin README say where the user stops and resumes ever
   expect(readme).not.toContain("for your terminal only");
   expect(pluginReadme()).toContain("/f1rm:stop-all");
   expect(guidelines.split("/f1rm:stop-all").length).toBe(2);
+  expect(guidelines).toContain("`f1rm wake` refuses a message that starts with a slash");
+  for (const [text, name] of [[readme, "README"], [guidelines, "guidelines"]] as const) expect(text, name).toContain("best-effort text matching");
+  const wakeRow = readme.split("\n").find((l) => l.startsWith("| `f1rm wake` |")) ?? "";
+  expect(wakeRow).toContain("The message cannot start with a slash: a resumed session would run it as a slash command");
 });
 
 test("docs/decisions.md has the Stop all and resume all entry with the mechanism and what it rejected", () => {
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const entry = entries.find((e) => e.startsWith("2026-11-02 Stop all and resume all in three places\n")) ?? "";
-  for (const s of ["- Decision:", "- Why:", "- Rejected:", "- Where:", "disable-model-invocation", "no hook", "allowed-tools", "f1rm wake", "lid", "nothing resumes by itself"]) expect(entry, s).toContain(s);
+  for (const s of ["- Decision:", "- Why:", "- Rejected:", "- Where:", "disable-model-invocation", "no hook", "whose prompt text matches", "best-effort text matching", "USAGE and the README row", "a HOME prefix included", "allowed-tools", "f1rm wake", "lid", "nothing resumes by itself"]) expect(entry, s).toContain(s);
 });

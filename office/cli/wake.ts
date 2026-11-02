@@ -8,7 +8,7 @@ import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, ro
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
-export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
+export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...] (a message cannot start with a slash)";
 export const DEFAULT_NOTE = "resumed; continue your task";
 
 /** A simple task's hire: a specialist with no team, whose lead is the PM. */

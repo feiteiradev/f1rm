@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { HireRefused, LOAD_FIRST, projectFolder as folder, SECURITY } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { clearPaused, pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
-import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
+import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake, USAGE } from "./wake.ts";
 
 setDefaultTimeout(30_000);
 const made: string[] = [];
@@ -61,6 +61,10 @@ test("a wake message never starts with a slash: a resumed session expands its fi
   // A slash inside the message is a message like any other.
   const ok = await plan("shop.backend-dev-checkout", [lead, dev], { message: "fix round 2: see src/a.ts and /tmp/notes" });
   expect(ok.argv).toContain("fix round 2: see src/a.ts and /tmp/notes\nReport to: lead-shop");
+  // f1rm's own notes (no message: the default note, the office's) are not slash commands and still plan.
+  const noted = await plan("shop.backend-dev-checkout", [lead, dev]);
+  expect(noted.argv).toContain(`${DEFAULT_NOTE}\nReport to: lead-shop`);
+  expect(USAGE).toContain("a message cannot start with a slash");
 });
 
 test("a hire of a paused project is not woken, and the refusal points at `f1rm resume`; once resumed it is woken as before", async () => {

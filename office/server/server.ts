@@ -397,8 +397,17 @@ const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) =
   // A wake resumes the session it names; `--fork-session` starts a new one.
   const wake = args.some((a) => a === "-r" || a === "--resume" || a.startsWith("--resume=")) && !args.includes("--fork-session");
   // The user's /f1rm:stop-all and /f1rm:resume-all (also spelled without the plugin's name) are slash commands, which a started or resumed claude runs when its prompt is one.
-  const slashAll = args.some((a) => /^\s*\/(?:f1rm:)?(?:stop|resume)-all\b/.test(a));
-  return bg || print ? { bg, print, wake, slashAll, home: ownHome(prefix) } : null;
+  // Best effort, text only: every word after `claude` is looked at (past a `--` too), with all quotes and backslashes taken out (`"/f1rm:stop-"all`, `$'/f1rm:stop-all'`, `/f1rm:stop\-all`).
+  // A prompt the gate cannot read is refused too: a `$VAR`, `$(…)` or backtick word, or a `<` redirect or here-string with no prompt word (a pipe is judged on the line, see `piped`).
+  const every = words.slice(i + 1).map((w) => w.replace(/\$'/g, "").replace(/["'\\]/g, ""));
+  const slashAll = every.some((a) => /^\s*\/(?:f1rm:)?(?:stop|resume)-all\b/.test(a));
+  // A prompt word is a word that is no flag and no flag's value (a flag that is not one of these takes the next word); any such word may be the prompt.
+  const BOOLEAN = ["-p", "--print", "--bg", "--background", "-c", "--continue", "--verbose", "--fork-session"];
+  // A `<` redirect is no prompt word: neither is its file, when it is the next word.
+  const given = args.filter((a, k) => !/^\d*</.test(a) && !/^\d*<+$/.test(args[k - 1] ?? ""));
+  const prompt = given.some((a, k) => !a.startsWith("-") && (k === 0 || !given[k - 1].startsWith("-") || BOOLEAN.includes(given[k - 1])));
+  const unreadable = rest.some((a) => /\$(?!')[\w({@*#?!]|`/.test(a)) || (!prompt && args.some((a) => /^\d*</.test(a)));
+  return bg || print ? { bg, print, wake, slashAll, prompt, unreadable, home: ownHome(prefix) } : null;
 };
 // A Founder role drafts and never puts anything out: a connector tool with one of these words in its name is held.
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
@@ -613,8 +622,11 @@ export function startServer({
     // a skill with `disable-model-invocation`, a message from another session arrives wrapped in <cross-session-message>, and a `claude` it starts with that command as its prompt is refused here and in `f1rm wake`.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
-      if (split.some((c) => claudeStart(c)?.slashAll && !claudeStart(c)?.home)) {
-        return refuse("pause-all", "/f1rm:stop-all and /f1rm:resume-all are slash commands only the user types: no session starts or resumes a claude with one as its prompt.");
+      const started = split.flatMap((c) => claudeStart(c) ?? []);
+      // No HOME carve-out: a second office whose ~/.claude is a link and whose office-url is a copy reaches the real office.
+      const piped = /(?<!\|)\|(?!\|)[^|;&\n]*\bclaude\b/i.test(line);
+      if (started.some((s) => s.slashAll || s.unreadable || (piped && !s.prompt))) {
+        return refuse("pause-all", "/f1rm:stop-all and /f1rm:resume-all are slash commands only the user types: no session starts or resumes a claude with one as its prompt, or with a prompt the office cannot read (a pipe, a `<` redirect, `$VAR`, `$(…)`). Write the prompt out as plain words.");
       }
       if (/\b(?:pause|resume)\b/.test(line) && namesOffice(line)) {
         return refuse("pause-route", "Pause and resume go through `f1rm pause` and `f1rm resume`, never the office's own address.");
