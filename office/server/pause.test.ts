@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HireRefused } from "../cli/hire.ts";
 import { projectFile } from "./editions.ts";
-import { PAUSE_ANSWER } from "./pause.ts";
+import { pausedFile, PAUSE_ANSWER, writePaused } from "./pause.ts";
 import { startServer } from "./server.ts";
 
 const SECRET = "ingest-secret";
@@ -347,4 +347,26 @@ test("a project resumed before the 30 s are up stops nothing", async () => {
   now += 30_000;
   await settle();
   expect(stopped).toEqual([]);
+});
+
+test("the page's snapshot lists the paused projects by name, a schedule pause included, and the office pushes it on pause and resume", async () => {
+  const pausedDir = join(dir, `paused-${n++}`);
+  writePaused(pausedFile(pausedDir, "/code/idle/.git"), { by: "schedule", at: 1, why: "" });
+  const { server } = start(pausedDir);
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: `http://127.0.0.1:${server.port}` } } as any);
+  let last: unknown = "nothing yet";
+  ws.onmessage = (m) => (last = JSON.parse(String(m.data)).paused);
+  const sees = async (names: string[]) => {
+    for (let i = 0; i < 40 && JSON.stringify(last) !== JSON.stringify(names); i++) await settle(25);
+    expect(last).toEqual(names);
+  };
+  try {
+    await sees(["idle"]);
+    await post(server, "pause", { room: SHOP });
+    await sees(["idle", "shop"]);
+    await post(server, "resume", { all: true });
+    await sees([]);
+  } finally {
+    ws.close();
+  }
 });

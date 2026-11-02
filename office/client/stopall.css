@@ -1,0 +1,16 @@
+.stopall { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.stopall .ask { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--amber); }
+.stopall .ask button {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 2px 12px;
+  cursor: pointer;
+}
+.stopall .ask button:hover, .stopall .ask button:focus-visible { border-color: var(--amber); }
+.stopall .ask button:active { transform: translateY(1px); }
+.stopall [aria-disabled="true"] { opacity: 0.6; cursor: default; }
+.stopall .status { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.stopall .status[data-failed] { color: var(--amber); }
+.stopall .status:empty { display: none; }

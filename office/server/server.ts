@@ -1013,7 +1013,9 @@ export function startServer({
   // A lead waits on the user while its own permission request is held, or its team's board holds an open question. The reducer never sees this; the snapshot adds it.
   const needsYou = (e: Employee) => e.role === "lead" && (approvals.list().some((a) => a.sessionId === e.sessionId) || asking.has(`${e.room}\n${teamOf(e)}`));
   const employeesNow = () => Object.fromEntries(Object.entries(state.employees).map(([id, e]) => [id, needsYou(e) ? { ...e, needsYou: true } : e]));
-  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions }), approvals: approvals.list() });
+  // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all.
+  const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
+  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions }), paused: pausedNames(), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
