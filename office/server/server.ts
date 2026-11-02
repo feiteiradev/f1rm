@@ -747,6 +747,12 @@ export function startServer({
     if ((role !== "pm" || payload.agent_id) && commands.some((c) => hireArgs(c, "push"))) {
       return refuse("push-cmd", "Only the PM pushes, with `f1rm push` at the end of a milestone, once everything landed and the suite is green. Tell the session in your Report to that the work is ready.");
     }
+    // The `--check` value of `f1rm push` and `f1rm merge` runs under `sh -c`, so it is read as a command line of its own: the suite, never a push or a merge.
+    // ponytail: like the rest of the gate, `bash -c` and quote tricks inside the value are not seen.
+    const checks = commands.flatMap((c) => ["push", "merge"].flatMap((verb) => (hireArgs(c, verb) ?? []).flatMap((a, i, all) => (a === "--check" && all[i + 1] !== undefined ? [all[i + 1]] : []))));
+    if (checks.some((v) => splitCommands(v).some(({ words: w }) => gitCall(w)?.sub === "push" || ghLands(w) || hireArgs(w, "push")))) {
+      return refuse("check-push", "A --check command runs the project's suite; it may not push or merge. The PM pushes with plain `f1rm push` at the end of a milestone.");
+    }
     if (role === "pm" && hires.some((h) => h.simple && (h.team || h.role === "lead" || h.role === "reviewer"))) {
       return refuse("hire", "--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer.");
     }

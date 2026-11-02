@@ -28,8 +28,8 @@ export async function pushIn(argv: string[], cwd: string, deps: Partial<PushDeps
   const lines: string[] = [];
   const say = (line: string) => (lines.push(line), deps.say?.(line));
   try {
-    await send(check, custom, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
-    return { out: lines.join("\n") + "\n", err: "", code: 0 };
+    const warning = await send(check, custom, cwd, { home: deps.home ?? process.env.HOME!, now: deps.now ?? Date.now, env: deps.env ?? {} }, say);
+    return { out: lines.join("\n") + "\n", err: warning ? `warning: ${warning}\n` : "", code: 0 };
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
     return { out: lines.length ? lines.join("\n") + "\n" : "", err: `f1rm push: ${e.message}\n`, code: 1 };
@@ -71,8 +71,15 @@ async function send(check: string, custom: boolean, cwd: string, deps: Pick<Push
   // One explicit refspec overrides remote.origin.push and push.default, so a `+` refspec from config cannot force; no tags follow.
   const sent = net(main, deps.env, ["push", "--no-follow-tags", "origin", `${ref}:${ref}`]);
   if (!sent.ok) throw new Refused(`push failed: ${sent.err}`);
-  const kept = join(deps.home, ".f1rm", "kept", basename(main));
-  mkdirSync(kept, { recursive: true });
-  appendFileSync(join(kept, "pushes.log"), `${new Date(deps.now()).toISOString()} | ${basename(main)} | ${base} | ${old || NO_OLD}..${tip}\n`);
+  // The push is done: a log that cannot be written is a warning, never a failed run (a retry would find nothing to push).
+  let warning: string | undefined;
+  try {
+    const kept = join(deps.home, ".f1rm", "kept", basename(main));
+    mkdirSync(kept, { recursive: true });
+    appendFileSync(join(kept, "pushes.log"), `${new Date(deps.now()).toISOString()} | ${basename(main)} | ${base} | ${old || NO_OLD}..${tip}\n`);
+  } catch (e) {
+    warning = `could not write pushes.log: ${(e as Error).message}`;
+  }
   say(`pushed ${base} ${(old || NO_OLD).slice(0, 7)}..${tip.slice(0, 7)} to origin`);
+  return warning;
 }

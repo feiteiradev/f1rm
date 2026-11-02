@@ -69,6 +69,18 @@ test("a push appends `date | repo | base | old..new` to ~/.f1rm/kept/<repo>/push
   expect(readFileSync(pushesLog(s), "utf8")).toBe(`2026-11-02T12:00:00.000Z | shop | main | ${s.first}..${one}\n2026-11-02T12:00:00.000Z | shop | main | ${one}..${two}\n`);
 });
 
+test("a pushes.log that cannot be written (a file where its directory should be) leaves a pushed run at exit 0: the pushed line, a warning on stderr", async () => {
+  const s = setup();
+  const tip = commit(s.repo, "a.txt");
+  mkdirSync(join(s.home, ".f1rm"), { recursive: true });
+  writeFileSync(join(s.home, ".f1rm", "kept"), "not a directory");
+  const r = await push(s);
+  expect(r.code).toBe(0);
+  expect(r.out.trim().split("\n").at(-1)).toBe(`pushed main ${s.first.slice(0, 7)}..${tip.slice(0, 7)} to origin`);
+  expect(r.err).toMatch(/^warning: could not write pushes\.log: .+\n$/);
+  expect(originMain(s)).toBe(tip);
+});
+
 test("when origin already has the tip it says `already up to date`, pushes nothing and logs nothing", async () => {
   const s = setup();
   const r = await push(s);

@@ -1970,6 +1970,21 @@ test("only the PM runs `f1rm push`: a lead, a dev, a designer, a researcher, a R
   for (const reason of [LANDING_REFUSAL, PUSH_REFUSAL]) expect(reason).not.toMatch(/ask the user|with `!`/i);
 });
 
+test("a `--check` command of `f1rm push` and `f1rm merge` runs the project's suite: it may not push, merge or run `f1rm push`", async () => {
+  const bash = await mainOffice();
+  const refused = ["git push -f origin other", "bun test && git push origin main", "gh pr merge 1", "gh api -X PUT repos/o/r/pulls/3/merge", "git -C x push", "f1rm push", "bun run check; f1rm push --check true"];
+  for (const verb of ["f1rm push", "f1rm merge add-a"]) {
+    for (const check of refused) {
+      for (const command of [`${verb} --check '${check}'`, `${verb} --check "${check}"`]) {
+        const out = await bash("p", command);
+        expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+        expect(out.permissionDecisionReason).toContain("A --check command runs the project's suite; it may not push or merge. The PM pushes with plain `f1rm push` at the end of a milestone.");
+      }
+    }
+    for (const check of ["scripts/test.sh fast", "bun run check", "git status && bun test", "git log --grep=push"]) expect([verb, check, await bash("p", `${verb} --check '${check}'`)]).toEqual([verb, check, null]);
+  }
+});
+
 const LANDS = [
   "git merge worktree-add-a", "git merge --no-ff worktree-add-a -m x", "git merge --ff-only abc1234", "git cherry-pick abc1234", "git rebase main", "git reset --hard HEAD~1", "git reset --soft main", "git commit -m x", "git commit --amend --no-edit", "git am fix.patch",
   "git pull", "git pull origin main", "git revert abc1234", "git checkout worktree-add-a -- src/a.ts", "git checkout abc1234 -- .", "git checkout -q main -- a.ts b.ts", "git checkout -B main abc1234", "git switch -C main abc1234", "git restore --source=worktree-add-a src/a.ts",
