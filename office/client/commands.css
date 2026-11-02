@@ -1,0 +1,33 @@
+/* The commands card shares the approval card's look: the surface, the amber edge, the mono text. */
+.commands { padding: 12px 16px; border-bottom: 1px solid var(--line); border-left: 4px solid var(--amber); }
+.commands h3 { margin: 0; font-size: 14px; }
+.commands .project { color: var(--amber); overflow-wrap: anywhere; }
+.commands .lede { margin: 4px 0 8px; color: var(--muted); }
+.commands fieldset { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
+.commands legend { padding: 0; color: var(--muted); font-weight: 700; }
+.commands ul { margin: 2px 0 0; padding: 0; list-style: none; }
+.commands li { padding: 1px 0; }
+.commands label { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+.commands input { flex: none; margin: 0; accent-color: var(--green); }
+.commands code { font: inherit; overflow-wrap: anywhere; }
+.commands li[data-excluded] { color: var(--muted); }
+.commands li[data-excluded] label { cursor: default; }
+.commands li[data-excluded] code { text-decoration: line-through; text-decoration-color: var(--line); }
+.commands .why { display: block; margin-left: 22px; font-size: 13px; }
+.commands input:focus-visible, .commands button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.commands .approve {
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--bg);
+  background: var(--green);
+  border: 1px solid var(--green);
+}
+.commands .approve:disabled { opacity: 0.5; cursor: default; }
+.commands .approve:active:not(:disabled) { transform: translateY(1px); }
+.commands .problem { margin: 6px 0 0; color: var(--amber); }
+/* Inside the PM's panel the card sits in the panel's own padding. */
+.panel .commands { margin: 0 0 12px; border: 1px solid var(--line); border-left: 4px solid var(--amber); }

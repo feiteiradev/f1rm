@@ -8,6 +8,7 @@ import { canRemove, DOOR, hashFor, isProject, layoutLobby, projectState, roomFro
 import { createLobby, type Lobby as LobbyScene } from "./lobby-scene.ts";
 import { DeskCard, Tray } from "./approvals.tsx";
 import { handsOf, needsYouTag, type Anchor } from "./approvals.ts";
+import { CommandsCard } from "./commands.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
@@ -105,6 +106,8 @@ function Panel({ state, id, entries, onAsk, onTell, onIntern, onClose }: { state
           </>
         )}
       </dl>
+      {/* On the PM's desk until the user approves the project's commands; it blocks nothing, the PM meets the per-request cards meanwhile. */}
+      {pm && state.commands?.[e.room] && <CommandsCard room={e.room} name={state.rooms[e.room]?.name ?? e.room} list={state.commands[e.room]} />}
       <JumpButton id={id} label={pm ? "Talk" : undefined} />
       <LetGo id={id} name={name} />
       <AskBox onAsk={onAsk} />

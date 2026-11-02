@@ -2,6 +2,7 @@
 import { basename } from "node:path";
 import { nameFor, roleOfAgentType, type RoleId } from "../people.ts";
 import type { Approval } from "./approvals.ts";
+import type { Cmd } from "./projectcmds.ts";
 import type { BoardRow } from "./board.ts";
 
 export type Status = "working" | "waiting" | "idle" | "offline";
@@ -54,6 +55,8 @@ export type OfficeState = {
   teamBoards?: Record<string, Record<string, BoardRow[]>>;
   /** Each room's edition, only for rooms whose edition was chosen; a room without one counts as Work. Added by the server like `boards`, and absent when the office keeps no project settings. */
   editions?: Record<string, "work" | "founder">;
+  /** Each registered project's command list the user has not approved yet (see projectcmds.ts), only for projects whose folder exists. Added by the server like `boards`, and absent when the office keeps no project settings. */
+  commands?: Record<string, Cmd[]>;
   /** The names of the registered projects that are paused (by hand or by the schedule). Added by the server like `boards`. */
   paused?: string[];
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */

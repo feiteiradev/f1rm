@@ -4,6 +4,7 @@ import type { OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
 import { cardOf, handsOf, type Anchor } from "./approvals.ts";
 import { post } from "./post.ts";
+import { CommandsCard } from "./commands.tsx";
 import "./approvals.css";
 
 type Verb = "approve" | "deny" | "always";
@@ -79,6 +80,9 @@ export function Tray({ state }: { state: OfficeState }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const hands = state.approvals;
+  // The projects whose command list waits for the user's tick: one card each, ahead of the single requests.
+  const lists = Object.entries(state.commands ?? {});
+  const waiting = (hands?.length ?? 0) + lists.length;
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => root.current && !root.current.contains(e.target as Node) && setOpen(false);
@@ -91,16 +95,17 @@ export function Tray({ state }: { state: OfficeState }) {
   if (!hands) return null;
   return (
     <div className="tray" ref={root}>
-      <button className="tray-button" data-waiting={hands.length > 0 || undefined} aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="tray-button" data-waiting={waiting > 0 || undefined} aria-expanded={open} onClick={() => setOpen(!open)}>
         Approvals
-        <span className="badge" aria-label={`${hands.length} waiting`}>{hands.length}</span>
+        <span className="badge" aria-label={`${waiting} waiting`}>{waiting}</span>
       </button>
       {open && (
         <section className="tray-panel" aria-label="Approvals">
-          {hands.length === 0 ? (
+          {waiting === 0 ? (
             <p className="none">No one is waiting for permission.</p>
           ) : (
             <ul>
+              {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
               {hands.map((a) => <li key={a.id}><HandCard state={state} approval={a} /></li>)}
             </ul>
           )}

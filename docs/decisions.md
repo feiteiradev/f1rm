@@ -422,6 +422,12 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: asking the user before removing (the point is that nobody is asked); `claude rm` for leftovers (it is what auto mode blocks, and it needs a session id that a stale worktree no longer has); keeping stale worktrees until someone cleans them (they pile up, hold branches and make `claude rm` refuse); archiving the whole worktree folder as a copy (a git commit is smaller, cannot be half-written and is easy to inspect or restore); a gate rule that lets a lead let go the PM's simple hire (it is the PM's to merge and let go).
 - Where: archive-letgo
 
+## 2026-11-02 Permissions approved once per project
+
+- Decision: the office derives a project's command list from package.json, the lockfile and CI; the user approves it once; only the office writes permissions.allow/deny into the main checkout's settings.local.json; sessions cannot approve or widen it (gate on the route, a settings gate, and `f1rm merge` refusing settings files); a command outside it raises the card as before.
+- Why: decision 4 of the user; the per-request cards were the biggest recurring ask.
+- Rejected: a hire or lead approving its own commands; bypassPermissions and the fewer-permission-prompts skill (they skip the gates); a managed-settings.json (machine-wide, needs admin); passing rules by `--settings` at hire (running sessions keep the old list).
+- Where: project-permissions
 ## 2026-11-02 Work hours removed
 
 - Decision: the work-hours schedule is gone and supersedes "2026-10-28 Work hours": no pause at the end of the day, no resume in the morning, no `workHours` config, no overrides, no new pause with `by: schedule`. The office never pauses or resumes a project by itself. The sleep grace stays (after a gap of more than 2 minutes between ticks, nobody is judged stalled, woken or nudged for 5 minutes). A flag already on disk with `by: schedule` still reads as paused, `f1rm status` shows it as paused, and `f1rm resume` clears it and wakes its hires as usual; a project the old schedule paused stays paused until the user resumes it.
