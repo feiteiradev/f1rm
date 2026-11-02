@@ -111,6 +111,8 @@ const hireArgs = (words: string[], verb = "hire") => {
   const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === verb);
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
+/** A word the shell reads as `--override` once its quotes and backslashes go (`--over""ride`, `\--override`); a quoted brief with spaces in it is prose. */
+const isOverrideWord = (w: string) => !/\s/.test(w) && w.replace(/[\\"']/g, "").includes("override");
 /** The role, `--team` and `--simple` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
 const hireOf = (args: string[] | null) => {
   if (!args) return null;
@@ -755,7 +757,7 @@ export function startServer({
       if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
     }
     // A cap makes a hire or a wake wait for a free slot; `--override` is the user's own terminal's and the Hire dialog's, never a session's.
-    if (role && commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.includes("--override")))) {
+    if (role && commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isOverrideWord)))) {
       return refuse("override", "No session exceeds a cap. Run the same command again: it waits for a free slot.");
     }
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {

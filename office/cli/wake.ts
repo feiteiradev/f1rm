@@ -8,7 +8,7 @@ import { checkSlots, EX_TEMPFAIL, HireRefused, pmName, projectFolder, realWait, 
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
-export const USAGE = "usage: f1rm wake <name|id> [message] [--override] [claude flags...]";
+export const USAGE = "usage: f1rm wake <name|id> [message] [--override] (the user's own terminal only)[claude flags...]";
 export const DEFAULT_NOTE = "resumed; continue your task";
 
 /** A simple task's hire: a specialist with no team, whose lead is the PM. */

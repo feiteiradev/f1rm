@@ -220,6 +220,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants to be asked fewer questions.
 - Rejected: asking about every technical choice.
 - Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-21 Skill stack: mattpocock + pstack
 
@@ -269,6 +270,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: small requests were getting a full interview.
 - Rejected: one workflow for everything; letting the PM hire specialists for small work (the PM hires only leads still holds); a Jump to the lead for a simple workflow's decisions and inputs (a cap or a permission still needs its own session).
 - Where: workflow-talk, 196837a
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 Who talks to whom
 
@@ -276,6 +278,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the PM's chat stays free of hire traffic, and each lead's decisions reach the user without a relay.
 - Rejected: the PM relaying every question; PLAN and GO round trips for changes the user already approved.
 - Where: workflow-talk, 196837a
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 f1rm wake
 

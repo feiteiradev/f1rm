@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { hire as hireCommand, NO_SLOT, type Wait } from "./hire.ts";
+import { hire as hireCommand, NO_SLOT, realWait, type Wait } from "./hire.ts";
 
 // The real `f1rm hire` waits for a slot up to 8 minutes; the processes these tests spawn give up at once (the wait itself is tested in process, below).
 process.env.F1RM_SLOT_WAIT_MS = "0";
@@ -651,6 +651,21 @@ test("a hire that never gets a slot waits 8 minutes, says so at most once a minu
   expect(c.said.filter((l) => l.startsWith("waiting for a slot: ")).length).toBe(9);
   expect(c.said.at(-1)).toBe(NO_SLOT);
   expect(stub.argv()).toBeNull();
+});
+
+test("F1RM_SLOT_WAIT_MS that is not a number falls back to the 8 minutes, and 0 stays an accepted value", async () => {
+  const saved = process.env.F1RM_SLOT_WAIT_MS;
+  try {
+    process.env.F1RM_SLOT_WAIT_MS = "abc";
+    const stub = stubClaude(Array(8).fill(bg("working")));
+    const c = clock();
+    expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], { ...c.wait, total: realWait().total })).toBe(75);
+    expect(c.sleeps()).toBe(24);
+    process.env.F1RM_SLOT_WAIT_MS = "0";
+    expect(realWait().total).toBe(0);
+  } finally {
+    process.env.F1RM_SLOT_WAIT_MS = saved;
+  }
 });
 
 test("the team and project caps wait too; a refusal that is no counted cap is immediate", async () => {

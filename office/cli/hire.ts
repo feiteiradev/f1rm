@@ -7,7 +7,7 @@ import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from ".
 import { claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
-  "usage: f1rm hire [--override] [--report-to <pm session>] [--team <team>] [--simple] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
+  "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
   "       f1rm hire lead lead-<team> <team> <brief>";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
@@ -274,7 +274,7 @@ export const NO_SLOT = "no slot yet: run the same command again. Ask nobody; it 
 export const EX_TEMPFAIL = 75;
 export type Wait = { sleep: (ms: number) => Promise<unknown>; now: () => number; total: number; say: (line: string) => void };
 // F1RM_SLOT_WAIT_MS is the tests' way to shorten the total wait of the real command (0 gives up at the first refusal).
-export const realWait = (): Wait => ({ sleep: Bun.sleep, now: Date.now, total: Number(process.env.F1RM_SLOT_WAIT_MS ?? WAIT_MS), say: (line) => console.error(line) });
+export const realWait = (): Wait => ({ sleep: Bun.sleep, now: Date.now, total: Number(process.env.F1RM_SLOT_WAIT_MS ?? WAIT_MS) || (process.env.F1RM_SLOT_WAIT_MS === "0" ? 0 : WAIT_MS), say: (line) => console.error(line) });
 
 /**
  * Runs `attempt` until no counted cap (a HireRefused with a working count) refuses it, polling every POLL_MS and saying `waiting for a slot: <the cap>` at the start and then once a minute.

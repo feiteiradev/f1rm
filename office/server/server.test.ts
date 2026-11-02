@@ -1769,6 +1769,26 @@ test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits fo
   }
 });
 
+test("a quote-split --override is the same flag to the shell, so the gate refuses it too; a sub-agent of the PM or a lead is held to it", async () => {
+  const bash = await gateOffice();
+  const spellings = ['--over""ride', "\\--override", "--over'ride'", '"--over"ride'];
+  const reason = "No session exceeds a cap. Run the same command again: it waits for a free slot.";
+  for (const [id, hire, wake] of [["p", "lead lead-checkout checkout b", "lead-checkout"], ["l", "--team checkout designer checkout.designer-a a b", "checkout.designer-a"]] as const) {
+    for (const flag of spellings) {
+      for (const command of [`f1rm hire ${hire} ${flag}`, `timeout 600 f1rm hire ${hire} ${flag}`, `f1rm wake ${flag} ${wake}`, `timeout 5 f1rm wake ${wake} ${flag}`]) {
+        const out = await bash(id, command);
+        expect([id, command, out?.permissionDecision, out?.permissionDecisionReason]).toEqual([id, command, "deny", reason]);
+      }
+    }
+  }
+  for (const [id, command] of [["p", "f1rm hire --override lead lead-checkout checkout b"], ["l", "f1rm wake --override checkout.designer-a"]] as const) {
+    const out = await held(await hook({ ...preToolUse(id, "Bash", { command }), agent_id: "agent-1", agent_type: "Explore" }));
+    expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]); // a sub-agent's hire has its own, earlier refusal
+  }
+  // A longer quoted brief that mentions the flag is still prose.
+  expect(await bash("p", `f1rm hire lead lead-checkout checkout "do not pass --over'ride' here"`)).toBeNull();
+});
+
 test("a lead hires only into its own team: not a lead, not without --team, not into another team", async () => {
   const bash = await gateOffice();
   const allowed = ["f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --report-to x --skills s --team checkout reviewer checkout.reviewer-a review-a b", 'f1rm hire --team "checkout" designer checkout.designer-a a b', "f1rm hire --level high --team checkout reviewer checkout.reviewer-a review-a b", "f1rm hire --help"];
