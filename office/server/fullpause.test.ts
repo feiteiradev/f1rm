@@ -2,7 +2,7 @@
 // Real temp git repo and worktree, the machine and the process table faked.
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkpointDirOf, latestManifest, readManifest } from "./checkpoint.ts";
@@ -427,6 +427,31 @@ test("a flag an old office wrote with by: schedule reads as paused, refuses a hi
   await settle(500);
   expect(o.flag()).toBeNull();
   expect(o.r.woke.map((w) => w.name)).toEqual(["checkout.backend-dev-x"]);
+});
+
+test("a manual pause on a project holding an old by: schedule flag keeps that flag as it is, still stops and checkpoints what runs, and reports the stop but no change", async () => {
+  const p = project();
+  world(p);
+  const o = clocked(p, utc("10-28T10:00:00"));
+  mkdirSync(o.pausedDir, { recursive: true });
+  const old = { by: "schedule", at: utc("10-27T19:00:00"), why: "work hours" };
+  writeFileSync(pausedFile(o.pausedDir, p.room), JSON.stringify(old));
+  await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
+  await settle();
+  const r = await post(o.server, "pause", { room: p.room, why: "bed" });
+  const body: any = await r.json();
+  expect(r.status).toBe(200);
+  expect(body.rooms).toEqual([]); // the project was paused already: nothing changed
+  expect(body.results[0]).toMatchObject({ verified: true, stopped: ["checkout.backend-dev-x"], checkpoint: expect.stringMatching(/^cp-/) });
+  expect(stopped).toEqual(["dev"]);
+  expect(o.flag()).toMatchObject({ ...old, stopped: ["checkout.backend-dev-x"], checkpoint: body.results[0].checkpoint }); // still by: schedule, still "work hours"
+});
+
+test("no schedule code remains: workhours.ts and its test are gone and neither server.ts nor f1rm.ts names the schedule", () => {
+  const read = (f: string) => readFileSync(join(import.meta.dir, f), "utf8");
+  expect(existsSync(join(import.meta.dir, "workhours.ts"))).toBe(false);
+  expect(existsSync(join(import.meta.dir, "workhours.test.ts"))).toBe(false);
+  for (const f of ["server.ts", "../cli/f1rm.ts"]) for (const s of ["scheduleOnce", "workHours"]) expect(read(f), `${f} ${s}`).not.toContain(s);
 });
 
 test("--all goes on past a project whose process table cannot be read: the others are paused and checkpointed, the failure is named, and the state is pushed", async () => {
