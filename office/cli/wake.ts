@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
-import { checkSlots, HireRefused, pmName, projectFolder, REVIEWER_DISALLOWED, rootTooLong, SECURITY, withPonytail, type LiveHires } from "./hire.ts";
+import { checkSlots, EX_TEMPFAIL, HireRefused, pmName, projectFolder, realWait, REVIEWER_DISALLOWED, rootTooLong, SECURITY, untilSlot, withPonytail, type LiveHires, type Wait } from "./hire.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
@@ -163,20 +163,16 @@ export function realWakeDeps(home: string): WakeDeps {
   };
 }
 
+/** `planWake`, but a cap that refuses it waits for a free slot (see untilSlot): null when none came. The sessions are read again at every look. */
+export const planWakeWaiting = (req: WakeRequest, mkDeps: () => WakeDeps, w: Wait): Promise<WakePlan | null> => untilSlot(() => planWake(req, mkDeps()), w);
+
 /** Runs `f1rm wake` and returns the exit code. */
-export async function wake(words: string[]): Promise<number> {
+export async function wake(words: string[], wait: Wait = realWait()): Promise<number> {
   if (words[0] === "--help" || words[0] === "-h") return console.log(USAGE), 0;
   const { target, message, override, extra: rest } = parseWakeArgs(words);
   if (!target) throw new Error(USAGE);
-  let plan: WakePlan;
-  try {
-    plan = await planWake({ target, message, cwd: process.cwd(), override, extra: rest }, realWakeDeps(process.env.HOME!));
-  } catch (err) {
-    if (err instanceof HireRefused && err.working !== null) {
-      throw new Error(`${err.message} Do not wake it; tell the session you report to. Only after the user approves this wake in that conversation is it rerun with --override.`);
-    }
-    throw err;
-  }
+  const plan = await planWakeWaiting({ target, message, cwd: process.cwd(), override, extra: rest }, () => realWakeDeps(process.env.HOME!), wait);
+  if (!plan) return EX_TEMPFAIL;
   const proc = Bun.spawn(plan.argv, { cwd: plan.cwd, env: claudeEnv(), stdin: "ignore", stdout: "pipe", stderr: "inherit" });
   const out = (await new Response(proc.stdout).text()).trim();
   const code = await proc.exited;

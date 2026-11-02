@@ -3,12 +3,14 @@ import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { HireRefused, LOAD_FIRST, projectFolder as folder, SECURITY } from "./hire.ts";
+import { HireRefused, LOAD_FIRST, NO_SLOT, projectFolder as folder, SECURITY, type Wait } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { clearPaused, pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
-import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake } from "./wake.ts";
+import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake, planWakeWaiting } from "./wake.ts";
 
 setDefaultTimeout(30_000);
+// The real `f1rm wake` waits for a slot up to 8 minutes; the processes these tests spawn give up at once (the wait itself is tested in process, below).
+process.env.F1RM_SLOT_WAIT_MS = "0";
 const made: string[] = [];
 const tmp = (prefix: string) => (made.push(mkdtempSync(join(tmpdir(), prefix))), made[made.length - 1]);
 afterAll(() => made.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -394,7 +396,7 @@ test("f1rm wake starts claude from the hire's worktree with the resume argv, and
   });
 });
 
-test("f1rm wake that a cap refuses says so, tells the hire not to wake, and starts nothing", async () => {
+test("f1rm wake that a cap refuses waits, gives up with code 75 and the ask-nobody line, and starts nothing", async () => {
   const repo = repoWith("checkout");
   const bin = stub([
     running("lead-shop", "lead-sid", repo),
@@ -403,9 +405,56 @@ test("f1rm wake that a cap refuses says so, tells the hire not to wake, and star
     running("shop.designer-b", "b", wt("b", repo)),
   ]);
   const r = run(bin, repo, "shop.backend-dev-checkout");
-  expect(r.code).toBe(1);
-  expect(r.err).toContain("team shop already has 2 working (the cap is 2 per team)");
-  expect(r.err).toContain("Do not wake");
+  expect(r.code).toBe(75);
+  expect(r.err).toContain("waiting for a slot: team shop already has 2 working (the cap is 2 per team)");
+  expect(r.err).toContain("no slot yet: run the same command again. Ask nobody; it is not a decision for the user.");
+  expect(r.err).not.toContain("--override");
   expect(await Bun.file(join(bin, "argv.log")).exists()).toBe(false);
   expect(run(bin, repo).err).toContain("usage: f1rm wake");
+});
+
+/** A fake clock for the wait: each sleep moves it on, and `onSleep` gets the count of sleeps so far (a test frees a slot there). */
+function clock(onSleep: (n: number) => void = () => {}) {
+  let t = 0, n = 0;
+  const said: string[] = [];
+  const wait: Wait = { sleep: async (ms) => { t += ms; onSleep(++n); }, now: () => t, total: 8 * 60_000, say: (line) => said.push(line) };
+  return { wait, said, sleeps: () => n };
+}
+
+test("a wake refused by a cap polls, prints one waiting line, and plans the wake as soon as a slot frees", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
+  const two = [running("shop.frontend-dev-a", "a", wt("a")), running("shop.designer-b", "b", wt("b"))];
+  let list = [lead, dev, ...two];
+  const c = clock((n) => n === 2 && (list = [lead, dev, two[0]]));
+  const p = await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps(list), c.wait);
+  expect(p?.sessionId).toBe("dev-sid-1");
+  expect([c.sleeps(), c.said]).toEqual([2, ["waiting for a slot: team shop already has 2 working (the cap is 2 per team)."]]);
+});
+
+test("a wake that never gets a slot waits 8 minutes, says so at most once a minute, then gives up with the ask-nobody line", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
+  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  const c = clock();
+  expect(await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([lead, dev, ...crowd]), c.wait)).toBeNull();
+  expect(c.sleeps()).toBe(24);
+  expect(c.said.filter((l) => l.startsWith("waiting for a slot: 8 hires")).length).toBe(9);
+  expect(c.said.at(-1)).toBe(NO_SLOT);
+});
+
+test("a wake refused for anything but a counted cap is immediate: one specialist per task, a missing lead, a paused project", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
+  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  for (const [list, why] of [
+    [[lead, dev, ...crowd, running("shop.backend-dev-other", "x", wt("checkout"))], "one specialist per task"],
+    [[dev, ...crowd], "has no lead running"],
+  ] as const) {
+    const c = clock();
+    const err = await failure(planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([...list]), c.wait));
+    expect([why, err?.message.includes(why), c.sleeps(), c.said]).toEqual([why, true, 0, []]);
+  }
+  const home = tmp("f1rm-wake-home-");
+  writePaused(pausedFile(pausedDirOf(home), REPO), { by: "manual", at: NOW, why: "lunch" });
+  const c = clock();
+  expect((await failure(planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([lead, dev], { home }), c.wait)))?.message).toContain("is paused");
+  expect(c.sleeps()).toBe(0);
 });

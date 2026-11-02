@@ -283,6 +283,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: only the user's `claude attach` brought stopped hires back (a limit stop never resumed after its reset, and the session stayed listed as blocked with no process).
 - Rejected: re-hiring a new session with a resume brief for every stop (loses context, wastes a worktree); waking by bare name through SendMessage (it goes to offline Remote Control copies and is queued for good); a wake that skips the caps (a woken hire works like a hired one); reading who the waker is in the command (it cannot know; the gate does, as for hire).
 - Where: wake, 1b20dfe, 24ace42, ae1be73 (prose), 3b118ed (model), e140577 (first-prompt rule, Reviewer task and push block), dfc7f5c (`--override`), 34a2546 (security sentence), 301b785 (isMeta, fail closed, usage error)
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 A message to a hire with no live process says so
 
@@ -414,3 +415,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: letting go of a hire used to stop at "uncommitted files" or "branch not merged", so the PM or the user ended with `claude rm` and `git worktree remove --force` by hand, which Claude Code's auto mode blocks as destructive. When the work is kept first, nothing is lost and there is nothing to block, so the command can finish by itself. The age of an archive is the date of its own commit, so an old unmerged tip archived today is not pruned at once.
 - Rejected: asking the user before removing (the point is that nobody is asked); `claude rm` for leftovers (it is what auto mode blocks, and it needs a session id that a stale worktree no longer has); keeping stale worktrees until someone cleans them (they pile up, hold branches and make `claude rm` refuse); archiving the whole worktree folder as a copy (a git commit is smaller, cannot be half-written and is easy to inspect or restore); a gate rule that lets a lead let go the PM's simple hire (it is the PM's to merge and let go).
 - Where: archive-letgo
+
+## 2026-11-02 Caps wait, never ask
+
+- Decision: a hire or a wake refused by a counted cap (8 working on the machine, 2 teams per project, 2 working per team) waits for a free slot and asks nobody. `f1rm hire` and `f1rm wake` look again every 20 s (the sessions are read afresh), say `waiting for a slot: <the cap>` at the start and at most once a minute, and go on as soon as the checks pass. After 8 minutes they exit 75 with `no slot yet: run the same command again. Ask nobody; it is not a decision for the user.` Every other refusal (one specialist per task, a role not allowed, a paused project, the edition, a bad name, a lead missing) stays immediate. `--override` stays in the CLI for the user's own terminal and in the office's Hire dialog, but the Bash gate refuses it from a company role in `f1rm hire` and `f1rm wake`: `No session exceeds a cap. Run the same command again: it waits for a free slot.`
+- Why: the user decided that a refused hire always waits for a free slot, and is never asked and never overridden. A lead that asked "wait or exceed?" put the user in the loop for a thing that a slot freeing solves by itself, and the overrides pushed the machine past the 8 sessions the user set to keep the load down.
+- Rejected: asking the user wait-or-exceed (the old rule: it interrupts for nothing); a session-held override (the point of a cap is that no session can raise it); waiting forever in one call (a Bash call ends at 10 minutes, so the wait is 8 and the session runs the same command again).
+- Where: caps-wait

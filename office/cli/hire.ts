@@ -267,28 +267,47 @@ export function parseHireFlags(words: string[]) {
   return { override, reportTo, team, level, content, simple, skills, args };
 }
 
-/** Runs `f1rm hire` and returns the exit code. */
-export async function hire(words: string[]): Promise<number> {
+/** How long a hire or a wake refused by a counted cap waits (under the 10 minutes a Bash call lasts), how often it looks again, and how often it says it still waits. */
+export const WAIT_MS = 8 * 60_000, POLL_MS = 20_000, SAY_MS = 60_000;
+export const NO_SLOT = "no slot yet: run the same command again. Ask nobody; it is not a decision for the user.";
+/** The exit code of a hire or a wake that found no slot in time: EX_TEMPFAIL, run it again. */
+export const EX_TEMPFAIL = 75;
+export type Wait = { sleep: (ms: number) => Promise<unknown>; now: () => number; total: number; say: (line: string) => void };
+// F1RM_SLOT_WAIT_MS is the tests' way to shorten the total wait of the real command (0 gives up at the first refusal).
+export const realWait = (): Wait => ({ sleep: Bun.sleep, now: Date.now, total: Number(process.env.F1RM_SLOT_WAIT_MS ?? WAIT_MS), say: (line) => console.error(line) });
+
+/**
+ * Runs `attempt` until no counted cap (a HireRefused with a working count) refuses it, polling every POLL_MS and saying `waiting for a slot: <the cap>` at the start and then once a minute.
+ * Returns null, after saying NO_SLOT, when `total` has passed. Any other refusal is thrown at once.
+ */
+export async function untilSlot<T>(attempt: () => Promise<T>, w: Wait): Promise<T | null> {
+  const end = w.now() + w.total;
+  let said = -Infinity;
+  for (;;) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (!(err instanceof HireRefused && err.working !== null)) throw err;
+      if (w.now() - said >= SAY_MS) (w.say(`waiting for a slot: ${err.message}`), (said = w.now()));
+      if (w.now() >= end) return (w.say(NO_SLOT), null);
+      await w.sleep(POLL_MS);
+    }
+  }
+}
+
+/** Runs `f1rm hire` and returns the exit code. A cap waits for a free slot (see untilSlot); `--override` is the user's own terminal's. */
+export async function hire(words: string[], wait: Wait = realWait()): Promise<number> {
   const { override, reportTo, team, level, content, simple, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
-  let argv: string[];
   // Git is asked once; the edition file, the PM's name and the path limit all read it.
   const common = machine.gitCommonDir(process.cwd());
   const git = { gitCommonDir: () => common };
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
-  try {
-    argv = await planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, extra }, { backgroundSessions: machine.backgroundSessions, ...git });
-  } catch (err) {
-    if (err instanceof HireRefused && err.working !== null) {
-      throw new Error(
-        `${err.message} Do not hire; leave the task todo. Tell the session you report to. The lead asks the user in its own session (the PM, for a hire of its own), and only after the user approves this hire in that conversation is it rerun with --override.`,
-      );
-    }
-    throw err;
-  }
+  const argv = await untilSlot(() => planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, extra }, { backgroundSessions: machine.backgroundSessions, ...git }), wait);
+  if (!argv) return EX_TEMPFAIL;
   const proc = Bun.spawn(argv, { cwd: root, env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
   return proc.exited;
 }
