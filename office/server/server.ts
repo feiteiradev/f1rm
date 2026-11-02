@@ -18,7 +18,6 @@ import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
 import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
-import { clearOverride, inWorkHours, nextEnd, overrideFile, readOverride, scheduleAction, writeOverride, type WorkHours } from "./workhours.ts";
 import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
@@ -432,8 +431,6 @@ type Options = {
   checkpointsDir?: string;
   /** The process table and kill a pause uses to stop what the hires started. Without it a pause stops the sessions only, after the grace, and checkpoints nothing. */
   fullStop?: FullStopOptions;
-  /** The work-hours schedule (workhours.ts): the config, read at every look so an edit applies at once, where a manual resume out of hours leaves its override, and how often the schedule is looked at. Without it nothing is scheduled. */
-  workHours?: { config: () => WorkHours; overridesDir: string; everyMs: number };
   /** Where Claude Code keeps session transcripts (`~/.claude/projects`): the skill gate reads a refused Skill call from there. */
   transcriptsDir?: string;
   /** The folders that never get a door: the office's own, Claude's and temp folders. Tests inject them. */
@@ -534,7 +531,6 @@ export function startServer({
   pausedDir,
   checkpointsDir,
   fullStop: fullStopDeps,
-  workHours,
   transcriptsDir = join(homedir(), ".claude", "projects"),
   junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
@@ -1236,12 +1232,12 @@ export function startServer({
         let waking = 0;
         for (const key of all === true ? registeredKeys() : [repoKey(room as string)]) {
           if (rest[0] === "pause") {
-            const r = await pauseProject(key, "manual", (why as string | undefined) ?? "");
+            const r = await pauseProject(key, (why as string | undefined) ?? "");
             if (r.changed) changed.push(r.name);
             if (r.result) results.push(r.result);
             if (r.error) failed.push(r.error);
           } else {
-            const r = await resumeProject(key, true);
+            const r = await resumeProject(key);
             if (!r) continue; // not paused
             changed.push(r.name);
             lost.push(...r.lost);
@@ -1487,10 +1483,10 @@ export function startServer({
     }
   }
   /**
-   * Pauses one project (by its key) the way `f1rm pause` does, for `by`: the flag first, then the full stop and the checkpoint. A pause that was set already stops and checkpoints again only if something still runs.
+   * Pauses one project (by its key) the way `f1rm pause` does: the flag first, then the full stop and the checkpoint. A pause that was set already stops and checkpoints again only if something still runs.
    * A stop that fails leaves the flag set (the hires halt at their next step) and comes back as `error`: nothing was verified, so the caller must not say "All N stopped".
    */
-  async function pauseProject(key: string, by: Paused["by"], why: string) {
+  async function pauseProject(key: string, why: string) {
     const was = pausedOf(key);
     const id = Object.keys(state.rooms).find((r) => repoKey(r) === key); // none for a project no session has been in
     const name = id ? roomName(id) : registeredName(key);
@@ -1503,9 +1499,7 @@ export function startServer({
         job.pending.clear();
       }
       stopTries.clear();
-      setPaused(key, { by, at: clock(), why, ...(unfinished.length && { halted: unfinished }) });
-    } else if (by === "manual" && was.by === "schedule") {
-      setPaused(key, { ...was, by: "manual", at: clock(), why }); // "I'm going to bed" after 19:00: the pause is the user's now, and the 09:00 look leaves it
+      setPaused(key, { by: "manual", at: clock(), why, ...(unfinished.length && { halted: unfinished }) });
     }
     let result: Awaited<ReturnType<typeof stopProject>> | undefined;
     let error: string | undefined;
@@ -1517,13 +1511,12 @@ export function startServer({
         error = `${name} is paused (the hires halt at their next step), but the office could not check what still runs: ${(err as Error).message}. Run \`f1rm pause\` again.`;
       }
     }
-    return { name, changed: !was || (by === "manual" && was.by === "schedule"), result, error };
+    return { name, changed: !was, result, error };
   }
-  /** Lifts a project's pause and starts continuing its hires; null when it was not paused. A resume `byHand` out of work hours leaves its override first: the flag is gone before the wake-up is done, and a look of the schedule in between must find it. */
-  async function resumeProject(key: string, byHand = false) {
+  /** Lifts a project's pause and starts continuing its hires; null when it was not paused. */
+  async function resumeProject(key: string) {
     const was = pausedOf(key);
     if (!was) return null;
-    if (byHand) holdUntilEvening(key);
     const id = Object.keys(state.rooms).find((r) => repoKey(r) === key);
     const name = id ? roomName(id) : registeredName(key);
     setPaused(key, null);
@@ -1540,44 +1533,6 @@ export function startServer({
       waking = resumeHires(id, names, notes);
     }
     return { name, lost, waking };
-  }
-  /** A manual resume out of work hours lasts until the end of the next work day: the schedule leaves the project running until then, and pauses it again at that 19:00. */
-  function holdUntilEvening(key: string) {
-    if (!workHours) return;
-    const c = workHours.config(), t = clock();
-    if (!inWorkHours(c, t)) writeOverride(overrideFile(workHours.overridesDir, key), { until: nextEnd(c, t) });
-  }
-  // The schedule: at every look each registered project is paused by the schedule or has the schedule's own pause lifted, as scheduleAction says (a boundary the Mac slept through is applied at the first look after waking).
-  let scheduling = false;
-  async function scheduleOnce() {
-    if (!workHours || scheduling) return;
-    scheduling = true;
-    try {
-      const c = workHours.config(), now = clock();
-      for (const key of registeredKeys()) {
-        try {
-          const file = overrideFile(workHours.overridesDir, key);
-          const override = readOverride(file);
-          if (override && override.until <= now) clearOverride(file);
-          const action = scheduleAction(c, now, pausedOf(key), override);
-          if (action === "pause") {
-            const r = await pauseProject(key, "schedule", "work hours");
-            if (r.error) console.log(`work hours ${r.name}: ${r.error}`);
-            else if (r.result && !r.result.verified) console.log(`work hours ${r.name}: still running after the stop: ${r.result.remaining.map((q) => `pid ${q.pid} ${q.command}`).join(", ")}`);
-          } else if (action === "resume") {
-            const r = await resumeProject(key);
-            for (const l of r?.lost ?? []) console.log(`work hours ${r!.name}: ${l.name} not woken: ${l.why}`);
-          }
-        } catch (err) {
-          console.log(`work hours ${key}: ${(err as Error).message}`); // one project's failure must not skip the others
-        }
-      }
-      push();
-    } catch (err) {
-      console.log(`work hours: ${(err as Error).message}`);
-    } finally {
-      scheduling = false;
-    }
   }
   // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
   const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
@@ -1618,8 +1573,6 @@ export function startServer({
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
-  const scheduleTimer = workHours && setInterval(scheduleOnce, workHours.everyMs);
-  void ready.then(scheduleOnce); // an office that starts out of hours pauses at once, not a look later
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     closing.abort();
@@ -1628,7 +1581,6 @@ export function startServer({
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
     clearInterval(recoveryTimer);
-    clearInterval(scheduleTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);
     db.close();

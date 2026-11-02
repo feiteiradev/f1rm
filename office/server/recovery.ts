@@ -415,7 +415,7 @@ export function createRecovery(d: RecoveryDeps) {
     resume,
     async tick(repos: string[]) {
       // Every call is seen by the sleep rule, a call that finds the last tick still running included, so a slow tick is no sleep.
-      const asleep = resting(d.now()); // just back from a sleep: nobody is judged yet (the schedule runs on its own timer)
+      const asleep = resting(d.now()); // just back from a sleep: nobody is judged yet
       if (ticking || asleep) return;
       ticking = true;
       try {
