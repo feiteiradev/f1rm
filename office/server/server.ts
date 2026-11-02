@@ -739,6 +739,16 @@ export function startServer({
     if ((!COORDINATORS.has(role) || payload.agent_id) && commands.some((c) => hireArgs(c, "merge"))) {
       return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
     }
+    // `f1rm push` pushes the base branch to origin, fast-forward only, once the suite is green: the PM's, at the end of a milestone. A lead, a specialist, a Reviewer and any intern are refused.
+    if ((role !== "pm" || payload.agent_id) && commands.some((c) => hireArgs(c, "push"))) {
+      return refuse("push-cmd", "Only the PM pushes, with `f1rm push` at the end of a milestone, once everything landed and the suite is green. Tell the session in your Report to that the work is ready.");
+    }
+    // The `--check` value of `f1rm push` and `f1rm merge` runs under `sh -c`, so it is read as a command line of its own: the suite, never a push or a merge.
+    // ponytail: like the rest of the gate, `bash -c` and quote tricks inside the value are not seen.
+    const checks = commands.flatMap((c) => ["push", "merge"].flatMap((verb) => (hireArgs(c, verb) ?? []).flatMap((a, i, all) => (a === "--check" && all[i + 1] !== undefined ? [all[i + 1]] : []))));
+    if (checks.some((v) => splitCommands(v).some(({ words: w }) => gitCall(w)?.sub === "push" || ghLands(w) || hireArgs(w, "push")))) {
+      return refuse("check-push", "A --check command runs the project's suite; it may not push or merge. The PM pushes with plain `f1rm push` at the end of a milestone.");
+    }
     if (role === "pm" && hires.some((h) => h.simple && (h.team || h.role === "lead" || h.role === "reviewer"))) {
       return refuse("hire", "--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer.");
     }
@@ -774,9 +784,9 @@ export function startServer({
     const line = String(input.command ?? "");
     const unreadCommit = subOfCoordinator && /\bcommit\b/.test(line) && /\$\(|`/.test(line) && !commands.some((w) => gitCall(w)?.sub === "commit");
     if (COORDINATORS.has(role) && (unreadCommit || commands.some(lands))) {
-      return refuse("landing", "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
+      return refuse("landing", "Land with `f1rm merge <task>`, which the PM and the leads run in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the PM's at the end of a milestone.");
     }
-    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "Only the user pushes, and merges pull requests. Tell the session in your Report to that the work is ready.");
+    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "`git push` and merging pull requests are refused for everyone. The company pushes only with `f1rm push`, which the PM runs at the end of a milestone; tell the session in your Report to that the work is ready.");
     // Nothing lands on the base branch but `f1rm merge`, for every role.
     const me = state.employees[sessionId];
     if (me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {

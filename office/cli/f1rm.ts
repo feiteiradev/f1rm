@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | archives | status | report | merge
+// The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | archives | status | report | merge | push
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -16,6 +16,7 @@ import { hire, pmName, rootTooLong } from "./hire.ts";
 import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 import { mergeIn } from "./merge.ts";
+import { pushIn } from "./push.ts";
 import { wake } from "./wake.ts";
 import { pauseCall, pausedNote } from "./pause.ts";
 import { reportIn } from "./report.ts";
@@ -558,8 +559,13 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (r.err) console.error(r.err.trimEnd());
     process.exitCode = r.code;
   },
+  push: async () => {
+    const r = await pushIn(process.argv.slice(3), process.cwd(), { say: (line) => console.log(line) });
+    if (r.err) console.error(r.err.trimEnd());
+    process.exitCode = r.code;
+  },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>]";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] | push [--check <command>]";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);
