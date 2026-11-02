@@ -223,6 +223,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: asking about every technical choice.
 - Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae
 - Superseded: PM pushes at milestone end (2026-11-02).
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-21 Skill stack: mattpocock + pstack
 
@@ -272,6 +273,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: small requests were getting a full interview.
 - Rejected: one workflow for everything; letting the PM hire specialists for small work (the PM hires only leads still holds); a Jump to the lead for a simple workflow's decisions and inputs (a cap or a permission still needs its own session).
 - Where: workflow-talk, 196837a
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 Who talks to whom
 
@@ -279,6 +281,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the PM's chat stays free of hire traffic, and each lead's decisions reach the user without a relay.
 - Rejected: the PM relaying every question; PLAN and GO round trips for changes the user already approved.
 - Where: workflow-talk, 196837a
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 f1rm wake
 
@@ -286,6 +289,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: only the user's `claude attach` brought stopped hires back (a limit stop never resumed after its reset, and the session stayed listed as blocked with no process).
 - Rejected: re-hiring a new session with a resume brief for every stop (loses context, wastes a worktree); waking by bare name through SendMessage (it goes to offline Remote Control copies and is queued for good); a wake that skips the caps (a woken hire works like a hired one); reading who the waker is in the command (it cannot know; the gate does, as for hire).
 - Where: wake, 1b20dfe, 24ace42, ae1be73 (prose), 3b118ed (model), e140577 (first-prompt rule, Reviewer task and push block), dfc7f5c (`--override`), 34a2546 (security sentence), 301b785 (isMeta, fail closed, usage error)
+- Superseded: Caps wait, never ask (2026-11-02).
 
 ## 2026-10-22 A message to a hire with no live process says so
 
@@ -430,3 +434,9 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user decided on 2026-11-02 that the PM pushes main to origin itself at the end of each milestone, once everything landed and the full suite is green: fast-forward only, never force, never another branch. The end of a milestone no longer waits for the user to push, and the protection the old rule gave (nothing reaches origin that was not checked, nothing is rewritten) is kept by the command and not by the user's terminal.
 - Rejected: letting any session run `git push` (a lead or a dev could send unreviewed or unfinished work); letting the PM run raw `git push` behind an allow-list of forms (the gate reads words, and a flag, an alias or a config line slips past it, where one command with one explicit refspec cannot); a fetch-merge or a rebase when origin is ahead (it would land or rewrite what no one reviewed); `--force-with-lease` (data loss on a shared remote is not worth a retry); pushing without the suite (a red main on origin).
 - Where: push-at-end (the commit that adds office/cli/push.ts)
+## 2026-11-02 Caps wait, never ask
+
+- Decision: a hire or a wake refused by a counted cap (8 working on the machine, 2 teams per project, 2 working per team) waits for a free slot and asks nobody. `f1rm hire` and `f1rm wake` look again every 20 s (the sessions are read afresh), say `waiting for a slot: <the cap>` at the start and at most once a minute, and go on as soon as the checks pass. After 8 minutes they exit 75 with `no slot yet: run the same command again. Ask nobody; it is not a decision for the user.` Every other refusal (one specialist per task, a role not allowed, a paused project, the edition, a bad name, a lead missing) stays immediate. `--override` stays in the CLI for the user's own terminal and in the office's Hire dialog, but the Bash gate refuses it from a company role in `f1rm hire` and `f1rm wake`: `No session exceeds a cap. Run the same command again: it waits for a free slot.`
+- Why: the user decided that a refused hire always waits for a free slot, and is never asked and never overridden. A lead that asked "wait or exceed?" put the user in the loop for a thing that a slot freeing solves by itself, and the overrides pushed the machine past the 8 sessions the user set to keep the load down.
+- Rejected: asking the user wait-or-exceed (the old rule: it interrupts for nothing); a session-held override (the point of a cap is that no session can raise it); waiting forever in one call (a Bash call ends at 10 minutes, so the wait is 8 and the session runs the same command again).
+- Where: caps-wait

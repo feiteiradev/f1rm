@@ -1465,7 +1465,7 @@ test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member o
     expect(out.permissionDecisionReason).toContain("Only the PM and team leads wake");
   }
   expect(await decision("rv", "f1rm wake checkout.backend-dev-old")).toBe("deny");
-  for (const command of ["f1rm wake checkout.backend-dev-old", "f1rm wake sid_checkout.backend-dev-old", "f1rm wake e_checkout.backend-dev-old", "f1rm wake --override checkout.backend-dev-old 'one more round' --model haiku", "ls && f1rm wake checkout.backend-dev-old", "f1rm wake checkout.backend-dev-gone"]) {
+  for (const command of ["f1rm wake checkout.backend-dev-old", "f1rm wake sid_checkout.backend-dev-old", "f1rm wake e_checkout.backend-dev-old", "f1rm wake checkout.backend-dev-old 'one more round' --model haiku", "ls && f1rm wake checkout.backend-dev-old", "f1rm wake checkout.backend-dev-gone"]) {
     expect([command, await decision("l1", command)]).toEqual([command, null]); // the last is unknown: the command itself refuses it
   }
   for (const command of ["f1rm wake search.backend-dev-x", "f1rm wake sid_search.backend-dev-x", "f1rm wake lead-old", "f1rm wake lead-search"]) {
@@ -1738,7 +1738,7 @@ async function gateOffice() {
 
 test("a PM hires only leads, with any flags before the role; a specialist hire, or a lead hire named only in the brief, is refused", async () => {
   const bash = await gateOffice();
-  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --override lead lead-checkout checkout b", "f1rm hire --override --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
+  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
   for (const command of allowed) expect([command, await bash("p", command)]).toEqual([command, null]);
   const refused = ["f1rm hire backend-dev backend-dev-a a brief", "f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --override --skills x designer designer-a a b", "cd x && f1rm hire reviewer reviewer-a review-a b", "f1rm hire backend-dev backend-dev-a a lead", "echo hi | f1rm hire --report-to lead designer designer-a a b"];
   for (const command of refused) {
@@ -1748,9 +1748,54 @@ test("a PM hires only leads, with any flags before the role; a specialist hire, 
   }
 });
 
+test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
+  const bash = await gateOffice();
+  const override = [
+    "f1rm hire --override lead lead-checkout checkout b",
+    "f1rm hire --report-to pm-shop --override --skills 'a,b' lead lead-checkout checkout b",
+    "f1rm hire --team checkout --override designer checkout.designer-a a b",
+    "f1rm hire --team checkout designer checkout.designer-a a b --override",
+    "timeout 600 f1rm hire --override --team checkout designer checkout.designer-a a b",
+    "nice -n 5 f1rm wake lead-checkout --override",
+    "cd x && bun office/cli/f1rm.ts wake checkout.designer-a --override 'go'",
+    "f1rm wake --override checkout.designer-a",
+  ];
+  for (const [id, commands] of [["p", override.filter((c) => !c.includes("--team") && !c.includes("designer-a"))], ["l", override.filter((c) => c.includes("designer-a"))], ["d", override]] as const) {
+    for (const command of commands) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session exceeds a cap. Run the same command again: it waits for a free slot.");
+    }
+  }
+  // Without it the same commands run as before, and a brief that only mentions the word is no flag.
+  for (const [id, command] of [["p", "f1rm hire lead lead-checkout checkout b"], ["p", "f1rm hire lead lead-checkout checkout 'mention --override in prose'"], ["l", "f1rm wake checkout.designer-a"], ["p", "git log --grep=--override"]] as const) {
+    expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  }
+});
+
+test("a quote-split --override is the same flag to the shell, so the gate refuses it too; a sub-agent of the PM or a lead is held to it", async () => {
+  const bash = await gateOffice();
+  const spellings = ['--over""ride', "\\--override", "--over'ride'", '"--over"ride'];
+  const reason = "No session exceeds a cap. Run the same command again: it waits for a free slot.";
+  for (const [id, hire, wake] of [["p", "lead lead-checkout checkout b", "lead-checkout"], ["l", "--team checkout designer checkout.designer-a a b", "checkout.designer-a"]] as const) {
+    for (const flag of spellings) {
+      for (const command of [`f1rm hire ${hire} ${flag}`, `timeout 600 f1rm hire ${hire} ${flag}`, `f1rm wake ${flag} ${wake}`, `timeout 5 f1rm wake ${wake} ${flag}`]) {
+        const out = await bash(id, command);
+        expect([id, command, out?.permissionDecision, out?.permissionDecisionReason]).toEqual([id, command, "deny", reason]);
+      }
+    }
+  }
+  for (const [id, command] of [["p", "f1rm hire --override lead lead-checkout checkout b"], ["l", "f1rm wake --override checkout.designer-a"]] as const) {
+    const out = await held(await hook({ ...preToolUse(id, "Bash", { command }), agent_id: "agent-1", agent_type: "Explore" }));
+    expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]); // a sub-agent's hire has its own, earlier refusal
+  }
+  // A longer quoted brief that mentions the flag is still prose.
+  expect(await bash("p", `f1rm hire lead lead-checkout checkout "do not pass --over'ride' here"`)).toBeNull();
+});
+
 test("a lead hires only into its own team: not a lead, not without --team, not into another team", async () => {
   const bash = await gateOffice();
-  const allowed = ["f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --report-to x --override --skills s --team checkout reviewer checkout.reviewer-a review-a b", 'f1rm hire --team "checkout" designer checkout.designer-a a b', "f1rm hire --level high --team checkout reviewer checkout.reviewer-a review-a b", "f1rm hire --help"];
+  const allowed = ["f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --report-to x --skills s --team checkout reviewer checkout.reviewer-a review-a b", 'f1rm hire --team "checkout" designer checkout.designer-a a b', "f1rm hire --level high --team checkout reviewer checkout.reviewer-a review-a b", "f1rm hire --help"];
   for (const command of allowed) expect([command, await bash("l", command)]).toEqual([command, null]);
   const refused = ["f1rm hire lead lead-other other b", "f1rm hire --team checkout lead lead-other other b", "f1rm hire backend-dev backend-dev-a a b", "f1rm hire --team other backend-dev other.backend-dev-a a b", "f1rm hire backend-dev backend-dev-a a '--team checkout'", "f1rm hire --team check backend-dev check.backend-dev-a a b", "f1rm hire --team checkout-2 backend-dev a a b"];
   for (const command of refused) {
@@ -2923,7 +2968,7 @@ test("a simple dev whose process ended is reached by the PM with the way back: w
 
 test("only the PM hires with --simple, one dev, designer or researcher with no team; a lead, a specialist and the PM's other forms are refused", async () => {
   const { bash } = await flatOffice();
-  for (const command of ["f1rm hire --simple backend-dev backend-dev-x x 'Task: x'", "f1rm hire --simple --level high frontend-dev frontend-dev-x x b", "f1rm hire --simple --report-to pm-shop designer designer-x x b", "f1rm hire --override --simple researcher researcher-x x b", "f1rm hire --simple --skills a,b backend-dev backend-dev-x x b", "f1rm hire lead lead-cart cart b"]) {
+  for (const command of ["f1rm hire --simple backend-dev backend-dev-x x 'Task: x'", "f1rm hire --simple --level high frontend-dev frontend-dev-x x b", "f1rm hire --simple --report-to pm-shop designer designer-x x b", "f1rm hire --simple researcher researcher-x x b", "f1rm hire --simple --skills a,b backend-dev backend-dev-x x b", "f1rm hire lead lead-cart cart b"]) {
     expect([command, await bash("p", command)]).toEqual([command, null]);
   }
   for (const command of ["f1rm hire backend-dev backend-dev-x x b", "f1rm hire --simple --team checkout backend-dev checkout.backend-dev-x x b", "f1rm hire --simple lead lead-cart cart b", "f1rm hire --simple reviewer reviewer-review-x review-x b", "f1rm hire --content reviewer reviewer-review-x review-x b"]) {
