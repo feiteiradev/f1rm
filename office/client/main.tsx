@@ -19,6 +19,7 @@ import { LetGo } from "./letgo.tsx";
 import { post } from "./post.ts";
 import { clearAfter } from "./remove.ts";
 import { RemoveDoor } from "./remove.tsx";
+import { StopAll } from "./stopall.tsx";
 import { InternBox, TellBox } from "./tell.tsx";
 import { roleTitle, teamOf } from "../people.ts";
 import type { HistoryEntry } from "./history.ts";
@@ -394,6 +395,7 @@ function Office() {
         {inside && isProject(inside) && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
         {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
+        {state && <StopAll paused={state.paused ?? []} />}
         {state && <Palette state={state} onOpen={go} />}
         {state && <Tray state={state} />}
         {view && <Counter state={view} />}

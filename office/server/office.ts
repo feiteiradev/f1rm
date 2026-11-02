@@ -54,6 +54,8 @@ export type OfficeState = {
   teamBoards?: Record<string, Record<string, BoardRow[]>>;
   /** Each room's edition, only for rooms whose edition was chosen; a room without one counts as Work. Added by the server like `boards`, and absent when the office keeps no project settings. */
   editions?: Record<string, "work" | "founder">;
+  /** The names of the registered projects that are paused (by hand or by the schedule). Added by the server like `boards`. */
+  paused?: string[];
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */
   approvals?: Approval[];
 };
