@@ -66,6 +66,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: per-task status reports from leads to the PM.
 - Where: rules-prose
 - Superseded: by "Lean review and test runs" (2026-10-23).
+- Superseded: PM pushes at milestone end (2026-11-02).
 
 ## 2026-10-20 Reviewer conflict and tip rules
 
@@ -80,6 +81,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the no-push rule was prompt-only, and a prompt can be got around.
 - Rejected: `disallowedTools: Bash(git push *)`, which removes the whole Bash tool.
 - Where: rules-prose (the gate is gate-hire-push)
+- Superseded: PM pushes at milestone end (2026-11-02).
 
 ## 2026-10-20 Milestone cleanup
 
@@ -220,6 +222,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants to be asked fewer questions.
 - Rejected: asking about every technical choice.
 - Where: skill-stack, 9fd3578; skill-stack-2, 8d68215, 18aa052, 2359dae
+- Superseded: PM pushes at milestone end (2026-11-02).
 
 ## 2026-10-21 Skill stack: mattpocock + pstack
 
@@ -414,3 +417,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: letting go of a hire used to stop at "uncommitted files" or "branch not merged", so the PM or the user ended with `claude rm` and `git worktree remove --force` by hand, which Claude Code's auto mode blocks as destructive. When the work is kept first, nothing is lost and there is nothing to block, so the command can finish by itself. The age of an archive is the date of its own commit, so an old unmerged tip archived today is not pruned at once.
 - Rejected: asking the user before removing (the point is that nobody is asked); `claude rm` for leftovers (it is what auto mode blocks, and it needs a session id that a stale worktree no longer has); keeping stale worktrees until someone cleans them (they pile up, hold branches and make `claude rm` refuse); archiving the whole worktree folder as a copy (a git commit is smaller, cannot be half-written and is easy to inspect or restore); a gate rule that lets a lead let go the PM's simple hire (it is the PM's to merge and let go).
 - Where: archive-letgo
+
+## 2026-11-02 PM pushes at milestone end
+
+- Decision: the PM pushes the base branch to origin itself at the end of each milestone, once everything landed and the full suite is green, with `f1rm push [--check "<cmd>"]` (`office/cli/push.ts`). It runs in the main working directory and refuses a worktree, a detached HEAD, no `origin`, a branch that is not the base (the one `origin/HEAD` names, else main or master), uncommitted changes, and an origin that has commits the base branch lacks (the message says so with the count: no fetch-merge, no rebase, no force). It runs the full suite the way `f1rm merge` does (default `bun run check` behind the suite lock; `--check` for a project whose suite is another command, with the same "no check script" refusal), refuses when it fails, then runs `git push --no-follow-tags origin refs/heads/<base>:refs/heads/<base>`: one explicit refspec, which overrides `remote.origin.push` and `push.default`, so no `+` refspec from config forces, and never `--force`, `--force-with-lease`, `--delete`, `--mirror`, `--all`, `--tags` or another branch. It prints `pushed <base> <old7>..<new7> to origin`, or `already up to date` (without running the suite: nothing is pushed), and appends `date | repo | base | old..new` to `~/.f1rm/kept/<repo>/pushes.log`. Git never prompts (`GIT_TERMINAL_PROMPT=0`, and `ssh -o BatchMode=yes` when `GIT_SSH_COMMAND` is unset); a failed push prints git's last line and exits non-zero. The gate lets only the PM run it (not the PM's intern); a lead, a specialist, a Reviewer and an intern are refused with a message that the PM pushes at the end of a milestone. Raw `git push` in every form it refused before, `gh pr merge` and the landing `gh api` endpoints stay refused for every role, the PM included, and their messages name `f1rm merge` and `f1rm push` instead of telling anyone to ask the user to run something. Limits: `--check` is `sh -c`, so the PM can run any command through it, as with `f1rm merge`; a repo whose base has another name and no `origin/HEAD` sets it with `git remote set-head origin -a`; a branch that moves in the main working directory while the suite runs is refused, not pushed.
+- Why: the user decided on 2026-11-02 that the PM pushes main to origin itself at the end of each milestone, once everything landed and the full suite is green: fast-forward only, never force, never another branch. The end of a milestone no longer waits for the user to push, and the protection the old rule gave (nothing reaches origin that was not checked, nothing is rewritten) is kept by the command and not by the user's terminal.
+- Rejected: letting any session run `git push` (a lead or a dev could send unreviewed or unfinished work); letting the PM run raw `git push` behind an allow-list of forms (the gate reads words, and a flag, an alias or a config line slips past it, where one command with one explicit refspec cannot); a fetch-merge or a rebase when origin is ahead (it would land or rewrite what no one reviewed); `--force-with-lease` (data loss on a shared remote is not worth a retry); pushing without the suite (a red main on origin).
+- Where: push-at-end (the commit that adds office/cli/push.ts)

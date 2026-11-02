@@ -1623,7 +1623,7 @@ test("a PM's or lead's landing git commands are refused, past global options; re
     for (const command of landing) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toBe("Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.");
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
     }
     for (const command of readOnly) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
@@ -1722,6 +1722,10 @@ test("a background shell watcher (Bash with run_in_background) is not held for t
   }
 });
 
+// The refusals of landing and of a raw push name the company's own paths: `f1rm merge` for the PM and the leads, `f1rm push` for the PM.
+const LANDING_REFUSAL = "Land with `f1rm merge <task>`, which the PM and the leads run in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the PM's at the end of a milestone.";
+const PUSH_REFUSAL = "The company pushes only with `f1rm push`, which the PM runs at the end of a milestone";
+
 // A PM, the checkout lead, a designer, a Reviewer and a freelancer, for the hire and push rules.
 async function gateOffice() {
   start();
@@ -1795,7 +1799,7 @@ test("nobody pushes or merges a PR: a specialist's and a Reviewer's git push and
     for (const command of PUSHES) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Only the user pushes");
+      expect(out.permissionDecisionReason).toContain(PUSH_REFUSAL);
     }
     for (const command of ["git log --oneline", "git status", "echo git push", "git log --grep 'git push'", "gh pr view 3", "gh pr list", "gh pr checkout 3", "gh api repos/o/r/pulls/3/merge", "gh api -X GET repos/o/r/pulls/3/merge", "gh api --method GET repos/o/r/pulls/3/merge", "gh api --method=get repos/o/r/pulls/3", "gh api -XGET repos/o/r/pulls/3", "gh api -i repos/o/r/pulls/3", "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/3", "gh api repos/o/r/pulls --jq '.[].number'", "gh api --method POST repos/o/r/issues/3/dependencies/blocked_by -F issue_id=9", "gh api --method POST repos/o/r/issues/3/sub_issues -F sub_issue_id=9", "gh api --method POST repos/o/r/issues/3/comments -f body=x", "gh api -X POST repos/o/r/issues/3/labels -f 'labels[]=bug'", "gh api -X PATCH repos/o/r/issues/3 -f state=closed", "gh api --method POST repos/o/r/issues -f title=x", "gh api -X PUT repos/o/r/issues/3/lock", "gh api -X", "gh api -X GET repos/o/r/git/refs/heads/main", "gh api repos/o/r/contents/f", "gh api repos/o/r/merges", "gh api graphql -F query=@q.graphql", "gh api graphql --input q.json", "gh api graphql -f query='mutation{addSubIssue(input:{issueId:\"a\",subIssueId:\"b\"}){clientMutationId}}'", "gh api graphql -f query='{viewer{login}}'", "gh api graphql -F owner=o -f query='query($owner:String!){repository(owner:$owner,name:\"r\"){id}}'", "gh api repos/o/r/pulls/3", "gh api repos/o/r/pulls/3/merge -qfiles", "gh api -HIf-None-Match:x repos/o/r/contents/f", "gh api -HIf-None-Match:x repos/o/r/git/refs/heads/main", "gh api -iq .sha repos/o/r/contents/f", "timeout 60 git log --oneline", "nice -n 10 git status", "stdbuf -oL git diff", "echo timeout 60 git push", "gh -R o/r pr view 3", "git diff -m 'git push later'", "if git diff --quiet; then echo ok; fi"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }
@@ -1897,7 +1901,7 @@ test("a command after a heredoc's terminator, on its opening line, or in an unqu
   for (const command of read) {
     const out = await bash("d", command);
     if (out?.permissionDecision !== "deny") passed.push(command);
-    else expect(out.permissionDecisionReason).toContain("Only the user pushes");
+    else expect(out.permissionDecisionReason).toContain(PUSH_REFUSAL);
   }
   expect(passed).toEqual([]);
   // The same lines are read by the PM and lead rules too.
@@ -1933,6 +1937,37 @@ test("only the PM, a lead and the user's own session run `f1rm merge`: a dev, a 
   }
   for (const id of ["p", "l"]) expect([id, (await bash(id, "f1rm merge add-a", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
   for (const id of ["b", "d", "v"]) for (const command of ["git log --grep 'f1rm merge'", "echo 'f1rm merge add-a'", "f1rm status", "f1rm report DONE add-a --commit abc1234"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+});
+
+test("only the PM runs `f1rm push`: a lead, a dev, a designer, a researcher, a Reviewer and any intern are refused, the PM's raw `git push`, a forced one, one of another branch and `gh pr merge` stay refused, and none of those messages sends anyone to the user", async () => {
+  const bash = await mainOffice();
+  const forms = ["f1rm push", "f1rm push --check 'bun run check'", "cd /code/shop && f1rm push", "bun office/cli/f1rm.ts push", "npx f1rm push", "timeout 900 f1rm push"];
+  for (const id of ["p", "f"]) for (const command of forms) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  for (const id of ["l", "b", "bm", "d", "r", "v"]) {
+    for (const command of forms) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain("Only the PM pushes, with `f1rm push` at the end of a milestone");
+    }
+  }
+  for (const id of ["p", "l"]) expect([id, (await bash(id, "f1rm push", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
+  for (const id of ["l", "b", "d", "v"]) for (const command of ["git log --grep 'f1rm push'", "echo 'f1rm push'", "f1rm status", "f1rm report DONE add-a --note ready"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  const raw = ["git push", "git push --force", "git push -f origin main", "git push origin other-branch", "git push origin main:other", "git push --force-with-lease", "git push --tags", "git push origin +main", "timeout 60 git push", "env git push", "gh pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge"];
+  for (const id of ["p", "l"]) {
+    for (const command of raw) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
+    }
+  }
+  for (const id of ["b", "d", "r", "v"]) {
+    for (const command of raw) {
+      const out = await bash(id, command);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+      expect(out.permissionDecisionReason).toContain(PUSH_REFUSAL);
+    }
+  }
+  for (const reason of [LANDING_REFUSAL, PUSH_REFUSAL]) expect(reason).not.toMatch(/ask the user|with `!`/i);
 });
 
 const LANDS = [
@@ -2016,7 +2051,7 @@ test("the user's own session lands anything; the Reviewer has no exception left 
     for (const command of ["git merge worktree-add-a", "git commit -m x", "git rebase main", "git cherry-pick abc1234"]) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Landing goes through `f1rm merge <task>`");
+      expect(out.permissionDecisionReason).toBe(LANDING_REFUSAL);
     }
   }
   // Everyone's `git push` stays refused, `push .` included.
@@ -2079,7 +2114,6 @@ async function ownerOffice() {
   return { repo, beside, a, b, main: git("rev-parse", "main"), behind: git("rev-parse", "worktree-add-a"), diverged: git("rev-parse", "worktree-add-b"), call, bash };
 }
 const WRITE_REFUSAL = "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.";
-const LANDING_REFUSAL = "Landing goes through `f1rm merge <task>`, which the PM and the leads run in the main working directory; pushing and merging pull requests are the user's. Ask the user to run this with `!`.";
 
 test("a PM's or lead's sub-agent writes inside its own worktree; the same writes from the parent, in the main checkout, another worktree, a folder beside it, through a link or `..` are refused", async () => {
   const { repo, beside, a, b, call } = await ownerOffice();

@@ -21,19 +21,19 @@ const DOC_FILE = /\.md$/i;
 const isDoc = (file: string) => DOC_FILE.test(file) || file.startsWith("growth/") || file.startsWith("docs/");
 
 /** A refusal: its message is the whole output, and nothing has changed on main. */
-class Refused extends Error {}
+export class Refused extends Error {}
 
 type Run = { ok: boolean; out: string; err: string };
-const run = (cwd: string, args: string[]): Run => {
+export const run = (cwd: string, args: string[]): Run => {
   const r = Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });
   return { ok: r.success, out: r.stdout.toString().trim(), err: r.stderr.toString().trim() };
 };
-const git = (cwd: string, ...args: string[]) => {
+export const git = (cwd: string, ...args: string[]) => {
   const r = run(cwd, args);
   if (!r.ok) throw new Refused(`git ${args[0]} failed in ${cwd}: ${r.err.split("\n").pop() || "no message"}`);
   return r.out;
 };
-const real = (path: string) => {
+export const real = (path: string) => {
   try {
     return realpathSync(path);
   } catch {
@@ -55,6 +55,16 @@ function scratch(main: string, name: string, commit: string, force: boolean) {
       return r.ok ? "" : r.err.split("\n").pop() || "git worktree remove failed";
     },
   };
+}
+
+/** The repo's main working directory, when `cwd` is it: a refusal in a worktree or beside the repo. */
+export function mainDir(cwd: string) {
+  const common = machine.gitCommonDir(cwd);
+  if (!common) throw new Refused("not in a git repo");
+  const main = dirname(real(common));
+  const toplevel = run(cwd, ["rev-parse", "--show-toplevel"]).out;
+  if (real(toplevel) !== main) throw new Refused(`run it in the main working directory (${main}), not in a worktree or beside the repo`);
+  return main;
 }
 
 /** Runs `f1rm merge` in `cwd`: one line per step through `deps.say`, all of them also in `out`; a non-zero `code` leaves main as it was. */
@@ -79,11 +89,7 @@ export async function mergeIn(argv: string[], cwd: string, deps: Partial<MergeDe
 
 async function land(task: string, check: string, custom: boolean, cwd: string, deps: Pick<MergeDeps, "home" | "now" | "env">, say: (line: string) => void) {
   const branch = `worktree-${task}`;
-  const common = machine.gitCommonDir(cwd);
-  if (!common) throw new Refused("not in a git repo");
-  const main = dirname(real(common));
-  const toplevel = run(cwd, ["rev-parse", "--show-toplevel"]).out;
-  if (real(toplevel) !== main) throw new Refused(`run it in the main working directory (${main}), not in a worktree or beside the repo`);
+  const main = mainDir(cwd);
   if (!run(main, ["symbolic-ref", "-q", "HEAD"]).ok) throw new Refused("the main working directory has a detached HEAD: there is no base branch to land on");
   const baseBranch = git(main, "symbolic-ref", "--short", "HEAD");
   if (git(main, "status", "--porcelain", "--", ".", ":(exclude).claude/worktrees")) throw new Refused("the main working directory has uncommitted changes: it is the user's to commit or discard, never stashed or discarded here");
@@ -139,7 +145,7 @@ async function land(task: string, check: string, custom: boolean, cwd: string, d
   }
 }
 
-const hasCheckScript = (main: string) => {
+export const hasCheckScript = (main: string) => {
   try {
     return typeof JSON.parse(readFileSync(join(main, "package.json"), "utf8"))?.scripts?.check === "string";
   } catch {
@@ -182,20 +188,8 @@ async function mergeAndCheck(main: string, task: string, branch: string, tip: st
     }
     const sha = git(wt.path, "rev-parse", "HEAD");
     say(`merged ${branch} onto ${base.slice(0, 9)} in a scratch worktree: ${sha.slice(0, 9)}`);
-    // The suite lock is held around the whole command; the repo's own `check` script is the lock script again, finds F1RM_CHECK_LOCKED in its env and does not wait for itself.
-    // F1RM_CHECK_LOCKED is cleared here: a merge run from inside a locked check (a test of it) must still take the lock.
-    const fd = openSync(log, "w");
-    let code: number;
-    try {
-      const p = Bun.spawn(["bun", LOCK_SCRIPT, "sh", "-c", check], { cwd: wt.path, env: { ...process.env, ...env, F1RM_CHECK_LOCKED: "" }, stdin: "ignore", stdout: fd, stderr: fd });
-      code = await p.exited;
-    } finally {
-      closeSync(fd);
-    }
-    if (code !== 0) {
-      const tail = readFileSync(log, "utf8").trimEnd().split("\n").slice(-TAIL_LINES).join("\n");
-      throw new Refused(`check failed (exit ${code}), nothing landed; the log is ${log}, its last lines:\n${tail}`);
-    }
+    const failed = await runSuite(wt.path, check, log, env);
+    if (failed) throw new Refused(`check failed (exit ${failed.code}), nothing landed; the log is ${log}, its last lines:\n${failed.tail}`);
     say(`check: ${check} passed on the merge (log ${log})`);
     return sha;
   } finally {
@@ -203,4 +197,20 @@ async function mergeAndCheck(main: string, task: string, branch: string, tip: st
     const left = wt.remove();
     if (left) say(`warning: the scratch worktree ${wt.path} stays: ${left}`);
   }
+}
+
+/** Runs `check` in `cwd` behind the suite lock, its output in `log`: null when it passes, else its exit code and the last lines of the log. */
+export async function runSuite(cwd: string, check: string, log: string, env: Record<string, string>) {
+  // The suite lock is held around the whole command; the repo's own `check` script is the lock script again, finds F1RM_CHECK_LOCKED in its env and does not wait for itself.
+  // F1RM_CHECK_LOCKED is cleared here: a run from inside a locked check (a test of it) must still take the lock.
+  const fd = openSync(log, "w");
+  let code: number;
+  try {
+    const p = Bun.spawn(["bun", LOCK_SCRIPT, "sh", "-c", check], { cwd, env: { ...process.env, ...env, F1RM_CHECK_LOCKED: "" }, stdin: "ignore", stdout: fd, stderr: fd });
+    code = await p.exited;
+  } finally {
+    closeSync(fd);
+  }
+  if (code === 0) return null;
+  return { code, tail: readFileSync(log, "utf8").trimEnd().split("\n").slice(-TAIL_LINES).join("\n") };
 }
