@@ -102,7 +102,7 @@ test("the f1rm command wires it: steps on stdout as they happen, the last line `
   const landed = cli("merge", "add-a", "--check", "true");
   expect(landed.exitCode).toBe(0);
   expect(landed.stdout.toString().trim().split("\n").at(-1)).toBe(`merged ${git(s.repo, "rev-parse", "HEAD")}`);
-  expect(cli("help").stdout.toString()).toContain("merge <task> [--check <command>]");
+  expect(cli("help").stdout.toString()).toContain("merge <task> [--check <command>] [--no-red <reason>]");
 });
 
 test("the default check is `bun run check`, run once, in the scratch worktree of the merge", async () => {
@@ -141,27 +141,44 @@ test("a failing check refuses the landing: main untouched, scratch gone, and the
   expect(r.err).toContain("check failed");
   expect(r.err).toContain("exit 3");
   expect(r.err).toContain("BOOM-FROM-CHECK");
+  expect(r.err).toContain("the dev fixes it and sends a new DONE");
   expect(existsSync(evidence(s, "merge.json"))).toBe(false);
   untouched(s, head, tip);
 });
 
-test("a dirty main working directory is refused and left as it is; the scratch folder of worktrees does not count as dirt", async () => {
+test("a dirty file the merge does not touch no longer blocks and is left as it is; a dirty or untracked path the merge changes is refused, named, and nothing moves", async () => {
   const s = setup();
-  const tip = feature(s);
+  feature(s);
   await done(s);
   writeFileSync(join(s.repo, "README.md"), "edited by the user\n");
-  const head = git(s.repo, "rev-parse", "HEAD");
-  const r = await merge(s);
-  expect(r.code).not.toBe(0);
-  expect(r.err).toContain("uncommitted changes");
-  expect(readFileSync(join(s.repo, "README.md"), "utf8")).toBe("edited by the user\n");
-  expect(git(s.repo, "rev-parse", "HEAD")).toBe(head);
-  expect(git(s.repo, "rev-parse", "refs/heads/worktree-add-a")).toBe(tip);
-  git(s.repo, "checkout", "--", "README.md");
   writeFileSync(join(s.repo, "stray.txt"), "untracked\n");
-  expect((await merge(s)).err).toContain("uncommitted changes");
-  rmSync(join(s.repo, "stray.txt"));
-  expect((await merge(s)).code).toBe(0); // .claude/worktrees/add-a is untracked in this repo and is no dirt
+  const r = await merge(s);
+  expect(r.err).toBe("");
+  expect(r.code).toBe(0);
+  expect(readFileSync(join(s.repo, "README.md"), "utf8")).toBe("edited by the user\n");
+  expect(readFileSync(join(s.repo, "stray.txt"), "utf8")).toBe("untracked\n");
+  expect(readFileSync(join(s.repo, "add.ts"), "utf8")).toBe(ADD);
+
+  const o = setup();
+  const tip = commit(o.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "README.md": "shop, the dev's words\n" }, "add");
+  await done(o);
+  const head = git(o.repo, "rev-parse", "HEAD");
+  writeFileSync(join(o.repo, "README.md"), "edited by the user\n"); // tracked, changed by the merge
+  writeFileSync(join(o.repo, "add.ts"), "// mine\n"); // untracked, added by the merge
+  const refused = await merge(o);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("README.md");
+  expect(refused.err).toContain("add.ts");
+  expect(refused.err).toContain("committed or removed");
+  expect(refused.err).not.toContain("add.test.ts");
+  expect(readFileSync(join(o.repo, "README.md"), "utf8")).toBe("edited by the user\n");
+  expect(readFileSync(join(o.repo, "add.ts"), "utf8")).toBe("// mine\n");
+  expect(git(o.repo, "rev-parse", "HEAD")).toBe(head);
+  expect(git(o.repo, "rev-parse", "refs/heads/worktree-add-a")).toBe(tip);
+  expect(git(o.repo, "worktree", "list")).not.toContain("merge-add-a");
+  git(o.repo, "checkout", "--", "README.md");
+  rmSync(join(o.repo, "add.ts"));
+  expect((await merge(o)).code).toBe(0); // .claude/worktrees/add-a is untracked in this repo and is no dirt
 });
 
 test("no DONE report, or a newest report that is not a DONE, or a DONE without a commit, is refused", async () => {
@@ -238,6 +255,7 @@ test("a conflict with main is aborted and cleaned up, main is untouched and the 
   const r = await merge(s);
   expect(r.code).not.toBe(0);
   expect(r.err).toContain("conflict: the dev rebases onto main and sends a new DONE");
+  expect(r.err).toContain("the lead hires a fresh implementer");
   expect(existsSync(evidence(s, "merge.json"))).toBe(false);
   untouched(s, head, tip);
   expect(existsSync(join(s.repo, ".git", "worktrees", "merge-add-a"))).toBe(false); // no merge state left behind
@@ -254,8 +272,204 @@ test("a repo without a check script is refused unless --check names one", async 
   const r = await mergeIn(["add-a"], s.repo, { home: s.home });
   expect(r.code).not.toBe(0);
   expect(r.err).toContain("no `check` script");
+  expect(r.err).toContain('--check "<the project\'s full suite command>"');
+  expect(r.err).toContain("remembered");
   untouched(s, head, tip);
   expect((await merge(s)).code).toBe(0);
+});
+
+const checkFile = (s: Setup) => join(s.home, ".f1rm", "kept", "shop", "check-command");
+const callsFile = (s: Setup) => join(s.home, ".f1rm", "kept", "shop", "calls.md");
+/** The repo without a `check` script, the dev's branch updated onto it, and a feature on that branch. */
+function noScript() {
+  const s = setup();
+  writeFileSync(join(s.repo, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }));
+  git(s.repo, "commit", "-q", "-am", "no check");
+  git(s.wt, "merge", "-q", "main");
+  feature(s);
+  return s;
+}
+
+test("--check is remembered when the merge lands: one line in kept/<repo>/check-command, and a refused merge writes nothing", async () => {
+  const s = noScript();
+  await done(s);
+  expect((await merge(s, "--check", "exit 3")).code).toBe(1);
+  expect(existsSync(checkFile(s))).toBe(false);
+  expect((await mergeIn(["add-a", "--check", "echo suite-ran"], s.repo, { home: s.home })).code).toBe(0);
+  expect(readFileSync(checkFile(s), "utf8")).toBe("echo suite-ran\n");
+});
+
+test("with no --check and no check script the remembered command is the suite; an explicit --check wins; a repo with a check script keeps its script", async () => {
+  const s = noScript();
+  await done(s);
+  mkdirSync(join(s.home, ".f1rm", "kept", "shop"), { recursive: true });
+  const ran = join(s.root, "ran");
+  writeFileSync(checkFile(s), `echo remembered > ${ran}\n`);
+  const r = await mergeIn(["add-a", "--check", "echo given"], s.repo, { home: s.home });
+  expect(r.code).toBe(0);
+  expect(existsSync(ran)).toBe(false); // --check won
+  expect(readFileSync(checkFile(s), "utf8")).toBe("echo given\n");
+
+  const t = noScript();
+  await done(t);
+  mkdirSync(join(t.home, ".f1rm", "kept", "shop"), { recursive: true });
+  writeFileSync(checkFile(t), `echo remembered > ${ran}\n`);
+  const used = await mergeIn(["add-a"], t.repo, { home: t.home });
+  expect(used.err).toBe("");
+  expect(used.code).toBe(0);
+  expect(readFileSync(ran, "utf8").trim()).toBe("remembered");
+  expect(used.out).toContain("echo remembered");
+
+  const u = setup(); // has scripts.check
+  feature(u);
+  await done(u);
+  mkdirSync(join(u.home, ".f1rm", "kept", "shop"), { recursive: true });
+  writeFileSync(checkFile(u), "exit 9\n");
+  expect((await mergeIn(["add-a"], u.repo, { home: u.home })).code).toBe(0);
+  expect(readFileSync(join(u.repo, ".git", "check-ran"), "utf8").trim()).toBe(join(u.repo, ".claude", "worktrees", "merge-add-a"));
+});
+
+test("--no-red: a test-only branch is refused with the way out named, lands with a reason that is logged in calls.md, and the suite still runs", async () => {
+  const s = setup();
+  const tip = commit(s.wt, { "always.test.ts": PASSES }, "test only");
+  await done(s);
+  const head = git(s.repo, "rev-parse", "HEAD");
+  const r = await merge(s);
+  expect(r.code).toBe(1);
+  expect(r.err).toContain('--no-red "<reason>"');
+  expect(r.err).not.toMatch(/user/i);
+  untouched(s, head, tip);
+  const failed = await merge(s, "--no-red", "renamed tests", "--check", "exit 4");
+  expect(failed.err).toContain("check failed (exit 4)");
+  expect(existsSync(callsFile(s))).toBe(false);
+  untouched(s, head, tip);
+  for (const bad of [["--no-red"], ["--no-red", " "]]) expect((await merge(s, ...bad)).err).toContain("usage");
+  const ok = await merge(s, "--no-red", "renamed | tests only");
+  expect(ok.err).toBe("");
+  expect(ok.code).toBe(0);
+  expect(ok.out).toContain("red: skipped");
+  expect(readFileSync(callsFile(s), "utf8")).toBe("| date | task | call | detail |\n|---|---|---|---|\n| 2026-10-28 | add-a | merge --no-red | renamed / tests only |\n");
+  expect(JSON.parse(readFileSync(evidence(s, "merge.json"), "utf8")).red).toEqual([]);
+
+  const c = setup(); // code with no test file, and a calls.md that already has its header
+  commit(c.wt, { "add.ts": ADD }, "refactor");
+  await done(c);
+  mkdirSync(join(c.home, ".f1rm", "kept", "shop"), { recursive: true });
+  writeFileSync(callsFile(c), "| date | task | call | detail |\n|---|---|---|---|\n| 2026-10-01 | x | y | z |\n");
+  expect((await merge(c)).err).toContain('--no-red "<reason>"');
+  expect((await merge(c, "--no-red", "no new behaviour")).code).toBe(0);
+  expect(readFileSync(callsFile(c), "utf8").trim().split("\n")).toEqual(["| date | task | call | detail |", "|---|---|---|---|", "| 2026-10-01 | x | y | z |", "| 2026-10-28 | add-a | merge --no-red | no new behaviour |"]);
+});
+
+test("a branch that touches Claude Code settings, hooks or commands is refused whatever the flags; the message says only the user changes permissions", async () => {
+  for (const file of [".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/pre.sh", ".claude/commands/go.md", ".claude/hooks/é.sh", ".Claude/Settings.json", ".CLAUDE/hooks/x", ".claude/agents/a.md", ".claude/skills/s/SKILL.md", ".mcp.json"]) {
+    const s = setup();
+    mkdirSync(join(s.wt, file, ".."), { recursive: true });
+    writeFileSync(join(s.wt, file), "{}\n");
+    git(s.wt, "add", "-f", file); // settings.local.json is ignored in most checkouts
+    const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST });
+    await done(s);
+    const head = git(s.repo, "rev-parse", "HEAD");
+    const r = await merge(s, "--no-red", "because");
+    expect([file, r.code, r.err]).toEqual([file, 1, expect.stringContaining("a merged settings file widens every later session's permissions; only the user changes Claude Code permissions (the office's project-commands card)")]);
+    expect(r.err).toContain(file);
+    untouched(s, head, tip);
+  }
+});
+
+test("a settings entry that is a bare symlink (.claude/commands, .claude/hooks) is refused like the files under it", async () => {
+  for (const dir of [".claude/commands", ".claude/hooks"]) {
+    const s = setup();
+    mkdirSync(join(s.wt, ".claude"), { recursive: true });
+    symlinkSync("../elsewhere", join(s.wt, dir));
+    git(s.wt, "add", "-f", dir);
+    const tip = commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST });
+    await done(s);
+    const r = await merge(s);
+    expect([dir, r.code, r.err]).toEqual([dir, 1, expect.stringContaining("a merged settings file widens")]);
+    untouched(s, git(s.repo, "rev-parse", "HEAD"), tip);
+  }
+});
+
+test("paths git would quote (accents, spaces) are read whole: an accented test file counts as a test, and a dirty file with such a name is named in the refusal", async () => {
+  const s = setup();
+  commit(s.wt, { "é.test.ts": ADD_TEST, "add.ts": ADD }, "accented test");
+  await done(s);
+  const r = await merge(s);
+  expect(r.err).toBe("");
+  expect(JSON.parse(readFileSync(evidence(s, "merge.json"), "utf8")).red).toEqual(["é.test.ts"]);
+
+  const o = setup(); // an untracked file at a path the merge adds
+  const tip = commit(o.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "my fíle.txt": "dev\n" });
+  await done(o);
+  writeFileSync(join(o.repo, "my fíle.txt"), "mine\n");
+  const refused = await merge(o);
+  expect(refused.err).toContain("my fíle.txt");
+  untouched2(o, tip);
+});
+const untouched2 = (s: Setup, tip: string) => expect(git(s.repo, "rev-parse", "refs/heads/worktree-add-a")).toBe(tip);
+
+test("a rename in main's working tree counts at the old path too, and an untracked file where the merge adds a directory (or the reverse) is named", async () => {
+  const s = setup();
+  commit(s.repo, { "old name.txt": "x\n" }, "base file");
+  git(s.wt, "merge", "-q", "main");
+  commit(s.wt, { "old name.txt": "x, changed by the dev\n", "add.ts": ADD, "add.test.ts": ADD_TEST });
+  await done(s);
+  git(s.repo, "mv", "old name.txt", "new name.txt");
+  const r = await merge(s);
+  expect(r.code).toBe(1);
+  expect(r.err).toContain("old name.txt");
+
+  const d = setup();
+  commit(d.wt, { "lib/x.ts": ADD, "lib/x.test.ts": ADD_TEST.replace("./add.ts", "./x.ts") });
+  await done(d);
+  writeFileSync(join(d.repo, "lib"), "a file where the dev adds a folder\n");
+  expect((await merge(d)).err).toContain("lib");
+  rmSync(join(d.repo, "lib"));
+  expect((await merge(d)).code).toBe(0);
+
+  const e = setup();
+  commit(e.wt, { "lib": ADD, "lib.test.ts": ADD_TEST.replace("./add.ts", "./lib") });
+  await done(e);
+  mkdirSync(join(e.repo, "lib"));
+  writeFileSync(join(e.repo, "lib", "mine.txt"), "mine\n");
+  const reverse = await merge(e);
+  expect(reverse.err).toContain("lib/mine.txt");
+});
+
+test("the remembered check command may not push or merge: it is refused where it is read, so a file written by hand cannot smuggle one past the gate", async () => {
+  for (const bad of ["git push origin main", "bun test && git -C . push", "gh pr merge 3", "gh api repos/a/b/merges -f base=main", "f1rm push", "true; git  push --force"]) {
+    const s = noScript();
+    await done(s);
+    mkdirSync(join(s.home, ".f1rm", "kept", "shop"), { recursive: true });
+    writeFileSync(checkFile(s), bad + "\n");
+    const r = await mergeIn(["add-a"], s.repo, { home: s.home });
+    expect([bad, r.code, r.err]).toEqual([bad, 1, expect.stringContaining("the remembered check command may not push or merge; pass --check again")]);
+    untouched(s, git(s.repo, "rev-parse", "HEAD"), git(s.repo, "rev-parse", "refs/heads/worktree-add-a"));
+  }
+});
+
+test("a --check or --no-red value with a newline is an error, not flattened; a calls.md or check-command that cannot be written warns after the landing and still exits 0", async () => {
+  const s = setup();
+  feature(s);
+  await done(s);
+  for (const flags of [["--check", "true\nrm -rf x"], ["--no-red", "a\nb"]]) {
+    const r = await merge(s, ...flags);
+    expect([flags[0], r.code, r.err]).toEqual([flags[0], 1, expect.stringContaining("one line")]);
+  }
+  mkdirSync(join(s.home, ".f1rm"), { recursive: true });
+  writeFileSync(join(s.home, ".f1rm", "kept"), "a file where the folder should be\n");
+  const r = await merge(s, "--no-red", "why");
+  expect(r.code).toBe(0);
+  expect(r.out).toContain("warning: could not write");
+  expect(r.out.trim().split("\n").at(-1)).toMatch(/^merged /);
+});
+
+test("no refusal of merge.ts sends anyone to the user, hands out a script or says to land by hand: its only mention of the user is the settings-file refusal", () => {
+  const mentions = readFileSync(join(import.meta.dir, "merge.ts"), "utf8").split("\n").filter((l) => /\buser/i.test(l));
+  expect(mentions).toHaveLength(1);
+  expect(mentions[0]).toContain("only the user changes Claude Code permissions");
+  expect(readFileSync(join(import.meta.dir, "merge.ts"), "utf8")).not.toMatch(/by hand/i);
 });
 
 test("it runs only in the main working directory: a worktree, a folder outside the repo and a bad task name are refused", async () => {
@@ -402,13 +616,18 @@ test("a branch that changes how the suite runs (scripts.check, scripts.suite, sc
     const head = git(s.repo, "rev-parse", "HEAD");
     const r = await mergeIn(["add-a"], s.repo, { home: s.home });
     expect([Object.keys(change)[0], r.code, r.err]).toEqual([Object.keys(change)[0], 1, expect.stringContaining("changes how the suite runs")]);
+    expect(r.err).toContain("read the branch's diff of scripts.check, scripts.suite and scripts/check-lock.ts yourself");
+    expect(r.err).toContain('--check "bun run check"');
+    expect(r.err).not.toMatch(/user/i);
     untouched(s, head, tip);
     expect((await merge(s)).code).toBe(0);
+    expect(readFileSync(callsFile(s), "utf8").trim().split("\n").at(-1)).toBe("| 2026-10-28 | add-a | merge --check on a suite change | true |");
   }
   const s = setup();
   commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "package.json": JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran", build: "echo hi" } }) });
   await done(s);
   expect((await mergeIn(["add-a"], s.repo, { home: s.home })).code).toBe(0);
+  expect(existsSync(callsFile(s))).toBe(false);
 });
 
 test("a new test file is red when bun reports a failure for it on the base: a module the branch adds counts (it cannot load), a fixture under tests/ does not and is named and refused", async () => {

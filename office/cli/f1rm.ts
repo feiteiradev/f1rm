@@ -565,7 +565,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] | push [--check <command>]";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>]";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);
