@@ -5,6 +5,8 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readd
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
+import { applyApproval, commandsFile, deriveCommands, type Cmd } from "./projectcmds.ts";
+import { isSettingsFile, isWideningFlag, SETTINGS_REFUSAL, WIDENING_REFUSAL, writesSettings } from "./settingsgate.ts";
 import { boardFile, clip, MAX_CELL, openQuestion, parseBoard, readBoard, readBoardText, repoDir, repoKey, roomName, teamBoardFile, type BoardRow } from "./board.ts";
 import { changeEdition, isEdition, projectFile, readEdition, readFolder, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
@@ -681,14 +683,22 @@ export function startServer({
         }
       }
     }
-    // A permission request is answered by the user's browser only: a command that names an answer route (approve, deny, always) of this office, by its port, its link key or the saved link, is refused.
+    // A permission request is answered by the user's browser only: a command that names an answer route (approve, deny, always, and commands, which approves a project's command list) of this office, by its port, its link key or the saved link, is refused.
     // ponytail: it guards against a slip, not a determined session that builds the address piece by piece; the link key lives in a file the user's account can read.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
-      if (/(?:approve|deny|always)\/[^\s'"]/.test(line) && namesOffice(line)) {
+      if (/(?:approve|deny|always|commands)\/[^\s'"]/.test(line) && namesOffice(line)) {
         return refuse("answer", "Only the user answers a permission request, in the office: tell the session in your Report to what you are waiting for, and wait.");
       }
     }
+    // Only the user changes Claude Code's permissions (see settingsgate.ts): no company session, a sub-agent included, writes a settings or hooks file. The user's own sessions have no role and never get here.
+    if (WRITE_TOOLS.has(tool)) {
+      const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
+      if (isSettingsFile(file, homeKey(file))) return refuse("settings", SETTINGS_REFUSAL);
+    }
+    if (tool === "Bash" && writesSettings(split, String(input.command ?? ""), gitCall)) return refuse("settings", SETTINGS_REFUSAL);
+    // A hire's permissions are the user's: no session starts or wakes one with a flag that sets them (the user's terminal still can). Judged before the hire rules: a flag's value would read as the role there.
+    if (commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isWideningFlag)))) return refuse("widen", WIDENING_REFUSAL);
     const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
     if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
       return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
@@ -846,7 +856,7 @@ export function startServer({
     return folder ? basename(folder) : key.split("-").pop() || key;
   };
   /** Every registered project's key, those no session has been in included (`--all` reaches them: their first session meets the pause). */
-  const registeredKeys = () => new Set([...projectRooms().map(repoKey), ...(projectsDir && existsSync(projectsDir) ? readdirSync(projectsDir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)) : [])]);
+  const registeredKeys = () => new Set([...projectRooms().map(repoKey), ...(projectsDir && existsSync(projectsDir) ? readdirSync(projectsDir).filter((f) => f.endsWith(".json") && !f.endsWith(".commands.json")).map((f) => f.slice(0, -5)) : [])]);
   const isProject = (room: string) => room !== ELSEWHERE.id && (Object.hasOwn(state.rooms, room) || (!!projectsDir && existsSync(projectFile(projectsDir, room))));
   /**
    * The full stop of one project (see fullstop.ts): its background hires' sessions, what they started, a snapshot of every worktree and the manifest, with the pause flag naming the checkpoint.
@@ -1025,9 +1035,25 @@ export function startServer({
   // A lead waits on the user while its own permission request is held, or its team's board holds an open question. The reducer never sees this; the snapshot adds it.
   const needsYou = (e: Employee) => e.role === "lead" && (approvals.list().some((a) => a.sessionId === e.sessionId) || asking.has(`${e.room}\n${teamOf(e)}`));
   const employeesNow = () => Object.fromEntries(Object.entries(state.employees).map(([id, e]) => [id, needsYou(e) ? { ...e, needsYou: true } : e]));
+  // A project's command list (projectcmds.ts) shows as a card until the user approves it. The list is derived from the main checkout and kept 30 s, so a push does not read the disk; the approval is a file in the settings folder, read once.
+  const proposals = new Map<string, { at: number; list: Cmd[] }>();
+  const approvedProjects = new Map<string, boolean>();
+  const commandsApproved = (room: string) => {
+    if (!approvedProjects.has(room)) approvedProjects.set(room, !!projectsDir && existsSync(commandsFile(projectsDir, room)));
+    return approvedProjects.get(room)!;
+  };
+  const proposalOf = (room: string) => {
+    const kept = proposals.get(room);
+    if (kept && clock() - kept.at < 30_000) return kept.list;
+    const list = deriveCommands(folderOf(room));
+    proposals.set(room, { at: clock(), list });
+    return list;
+  };
+  /** The proposals of the registered projects whose folder exists and whose list the user has not approved. */
+  const pendingCommands = () => Object.fromEntries(projectRooms().filter((room) => !commandsApproved(room) && existsSync(folderOf(room))).map((room) => [room, proposalOf(room)]));
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
-  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions }), paused: pausedNames(), approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1132,6 +1158,27 @@ export function startServer({
         return approvals.list().some((a) => a.id === rest[1])
           ? Response.json({ ok: false, error: "There is no rule to add for that request; approve it once, or answer at the terminal." }, { status: 409 })
           : Response.json({ ok: false, error: "That request is no longer waiting; the terminal has it." }, { status: 404 });
+      }
+      // A project's command list: read with GET, approved with POST {ids}. Only the user's browser holds the link; the office writes the rules, from the derived lines only (see projectcmds.ts).
+      if (rest[0] === "commands" && rest.length === 2) {
+        if (req.method !== "GET" && req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "GET, POST" } });
+        let room = "";
+        try {
+          room = decodeURIComponent(rest[1]);
+        } catch {} // a malformed escape names no project
+        if (!projectsDir) return Response.json({ error: "This office keeps no project settings." }, { status: 500 });
+        if (!isProject(room) || !existsSync(folderOf(room))) return Response.json({ error: "No such project." }, { status: 404 });
+        if (req.method === "GET") return Response.json({ approved: commandsApproved(room), commands: deriveCommands(folderOf(room)) });
+        const ids = ((await req.json().catch(() => null)) as { ids?: unknown } | null)?.ids;
+        if (!Array.isArray(ids)) return Response.json({ error: "Send the ticked lines as ids: a list." }, { status: 400 });
+        try {
+          const approved = applyApproval(folderOf(room), ids, { record: commandsFile(projectsDir, room) });
+          approvedProjects.set(room, true);
+          push();
+          return Response.json({ ok: true, approved });
+        } catch (err) {
+          return Response.json({ error: `Could not write the project's settings: ${(err as Error).message}` }, { status: 500 });
+        }
       }
       if ((rest[0] === "approve" || rest[0] === "deny") && rest.length === 2) {
         const decided = approvals.answer(rest[1], rest[0] === "approve" ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE });
