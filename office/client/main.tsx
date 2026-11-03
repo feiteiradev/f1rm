@@ -13,6 +13,8 @@ import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
+import { TopicDialog } from "./topic.tsx";
+import { liveLeads } from "./topic.ts";
 import { JumpButton, OnEnded, Palette } from "./jump.tsx";
 import { ENDED, without } from "./jump.ts";
 import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
@@ -338,6 +340,7 @@ function Office() {
   const goRef = useRef(go);
   goRef.current = go;
   const [hiring, setHiring] = useState(false);
+  const [topicing, setTopicing] = useState(false);
   // "Not now" on the edition question lasts until the project is left.
   const [notNow, setNotNow] = useState<string | null>(null);
   const left = useRef<string | null>(null);
@@ -396,6 +399,7 @@ function Office() {
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
         {inside && isProject(inside) && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
+        {inside && isProject(inside) && <button className="hire-btn" onClick={() => setTopicing(true)}>New topic</button>}
         {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state && <StopAll paused={state.paused ?? []} />}
@@ -413,6 +417,7 @@ function Office() {
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
       {toast && <p className="note low pm-note toast" role="status">{toast}</p>}
+      {topicing && inside && isProject(inside) && state && <TopicDialog key={inside} room={inside} name={state.rooms[inside].name} live={liveLeads(state, inside)} onClose={() => setTopicing(false)} />}
       {hiring && inside && isProject(inside) && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </OnEnded.Provider>
   );

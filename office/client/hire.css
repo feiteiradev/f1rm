@@ -100,6 +100,9 @@
 @keyframes hire-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes hire-fade { from { opacity: 0; } }
 
+.hire.topic { width: min(420px, calc(100% - 32px)); }
+.hire.topic form { grid-template-columns: minmax(0, 1fr); }
+
 @media (max-width: 720px) {
   .hire form { grid-template-columns: minmax(0, 1fr); }
 }
