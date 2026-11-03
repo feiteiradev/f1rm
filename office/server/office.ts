@@ -4,6 +4,7 @@ import { nameFor, roleOfAgentType, type RoleId } from "../people.ts";
 import type { Approval } from "./approvals.ts";
 import type { Cmd } from "./projectcmds.ts";
 import type { BoardRow } from "./board.ts";
+import type { Topic } from "./progress.ts";
 
 export type Status = "working" | "waiting" | "idle" | "offline";
 export type Room = { id: string; name: string };
@@ -53,6 +54,8 @@ export type OfficeState = {
   boards?: Record<string, BoardRow[]>;
   /** Each room's team boards, by team, only for teams that have one. Added by the server like `boards`. */
   teamBoards?: Record<string, Record<string, BoardRow[]>>;
+  /** Each room's topics (one per team board or desk file): done over total, the last landed task, what is stuck and the desk lines. Added by the server like `boards`. */
+  topics?: Record<string, Topic[]>;
   /** Each room's edition, only for rooms whose edition was chosen; a room without one counts as Work. Added by the server like `boards`, and absent when the office keeps no project settings. */
   editions?: Record<string, "work" | "founder">;
   /** Each registered project's command list the user has not approved yet (see projectcmds.ts), only for projects whose folder exists. Added by the server like `boards`, and absent when the office keeps no project settings. */

@@ -1454,7 +1454,9 @@ test("topic-prose: a topic lead grills, previews visible work, shows a first sli
       "opens with `mattpocock-skills:grilling` and interviews the user about that one topic in its own chat",
       "one-screen plan plus a mock or screenshot", "his \"go\"", "`NEEDS YOU <team>: preview`",
       "thinnest end-to-end slice first", "its proof on its desk", "without waiting", "\"stop\"",
-      "about 5 tasks", "only with proof from the running app", "one line on its desk per landed task",
+      "about 5 tasks", "only with proof from the running app", "right after `f1rm merge` appends one line per landed task to its desk file `~/.f1rm/evidence/<repo>/lead-<team>/desk.md`",
+      "`| <ISO date> | <task slug> | <proof path or https link, or \"none (not visible)\"> | <one-line what landed> |`",
+      "proof path is absolute under `~/.f1rm/evidence/` or relative to the desk file's folder",
     ]) expect(text, `${name}: ${s}`).toContain(s);
   }
   expect(section("Teams")).toContain("`lead-<topic>`");

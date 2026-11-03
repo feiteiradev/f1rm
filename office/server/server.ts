@@ -15,6 +15,7 @@ import { askStream, MAX_QUESTION } from "./ask.ts";
 import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
 import { readUsage, usageFile } from "../usage.ts";
+import { evidenceFile, proofType, topicProgress, type Topic } from "./progress.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
@@ -439,6 +440,8 @@ type Options = {
   dbPath?: string;
   /** Where the PM's board files live; without it no room has a board. */
   boardsDir?: string;
+  /** Where the evidence folders live (`~/.f1rm/evidence`): the desk files of the topics and the proofs they name, served read-only. */
+  evidenceDir?: string;
   /** Where each project's edition file lives (`~/.f1rm/projects`). */
   projectsDir?: string;
   /** Where each project's pause flag lives (`~/.f1rm/paused`); without it a pause lasts until the office restarts. */
@@ -543,6 +546,7 @@ export function startServer({
   port, secret, token, machine, clientDir,
   dbPath = ":memory:",
   boardsDir,
+  evidenceDir,
   projectsDir,
   pausedDir,
   checkpointsDir,
@@ -1046,6 +1050,7 @@ export function startServer({
 
   let boards: Record<string, BoardRow[]> = {};
   let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
+  let topics: Record<string, Topic[]> = {};
   let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
   // Without a settings folder there is nowhere to keep an edition, so the page isn't told about editions at all and never asks.
@@ -1072,7 +1077,7 @@ export function startServer({
   const pendingCommands = () => Object.fromEntries(projectRooms().filter((room) => !commandsApproved(room) && existsSync(folderOf(room))).map((room) => [room, proposalOf(room)]));
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
-  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1251,8 +1256,23 @@ export function startServer({
         editions = left;
         delete boards[room];
         delete teamBoards[room];
+        delete topics[room];
         push();
         return Response.json({ ok: true });
+      }
+      // The proofs a desk names: read-only, only inside the evidence folder (evidenceFile refuses `..`, absolute paths and links out).
+      if (rest[0] === "evidence" && rest.length > 1) {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
+        let rel = "";
+        try {
+          rel = rest.slice(1).map(decodeURIComponent).join("/");
+        } catch {} // a malformed escape names no file
+        // Only the repo folders of the projects this office knows: one project cannot read another's proofs.
+        const known = projectRooms().some((r) => roomName(r) === rel.split("/")[0]);
+        const file = evidenceDir && known ? evidenceFile(evidenceDir, rel) : null;
+        const type = file && proofType(file);
+        if (!file || !type) return new Response("not found", { status: 404 });
+        return new Response(Bun.file(file), { headers: { "content-type": type, "x-content-type-options": "nosniff", "content-security-policy": "sandbox" } });
       }
       if (rest[0] === "background" && rest.length === 2) {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
@@ -1531,11 +1551,28 @@ export function startServer({
       const next: Record<string, BoardRow[]> = {};
       const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
       const nextAsking = new Set<string>();
+      const nextTopics: Record<string, Topic[]> = {};
+      const files = (() => {
+        try {
+          return readdirSync(boardsDir);
+        } catch {
+          return []; // no boards folder yet
+        }
+      })().filter((f) => f.endsWith(".md"));
       for (const id of projects) {
         const rows = await readBoard(boardFile(boardsDir, id));
         if (rows.length) next[id] = rows;
         // Only the boards of teams someone in the room works in.
-        const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t) => t !== null));
+        const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t): t is string => t !== null && /^[A-Za-z0-9-]+$/.test(t))); // a team joins into a path, so it passes the same check as a file-derived one
+        // A topic stays on the room's progress after its lead is gone: every team board of the repo counts. ponytail: finished topics pile up; hide them past a count if that is felt.
+        const prefix = basename(boardFile(boardsDir, id), ".md") + ".team.";
+        const topicTeams = new Set([...teams, ...files.filter((f) => f.startsWith(prefix)).map((f) => f.slice(prefix.length, -3)).filter((t) => /^[A-Za-z0-9-]+$/.test(t))]);
+        for (const team of topicTeams) {
+          const text = await readBoardText(teamBoardFile(boardsDir, id, team));
+          const desk = evidenceDir ? await readBoardText(join(evidenceDir, roomName(id), `lead-${team}`, "desk.md")) : "";
+          const topic = topicProgress(text, desk);
+          if (topic.total || topic.desk.length) (nextTopics[id] ??= []).push({ team, ...topic });
+        }
         for (const team of teams) {
           const text = await readBoardText(teamBoardFile(boardsDir, id, team)); // read once: the rows and the open question come from the same text
           const teamRows = parseBoard(text);
@@ -1543,8 +1580,9 @@ export function startServer({
           if (openQuestion(text)) nextAsking.add(`${id}\n${team}`);
         }
       }
-      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards) || [...nextAsking].sort().join() !== [...asking].sort().join()) {
+      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards) || JSON.stringify(nextTopics) !== JSON.stringify(topics) || [...nextAsking].sort().join() !== [...asking].sort().join()) {
         boards = next;
+        topics = nextTopics;
         teamBoards = nextTeams;
         asking = nextAsking;
         push();

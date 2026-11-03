@@ -1,0 +1,34 @@
+/* The topics' progress, top left of the room: flat and square like the board panel. */
+.progress {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  width: min(360px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(8 10 16 / 0.5);
+}
+.progress article { padding: 12px 16px; }
+.progress article + article { border-top: 1px solid var(--line); }
+.progress h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.progress .count { margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+.progress .meter { height: 6px; background: var(--bg); border: 1px solid var(--line); }
+.progress .meter span { display: block; height: 100%; background: #5b8def; }
+.progress .last, .progress .none { margin: 8px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.progress ul { margin: 0; padding: 0; list-style: none; }
+.progress .stuck { margin-top: 4px; color: #e05a5a; overflow-wrap: anywhere; }
+.progress .desk { margin-top: 10px; font-size: 12px; }
+.progress .desk li { display: grid; grid-template-columns: 8px 1fr; column-gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.progress .mark { width: 8px; height: 8px; margin-top: 4px; background: #5b8def; }
+.progress .desk > li > :not(.mark) { grid-column: 2; overflow-wrap: anywhere; }
+.progress .task { font-weight: 700; }
+.progress .what { color: var(--muted); }
+.progress a { color: var(--amber); text-underline-offset: 2px; }
+.progress a:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+@media (max-width: 900px) {
+  .progress { top: auto; left: 0; bottom: 0; width: auto; max-height: 40%; }
+}
