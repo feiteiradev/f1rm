@@ -1,5 +1,5 @@
 // The machine module: the only code that touches the OS. Seam 1 tests swap it for a fake.
-import { lstatSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, rmSync, statSync } from "node:fs";
 import { connect } from "node:net";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
@@ -19,6 +19,14 @@ async function* lines(stream: ReadableStream<Uint8Array>) {
   }
   if (buf) yield buf;
 }
+
+const realpathOr = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
 
 const ITERM ='application id "com.googlecode.iterm2"';
 // A leading "-" would let an id be read as a flag.
@@ -239,8 +247,25 @@ export const machine = {
       const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" });
       if (!r.success) throw new Error(r.stderr.toString().trim().split("\n").pop() || `git ${args[0]} failed`);
     };
-    // A stopped Claude Code session leaves its worktree locked, which takes `--force` twice.
-    if (statSync(`${repo}/.claude/worktrees/${task}`, { throwIfNoEntry: false })) git("worktree", "remove", ...(force ? ["--force", "--force"] : []), `.claude/worktrees/${task}`);
+    const dir = `${repo}/.claude/worktrees/${task}`;
+    if (lstatSync(dir, { throwIfNoEntry: false })) {
+      // Never delete through a symlink, and only inside a folder git lists as one of this repo's worktrees.
+      for (const p of [`${repo}/.claude`, `${repo}/.claude/worktrees`, dir]) if (lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${p} is a symlink: nothing removed`);
+      const listed = Bun.spawnSync(["git", "-C", repo, "worktree", "list", "--porcelain"], { stderr: "ignore" }).stdout.toString().split("\n\n");
+      const real = realpathSync(dir);
+      const entry = listed.find((b) => b.startsWith("worktree ") && realpathOr(b.split("\n")[0]!.slice(9)) === real);
+      if (!entry) throw new Error(`${dir} is not a worktree of ${repo}: nothing removed`);
+      if (!force && /^locked/m.test(entry)) throw new Error(`the worktree ${dir} is locked: nothing removed`);
+      // node_modules is untracked and huge: delete it first so a plain remove works.
+      rmSync(`${dir}/node_modules`, { recursive: true, force: true });
+      try {
+        git("worktree", "remove", `.claude/worktrees/${task}`);
+      } catch (err) {
+        // A stopped Claude Code session leaves its worktree locked, which takes `--force` twice.
+        if (!force) throw new Error(`git still refuses to remove the worktree (its node_modules is already deleted): ${(err as Error).message}`);
+        git("worktree", "remove", "--force", "--force", `.claude/worktrees/${task}`);
+      }
+    }
     // `claude rm` may already have taken the branch with the worktree.
     if (Bun.spawnSync(["git", "-C", repo, "rev-parse", "--verify", "-q", `refs/heads/worktree-${task}`], { stdout: "ignore" }).success) git("branch", force ? "-D" : "-d", `worktree-${task}`);
   },

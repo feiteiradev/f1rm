@@ -15,6 +15,8 @@ import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong, withEffort } from "./hire.ts";
 import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
+import { dockerTagIn } from "./dockertag.ts";
+import { realDocker } from "../docker.ts";
 import { mergeIn } from "./merge.ts";
 import { pushIn } from "./push.ts";
 import { wake } from "./wake.ts";
@@ -284,7 +286,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), evidenceDir: join(F1RM_DIR, "evidence"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), evidenceDir: join(F1RM_DIR, "evidence"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!), docker: realDocker } });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty
@@ -536,6 +538,12 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(r.lines.join("\n"));
     process.exit(r.ok ? 0 : 1);
   },
+  "docker-tag": () => {
+    const r = dockerTagIn(process.argv.slice(3), machine, process.cwd());
+    process.stdout.write(r.out);
+    if (r.err) console.error(r.err);
+    process.exitCode = r.code;
+  },
   archives: () => {
     const r = archivesIn(process.argv.slice(3), machine, process.cwd());
     process.stdout.write(r.out);
@@ -575,7 +583,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | usage-tap";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | docker-tag <task> | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | usage-tap";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

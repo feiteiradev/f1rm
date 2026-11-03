@@ -4,6 +4,8 @@
 // teardown and sweep match BOTH the f1rm labels and the project label.
 // Only tagged resources are ever removed (never images, never a prune). Pure: the docker runner is injected, no server/client imports.
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { basename } from "node:path";
 
 export type Docker = (args: string[]) => Promise<{ code: number; out: string }>;
 
@@ -18,6 +20,13 @@ export const realDocker: Docker = async (args) => {
     return { code: 127, out: "" };
   }
 };
+
+/** The repo name every tag, teardown and sweep uses: its folder name plus 6 hex of the real path's hash, so two repos both called `app` never share resources. */
+export function repoId(repoPath: string): string {
+  let real = repoPath;
+  try { real = realpathSync(repoPath); } catch { /* a folder that is gone keeps its given path */ }
+  return `${basename(repoPath)}-${createHash("sha256").update(real).digest("hex").slice(0, 6)}`;
+}
 
 const san = (x: string) => x.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 const hash = (repo: string, task: string) => createHash("sha256").update(`${repo}\0${task}`).digest("hex").slice(0, 8);
