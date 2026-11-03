@@ -557,13 +557,13 @@ const repoDir = (name: string) => {
   return dir;
 };
 
-test("pm starts the PM role, named for its repo, with the grilling slash command first in its prompt", () => {
+test("pm starts the PM role, named for its repo, with its session name first in its prompt", () => {
   const stub = stubClaude();
   expect(pmIn(repoDir("shop"), {}, stub).code).toBe(0);
   const args = stub.args();
   expect(args.slice(0, 4)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop"]);
   expect(args).toHaveLength(7);
-  expect(args[6]).toStartWith("/mattpocock-skills:grilling ");
+  expect(args[6]).toStartWith("Your session name is pm-shop.");
 });
 
 test("pm refuses a second PM for a repo whose PM is running, and starts one when only other repos have theirs", () => {
@@ -577,20 +577,21 @@ test("pm refuses a second PM for a repo whose PM is running, and starts one when
   expect(elsewhere.args().slice(0, 4)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop"]);
 });
 
-test("the PM's first prompt gives its session name, after the slash command", () => {
+test("the PM's first prompt gives its session name, with no slash command", () => {
   const stub = stubClaude();
   pmIn(repoDir("shop"), {}, stub);
   const prompt = stub.args()[6];
-  expect(prompt.indexOf("pm-shop")).toBeGreaterThan(prompt.indexOf("/mattpocock-skills:grilling"));
+  expect(prompt).not.toContain("/mattpocock-skills");
   expect(prompt).toContain("Your session name is pm-shop.");
 });
 
-test("the PM's first prompt asks it to pick up from the board and the live sessions before the interview", () => {
+test("the PM's first prompt asks it to pick up from the board and the live sessions, and says it interviews no one", () => {
   const stub = stubClaude();
   pmIn(repoDir("shop"), {}, stub);
   const prompt = stub.args()[6];
   for (const s of ["claude agents --json", "claude logs", "`doing` or `review`"]) expect(prompt).toContain(s);
-  expect(prompt.indexOf("claude agents --json")).toBeLessThan(prompt.indexOf("interview"));
+  expect(prompt).toContain("interview no one");
+  expect(prompt).not.toContain("open the interview");
 });
 
 test("the PM's first prompt points to the guidelines' decision policy by name and promises the end-of-milestone decisions line, without restating the policy", () => {
@@ -601,11 +602,12 @@ test("the PM's first prompt points to the guidelines' decision policy by name an
   for (const restated of ["architecture", "libraries", "irreversible"]) expect(prompt).not.toContain(restated);
 });
 
-test("the PM's first prompt points to the workflow rule and the talk rules by name, carries the one-line form, and has no PLAN or GO", () => {
+test("the PM's first prompt points to the talk rules by name, picks no workflow, and has no PLAN or GO", () => {
   const stub = stubClaude();
   pmIn(repoDir("shop"), {}, stub);
   const prompt = stub.args()[6];
-  for (const s of ["Picking the workflow", "Simple workflow: <what, which role>", "milestone", "Who talks to whom", "NEEDS YOU <team>: <topic>"]) expect(prompt).toContain(s);
+  for (const s of ["Who talks to whom", "NEEDS YOU <team>: <topic>"]) expect(prompt).toContain(s);
+  for (const s of ["Picking the workflow", "Simple workflow:", "f1rm hire --simple", "Hire only leads"]) expect(prompt).not.toContain(s);
   expect(prompt).not.toMatch(/\bPLAN\b|\bGO\b/);
   expect(prompt).not.toContain("claude attach");
   for (const restated of ["one specialist role", "a numbered round", "recommended answer"]) expect(prompt).not.toContain(restated);
@@ -631,7 +633,7 @@ test("pm passes extra claude flags before the prompt and returns claude's exit c
   const args = stub.args();
   expect(args.slice(0, 8)).toEqual(["--agent", "f1rm:pm", "--name", "pm-shop", "--plugin-dir", "/p", "--model", "haiku"]);
   expect(args.slice(8, 10)).toEqual(["--effort", "medium"]);
-  expect(args[10]).toStartWith("/mattpocock-skills:grilling ");
+  expect(args[10]).toStartWith("Your session name is pm-shop.");
 });
 
 test("pm starts at --effort medium unless the user passes their own --effort", () => {
@@ -830,7 +832,7 @@ test("pm on a paused project with a checkpoint tells the fresh PM to read the bo
   const stub = stubClaude();
   expect(pmIn(repo, { HOME: home }, stub).code).toBe(0);
   const prompt = stub.args()[6]!;
-  expect(prompt).toStartWith("/mattpocock-skills:grilling "); // still the first command
+  expect(prompt).toStartWith("Your session name is pm-shop."); // still first
   expect(prompt).toContain("PAUSED");
   expect(prompt).toContain("cp-20261028-153012");
   expect(prompt).toContain(join(dir, "cp-20261028-153012.json"));
