@@ -790,7 +790,7 @@ test("Hire starts a background session through the machine: the exact argv, in t
   expect(spawned).toEqual([
     {
       cwd: "/code/shop",
-      argv: ["claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page", `/design-pipeline\n\n${brief}`, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}'],
+      argv: ["claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page", `/design-pipeline\n\n${brief}`, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--effort", "high"],
     },
   ]);
 });
@@ -800,7 +800,7 @@ test("Hire reports to the project's PM when it has one, and takes a lower model"
   await inRoom("p", { agent_type: "f1rm:pm" });
   await office((s) => ROOM in s.rooms);
   expect((await hireOf({ ...ASSIGN, model: "haiku" })).status).toBe(200);
-  expect(spawned[0].argv.slice(8)).toEqual(["/design-pipeline Report to: pm-shop\n\n" + ASSIGN.brief, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--model", "haiku"]);
+  expect(spawned[0].argv.slice(8)).toEqual(["/design-pipeline Report to: pm-shop\n\n" + ASSIGN.brief, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--effort", "high", "--model", "haiku"]);
   expect((await hireOf({ ...ASSIGN, model: null })).status).toBe(200);
   expect(spawned[1].argv).not.toContain("--model");
 });
