@@ -80,7 +80,7 @@ export function pacing(u: Usage | null, now: number): { hold: { until: number; r
   if (s && s.usedPct >= HOLD_7D) holds.push({ until: s.resetsAt, reason: `7-day usage is ${s.usedPct}% (resets ${when(s.resetsAt, now)})` });
   const hold = holds.sort((a, b) => b.until - a.until)[0] ?? null;
   const elapsed = s ? Math.min(1, Math.max(0, 1 - (s.resetsAt - now) / WEEK)) : 0;
-  return { hold, oneTeam: !!s && s.usedPct > elapsed * 100 };
+  return { hold, oneTeam: !!s && Math.floor(s.usedPct) > Math.floor(elapsed * 100) };
 }
 
 export const warn = (u: Usage) => ({ fiveHour: (u.fiveHour?.usedPct ?? 0) >= WARN_5H, sevenDay: (u.sevenDay?.usedPct ?? 0) >= WARN_7D });
@@ -95,13 +95,14 @@ const TAP = { type: "command", command: `${sh(process.execPath)} ${sh(join(impor
 
 /** The claude flags with the usage statusLine in `--settings` (merged into a JSON one, the caller's own statusLine wins). ponytail shortcut: a `--settings` that is a file path is left as given and that hire reports no usage. */
 export function withUsageTap(flags: string[]): string[] {
-  const at = flags.indexOf("--settings");
+  const eq = flags.findIndex((f) => f.startsWith("--settings="));
+  const at = eq >= 0 ? eq : flags.indexOf("--settings");
   if (at < 0) return ["--settings", JSON.stringify({ statusLine: TAP }), ...flags];
   try {
-    const own = JSON.parse(flags[at + 1] ?? "");
+    const own = JSON.parse(eq >= 0 ? flags[eq]!.slice(11) : (flags[at + 1] ?? ""));
     if (own === null || typeof own !== "object" || Array.isArray(own)) return flags;
     const merged = JSON.stringify({ ...own, statusLine: own.statusLine ?? TAP });
-    return flags.map((f, i) => (i === at + 1 ? merged : f));
+    return flags.map((f, i) => (eq >= 0 ? (i === eq ? `--settings=${merged}` : f) : i === at + 1 ? merged : f));
   } catch {
     return flags;
   }

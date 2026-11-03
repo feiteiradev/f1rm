@@ -4,7 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { hire as hireCommand, NO_SLOT, realWait, withEffort, type Wait } from "./hire.ts";
+import { hire as hireCommand, NO_SLOT, realWait, withEffort, withPonytail, type Wait } from "./hire.ts";
+
+test("withPonytail merges into a --settings=<json> and never adds a second --settings", () => {
+  const out = withPonytail("backend-dev", ['--settings={"env":{"A":"1"}}', "--model", "x"]);
+  expect(out.filter((f) => f.startsWith("--settings"))).toHaveLength(1);
+  expect(out.slice(1)).toEqual(["--model", "x"]);
+  expect(JSON.parse(out[0]!.slice("--settings=".length))).toEqual({ env: { PONYTAIL_DEFAULT_MODE: "full", A: "1" } });
+  expect(withPonytail("backend-dev", ["--settings=/tmp/s.json"])).toEqual(["--settings=/tmp/s.json"]);
+});
 
 // The real `f1rm hire` waits for a slot up to 8 minutes; the processes these tests spawn give up at once (the wait itself is tested in process, below).
 process.env.F1RM_SLOT_WAIT_MS = "0";

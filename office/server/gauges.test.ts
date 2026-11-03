@@ -337,6 +337,21 @@ test("an answer that cannot be saved still answers: Remove says so, Keep is 200"
   expect((await post("leftovers/keep")).status).toBe(200);
 });
 
+test("a corrupt leftovers file logs one warning naming it, and the card is asked again", async () => {
+  const h = home();
+  writeFileSync(leftoversOf(h), "{not json");
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    start({ docker: fakeDocker(boxes()).docker, leftoversFile: leftoversOf(h) });
+    await office((s) => !!s.leftovers);
+  } finally {
+    console.log = log;
+  }
+  expect(lines.filter((l) => l.includes("leftovers.json"))).toHaveLength(1);
+});
+
 test("the card lists at most 20 groups and says how many more there are", async () => {
   const many = Array.from({ length: 25 }, (_, i) => ({ id: `g${i}`, name: `proj${String.fromCharCode(97 + i)}-e2e-1`, state: "running" }));
   start({ docker: fakeDocker(many).docker, leftoversFile: leftoversOf(home()) });

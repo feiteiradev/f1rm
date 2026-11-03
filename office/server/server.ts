@@ -1729,7 +1729,7 @@ export function startServer({
   const sweepDockerOnce = async () => {
     if (!recovery?.docker || !process.env.HOME || dockerSweeping) return;
     const stateFile = join(process.env.HOME, ".f1rm", "docker-sweep.json");
-    if (!due(stateFile, recovery.deps.now())) return;
+    if (!registered().some((r) => due(stateFile, recovery.deps.now(), r))) return;
     dockerSweeping = true;
     try {
       const sessions = await Promise.resolve(recovery.deps.sessions()).catch(() => null);
