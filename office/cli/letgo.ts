@@ -2,13 +2,24 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname } from "node:path";
+import { realDocker, repoId, teardown, type Docker } from "../docker.ts";
 import { git, worktreesOf } from "../server/checkpoint.ts";
 import type { machine, Session } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { archiveWork, filesText } from "./archive.ts";
 import { readRoles, SLUG } from "./hire.ts";
 
-type M = Pick<typeof machine, "gitCommonDir" | "letGo" | "removeWorktree" | "sessions">;
+type M = Pick<typeof machine, "gitCommonDir" | "letGo" | "removeWorktree" | "sessions"> & { docker?: Docker };
+
+/** Tears down the task's tagged Docker stack; never throws. Returns ", tore down N containers, N networks, N volumes" only when something was removed. */
+async function toreDown(m: { docker?: Docker }, repo: string, task: string): Promise<string> {
+  try {
+    const r = await teardown(m.docker ?? realDocker, repoId(repo), task);
+    return r.containers.length + r.networks.length + r.volumes.length ? `, tore down ${r.containers.length} containers, ${r.networks.length} networks, ${r.volumes.length} volumes` : "";
+  } catch {
+    return "";
+  }
+}
 
 const SLUG_SRC = SLUG.source.slice(1, -1);
 const NOT_LET_GO = "not let go:";
@@ -44,7 +55,7 @@ export const repoOf = (cwd: string) => cwd.split("/.claude/worktrees/")[0];
  * then (for the `last` one) removes the worktree and branch with git before `claude rm` runs, so that has no files to refuse.
  * Nothing is refused for uncommitted files or an unmerged branch: it is all archived. A failing archive removes nothing and lets nobody go. Throws if the session can't be let go.
  */
-export async function letGoHire(m: Pick<M, "letGo" | "removeWorktree">, s: Session, repo: string, { first = true, last = true } = {}): Promise<string> {
+export async function letGoHire(m: Pick<M, "letGo" | "removeWorktree" | "docker">, s: Session, repo: string, { first = true, last = true } = {}): Promise<string> {
   const hire = hireTask(s.name);
   const task = hire && !hire.reviewer ? hire.task : null;
   // A Reviewer works in the main checkout and a lead has no branch: nothing of theirs to keep.
@@ -82,14 +93,14 @@ export async function letGoHire(m: Pick<M, "letGo" | "removeWorktree">, s: Sessi
   }
   if (!last) return `${s.name}: let go${kept && `, ${kept}`}`;
   const said = kept && `${kept}, `;
-  return removeError ? `${s.name}: let go, ${said}kept ${branch} and its worktree: ${removeError}` : `${s.name}: let go, ${said}removed its worktree and branch ${branch}`;
+  return removeError ? `${s.name}: let go, ${said}kept ${branch} and its worktree: ${removeError}` : `${s.name}: let go, ${said}removed its worktree and branch ${branch}${await toreDown(m, repo, task)}`;
 }
 
 /**
  * Archives and removes every worktree under `.claude/worktrees` and every `worktree-*` branch of `repo` that no session works in. A worktree with a session that is not done (stopped by a pause,
  * blocked on a limit, failed, running, or a finished one whose process lives) is listed and skipped: `f1rm wake` may resume it. It never stops or removes a session. Refuses while the project is paused.
  */
-function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[], home: string): { lines: string[]; ok: boolean } {
+async function leftovers(m: Pick<M, "removeWorktree" | "docker">, repo: string, all: Session[], home: string): Promise<{ lines: string[]; ok: boolean }> {
   const paused = readPaused(pausedFile(pausedDirOf(home), repo));
   if (paused) throw new Error(`${basename(repo)} is paused (${paused.by}${paused.why ? `: ${paused.why}` : ""}): its stopped sessions are resumed by \`f1rm resume\`, so nothing is cleaned up until then`);
   const real = (p: string) => {
@@ -106,7 +117,7 @@ function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[], h
   };
   const busy = new Map(all.filter((s) => (s.state !== "done" || s.pid) && taskIn(s.cwd)).map((s) => [taskIn(s.cwd)!, s]));
   const branches = (git(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads/worktree-*"]) ?? "").split("\n").filter(Boolean).map((b) => b.slice("worktree-".length));
-  const tasks = [...new Set([...worktreesOf(repo).map((p) => basename(p)), ...branches])].sort();
+  const tasks = [...new Set([...worktreesOf(repo).map((p) => basename(p)), ...branches])].filter((t) => t && !t.includes("/")).sort();
   const lines: string[] = [];
   let ok = true;
   for (const task of tasks) {
@@ -126,7 +137,7 @@ function leftovers(m: Pick<M, "removeWorktree">, repo: string, all: Session[], h
     }
     try {
       m.removeWorktree(repo, task, true);
-      lines.push(`${task}: ${kept}removed its worktree and branch worktree-${task}`);
+      lines.push(`${task}: ${kept}removed its worktree and branch worktree-${task}${await toreDown(m, repo, task)}`);
     } catch (err) {
       ok = false;
       lines.push(`${task}: ${kept}not removed: ${(err as Error).message}`);
@@ -144,7 +155,7 @@ export async function letgo(names: string[], m: M, cwd: string, home = process.e
   if (!all) throw new Error("can't list the sessions (`claude agents --json --all` failed)");
   if (names.includes("--leftovers")) {
     if (names.length > 1) throw new Error("usage: f1rm letgo --leftovers (it takes no names)");
-    return leftovers(m, repo, all, home);
+    return await leftovers(m, repo, all, home);
   }
   const lines: string[] = [];
   let ok = true;

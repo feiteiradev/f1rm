@@ -20,6 +20,8 @@ import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, p
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
+import { due, liveTasksOf, sweepTick } from "./dockersweep.ts";
+import type { Docker } from "../docker.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
 import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
 import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
@@ -471,7 +473,7 @@ type Options = {
   /** How long the SendMessage gate waits for the listing of ended hires. */
   gateListingMs?: number;
   /** The recovery tick (see recovery.ts): how often it runs, and the Claude Code, disk and clock it reads. Without it the office recovers nothing. */
-  recovery?: { everyMs: number; deps: Omit<RecoveryDeps, "board" | "tell" | "paused"> };
+  recovery?: { everyMs: number; deps: Omit<RecoveryDeps, "board" | "tell" | "paused">; /** With it, the daily docker sweep runs on the same tick. */ docker?: Docker };
 };
 
 // Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
@@ -1708,7 +1710,21 @@ export function startServer({
       });
     return names.length;
   }
-  const recoverOnce = () => recovering?.tick(registered());
+  let dockerSweeping = false;
+  const sweepDockerOnce = async () => {
+    if (!recovery?.docker || !process.env.HOME || dockerSweeping) return;
+    const stateFile = join(process.env.HOME, ".f1rm", "docker-sweep.json");
+    if (!due(stateFile, recovery.deps.now())) return;
+    dockerSweeping = true;
+    try {
+      const sessions = await Promise.resolve(recovery.deps.sessions()).catch(() => null);
+      if (!sessions) return; // can't say who is live: sweep nothing
+      for (const line of await sweepTick(registered(), (repo) => liveTasksOf(repo, sessions), recovery.docker, recovery.deps.now(), stateFile)) console.log(line);
+    } finally {
+      dockerSweeping = false;
+    }
+  };
+  const recoverOnce = () => (void sweepDockerOnce().catch(() => {}), recovering?.tick(registered()));
   const ready = Promise.all([sweepOnce(), readBoards()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   void checkProcesses(); // likewise: the replayed employees learn who is busy now, not a tick later
