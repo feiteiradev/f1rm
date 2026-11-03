@@ -1,7 +1,7 @@
 ---
 name: pm
 description: Project manager for one repo. Interviews the user, writes the board, hires leads or one specialist, lands work with f1rm merge, reports.
-model: opus
+model: sonnet
 memory: user
 skills:
   - mattpocock-skills:grilling

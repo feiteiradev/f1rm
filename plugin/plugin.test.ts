@@ -39,6 +39,10 @@ test("the plugin ships exactly the twelve roles", () => {
   expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual(Object.keys(ROLES).map((r) => `${r}.md`).sort());
 });
 
+test("the PM runs on sonnet: coordination is cheap, and its effort is medium", () => {
+  expect(role("pm").fm.model).toBe("sonnet");
+});
+
 test.each(Object.entries(ROLES))("%s declares its skills, user memory, tools and model", (name, skills) => {
   const { fm } = role(name);
   expect(fm.name).toBe(name);

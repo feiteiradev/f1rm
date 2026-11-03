@@ -471,3 +471,9 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants one command in the session he is in, and one button, instead of a trip to a shell; the same mechanism must keep every agent out, and the platform gives that for free (a skill the model cannot invoke, a pre-executed line no hook sees) where a grant tied to a user prompt would have needed the office to tell the user's prompt from a model's, which the hook payload cannot.
 - Rejected: an automatic pause on lid close or shutdown (the user does not want anything to stop by itself); letting the PM run `--all` (a project's PM then stops every other project); a schedule (the work hours were removed for the same reason); a one-use grant the office records from the user's UserPromptSubmit (design B: not needed, and the payload does not tell a typed prompt from a resume note); a `commands/` file instead of a skill (the docs say to prefer skills for new plugins, and the probe proved the skill form).
 - Where: stop-all-command (plugin/skills/stop-all, plugin/skills/resume-all, office/cli/wake.ts, the claude-start rule in office/server/server.ts)
+## 2026-11-03 Coordination at medium effort
+
+- Decision: the scribe PM and every lead start at `claude --effort medium`; every other role (devs, designers, researchers, Reviewers, Founder roles) starts at `--effort high`. `f1rm hire`, `f1rm wake` and `f1rm pm` add the flag, and an `--effort` the caller passes wins (none is added twice). The PM runs on `model: sonnet`, pinned in plugin/plugin.test.ts.
+- Why: the leads' own output was larger than all their implementers' together, 47 h on the weekly limit; coordination does not need the deepest reasoning, the code work does.
+- Rejected: high effort for all roles.
+- Where: effort-flag

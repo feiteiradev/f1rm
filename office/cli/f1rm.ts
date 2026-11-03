@@ -12,7 +12,7 @@ import { pausedDirOf } from "../server/pause.ts";
 import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
 import { startServer } from "../server/server.ts";
-import { hire, pmName, rootTooLong } from "./hire.ts";
+import { hire, pmName, rootTooLong, withEffort } from "./hire.ts";
 import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 import { mergeIn } from "./merge.ts";
@@ -495,7 +495,7 @@ async function pm() {
     chosen = answer.startsWith("f") ? "founder" : answer.startsWith("w") ? "work" : null;
     if (chosen) writeEdition(file, chosen);
   }
-  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...process.argv.slice(3), pmPrompt(name, chosen ?? "work") + pausedNote(root, process.env.HOME!)], {
+  const proc = Bun.spawn(["claude", "--agent", "f1rm:pm", "--name", name, ...withEffort("pm", process.argv.slice(3)), pmPrompt(name, chosen ?? "work") + pausedNote(root, process.env.HOME!)], {
     env: claudeEnv(),
     stdio: ["inherit", "inherit", "inherit"],
   });

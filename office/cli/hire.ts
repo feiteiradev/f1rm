@@ -53,6 +53,12 @@ export function withPonytail(role: string, flags: string[]): string[] {
   }
 }
 
+/** Coordination (the PM and every lead) starts at `--effort medium`, every other role at high; an `--effort` the caller passes wins, so none is added twice. */
+export function withEffort(role: string, flags: string[]): string[] {
+  if (flags.some((f) => f === "--effort" || f.startsWith("--effort="))) return flags;
+  return [...flags, "--effort", role === "lead" || role === "pm" ? "medium" : "high"];
+}
+
 /** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
 export const projectFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
 
@@ -242,7 +248,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const prompt = `/${first}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${dev ? reviewParagraph(task, basename(cwd), level ?? "medium") + "\n\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a content Reviewer reads the branch from its own scratch worktree, so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
-  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withPonytail(role, extra)];
+  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withEffort(role, withPonytail(role, extra))];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
   if (role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
