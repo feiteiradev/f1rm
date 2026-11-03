@@ -7,17 +7,17 @@ description: How the f1rm company works. Roster and hiring, each role's workflow
 
 These rules bind every f1rm role. Nothing here needs the office app. The office only displays the sessions and the board.
 
-Hierarchy: the user, then one PM per repo. The PM hires leads for a milestone, one or two, and one specialist directly for a simple task (`--simple`). A lead runs its tasks with implementer subagents and hires only specialists other than devs (designers, researchers, Founder roles) and content Reviewers into its team. Nobody else hires, and there is no layer below a lead.
+Hierarchy: the user, then one PM per repo, a scribe that hires no one. The user starts each topic as a lead, one or two live at once. A lead runs its tasks with implementer subagents and hires only specialists other than devs (designers, researchers, Founder roles) and content Reviewers into its team. Nobody else hires, and there is no layer below a lead.
 
 ## Roster and hiring playbook
 
 | Role | Hire for | Slash commands `f1rm hire` starts the brief with |
 | :- | :- | :- |
-| `pm` | Started by the user with `f1rm pm`. Never hired. | `mattpocock-skills:grilling` |
-| `lead` | One slice of a milestone, one or two leads per milestone. Hired only by the PM | `f1rm:f1rm-guidelines`, `f1rm:hire` |
+| `pm` | The project's scribe, started by the user with `f1rm pm`. Never hired, hires no one | none |
+| `lead` | One topic, started by the user ("New topic"); at most 2 live per project | `f1rm:f1rm-guidelines`, `f1rm:hire` |
 | `designer` | Layout, flows, visual system, UX copy | `design-pipeline` |
-| `frontend-dev` | UI implementation. Only a simple task's dev (`--simple`, hired by the PM); a lead's tasks go to its implementer subagents | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
-| `backend-dev` | Server, data, API implementation. Only a simple task's dev (`--simple`, hired by the PM); a lead's tasks go to its implementer subagents | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
+| `frontend-dev` | UI implementation. The PM hires none; a one-deliverable ask is a topic of one task, built by a lead's implementer subagent | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
+| `backend-dev` | Server, data, API implementation. The PM hires none; a one-deliverable ask is a topic of one task, built by a lead's implementer subagent | `pstack:poteto-mode`, `mattpocock-skills:tdd` |
 | `reviewer` | A branch with no code, hired with `--content` by a lead. It reads and reports; `f1rm merge` lands | `f1rm:f1rm-guidelines` |
 | `researcher` | A question that needs current, cited facts | `mattpocock-skills:research` |
 | `marketer` | Founder only. Positioning, landing copy, launch plans, conversion, and `growth/brand.md` first | `cro`, `anthropic-skills:content-creator`, `brandkit` |
@@ -30,7 +30,7 @@ Hierarchy: the user, then one PM per repo. The PM hires leads for a milestone, o
 
 Playbook:
 
-1. **Pick the workflow, then interview.** The PM picks by rule (see Picking the workflow). In a milestone, plan only after the user confirms a shared understanding.
+1. **Grill, then plan.** A topic's lead interviews the user (Teams 10) and plans only after the user confirms a shared understanding. The PM interviews no one.
 2. **One task, one hire, one worktree.** A task that needs two roles is two tasks.
 3. **Order by dependency.**
    - Researcher before any task whose approach depends on facts you lack.
@@ -38,17 +38,15 @@ Playbook:
    - Backend dev and Frontend dev in parallel only when the brief fixes the API contract between them.
    - A content Reviewer only after a branch with no code. A code branch has no Reviewer: its author reviews it inside its own session (see Review and landing).
 4. **Small tasks.** Each task fits one session and has acceptance criteria that a check can prove.
-   - The PM collects what the user must provide (accounts, keys, copy, decisions) while it plans, and hires only once those inputs exist.
+   - The lead collects what the user must provide (accounts, keys, copy, decisions) while it plans, and hires only once those inputs exist.
    - The same task goes to the same session: a `CHANGES REQUESTED` and a conflict from `f1rm merge` go back to the same dev or specialist. A new task gets a fresh hire, with the previous `DONE` report in its Inputs. Hires are not reused across tasks.
 5. **Hire only with `f1rm hire`**, directly or through the `f1rm:hire` skill, which runs it. Never start a hire by calling `claude` yourself, because the caps live in `f1rm hire`. Only the PM and leads hire: the PM hires leads, and for a simple task one dev, designer or researcher with `--simple`; a lead hires specialists other than devs (designers, researchers, Founder roles) and `--content` Reviewers into its team, never a dev (an owner's code is built by its implementer subagents, see Teams); the office blocks `f1rm hire` for every specialist.
 
    ```
-   f1rm hire lead lead-<team> <team> "<team brief>"             # the PM, for a milestone
-   f1rm hire --simple <role> <name> <task> "<brief>"            # the PM, for a simple task
    f1rm hire --team <team> <role> <team>.<role>-<task> <task> "<brief>"  # a lead, into its team
    ```
 
-   - `<role>` is `designer`, `researcher`, a Founder role or `reviewer` (with `--content`) for a lead's hire, `lead` for the PM's milestone hire, and `frontend-dev`, `backend-dev`, `designer` or `researcher` for `--simple`. A lead's `--team` hire of a dev is refused.
+   - `<role>` is `designer`, `researcher`, a Founder role or `reviewer` (with `--content`) for a lead's hire, the user's topic start for a `lead`. The PM hires none. A lead's `--team` hire of a dev is refused.
    - `<name>` and `<task>` follow rule 6. The task slug becomes the worktree `.claude/worktrees/<task>` and its branch `worktree-<task>`.
    - `<brief>` is one quoted argument in the brief format below, without the `Report to` line. `f1rm hire` adds it.
    - Flags after the brief go to `claude`, for example `--model haiku`.
@@ -62,7 +60,7 @@ Playbook:
 6. **Name** each hire `<role>-<task slug>`, for example `backend-dev-login`; a team member `<team>.<role>-<task slug>`, for example `checkout.designer-landing`; a lead `lead-<team>`. `f1rm hire` refuses any other name. Team and task slugs are lowercase words joined by hyphens, unique on their board. A Reviewer's task slug is `review-<task>`, for the task it reviews, so its name is `<team>.reviewer-review-<task>`; its lead pastes the author's `DONE` report into its Inputs.
 7. **Slash commands.** The brief of a hire starts with its role's first skill as a slash command, for example `/design-pipeline`. Only the first slash command in a prompt expands, so `f1rm hire` names the other skills in the brief and the hire loads them with the Skill tool before starting.
    - `/research` is a command, not a Skill-tool skill. `--skills research` makes it the first command; the Researcher's own skill is `mattpocock-skills:research`.
-   - `pstack:architect` and `pstack:how` are slash-only too: `--skills pstack:architect` or `--skills pstack:how` on a lead's hire makes it the lead's first command, and `f1rm:f1rm-guidelines` and `f1rm:hire` then load with the Skill tool. A hire has one first command, and a dev's is `/pstack:poteto-mode`, so `f1rm hire` refuses any other slash-only skill in a dev's `--skills`; `pstack:architect` and `pstack:how` are for a lead only. The PM gives `pstack:architect` for a cross-team contract or a new module.
+   - `pstack:architect` and `pstack:how` are slash-only too: `--skills pstack:architect` or `--skills pstack:how` on a lead's hire would make it the lead's first command, and `f1rm:f1rm-guidelines` and `f1rm:hire` then load with the Skill tool. A hire has one first command, and a dev's is `/pstack:poteto-mode`, so `f1rm hire` refuses any other slash-only skill in a dev's `--skills`; `pstack:architect` and `pstack:how` are for a lead only.
    - `/security-review` is never loaded at the start, because it reviews the git state where it runs. With `--level high` the dev tells its review subagent to run it on the same diff (see Review and landing).
    - `f1rm hire` writes all of this and the `Report to` line, so do not write them in the brief yourself.
 8. **Role prompts stay about the work.** Do not give a hire a persona or a character name in a brief.
@@ -70,11 +68,9 @@ Playbook:
 
 ## Picking the workflow
 
-The PM picks the workflow by this rule before it plans, and says it in one line: `Simple workflow: <what, which role>`. The user upgrades it by saying "milestone".
+The PM hires none and interviews no one. A lead's topic is the only way work starts: the user starts it in the office (Teams 10), even a one-deliverable ask, which is a topic of one task.
 
-- **Ops** is work with no file changes (run, start, open, install, status). The PM does it at once, with no interview, board row or hire.
-- **Simple** is one deliverable, one specialist role, no business, product-scope, design or strategy decision, and it fits one session. The PM asks at most one clarifying question, writes no milestone section, adds one board row and hires ONE dev, designer or researcher with `f1rm hire --simple <role> <name> <task> "<brief>"`: no lead, no team, named `<role>-<task>`, and it reports to the PM. The dev reviews its own branch (see Review and landing). When its `DONE` is in, the PM runs `f1rm merge <task>` and then `f1rm letgo <name>`. When the `DONE` has no repo change, or only files `f1rm merge` refuses (a researcher's findings live in `~/.f1rm/evidence`, so its `--commit` is optional), the PM checks the result against the brief and the content checklist itself, marks the row `done` without running `f1rm merge`, and lets the session go with `f1rm letgo`, which archives any unmerged work first. A simple designer or researcher gets no review session: Reviewers are a lead's hire only, so the PM waits for none. A simple task is a team of one in the project's cap of 2 for as long as its session lives.
-- **Milestone** is anything else: 2 or more tasks or roles, a big decision, research needed, or the user says "milestone" or "grill". It gets the full interview and teams (see Teams).
+- **Ops** is work with no file changes (run, start, open, install, status). The PM does it itself at once, with no interview, board row or hire.
 
 ## Workflows
 
@@ -83,15 +79,12 @@ Each role's steps, and the skill or command at each step. Every dev and speciali
 - **pm**
   1. Pick up: read the board, the team boards, the milestones file and `claude agents --json` (filtered to your own repo), run `claude logs <id>` for each hire on a `doing` or `review` row, update the rows, say nothing, and answer when the user asks "status?".
   2. Load `f1rm:f1rm-guidelines`.
-  3. Pick the workflow (see Picking the workflow). For ops, do it. For a simple workflow, ask at most one question. For a milestone, interview with `mattpocock-skills:grilling` until the user confirms, with at most 3 open scope questions (Who talks to whom).
-  4. Write the board (and, for a milestone, its section in the milestones file), run the board check (Who talks to whom), and collect what the user must provide.
-  5. For a simple workflow, hire one specialist with `f1rm hire --simple`; for a milestone, one or two leads with `f1rm hire lead`.
-  6. Wait, with a background watcher on your hires (see Watching and waking); never wait for an agent by message. On a simple dev's `DONE <slug>`, run `f1rm merge <task>`, mark the row `done`, then `f1rm letgo <name>` (a `DONE` with no landable commit: check it yourself, mark the row `done` without running `f1rm merge`, then `f1rm letgo`); on its `ESCALATE <slug>` or `BLOCKED`, make the call yourself (Review and landing); on its `NEEDS YOU <slug>`, an item of the user's, ask the user. On a lead's `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says. After `DONE <team>`, mark its row `done`, then let the lead go with `f1rm letgo`.
-  7. At the end of the milestone, run the milestone cleanup and the 5-line record, push with `f1rm push` (Review and landing), then send the one report. It needs no reply.
-  - Exploration beyond the README, CLAUDE.md, `git log` and the board goes to a Haiku Explore intern.
+  3. Be the scribe: keep the milestones file and the docs. Interview no one, plan nothing, hire no one. Milestones already running finish in the current flow.
+  4. Wait, with a background watcher on the leads (see Watching and waking); never wait for an agent by message. On a lead's `NEEDS YOU <team>: <topic>`, tell the user as Who talks to whom says.
+  5. On a topic's `DONE <team>`, mark its row `done`, let the lead go with `f1rm letgo lead-<team>`, then run `f1rm letgo --leftovers`, `f1rm archives --prune` and the 5-line record, push with `f1rm push` (Review and landing), and send the one report. It needs no reply.
 - **lead**
-  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Started with `pstack:architect`, sketch the shapes of the contract or module before you hire; a question about existing code goes to a Haiku Explore intern, or runs `pstack:how` when the PM started you with it.
-  2. Plan once: write the team board, one row per task, each with acceptance criteria a check can prove and files of its own. Approve your own plan and log it (Teams 6); ask only when it holds a product, design or business choice.
+  1. Load `f1rm:f1rm-guidelines`, then `f1rm:hire`. Sketch a contract or module from the files yourself before you hire; a question about existing code goes to a Haiku Explore intern.
+  2. Grill the user with `mattpocock-skills:grilling` about the topic in your own chat, and preview visible work and show the first slice as Teams 10 says. Plan once: write the team board, one row per task, each with acceptance criteria a check can prove and files of its own. Approve your own plan and log it (Teams 6); ask only when it holds a product, design or business choice.
   3. Run each task with an implementer subagent in its own worktree (Teams 7), at most 2 at a time. Hire a designer or researcher into the team with `f1rm hire --team` only for work that stands alone, and a `--content` Reviewer for a branch with no code. Watch those sessions with a background watcher (see Watching and waking). Ask the user a decision as Who talks to whom says.
   4. Check each task's `DONE` against its brief and its check record (Teams 8), have it reviewed by one fresh-context subagent, send the blocking findings back for one fix pass, then run `f1rm merge <task>`.
   5. Close the team (Teams 9): the batch task, each task's row `done`, `f1rm letgo`, then `DONE <team>`.
@@ -142,9 +135,9 @@ The mattpocock skills and the pstack skills work side by side. Each row names th
 
 | Phase | mattpocock skill | pstack skill | Rule that wins |
 | :- | :- | :- | :- |
-| Interview | `mattpocock-skills:grilling`, the PM's first command | none | Ask the user only for big decisions. |
-| Plan a cross-team contract or new module | none | `pstack:architect`, slash-only: a lead's first command, which the PM names with `--skills pstack:architect` | Sketch first, then hire. |
-| Questions about existing code | none | `pstack:how`, slash-only like architect (`--skills pstack:how`) | A lead not started with it sends a Haiku Explore intern. |
+| Interview | `mattpocock-skills:grilling`, a topic lead's first command | none | Ask the user only for big decisions. |
+| Plan a cross-team contract or new module | none | none | Sketch it yourself from the files, then hire. |
+| Questions about existing code | none | none | Send a Haiku Explore intern. |
 | Build | `mattpocock-skills:tdd`, loaded second with the Skill tool | `pstack:poteto-mode`, a dev's first command, with its playbook: `feature`, `bug-fix`, `refactoring`, `perf-issue` | The tdd skill is mattpocock's, never pstack's of the same name. Every criterion has a check that fails first. |
 | Diagnose a bug | `mattpocock-skills:diagnosing-bugs`, before tdd (`--skills`) | the `bug-fix` playbook | Diagnose first, then fix test-first. |
 | Review | none; the dev's one review subagent runs the `code-review` skill on its diff, and `security-review` at `--level high` | `pstack:interrogate`, slash-only: the user can run it by hand at `--level high` | The dev's own review decides what is fixed; `f1rm merge` lands. |
@@ -165,7 +158,9 @@ Every project is **Work** or **Founder**, and the user chooses: the office asks 
 
 ## Founder playbook
 
-In a Founder project the PM follows this on top of everything else here.
+Parked: no Founder work starts in the topic flow; this playbook applies again only when the user unparks it.
+
+In a Founder project this applies on top of everything else here.
 
 1. **Interview the business too.** Ask about the customer, the problem they have, the offer, and the channel that reaches them, as well as what to build.
 2. **Strategist first** when the idea is not validated, that is, when no customer has confirmed the problem. A plan built on an untested idea waits for the Strategist's verdict, the way a task waits for the Researcher's facts.
@@ -182,15 +177,16 @@ In a Founder project the PM follows this on top of everything else here.
 
 ## Teams
 
-1. **Every milestone runs through one or two teams**, even a milestone of one task. A simple workflow is one specialist, a team of one (see Picking the workflow). The PM hires only leads for a milestone, so hire traffic stays out of its chat with the user. Its own Haiku Explore interns are the one exception.
-2. **What a team owns.** One vertical slice of the milestone, end to end (design, frontend, backend), with its own acceptance criteria. Name the team after its slice, for example `checkout`.
-3. **At most 2 teams** work in a project at once, live leads and simple tasks together. Every task of a milestone goes through a team.
-4. **No nested teams.** Only the PM hires leads, and a lead hires only specialists other than devs and `--content` Reviewers, only into its own team.
-5. **Order.** The PM orders teams by dependency, as it orders tasks. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
+1. **Every topic is a team of its own.** The user starts a topic in the office ("New topic"); it is a lead `lead-<topic>` in its own session, and its team is named after the topic. The PM hires no lead and no specialist (it is a scribe: see Workflows). Milestones already running finish in the current flow.
+2. **What a team owns.** One topic, end to end (design, frontend, backend), with its own acceptance criteria. Name the team after its slice, for example `checkout`.
+3. **At most 2 topics live** in a project at once (the 2-team cap); a third waits for a slot. A topic holds about 5 tasks; a bigger ask splits into topics that queue. Every task goes through a team.
+4. **No nested teams.** Only the user starts a lead, and a lead hires only specialists other than devs and `--content` Reviewers, only into its own team.
+5. **Order.** Topics queue by dependency, two live at most. When a team needs only a contract from another (an API shape, a shared file), the two leads agree on it directly.
 6. **Plan once, approve it yourself.** A lead plans once: it writes its team board, one row per task, each with acceptance criteria a check can prove and files of its own. It approves its own plan, writes it on the team board and logs the call in `~/.f1rm/kept/<repo>/calls.md` (`| date | task | call | why |`). It asks the user only when the plan holds a product, design or business choice, as a numbered round with its recommendation, the open question on its board and `NEEDS YOU <team>: <topic>` to the PM; it starts nothing that answer could change until it has the answer. Only a decision of the user's (Who talks to whom) interrupts it afterwards.
 7. **Owners run implementer subagents.** A lead cannot hire a frontend-dev or a backend-dev (`f1rm hire` refuses it) and writes no product code. It runs each task with an implementer subagent, in the shape of the `implement-spec` skill with the team board as its ticket list: a general-purpose subagent that works test-first in its own worktree, on branch `worktree-<task>`, where the gate lets it write and commit and nowhere else. A plain Agent keeps its tool cwd in the main checkout, where the delegation gate refuses its Write and commit, so start it with the Agent tool and `isolation: "worktree"`: its cwd is then its own worktree `.claude/worktrees/agent-<id>`, where it writes, edits and commits. It spells git as `/usr/bin/git`, first word of its own Bash call, with no `cd`, no `-C` and no chaining (the user's rtk rewrite breaks plain `git` in an isolated agent). It starts with `/usr/bin/git checkout --detach main` (the one forward move the gate allows) and `/usr/bin/git checkout -b worktree-<task>`, and finishes with its commit and `bun run check` once. It never runs `git merge`, `reset`, `rebase` or `cherry-pick`; when main moves, the lead has the work re-created on main's tip as one commit with `git apply`, the trees compared. It sends `f1rm report DONE <task> --commit <sha>` when its checks pass. It runs at most 2 implementers at a time, the review subagent counting among the 2 sub-agents. A designer or a researcher is a separate session only when its work stands alone, and a `--content` Reviewer reads a branch with no code.
 8. **Scrutiny.** A lead checks each task's `DONE` against its brief and its check record (see Test runs in Handoff). If anything is missing, it sends the work back to the same specialist (an implementer gets a fix pass; a designer or researcher whose session has no live process is woken first: **No live session** in Watching and waking). Then one fresh-context review subagent reviews the branch as a dev's does (see Review and landing); the lead sends only the blocking findings back, for one fix pass, copies the non-blocking ones to `~/.f1rm/kept/<repo>/findings.md`, and runs `f1rm merge <task>`. A second blocking round, a conflict the implementer cannot resolve and a test-only branch are the lead's calls (Review and landing 4, 6 and Landing), each appended to `calls.md`.
 9. **Closing.** When every task of the team is merged, the lead runs one batch task for the non-blocking findings in its findings file: a normal task through the same flow (its own non-blocking findings stay `left` and start no second batch). The lead skips it, and says so in its `DONE <team>`, when the list is empty or the user says to leave them. The findings file records each finding as `fixed` or `left`. Then the lead marks each task's row `done` on its team board, lets its specialists go with `f1rm letgo <name>...`, which also removes their merged worktrees and branches (a designer's or researcher's `DONE` with no landable commit is checked by the lead against the brief and the content checklist, marked `done` without running `f1rm merge`, and the session let go the same way, `f1rm letgo` archiving any unmerged work first), removes an implementer's worktree and branch with `git worktree remove` and `git branch -d`, and sends the PM one `DONE <team>`: a 5-line summary (the merged commits, how to try it, what is open), the path of the findings file, and the specialists' `keep:` lines. The PM then marks the team's row `done` and only after that lets the lead go with `f1rm letgo lead-<team>`: the office wakes a hire whose row still says `doing` or `review` once `claude stop` has ended it, so the row is marked first.
+10. **Topic flow.** A topic lead opens with `mattpocock-skills:grilling` and interviews the user about that one topic in its own chat. For work the user would see (product or design) the lead shows a one-screen plan plus a mock or screenshot and waits for his "go", written under `## Open question for the user` with `NEEDS YOU <team>: preview`; work he would not see goes straight ahead. After "go" the lead builds the thinnest end-to-end slice first, pins it with its proof on its desk, and goes on without waiting; the user says "stop" if it is wrong. A task the user would see lands only with proof from the running app (a screenshot or short clip of the feature working end to end) that the lead checks against the task's criteria. A lead writes one line on its desk per landed task, with the proof (a path or link). Sessions message the user only for decisions.
 
 ## Watching and waking
 

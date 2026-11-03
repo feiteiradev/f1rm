@@ -477,3 +477,31 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the leads' own output was larger than all their implementers' together, 47 h on the weekly limit; coordination does not need the deepest reasoning, the code work does.
 - Rejected: high effort for all roles.
 - Where: effort-flag
+
+## 2026-11-03 Topics run by leads; the PM is a scribe
+
+- Decision: the user starts a topic in the office ("New topic"). Each topic is a lead `lead-<topic>` in its own session; it opens with `mattpocock-skills:grilling` and interviews the user about that one topic in its own chat. At most 2 topics live per project (the 2-team cap) and a third waits for a slot. A topic holds about 5 tasks; a bigger ask splits into topics that queue. The PM no longer interviews or hires: it keeps the milestones file and docs and, when a topic's lead sends `DONE <team>`, runs the cleanup (`f1rm letgo --leftovers`, `f1rm archives --prune`) and `f1rm push`, then lets the lead go. It runs on Sonnet at medium effort. `f1rm pm` still registers the project and starts it as `pm-<repo>`. Milestones already running finish in the current flow.
+- Why: one build is about 0.6 h per task; milestones lost days to usage-limit stops and coordination tokens; results went wrong (wrong thing built, buggy, wrong design).
+- Rejected: the one-PM front door.
+- Where: topic-prose (plugin/agents/pm.md, plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+
+## 2026-11-03 Preview before building visible work
+
+- Decision: for work the user would see (product or design) the lead shows a one-screen plan plus a mock or screenshot and waits for his "go"; work he would not see goes straight ahead. The lead writes it under `## Open question for the user` and sends `NEEDS YOU <team>: preview`.
+- Why: a wrong visible build costs a whole task; a preview costs one screen.
+- Rejected: previews for every task; building first and showing after.
+- Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+
+## 2026-11-03 First slice shown without waiting
+
+- Decision: after "go" the lead builds the thinnest end-to-end slice first, pins it with its proof on its desk, and goes on without waiting; the user says "stop" if it is wrong.
+- Why: the user sees the real direction early and the team never idles on an answer.
+- Rejected: waiting for a second "go" after the first slice.
+- Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+
+## 2026-11-03 Visible tasks land with proof from the running app
+
+- Decision: a task the user would see lands only with proof from the running app (a screenshot or short clip of the feature working end to end) that the lead checks against the task's criteria. Each lead writes one line on its desk per landed task, with the proof (a path or link). Sessions message the user only for decisions.
+- Why: tests passed on builds that were the wrong thing or looked wrong.
+- Rejected: proof in the chat; a report per task to the user.
+- Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
