@@ -396,7 +396,8 @@ test("B1: every topic is a lead, and the PM hires no one", () => {
   const forms = section("Roster and hiring playbook").split("```")[1];
   expect(forms).not.toContain("the PM, no teams");
   expect(String(role("pm").fm.description)).not.toContain("hires specialists");
-  expect(pmPromptText()).toContain("Hire only leads");
+  expect(pmPromptText()).not.toContain("Hire only leads");
+  expect(pmPromptText()).toContain("hire no one");
 });
 
 test("B1: no line says a specialist reports to the PM or that the PM lets specialists go", () => {
@@ -495,17 +496,13 @@ test("R8b: the guidelines keep Ops for the PM and say a lead's topic is the only
   for (const s of ["**Simple**", "**Milestone**", "f1rm hire --simple", "one specialist role"]) expect(w, s).not.toContain(s);
   expect(w).toContain("a topic of one task");
   const pmPrompt = pmPromptText();
-  expect(pmPrompt).toContain("Picking the workflow");
-  expect(pmPrompt).toContain("Simple workflow:");
-  expect(pmPrompt).not.toContain("one specialist role");
+  for (const s of ["Picking the workflow", "Simple workflow:", "one specialist role", "I upgrade it"]) expect(pmPrompt, s).not.toContain(s);
   expect(role("pm").body).not.toContain("Simple workflow:"); // the PM picks no workflow any more
   expect(pmStep(2)).toContain("Load the guidelines");
   const wf = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))!;
   expect(wf.indexOf("2. Load `f1rm:f1rm-guidelines`")).toBeGreaterThan(-1);
   expect(wf.indexOf("2. Load `f1rm:f1rm-guidelines`")).toBeLessThan(wf.indexOf("3. Be the scribe"));
-  const prompt = pmPromptText();
-  expect(prompt.indexOf("f1rm:f1rm-guidelines")).toBeGreaterThan(-1);
-  expect(prompt.indexOf("f1rm:f1rm-guidelines")).toBeLessThan(prompt.indexOf("Picking the workflow"));
+  expect(pmPromptText()).toContain("f1rm:f1rm-guidelines");
 });
 
 test("R8b: pm.md lets the PM run ops itself, and a lead records a direct Tell on its board instead of messaging the PM", () => {
@@ -1235,10 +1232,18 @@ const pluginReadme = () => readFileSync(join(PLUGIN, "README.md"), "utf8");
 const hireSkill = () => readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
 const pmDecides = () => /const PM_DECIDES =\s*("[^\n]*");/.exec(readFileSync(join(REPO, "office", "server", "server.ts"), "utf8"))![1];
 
-test("flat: a simple task is one specialist hired with --simple, landed by f1rm merge, then let go", () => {
+test("the PM prompt is the scribe's: duties and cleanup order, no interview, no hire, no workflow pick", () => {
+  const prompt = pmPromptText();
+  for (const s of ["scribe", "milestones file", "New topic button", "DONE <team>", "f1rm letgo lead-<team>", "f1rm letgo --leftovers", "f1rm archives --prune", "f1rm push", "interview no one", "hire no one", "already running finish in the current flow"]) expect(prompt, s).toContain(s);
+  expect(prompt.indexOf("f1rm letgo --leftovers")).toBeLessThan(prompt.indexOf("f1rm archives --prune"));
+  expect(prompt.indexOf("f1rm archives --prune")).toBeLessThan(prompt.indexOf("f1rm push"));
+  for (const s of ["Simple workflow:", "f1rm hire --simple", "Hire only leads", "f1rm hire lead", "open the interview", "grilling", "Picking the workflow", "without running f1rm merge"]) expect(prompt, s).not.toContain(s);
+});
+
+test("flat: the PM hires no simple task, so the prompt keeps none of its flow", () => {
   const forms = section("Roster and hiring playbook").split("```")[1];
   expect(forms).not.toContain("f1rm hire --simple"); // the PM hires none: only the prompt and the code keep the legacy flow
-  for (const s of ["f1rm hire --simple", "f1rm merge", "f1rm letgo", "Hire only leads for a milestone"]) expect(pmPromptText(), `prompt: ${s}`).toContain(s);
+  for (const s of ["f1rm hire --simple", "f1rm merge", "Hire only leads for a milestone"]) expect(pmPromptText(), `prompt: ${s}`).not.toContain(s);
   for (const s of ["f1rm hire --simple", "Hire only leads"]) expect(role("pm").body, `pm.md: ${s}`).not.toContain(s); // the PM hires no one
   expect(pmDecides()).toContain("f1rm hire --simple");
   expect(pmDecides()).toContain("f1rm hire lead");
@@ -1296,7 +1301,7 @@ test("flat: no sentence says a Reviewer reviews code or merges, that a lead hire
 });
 
 test("flat: a simple task whose DONE has no landable commit is checked by the PM and let go without f1rm merge", () => {
-  expect(pmPromptText()).toContain("without running f1rm merge");
+  expect(pmPromptText()).not.toContain("without running f1rm merge"); // the scribe lands nothing
   expect(section("Teams")).toContain("`git worktree remove` and `git branch -d`");
   for (const s of ['`isolation: "worktree"`', "`/usr/bin/git checkout --detach main`", "`/usr/bin/git checkout -b worktree-<task>`", "never runs `git merge`"]) expect(section("Teams"), s).toContain(s);
   expect(section("Teams")).not.toContain("git worktree add -b");
