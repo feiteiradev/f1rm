@@ -67,13 +67,17 @@ export function recordUsage(stdinJson: string, file: string, now: number): void 
   }
 }
 
-const hhmm = (epoch: number) => new Date(epoch * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+/** A local clock time, with the weekday when it is more than a day away. */
+export const when = (epoch: number, now: number) => {
+  const d = new Date(epoch * 1000);
+  return `${epoch - now > 86400 ? `${d.toLocaleDateString("en-GB", { weekday: "short" })} ` : ""}${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+};
 
 export function pacing(u: Usage | null, now: number): { hold: { until: number; reason: string } | null; oneTeam: boolean } {
   const holds: { until: number; reason: string }[] = [];
   const { fiveHour: f, sevenDay: s } = u ?? {};
-  if (f && f.usedPct >= HOLD_5H) holds.push({ until: f.resetsAt, reason: `5-hour usage is ${f.usedPct}% (resets ${hhmm(f.resetsAt)})` });
-  if (s && s.usedPct >= HOLD_7D) holds.push({ until: s.resetsAt, reason: `7-day usage is ${s.usedPct}% (resets ${hhmm(s.resetsAt)})` });
+  if (f && f.usedPct >= HOLD_5H) holds.push({ until: f.resetsAt, reason: `5-hour usage is ${f.usedPct}% (resets ${when(f.resetsAt, now)})` });
+  if (s && s.usedPct >= HOLD_7D) holds.push({ until: s.resetsAt, reason: `7-day usage is ${s.usedPct}% (resets ${when(s.resetsAt, now)})` });
   const hold = holds.sort((a, b) => b.until - a.until)[0] ?? null;
   const elapsed = s ? Math.min(1, Math.max(0, 1 - (s.resetsAt - now) / WEEK)) : 0;
   return { hold, oneTeam: !!s && s.usedPct > elapsed * 100 };

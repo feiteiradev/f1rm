@@ -4,7 +4,8 @@ import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
-import { HireRefused } from "../cli/hire.ts";
+import { HireRefused, UsageHold } from "../cli/hire.ts";
+import { pacing, readUsage, usageFile } from "../usage.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { parseReport, reportFile, reportSlug } from "../cli/report.ts";
 import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
@@ -122,6 +123,8 @@ export type RecoveryDeps = {
   reportAt?: (repo: string, name: string) => number | null | Promise<number | null>;
   /** Wakes the hire through `f1rm wake`'s own checks; throws what it refuses with. */
   wake: (repo: string, name: string, note: string) => Promise<void>;
+  /** True while the usage hold stops every new start: a wake waits, with nothing read or recorded, for a later tick. */
+  held?: () => boolean;
   /** Puts a message into the inbox of a live session of this name in the project (the one with this session id, when given); false if none takes it. */
   tell: (repo: string, name: string, message: string, sessionId?: string) => Promise<boolean>;
   store: { load: (repo: string) => Entries; save: (repo: string, entries: Entries) => void };
@@ -305,11 +308,13 @@ export function createRecovery(d: RecoveryDeps) {
         e.note = `${message}${reason ? ` (${reason})` : ""}${ok ? "" : `; ${to} has no inbox`}`;
       };
       const wakeIt = async (note: string, failed: string) => {
+        if (d.held?.()) return; // before the tip is read: not a failed wake, the stop stays undecided and a later tick tries again, after the window resets
         const wokeAt = d.now(); // before the wake: replies written while it starts count as progress
         const tip = await tipOf();
         try {
           await d.wake(repo, name, note);
         } catch (err) {
+          if (err instanceof UsageHold) return; // the hold began between `held` and the wake
           return tell(failed, (err as Error).message);
         }
         e.wokeAt = wokeAt;
@@ -467,6 +472,7 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
       const r = parseReport(await readFile(reportFile(home, basename(repo), slug), "utf8").catch(() => ""));
       return r ? Date.parse(r.at) : null;
     },
+    held: () => pacing(readUsage(usageFile(home), Date.now() / 1000), Date.now() / 1000).hold !== null,
     // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.
     wake: async (repo, name, note) => {
       const plan = await planWake({ target: name, message: note, cwd: repo }, realWakeDeps(home));

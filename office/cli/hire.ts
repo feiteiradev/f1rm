@@ -5,7 +5,7 @@ import { FOUNDER_ONLY, MODELS, roleOfAgentType } from "../people.ts";
 import { editionFile, readEdition, type Edition } from "../server/editions.ts";
 import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from "../server/pause.ts";
 import { claudeEnv, machine } from "../server/machine.ts";
-import { withUsageTap } from "../usage.ts";
+import { pacing, readUsage, usageFile, when, withUsageTap, type Usage } from "../usage.ts";
 
 export const USAGE =
   "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--topic (a lead only)] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
@@ -131,6 +131,8 @@ export type HireRequest = {
   /** `haiku`, `sonnet` or `opus` in place of the role's own model. */
   model?: string | null;
   override?: boolean;
+  /** The usage reading the pacing gate judges (see checkSlots); the real callers read the file, none means no gate. */
+  usage?: Usage | null;
   /** Skills added to the brief's list; a slash-only one becomes its first command. */
   skills?: string[];
   /** The level of a dev's own review: low, medium (the default) or high, which also runs `security-review` on the diff. The two devs only. */
@@ -150,11 +152,14 @@ export type HireRequest = {
 /** The live background sessions Claude Code lists, as `machine.backgroundSessions` gives them. */
 export type LiveHires = { name: string; state: string; cwd: string; status?: "busy" | "idle" }[];
 
+/** A HireRefused by the usage hold: a counted wait like a cap, but the office's auto-wake keeps its stop for a later tick instead of reporting a failed wake. */
+export class UsageHold extends HireRefused {}
+
 /**
  * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
  * (8 working on the machine, 2 teams per project, 2 working per team). A simple task is a team of one: live leads and live simple tasks make up the teams. Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
  */
-export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean }): void {
+export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override, usage, now }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean; usage?: Usage | null; now?: number }): void {
   const lead = role === "lead";
   // A hire with no team that is no lead and no Reviewer is a team of one, whoever starts it (the PM's --simple, the Hire dialog) and whether it is started or woken.
   const simple = !lead && !team && role !== "reviewer";
@@ -165,12 +170,17 @@ export function checkSlots(live: LiveHires, { role, name, task, team, cwd, overr
   // One specialist per task, whatever the caps say: a second hire there would work the same branch.
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {
+    // No reading, no pacing: only the real callers (the hire command, the Hire route, planWake) hand one in.
+    const at = now ?? Date.now() / 1000;
+    const pace = pacing(usage ?? null, at);
+    if (pace.hold) throw new UsageHold(`usage hold: ${pace.hold.reason}; new sessions wait until ${when(pace.hold.until, at)}`, busy.length);
     if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
     // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
     const worktrees = join(cwd, ".claude", "worktrees") + "/";
     const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
     const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
     if ((lead || simple) && teams >= TEAMS) throw new HireRefused(`this project already has ${teams} teams (the cap is ${TEAMS}).`, busy.length);
+    if ((lead || simple) && pace.oneTeam && teams >= 1) throw new HireRefused("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)", busy.length);
     // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
     const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
     if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
@@ -246,7 +256,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 
   const live = await m.backgroundSessions();
   if (live === null) throw new HireRefused("can't count the working hires (`claude agents --json` failed), so not hiring", null);
-  checkSlots(live, { role, name, task, team, cwd, override });
+  checkSlots(live, { role, name, task, team, cwd, override, usage: req.usage });
 
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
@@ -306,7 +316,7 @@ export async function untilSlot<T>(attempt: () => Promise<T>, w: Wait): Promise<
     } catch (err) {
       if (!(err instanceof HireRefused && err.working !== null)) throw err;
       if (w.now() - said >= SAY_MS) (w.say(`waiting for a slot: ${err.message}`), (said = w.now()));
-      if (w.now() >= end) return (w.say(NO_SLOT), null);
+      if (w.now() >= end) return (err instanceof UsageHold && w.say(err.message), w.say(NO_SLOT), null);
       await w.sleep(POLL_MS);
     }
   }
@@ -323,7 +333,7 @@ export async function hire(words: string[], wait: Wait = realWait()): Promise<nu
   const git = { gitCommonDir: () => common };
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
-  const argv = await untilSlot(() => planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, topic, extra }, { backgroundSessions: machine.backgroundSessions, ...git }), wait);
+  const argv = await untilSlot(() => planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, usage: readUsage(usageFile(process.env.HOME!), Date.now() / 1000), skills, level, content, simple, topic, extra }, { backgroundSessions: machine.backgroundSessions, ...git }), wait);
   if (!argv) return EX_TEMPFAIL;
   const proc = Bun.spawn(argv, { cwd: root, env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
   return proc.exited;

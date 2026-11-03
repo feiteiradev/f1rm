@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { checkSlots, EX_TEMPFAIL, HireRefused, pmName, projectFolder, realWait, REVIEWER_DISALLOWED, rootTooLong, SECURITY, untilSlot, withEffort, withPonytail, type LiveHires, type Wait } from "./hire.ts";
-import { withUsageTap } from "../usage.ts";
+import { readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
@@ -130,7 +130,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
     .filter((a) => !(a.name === name && !a.pid))
     .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }) }));
   // A Reviewer's task is review-<task>, as `f1rm hire` names it; hireName gives the task it reviews, whose dev may be idle in its worktree.
-  checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override });
+  checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override, now: d.now / 1000, usage: readUsage(usageFile(d.home), d.now / 1000) });
 
   // A woken hire starts with what `f1rm hire` gave it: the session it reports to is the one its first prompt named, and a Reviewer keeps its push block. A resume with flags does not inherit the saved options.
   const sessionId = String(target.sessionId);

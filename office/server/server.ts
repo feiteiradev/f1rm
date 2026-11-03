@@ -14,6 +14,7 @@ import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten,
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
+import { readUsage, usageFile } from "../usage.ts";
 import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
@@ -1373,7 +1374,7 @@ export function startServer({
         const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
         let argv: string[];
         try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), content: role === "reviewer", reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
+          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), content: role === "reviewer", reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true, usage: readUsage(usageFile(process.env.HOME ?? ""), Date.now() / 1000) }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });
