@@ -410,6 +410,19 @@ test("flags after the brief go to claude", () => {
   expect(stub.argv()!.slice(8)).toEqual(["--settings", FULL, "--model", "haiku", "--effort", "high"]);
 });
 
+test("a usage file at 95% of the 5-hour window holds the real hire (code 75, the time it ends), 50% starts it, --override skips the hold", () => {
+  const home = tmp("f1rm-home-");
+  const usage = (pct: number) => (mkdirSync(join(home, ".f1rm"), { recursive: true }), writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: pct, resetsAt: Date.now() / 1000 + 3600 }, readAt: 0 })));
+  usage(95);
+  const held = hire(stubClaude([]), [...pmArgs, "designer", "designer-x", "x", BRIEF], process.cwd(), { HOME: home });
+  expect(held.code).toBe(75);
+  expect(held.err).toContain("usage hold: 5-hour usage is 95%");
+  expect(held.err).toMatch(/new sessions wait until \d\d:\d\d/);
+  expect(hire(stubClaude([]), ["--override", ...pmArgs, "designer", "designer-x", "x", BRIEF], process.cwd(), { HOME: home }).code).toBe(0);
+  usage(50);
+  expect(hire(stubClaude([]), [...pmArgs, "designer", "designer-x", "x", BRIEF], process.cwd(), { HOME: home }).code).toBe(0);
+});
+
 test("at 8 working background sessions, hire waits for a slot, then gives up with code 75 and tells the session to ask nobody", () => {
   const stub = stubClaude([...Array(7).fill(bg("working")), bg("blocked")]);
   const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);

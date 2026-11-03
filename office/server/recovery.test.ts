@@ -1,6 +1,6 @@
 // Seam: the office's recovery tick. createRecovery against an injected `claude agents --json --all`, transcripts, boards, store, clock, wake and tell; the real wake code (planWake) for the caps.
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recoveryFile } from "../cli/status.ts";
@@ -39,7 +39,7 @@ const sent = (message: string, closing: string, ago: number, now = T0) => [
 const row = (owner: string, status: string, task: string): BoardRow => ({ id: "T1", owner, status, branch: `worktree-${task}`, task: "x" });
 
 /** A fake office: the listing, transcripts, boards and clock are set by the test; wakes and tells are recorded. */
-function office(over: { real?: number; resting?: (now: number) => boolean; wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
+function office(over: { held?: () => boolean; real?: number; resting?: (now: number) => boolean; wake?: (repo: string, name: string, note: string) => Promise<void>; prompts?: Record<string, string> } = {}) {
   const w = {
     now: T0 + 5 * MIN,
     list: [] as Listed[],
@@ -63,6 +63,8 @@ function office(over: { real?: number; resting?: (now: number) => boolean; wake?
     /** The waits the resume asked for; `onSleep` runs at each, so a test can free a slot. */
     slept: [] as number[],
     onSleep: () => {},
+    /** The 5-hour usage the held tests' fake reads. */
+    usagePct: 0,
   };
   const make = () => createRecovery({
     now: () => w.now,
@@ -75,6 +77,7 @@ function office(over: { real?: number; resting?: (now: number) => boolean; wake?
     commitTime: async (_repo, branch) => (w.commitCalls++, w.commits[branch] ?? null),
     reportAt: async (_repo, name) => w.reports[name] ?? null,
     wake: over.wake ?? (async (repo, name, note) => void w.woke.push({ repo, name, note })),
+    ...(over.held && { held: over.held }),
     tell: async (_repo, to, message, sessionId) => (w.told.push({ to, message }), w.toldSession.push(sessionId), w.inbox),
     store: { load: (repo) => structuredClone(w.store[repo] ?? {}), save: (repo, e) => void (w.store[repo] = structuredClone(e)) },
     paused: () => w.paused,
@@ -1279,4 +1282,64 @@ test("a resume that is aborted stops waiting, and a wake refused for another rea
   stuck.w.onSleep = () => stop.abort();
   await stuck.rec.resume(REPO, ["lead-shop"], stop.signal);
   expect(stuck.w.slept).toEqual([10_000]);
+});
+
+test("a wake refused by the usage hold is not a failed wake: no stop is marked, nobody is told, no note; a later tick wakes it once the window is down", async () => {
+  const home0 = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), "hold-"));
+  process.env.HOME = home;
+  try {
+    mkdirSync(join(home, ".f1rm"), { recursive: true });
+    // The window is in the fake clock's time: planWake reads the file in its own `home` at its `now` (T0).
+    const usage = (pct: number) => writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: pct, resetsAt: T0 / 1000 + 3600 }, readAt: 0 }));
+    const wakeDeps = (o: ReturnType<typeof office>) => ({
+      agents: async (all: boolean) => (all ? o.w.list : o.w.list.filter((a) => a.pid || a.state === "blocked")) as any[],
+      gitCommonDir: () => `${REPO}/.git`, home, now: T0, exists: () => true, modelOf: () => null, promptOf: () => null,
+    });
+    const planning = (held?: () => boolean) => {
+      const o: ReturnType<typeof office> = office({
+        held,
+        wake: async (repo, name, note) => {
+          await planWake({ target: name, message: note, cwd: repo }, wakeDeps(o));
+          o.w.woke.push({ repo, name, note });
+        },
+      });
+      return o;
+    };
+    // `ended` leaves no note; a limit stop that has reset keeps the note it had; both are woken by a later tick once the window is down.
+    const lifts = "waits for the session limit to lift (resets 8:40pm (Europe/Lisbon))";
+    const cases = [
+      ["ended", say("compiling", 1), T0 + 5 * MIN, T0 + 5 * MIN, undefined],
+      ["limit stop", limitStop("8:40pm (Europe/Lisbon)", 0), at("2026-10-22T19:30:00Z"), at("2026-10-22T19:41:00Z"), lifts], // seen before its reset, then held after it
+    ] as const;
+    for (const [label, last, first, later, note] of cases) {
+      for (const viaHeld of [false, true]) {
+        const o = planning(viaHeld ? () => o.w.usagePct >= 90 : undefined);
+        o.w.usagePct = 90;
+        stoppedDev(o, [last]);
+        usage(90);
+        o.w.now = first;
+        await o.tick();
+        o.w.now = later;
+        for (let i = 0; i < 3; i++) await o.tick();
+        const held = o.w.store[REPO]?.[DEV];
+        expect([label, viaHeld, o.w.woke, o.w.told, held?.wokeFrom, held?.told, held?.note]).toEqual([label, viaHeld, [], [], undefined, undefined, note]);
+        if (viaHeld) expect(o.w.commitCalls).toBe(0); // the hold is judged before the tip is read
+        usage(50);
+        o.w.usagePct = 50;
+        await o.tick();
+        expect([label, viaHeld, o.w.woke.map((x) => x.name), o.w.told]).toEqual([label, viaHeld, [DEV], []]);
+        expect(o.w.store[REPO][DEV].wokeFrom).toBe("dev-1");
+      }
+    }
+    // the wake itself is a counted refusal, like a cap
+    const o = planning();
+    stoppedDev(o, [say("compiling", 1)]);
+    usage(95);
+    const err = await planWake({ target: DEV, message: "x", cwd: REPO }, wakeDeps(o)).catch((e) => e);
+    expect(err).toBeInstanceOf(HireRefused);
+    expect(err.working).toBe(1);
+  } finally {
+    process.env.HOME = home0;
+  }
 });
