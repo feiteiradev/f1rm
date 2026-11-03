@@ -40,6 +40,9 @@ const plan = (target: string, list: Entry[], req: { message?: string; override?:
   planWake({ target, cwd: REPO, ...req }, deps(list, more));
 const failure = async (p: Promise<unknown>) => p.then(() => null, (e: Error) => e);
 
+const TAP_OBJ = { type: "command", command: `'${process.execPath}' '${join(import.meta.dir, "f1rm.ts")}' usage-tap` };
+const TAPPED = JSON.stringify({ statusLine: TAP_OBJ });
+const FULL = JSON.stringify({ env: { PONYTAIL_DEFAULT_MODE: "full" }, statusLine: TAP_OBJ });
 const lead = running("lead-shop", "lead-sid", REPO);
 
 test("a stopped member is resumed in the background with its agent, its name and its own worktree, and told where to report", async () => {
@@ -48,7 +51,8 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect(p.argv).toEqual([
     "claude", "--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout",
     "fix round 2: see the review\nReport to: lead-shop",
-    "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--effort", "high",
+    "--settings", FULL,
+    "--effort", "high",
   ]);
   expect(p.cwd).toBe(wt("checkout"));
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
@@ -88,10 +92,10 @@ test("a hire of a paused project is not woken, and the refusal points at `f1rm r
 test("a woken member keeps ponytail full, a woken lead keeps the default, and a --settings the caller passes gets the level merged into it", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   const full = (argv: string[]) => argv.filter((a, i) => argv[i - 1] === "--settings");
-  expect(full((await plan("shop.backend-dev-checkout", [lead, dev])).argv)).toEqual(['{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}']);
-  expect(full((await plan("lead-shop", [stopped("lead-shop", "old-lead", REPO, "blocked", { startedAt: 5 })])).argv)).toEqual([]);
+  expect(full((await plan("shop.backend-dev-checkout", [lead, dev])).argv)).toEqual([FULL]);
+  expect(full((await plan("lead-shop", [stopped("lead-shop", "old-lead", REPO, "blocked", { startedAt: 5 })])).argv)).toEqual([TAPPED]); // a lead has no ponytail env, but reports usage
   const own = (await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--settings", '{"disableAllHooks":true}'] })).argv;
-  expect(full(own).map((s) => JSON.parse(s))).toEqual([{ disableAllHooks: true, env: { PONYTAIL_DEFAULT_MODE: "full" } }]);
+  expect(full(own).map((s) => JSON.parse(s))).toEqual([{ disableAllHooks: true, env: { PONYTAIL_DEFAULT_MODE: "full" }, statusLine: TAP_OBJ }]);
 });
 
 test("a woken lead carries --effort medium, a woken member --effort high, and the caller's own --effort is the only one", async () => {
@@ -416,7 +420,7 @@ test("f1rm wake starts claude from the hire's worktree with the resume argv, and
   expect(r.out).toContain("dev-sid-1");
   const argv = Bun.file(join(bin, "argv.log")).text();
   return argv.then(async (text) => {
-    expect(text.split("\0").slice(0, -1)).toEqual(["--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout", "one more fix round\nReport to: lead-shop", "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--model", "haiku", "--effort", "high"]);
+    expect(text.split("\0").slice(0, -1)).toEqual(["--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout", "one more fix round\nReport to: lead-shop", "--settings", FULL, "--model", "haiku", "--effort", "high"]);
     expect((await Bun.file(join(bin, "cwd.log")).text()).trim()).toBe(wt("checkout", repo));
   });
 });
