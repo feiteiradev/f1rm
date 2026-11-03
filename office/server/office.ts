@@ -5,6 +5,7 @@ import type { Approval } from "./approvals.ts";
 import type { Cmd } from "./projectcmds.ts";
 import type { BoardRow } from "./board.ts";
 import type { Topic } from "./progress.ts";
+import type { LeftoversView, UsageView } from "./gauges.ts";
 
 export type Status = "working" | "waiting" | "idle" | "offline";
 export type Room = { id: string; name: string };
@@ -62,6 +63,10 @@ export type OfficeState = {
   commands?: Record<string, Cmd[]>;
   /** The names of the registered projects that are paused (by hand or by the schedule). Added by the server like `boards`. */
   paused?: string[];
+  /** The subscription's usage reading with derived flags (see gauges.ts); null with no reading. Added by the server like `boards`. */
+  usage?: UsageView | null;
+  /** The old untagged containers the user is asked about once, null when none or already answered. Added by the server like `boards`. */
+  leftovers?: LeftoversView | null;
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */
   approvals?: Approval[];
 };

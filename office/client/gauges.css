@@ -1,0 +1,28 @@
+/* The usage gauges, as mocked (gauges-mock/spec.md). Tokens only from office.css; the paused hatch is the one new pattern. */
+.usage { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 28px; min-width: 0; }
+.gauge { display: grid; grid-template-columns: 6ch 112px minmax(4ch, auto); align-items: center; gap: 0 8px; min-width: 0; }
+.gauge .name { color: var(--muted); }
+.gauge .track { position: relative; height: 6px; background: var(--bg); border: 1px solid var(--line); }
+.gauge .fill { position: absolute; inset: 0 auto 0 0; background: var(--idle); transition: width 300ms ease-out; }
+.gauge .tick { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
+.gauge .pace { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; background: var(--text); }
+.gauge .pct { justify-self: start; width: 4ch; color: var(--text); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.gauge .line2 { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.gauge .chip { padding: 0 6px; font-weight: 700; white-space: nowrap; border: 1px solid var(--amber); color: var(--amber); }
+/* width:0 + min-width:100%: the note wraps inside the gauge and never widens it */
+.gauge .pace-note { grid-column: 1 / -1; width: 0; min-width: 100%; margin-top: 2px; font-size: 13px; color: var(--text); }
+.gauge .pace-note span { display: inline-block; }
+.gauge .pace-note::before { content: ""; display: inline-block; width: 2px; height: 10px; margin-right: 6px; background: var(--text); vertical-align: -1px; }
+
+.gauge[data-state="warn"] .fill { background: var(--amber); }
+.gauge[data-state="warn"] .pct { color: var(--amber); }
+/* Paused: a solid chip and a hatched fill, told from warn by shape and texture, not hue. */
+.gauge[data-state="paused"] .track { border-color: var(--amber); }
+.gauge[data-state="paused"] .fill { background: repeating-linear-gradient(135deg, var(--amber) 0 3px, var(--bg) 3px 6px); }
+.gauge[data-state="paused"] .pct { color: var(--amber); }
+.gauge[data-state="paused"] .chip { color: var(--bg); background: var(--amber); }
+.gauge[data-state="none"] .track { border-style: dashed; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) { .gauge .fill { transition: none; } }

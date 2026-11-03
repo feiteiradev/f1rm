@@ -1869,6 +1869,10 @@ test("no session answers a permission request through the office's approve, deny
     `curl -X POST "$(cat ~/.f1rm/office-url)approve/abc"`,
     `bun -e "fetch('${at}/' + process.env.T + '/always/abc', {method:'POST'})"`,
     `curl -X POST http://example.test/${TOKEN}/approve/abc`,
+    `curl -s -X POST ${at}/${TOKEN}/leftovers/remove`,
+    `curl -s -X POST ${at}/${TOKEN}/leftovers/keep`,
+    `curl -X POST "$(cat ~/.f1rm/office-url)leftovers/remove"`,
+    `bun -e "fetch('${at}/' + process.env.T + '/leftovers/remove', {method:'POST'})"`,
   ];
   for (const id of ["d", "l", "p", "v"]) {
     for (const command of refused) {

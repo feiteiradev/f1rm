@@ -9,6 +9,7 @@ import { agents, claudeEnv, machine } from "../server/machine.ts";
 import { checkpointsDirOf } from "../server/checkpoint.ts";
 import { realFullStop } from "../server/fullstop.ts";
 import { pausedDirOf } from "../server/pause.ts";
+import { realDocker } from "../docker.ts";
 import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
 import { startServer } from "../server/server.ts";
@@ -16,7 +17,6 @@ import { hire, pmName, rootTooLong, withEffort } from "./hire.ts";
 import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 import { dockerTagIn } from "./dockertag.ts";
-import { realDocker } from "../docker.ts";
 import { mergeIn } from "./merge.ts";
 import { pushIn } from "./push.ts";
 import { wake } from "./wake.ts";
@@ -286,7 +286,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), evidenceDir: join(F1RM_DIR, "evidence"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!), docker: realDocker } });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), evidenceDir: join(F1RM_DIR, "evidence"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), usageFile: usageFile(process.env.HOME!), docker: realDocker, leftoversFile: join(F1RM_DIR, "leftovers.json"), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!), docker: realDocker } });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty

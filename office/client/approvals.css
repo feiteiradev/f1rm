@@ -89,3 +89,6 @@
 .desk-card:focus-visible { outline-offset: -2px; }
 .desk-card .hand { border-bottom: 1px solid var(--line); }
 .desk-card .hand:last-child { border-bottom: 0; }
+/* The result line's region stays in the page so a screen reader hears it arrive; empty, it takes no room. */
+.tray-panel [role="status"]:empty { padding: 0; height: 0; overflow: hidden; }
+.tray-panel:focus { outline: none; }

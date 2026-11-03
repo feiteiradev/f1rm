@@ -5,6 +5,7 @@ import type { Approval } from "../server/approvals.ts";
 import { cardOf, handsOf, type Anchor } from "./approvals.ts";
 import { post } from "./post.ts";
 import { CommandsCard } from "./commands.tsx";
+import { LeftoversCard } from "./leftovers.tsx";
 import "./approvals.css";
 
 type Verb = "approve" | "deny" | "always";
@@ -76,15 +77,19 @@ export function DeskCard({ state, id, at, onClose }: { state: OfficeState; id: s
   );
 }
 
-export function Tray({ state }: { state: OfficeState }) {
-  const [open, setOpen] = useState(false);
+export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boolean }) {
+  const [open, setOpen] = useState(open0);
   const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLElement>(null);
   const hands = state.approvals;
   // The projects whose command list waits for the user's tick: one card each, ahead of the single requests.
   const lists = Object.entries(state.commands ?? {});
-  const waiting = (hands?.length ?? 0) + lists.length;
+  const leftovers = state.leftovers ?? null;
+  const waiting = (hands?.length ?? 0) + lists.length + (leftovers ? 1 : 0);
+  // What the leftovers answer said, in the card's slot until the tray closes.
+  const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!open) return setNote(null);
     const away = (e: MouseEvent) => root.current && !root.current.contains(e.target as Node) && setOpen(false);
     const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     addEventListener("mousedown", away);
@@ -100,11 +105,14 @@ export function Tray({ state }: { state: OfficeState }) {
         <span className="badge" aria-label={`${waiting} waiting`}>{waiting}</span>
       </button>
       {open && (
-        <section className="tray-panel" aria-label="Approvals">
+        <section className="tray-panel" aria-label="Approvals" tabIndex={-1} ref={panel}>
+          {/* Always there, so the answer's words are announced when they arrive; the focus of the card's button is gone with the card, so it moves here. */}
+          <p className="none" role="status">{note}</p>
           {waiting === 0 ? (
-            <p className="none">No one is waiting for permission.</p>
+            !note && <p className="none">No one is waiting for permission.</p>
           ) : (
             <ul>
+              {leftovers && <li><LeftoversCard card={leftovers} onDone={(n) => (setNote(n), panel.current?.focus())} /></li>}
               {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
               {hands.map((a) => <li key={a.id}><HandCard state={state} approval={a} /></li>)}
             </ul>

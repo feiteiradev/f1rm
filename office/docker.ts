@@ -10,16 +10,24 @@ import { basename } from "node:path";
 export type Docker = (args: string[]) => Promise<{ code: number; out: string }>;
 
 /** The real docker. Missing binary or a down daemon gives code 127/nonzero, never a throw. */
-export const realDocker: Docker = async (args) => {
+export const dockerWith = (cmd: string[], timeoutMs = 10_000): Docker => async (args) => {
   try {
-    const p = Bun.spawn(["docker", ...args], { stdout: "pipe", stderr: "pipe" });
-    const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-    const code = await p.exited;
-    return { code, out: code === 0 ? out : out || err };
+    const p = Bun.spawn([...cmd, ...args], { stdout: "pipe", stderr: "pipe" });
+    // A wedged daemon must not hang the office: after the timeout the process is killed and the answer is code 124.
+    let late = false;
+    const timer = setTimeout(() => ((late = true), p.kill("SIGKILL")), timeoutMs);
+    try {
+      const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+      const code = await p.exited;
+      return late ? { code: 124, out: "" } : { code, out: code === 0 ? out : out || err };
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     return { code: 127, out: "" };
   }
 };
+export const realDocker: Docker = dockerWith(["docker"]);
 
 /** The repo name every tag, teardown and sweep uses: its folder name plus 6 hex of the real path's hash, so two repos both called `app` never share resources. */
 export function repoId(repoPath: string): string {
@@ -133,9 +141,10 @@ export async function leftovers(d: Docker) {
 
 /** Remove the chosen leftovers, but only those still in a fresh list (an id that became tagged or vanished is skipped). */
 export async function removeLeftovers(d: Docker, wanted: string[]) {
-  const fresh = new Set((await leftovers(d)).items.map((i) => i.id));
+  const now = await leftovers(d);
+  const fresh = new Set(now.items.map((i) => i.id));
   const ids = wanted.filter((id) => fresh.has(id));
-  const out = { removed: [] as string[], errors: [] as string[] };
+  const out = { removed: [] as string[], errors: [...now.errors] };
   for (const id of ids) {
     const r = await run(d, ["rm", "-f", "-v", "--", id]);
     if (r.code === 0) out.removed.push(id);
