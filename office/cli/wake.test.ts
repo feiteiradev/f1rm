@@ -48,7 +48,7 @@ test("a stopped member is resumed in the background with its agent, its name and
   expect(p.argv).toEqual([
     "claude", "--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout",
     "fix round 2: see the review\nReport to: lead-shop",
-    "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}',
+    "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--effort", "high",
   ]);
   expect(p.cwd).toBe(wt("checkout"));
   expect([p.name, p.sessionId]).toEqual(["shop.backend-dev-checkout", "dev-sid-1"]);
@@ -94,6 +94,14 @@ test("a woken member keeps ponytail full, a woken lead keeps the default, and a 
   expect(full(own).map((s) => JSON.parse(s))).toEqual([{ disableAllHooks: true, env: { PONYTAIL_DEFAULT_MODE: "full" } }]);
 });
 
+test("a woken lead carries --effort medium, a woken member --effort high, and the caller's own --effort is the only one", async () => {
+  const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
+  const eff = (argv: string[]) => argv.filter((a, i) => argv[i - 1] === "--effort");
+  expect(eff((await plan("shop.backend-dev-checkout", [lead, dev])).argv)).toEqual(["high"]);
+  expect(eff((await plan("lead-shop", [stopped("lead-shop", "old-lead", REPO, "blocked", { startedAt: 5 })])).argv)).toEqual(["medium"]);
+  expect(eff((await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--effort", "low"] })).argv)).toEqual(["low"]);
+});
+
 test("the checks wait for a git lookup and transcript readers that answer later, so the office's event loop is never blocked", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"));
   const later = <T>(v: T) => new Promise<T>((resolve) => setTimeout(() => resolve(v), 5));
@@ -117,7 +125,7 @@ test("a hire is found by its name, its session id or its short id, and flags aft
   const dev = stopped("shop.designer-landing", "abcd1234-0000", wt("landing"), "done");
   for (const target of ["shop.designer-landing", "abcd1234-0000", "abcd1234"]) {
     const p = await plan(target, [lead, dev], { extra: ["--model", "haiku"] });
-    expect([target, p.argv.slice(0, 8), p.argv.slice(-2)]).toEqual([target, ["claude", "--bg", "--resume", "abcd1234-0000", "--agent", "f1rm:designer", "--name", "shop.designer-landing"], ["--model", "haiku"]]);
+    expect([target, p.argv.slice(0, 8), p.argv.slice(-4)]).toEqual([target, ["claude", "--bg", "--resume", "abcd1234-0000", "--agent", "f1rm:designer", "--name", "shop.designer-landing"], ["--model", "haiku", "--effort", "high"]]);
   }
 });
 
@@ -164,11 +172,11 @@ test("the woken hire keeps the model it last answered with, unless the caller gi
   expect(kept.argv.slice(-2)).toEqual(["--model", "claude-haiku-5-5"]);
   const given = await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--model", "opus"] }, { modelOf });
   expect(given.argv.filter((a) => a === "--model")).toHaveLength(1);
-  expect(given.argv.slice(-2)).toEqual(["--model", "opus"]);
+  expect(given.argv.slice(-4)).toEqual(["--model", "opus", "--effort", "high"]);
   expect((await plan("shop.backend-dev-checkout", [lead, dev])).argv).not.toContain("--model"); // no transcript to read
   // The `--model=<x>` spelling is a model too: the old one is not appended after it.
   const equals = await plan("shop.backend-dev-checkout", [lead, dev], { extra: ["--model=opus"] }, { modelOf });
-  expect(equals.argv.slice(-1)).toEqual(["--model=opus"]);
+  expect(equals.argv.slice(-3)).toEqual(["--model=opus", "--effort", "high"]);
   expect(equals.argv).not.toContain("claude-haiku-5-5");
 });
 
@@ -408,7 +416,7 @@ test("f1rm wake starts claude from the hire's worktree with the resume argv, and
   expect(r.out).toContain("dev-sid-1");
   const argv = Bun.file(join(bin, "argv.log")).text();
   return argv.then(async (text) => {
-    expect(text.split("\0").slice(0, -1)).toEqual(["--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout", "one more fix round\nReport to: lead-shop", "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--model", "haiku"]);
+    expect(text.split("\0").slice(0, -1)).toEqual(["--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout", "one more fix round\nReport to: lead-shop", "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}', "--model", "haiku", "--effort", "high"]);
     expect((await Bun.file(join(bin, "cwd.log")).text()).trim()).toBe(wt("checkout", repo));
   });
 });

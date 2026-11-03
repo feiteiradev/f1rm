@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { hire as hireCommand, NO_SLOT, realWait, type Wait } from "./hire.ts";
+import { hire as hireCommand, NO_SLOT, realWait, withEffort, type Wait } from "./hire.ts";
 
 // The real `f1rm hire` waits for a slot up to 8 minutes; the processes these tests spawn give up at once (the wait itself is tested in process, below).
 process.env.F1RM_SLOT_WAIT_MS = "0";
@@ -69,6 +69,22 @@ test("every hire but a lead is started at ponytail full by its own --settings, w
   const lead = stubClaude([]);
   expect(hire(lead, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF]).code).toBe(0);
   expect(settingsOf(lead.argv())).toBeNull();
+});
+
+/** The values of every --effort in an argv. */
+const effortsOf = (argv: string[] | null) => argv!.filter((a, i) => argv![i - 1] === "--effort" || a.startsWith("--effort="));
+
+test("a lead starts at --effort medium and every other role at --effort high, none added twice when the caller passes its own", () => {
+  for (const [role, want] of [["lead", "medium"], ["backend-dev", "high"], ["frontend-dev", "high"], ["designer", "high"], ["researcher", "high"], ["reviewer", "high"]]) {
+    const stub = stubClaude([]);
+    expect(hire(stub, [...(role === "reviewer" ? ["--content"] : []), ...pmArgs, role, role === "reviewer" ? "reviewer-review-x" : `${role}-x`, role === "reviewer" ? "review-x" : "x", BRIEF]).code).toBe(0);
+    expect([role, effortsOf(stub.argv())]).toEqual([role, [want]]);
+  }
+  const own = stubClaude([]);
+  expect(hire(own, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--effort", "low"]).code).toBe(0);
+  expect(effortsOf(own.argv())).toEqual(["low"]);
+  expect(withEffort("marketer", [])).toEqual(["--effort", "high"]);
+  expect(withEffort("lead", ["--effort=max"])).toEqual(["--effort=max"]);
 });
 
 test("a reviewer's --settings stays ahead of --disallowedTools, which would swallow it, and a --settings the caller passes gets the level merged in", () => {
@@ -154,6 +170,8 @@ test("hire runs exactly claude --bg --agent --name --worktree with the slash com
     `/design-pipeline Report to: pm-shop\n\n${BRIEF}`,
     "--settings",
     FULL,
+    "--effort",
+    "high",
   ]);
   expect(r.out).toContain("backgrounded");
 });
@@ -377,7 +395,7 @@ test("a reviewer starts with no --worktree, so it runs in the main checkout; eve
 test("only a reviewer hire carries the no-push deny rule, after the prompt so it cannot swallow it", () => {
   const reviewer = stubClaude([]);
   hire(reviewer, ["--content", ...pmArgs, "reviewer", "reviewer-review-x", "review-x", BRIEF]);
-  expect(reviewer.argv()!.slice(6)).toEqual(["--settings", FULL, "--model", "sonnet", "--disallowedTools", "Bash(git push *)"]);
+  expect(reviewer.argv()!.slice(6)).toEqual(["--settings", FULL, "--effort", "high", "--model", "sonnet", "--disallowedTools", "Bash(git push *)"]);
   const designer = stubClaude([]);
   hire(designer, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
   expect(designer.argv()).not.toContain("--disallowedTools");
@@ -386,7 +404,7 @@ test("only a reviewer hire carries the no-push deny rule, after the prompt so it
 test("flags after the brief go to claude", () => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--model", "haiku"]);
-  expect(stub.argv()!.slice(8)).toEqual(["--settings", FULL, "--model", "haiku"]);
+  expect(stub.argv()!.slice(8)).toEqual(["--settings", FULL, "--model", "haiku", "--effort", "high"]);
 });
 
 test("at 8 working background sessions, hire waits for a slot, then gives up with code 75 and tells the session to ask nobody", () => {
@@ -465,6 +483,7 @@ test("a lead runs as lead-<team> in the repo, with no worktree, starting with th
   expect(stub.argv()).toEqual([
     "--bg", "--agent", "f1rm:lead", "--name", "lead-checkout",
     `/f1rm:f1rm-guidelines Before you start, load these with the Skill tool: f1rm:hire. Report to: pm-shop\n\n${BRIEF}`,
+    "--effort", "medium",
   ]);
 });
 
