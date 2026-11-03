@@ -1,5 +1,5 @@
 // The company plugin as shipped: role files, the guidelines skill, and a real `claude` install into a throwaway config.
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1489,4 +1489,24 @@ test("topic-prose: the PM is a scribe on Sonnet; the interview, the hires and th
 test("topic-prose: docs/decisions.md has the four topic entries", () => {
   const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
   for (const t of ["Topics run by leads; the PM is a scribe", "Preview before building visible work", "First slice shown without waiting", "Visible tasks land with proof from the running app"]) expect(log).toContain(`## 2026-11-03 ${t}\n`);
+});
+
+describe("usage pacing and docker rules", () => {
+  const usage = section("Usage pacing and Docker");
+  test("the section sits right before Use what is installed and says where the numbers come from", () => {
+    const names = guidelines.split(/^## /m).map((s) => s.split("\n")[0]);
+    expect(names.indexOf("Usage pacing and Docker")).toBeGreaterThan(-1);
+    expect(names.indexOf("Use what is installed")).toBe(names.indexOf("Usage pacing and Docker") + 1);
+    for (const s of ["statusLine", "never the oauth usage endpoint", "transcript estimates", "75", "85", "90", "95", "exit 75", "`--override` is refused", "one team per project"]) expect(usage, s).toContain(s);
+  });
+  test("a hire tags and removes the Docker resources it starts and never prunes", () => {
+    for (const s of ["f1rm docker-tag <task>", "COMPOSE_PROJECT_NAME", "removes what it starts", "never prune", "never touches an untagged resource or an image", "f1rm letgo", "node_modules"]) expect(usage, s).toContain(s);
+  });
+  test("the Cap rule points to the section", () => {
+    expect(section("Cap rule")).toContain("a usage hold waits the same way");
+  });
+  test("docs/decisions.md has the two usage entries", () => {
+    const log = readFileSync(join(REPO, "docs", "decisions.md"), "utf8");
+    for (const t of ["Pace on the official usage windows", "Tag and tear down each task's Docker stack"]) expect(log).toContain(`## 2026-11-03 ${t}\n`);
+  });
 });

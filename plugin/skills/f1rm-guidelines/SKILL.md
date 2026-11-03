@@ -450,6 +450,7 @@ Then the PM (a simple task) or the team's lead marks the task's row `done` and l
 - A refusal on a counted cap (the 8 sessions, the 2 teams, the 2 working in a team) makes `f1rm hire` and `f1rm wake` wait for a free slot and ask nobody. It prints `waiting for a slot` and gives up after 8 minutes with exit 75: run the same command again.
 - A hire or wake that may wait runs with `run_in_background`, or with `timeout` 600000, because the default Bash timeout is 2 minutes.
 - On exit 75 run the same command again; it costs nothing. A cap that holds for hours means the lead keeps working on other tasks and tries again; nobody asks the user, and `--override` is refused to every session. The cap is the company's, not a decision of the user's.
+- Hire and wake also wait on the usage windows: a usage hold waits the same way (see Usage pacing and Docker).
 
 ## Interns
 
@@ -470,6 +471,14 @@ The office holds its gates with hooks. A refusal says which rule held the call, 
 - The **project gate** holds every company role's SendMessage. It refuses a message to a session of another project, to a hire of the project with no live process (way out: **No live session** in Watching and waking), and to a name the office does not know or that sessions of more than one project answer to; inside the project it refuses what the Messaging table marks enforced, and Elsewhere is no room. Messages to `main`, to your own sub-agents and to the sessions the table allows pass. Way out: message only who the table allows; a problem with f1rm goes to the user as `f1rm feedback: <problem> -> <suggestion>`.
 - A specialist cannot run `f1rm hire`, `f1rm wake` or `f1rm merge`, and only the PM hires with `--simple`. Way out: ask the session in your `Report to`.
 - A session can't answer a permission request. A Bash command that names this office's approve, deny and always routes (by its port, its link key or the saved link) is refused for every company role. Only the user's browser, which holds the link key, answers. The gate reads the command text, so a commit message or heredoc that quotes a route is refused too: write it to a file and use `git commit -F`. Way out: wait for the user's answer in the office.
+
+## Usage pacing and Docker
+
+- **The numbers.** Pacing reads only the official `statusLine` numbers (5-hour and weekly used% and `resets_at`), which each hire's `f1rm usage-tap` writes to `~/.f1rm/usage.json`: never the oauth usage endpoint, never transcript estimates, and never touch the user's `~/.claude/settings.json` `statusLine`.
+- **The rules.** The 5-hour window warns at 75 and holds at 90; the weekly window warns at 85 and holds at 95. A hold stops every new hire, wake and office auto-wake until the window's `resets_at`. When the weekly used% runs ahead of the elapsed share of the 7-day window, it is one team per project.
+- **When `f1rm hire` or `f1rm wake` waits on a usage hold** (`waiting for a slot: usage hold: ...`), it is the cap's behaviour: on exit 75 run the same command again, keep working on other tasks, ask nobody. `--override` is refused. A running session is never stopped by a hold.
+- **Docker.** Before it starts any container, network or volume, a hire runs `f1rm docker-tag <task>` and uses the `COMPOSE_PROJECT_NAME` and the `--label f1rm.repo=... --label f1rm.task=...` it prints. It removes what it starts when it finishes. It never touches an untagged resource or an image, and never prune. `f1rm letgo` (after merge, or to drop a task) tears the task's tagged stack down, volumes included.
+- **Worktree removal** deletes `node_modules` first, so `git worktree remove` needs no `--force`.
 
 ## Use what is installed
 

@@ -505,3 +505,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: tests passed on builds that were the wrong thing or looked wrong.
 - Rejected: proof in the chat; a report per task to the user.
 - Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+
+## 2026-11-03 Pace on the official usage windows
+
+- Decision: read the official statusLine `rate_limits` (5-hour and weekly used% and resets_at) through each hire's own statusLine into ~/.f1rm/usage.json; warn at 75/85, no new hire, wake or auto-wake at 90/95 until resets_at, and one team per project when the weekly window runs ahead of pace.
+- Why: the longest stalls were usage-limit stops (a lead sat 47 h on the weekly limit); a live test proved background sessions receive the numbers.
+- Rejected: the undocumented /api/oauth/usage endpoint (Anthropic's terms); transcript token estimates as the main source; editing the user's own statusLine.
+- Where: T103, merge commits d3f74ed and b598f39
+
+## 2026-11-03 Tag and tear down each task's Docker stack
+
+- Decision: every container, network and volume a task starts is tagged (compose project f1rm-<repo>-<task> plus labels f1rm.repo and f1rm.task; repo identity is the name plus a hash of the real path); torn down, volumes included, on letgo after merge or drop; a daily sweep removes tagged orphans; old untagged leftovers are listed once and removed only on the user's click.
+- Why: dozens of per-task containers from other projects piled up (about 27 running, 12 exited).
+- Rejected: pruning images or untagged resources on our own; removing by name pattern without the user's click.
+- Where: T103, docker-tags 6a44343, task-cleanup fc5cd36
