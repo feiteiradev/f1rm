@@ -47,13 +47,14 @@ export const REVIEWER_DISALLOWED = ["--disallowedTools", "Bash(git push *)"];
  */
 export function withPonytail(role: string, flags: string[]): string[] {
   if (role === "lead") return flags;
-  const at = flags.indexOf("--settings");
+  const eq = flags.findIndex((f) => f.startsWith("--settings="));
+  const at = eq >= 0 ? eq : flags.indexOf("--settings");
   if (at < 0) return ["--settings", JSON.stringify({ env: { PONYTAIL_DEFAULT_MODE: "full" } }), ...flags];
   try {
-    const own = JSON.parse(flags[at + 1] ?? "");
+    const own = JSON.parse(eq >= 0 ? flags[eq]!.slice(11) : (flags[at + 1] ?? ""));
     if (own === null || typeof own !== "object" || Array.isArray(own)) return flags;
     const merged = JSON.stringify({ ...own, env: { PONYTAIL_DEFAULT_MODE: "full", ...own.env } });
-    return flags.map((f, i) => (i === at + 1 ? merged : f));
+    return flags.map((f, i) => (eq >= 0 ? (i === eq ? `--settings=${merged}` : f) : i === at + 1 ? merged : f));
   } catch {
     return flags;
   }

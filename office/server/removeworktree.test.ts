@@ -93,8 +93,17 @@ test("removeWorktree on a symlinked node_modules unlinks it and leaves the targe
 test("removeWorktree on a dirty worktree without force says git still refuses", () => {
   const repo = repoWith("t8");
   writeFileSync(join(wt(repo, "t8"), "base.txt"), "edited\n");
-  expect(() => machine.removeWorktree(repo, "t8")).toThrow(/still refuses.*node_modules is already deleted/);
+  expect(() => machine.removeWorktree(repo, "t8")).toThrow(/still refuses/);
   expect(existsSync(wt(repo, "t8"))).toBe(true);
+});
+
+test("a plain remove that git refuses for tracked changes leaves node_modules alone", () => {
+  const repo = repoWith("t9");
+  mkdirSync(join(wt(repo, "t9"), "node_modules"));
+  writeFileSync(join(wt(repo, "t9"), "node_modules", "k.js"), "k");
+  writeFileSync(join(wt(repo, "t9"), "base.txt"), "edited\n");
+  expect(() => machine.removeWorktree(repo, "t9")).toThrow(/still refuses/);
+  expect(existsSync(join(wt(repo, "t9"), "node_modules", "k.js"))).toBe(true);
 });
 
 test("removeWorktree with force still removes a locked worktree; without force it refuses and strips nothing", () => {

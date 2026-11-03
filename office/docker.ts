@@ -33,7 +33,7 @@ export const realDocker: Docker = dockerWith(["docker"]);
 export function repoId(repoPath: string): string {
   let real = repoPath;
   try { real = realpathSync(repoPath); } catch { /* a folder that is gone keeps its given path */ }
-  return `${basename(repoPath)}-${createHash("sha256").update(real).digest("hex").slice(0, 6)}`;
+  return `${basename(real)}-${createHash("sha256").update(real).digest("hex").slice(0, 6)}`;
 }
 
 const san = (x: string) => x.toLowerCase().replace(/[^a-z0-9_-]/g, "-");

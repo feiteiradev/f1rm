@@ -84,6 +84,7 @@ test("oneTeam when the 7-day used share is ahead of the elapsed share of the wee
   // half the week gone: 50% elapsed
   expect(pacing(u(undefined, 51), NOW).oneTeam).toBe(true);
   expect(pacing(u(undefined, 50), NOW).oneTeam).toBe(false);
+  expect(pacing(u(undefined, 50.4), NOW).oneTeam).toBe(false); // the display floors to 50: equal numbers are not ahead
   expect(pacing(u(undefined, 10), NOW).oneTeam).toBe(false);
   expect(pacing(u(99), NOW).oneTeam).toBe(false);
 });
@@ -144,6 +145,14 @@ test("withUsageTap adds the statusLine to --settings, merges into a JSON one, le
   const own = '{"statusLine":{"type":"command","command":"mine"}}';
   expect(withUsageTap(["--settings", own])).toEqual(["--settings", own]);
   expect(withUsageTap(["--settings", "/tmp/s.json"])).toEqual(["--settings", "/tmp/s.json"]);
+});
+
+test("withUsageTap merges into a --settings=<json> and never adds a second --settings", () => {
+  const merged = withUsageTap(["--settings={\"env\":{\"A\":\"1\"}}", "--model", "x"]);
+  expect(merged.filter((f) => f.startsWith("--settings"))).toHaveLength(1);
+  expect(merged.slice(1)).toEqual(["--model", "x"]);
+  expect(JSON.parse(merged[0]!.slice("--settings=".length))).toMatchObject({ env: { A: "1" }, statusLine: { type: "command" } });
+  expect(withUsageTap(["--settings=/tmp/s.json"])).toEqual(["--settings=/tmp/s.json"]);
 });
 
 test("f1rm usage-tap records stdin into <HOME>/.f1rm/usage.json, prints the status text and exits 0, also on garbage", () => {

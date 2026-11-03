@@ -42,7 +42,7 @@ test("sweepTick runs once, not again within 24 h, and again after", async () => 
   const t0 = 1_000_000_000;
   const a = await sweepTick([shop.p], live, f.d, t0, state);
   expect(a).toEqual(["docker sweep shop: removed 1 containers, 0 networks, 0 volumes"]);
-  expect(JSON.parse(readFileSync(state, "utf8"))).toEqual({ lastRun: t0 });
+  expect(JSON.parse(readFileSync(state, "utf8"))).toEqual({ repos: { [shop.p]: t0 } });
   res.push(tag("c", "c2", shop.id, "gone2"));
   expect(await sweepTick([shop.p], live, f.d, t0 + DAY - 1, state)).toEqual([]);
   expect(ids(res)).toEqual(["c2"]);
@@ -53,9 +53,9 @@ test("sweepTick runs once, not again within 24 h, and again after", async () => 
 test("due: a lastRun in the future counts as 0, so the sweep runs", () => {
   const state = join(tmp(), "s.json");
   writeFileSync(state, JSON.stringify({ lastRun: 50 * DAY }));
-  expect(due(state, 10 * DAY)).toBe(true);
-  expect(due(state, 50 * DAY + 1)).toBe(false);
-  expect(due(join(tmp(), "none.json"), 10 * DAY)).toBe(true);
+  expect(due(state, 10 * DAY, "r")).toBe(true);
+  expect(due(state, 50 * DAY + 1, "r")).toBe(false);
+  expect(due(join(tmp(), "none.json"), 10 * DAY, "r")).toBe(true);
 });
 
 test("sweepTick removes only orphans of each registered repo: live tasks, other repos and untagged resources stay", async () => {
@@ -112,4 +112,40 @@ test("liveTasksOf: every worktree folder (a symlinked one too) plus every task a
     { name: "pm", cwd: repo },
   ];
   expect([...liveTasksOf(repo, sessions)].sort()).toEqual(["has-tree", "intree", "linked", "starting"]);
+});
+
+test("a repo that failed is tried on the next tick while the one that worked waits its 24 h; the old {lastRun} file still counts for every repo", async () => {
+  const state = join(tmp(), "s.json");
+  const shop = repoDir("shop"), blog = repoDir("blog");
+  const res = [tag("c", "s1", shop.id, "gone"), tag("c", "b1", blog.id, "gone")];
+  const f = fakeDocker(res);
+  const failShop: Docker = async (args) => (args.some((a) => a.includes(`f1rm.repo=${shop.id}`)) ? { code: 1, out: "boom" } : f.d(args));
+  const t0 = 10 * DAY;
+  await sweepTick([shop.p, blog.p], () => new Set(), failShop, t0, state);
+  expect(ids(res)).toEqual(["s1"]);
+  res.push(tag("c", "b2", blog.id, "gone2"));
+  await sweepTick([shop.p, blog.p], () => new Set(), f.d, t0 + 1000, state);
+  expect(ids(res)).toEqual(["b2"]); // shop swept again, blog waits
+  expect(due(state, t0 + 1000, shop.p)).toBe(false);
+  expect(due(state, t0 + 1000, blog.p)).toBe(false);
+  const old = join(tmp(), "old.json");
+  writeFileSync(old, JSON.stringify({ lastRun: t0 }));
+  expect([due(old, t0 + 1000, shop.p), due(old, t0 + DAY, shop.p)]).toEqual([false, true]);
+});
+
+test("repoId is the same for a repo reached through a symlink by another name", () => {
+  const real = join(tmp(), "shop");
+  mkdirSync(real);
+  const link = join(tmp(), "alias");
+  symlinkSync(real, link);
+  expect(repoId(link)).toBe(repoId(real));
+  expect(repoId(link).startsWith("shop-")).toBe(true);
+});
+
+test("liveTasksOf: a repo reached through a symlink still matches the sessions that name its real path", () => {
+  const real = tmp();
+  const link = join(tmp(), "link");
+  symlinkSync(real, link);
+  const sessions = [{ name: "backend-dev-a", cwd: join(real, ".claude", "worktrees", "a") }, { name: "frontend-dev-b", cwd: real }];
+  expect([...liveTasksOf(link, sessions)].sort()).toEqual(["a", "b"]);
 });

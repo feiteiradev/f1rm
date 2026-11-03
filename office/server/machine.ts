@@ -256,14 +256,21 @@ export const machine = {
       const entry = listed.find((b) => b.startsWith("worktree ") && realpathOr(b.split("\n")[0]!.slice(9)) === real);
       if (!entry) throw new Error(`${dir} is not a worktree of ${repo}: nothing removed`);
       if (!force && /^locked/m.test(entry)) throw new Error(`the worktree ${dir} is locked: nothing removed`);
-      // node_modules is untracked and huge: delete it first so a plain remove works.
-      rmSync(`${dir}/node_modules`, { recursive: true, force: true });
+      const rel = `.claude/worktrees/${task}`;
       try {
-        git("worktree", "remove", `.claude/worktrees/${task}`);
+        try {
+          git("worktree", "remove", rel);
+        } catch (first) {
+          // node_modules is untracked and huge: only when it is the sole thing git sees (so nothing else is lost) is it deleted and the remove retried.
+          const status = Bun.spawnSync(["git", "-C", dir, "status", "--porcelain"], { stderr: "ignore" }).stdout.toString().split("\n").filter(Boolean);
+          if (!status.length || !status.every((l) => /^\?\? node_modules\/?$/.test(l))) throw first;
+          rmSync(`${dir}/node_modules`, { recursive: true, force: true });
+          git("worktree", "remove", rel);
+        }
       } catch (err) {
         // A stopped Claude Code session leaves its worktree locked, which takes `--force` twice.
-        if (!force) throw new Error(`git still refuses to remove the worktree (its node_modules is already deleted): ${(err as Error).message}`);
-        git("worktree", "remove", "--force", "--force", `.claude/worktrees/${task}`);
+        if (!force) throw new Error(`git still refuses to remove the worktree: ${(err as Error).message}`);
+        git("worktree", "remove", "--force", "--force", rel);
       }
     }
     // `claude rm` may already have taken the branch with the worktree.

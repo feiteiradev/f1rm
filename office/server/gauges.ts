@@ -1,6 +1,6 @@
 // What the office pushes for the top-bar usage gauges and the one-time leftovers card. Reads only; the one deletion (answer "removed") goes through docker.ts's removeLeftovers.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { leftovers, removeLeftovers, type Docker } from "../docker.ts";
 import { pacing, readUsage, warn, type Usage } from "../usage.ts";
@@ -52,7 +52,8 @@ const answeredOf = (file: string) => {
   try {
     const a = JSON.parse(readFileSync(file, "utf8")).answered;
     return a === "removed" || a === "kept";
-  } catch {
+  } catch (err) {
+    if (existsSync(file)) console.log(`f1rm: ${file} cannot be read (${(err as Error).message}); the leftovers card will ask again`);
     return false;
   }
 };
