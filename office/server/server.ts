@@ -27,6 +27,7 @@ import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "
 import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
 import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
+import { createLeftovers, usageView } from "./gauges.ts";
 
 const MAX_MESSAGE = 4000;
 const MAX_WHY = 200;
@@ -460,6 +461,11 @@ type Options = {
   boardPollMs?: number;
   /** How long a PermissionRequest hook is held for the browser before the terminal prompt decides. */
   approvalTimeoutMs?: number;
+  /** The usage file (`~/.f1rm/usage.json`) the top-bar gauges read; without it the snapshot has no usage. */
+  usageFile?: string;
+  /** Docker and the answer file (`~/.f1rm/leftovers.json`) of the one-time leftovers card; without both there is no card. */
+  docker?: Docker;
+  leftoversFile?: string;
   /** Time source in ms; tests control it. */
   clock?: () => number;
   /** Quiet this long (no event, no transcript write) and an employee goes offline. */
@@ -553,6 +559,9 @@ export function startServer({
   pausedDir,
   checkpointsDir,
   fullStop: fullStopDeps,
+  usageFile: gaugesFile,
+  docker,
+  leftoversFile,
   transcriptsDir = join(homedir(), ".claude", "projects"),
   junkRoots = defaultJunkRoots(),
   boardPollMs = 500,
@@ -712,7 +721,7 @@ export function startServer({
     // ponytail: it guards against a slip, not a determined session that builds the address piece by piece; the link key lives in a file the user's account can read.
     if (tool === "Bash") {
       const line = String(input.command ?? "");
-      if (/(?:approve|deny|always|commands)\/[^\s'"]/.test(line) && namesOffice(line)) {
+      if (/(?:approve|deny|always|commands|leftovers)\/[^\s'"]/.test(line) && namesOffice(line)) {
         return refuse("answer", "Only the user answers a permission request, in the office: tell the session in your Report to what you are waiting for, and wait.");
       }
     }
@@ -1079,7 +1088,8 @@ export function startServer({
   const pendingCommands = () => Object.fromEntries(projectRooms().filter((room) => !commandsApproved(room) && existsSync(folderOf(room))).map((room) => [room, proposalOf(room)]));
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
-  const snapshot = () => JSON.stringify({ ...state, employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
+  const leftoversCard = createLeftovers({ docker, file: leftoversFile, clock, onChange: () => push() });
+  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1164,8 +1174,13 @@ export function startServer({
       if (!same(given, token)) return new Response("<!doctype html><title>f1rm</title><p>Open the office with <code>f1rm</code>.", { status: 401, headers: { "content-type": "text/html; charset=utf-8" } });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "always", "ask", "tell", "letgo", "intern", "remove"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "always", "ask", "tell", "letgo", "intern", "remove", "leftovers"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+      }
+      // The one-time leftovers card's answers. Remove takes no ids: the office deletes what a fresh docker list holds.
+      if (rest[0] === "leftovers" && rest.length === 2 && (rest[1] === "remove" || rest[1] === "keep")) {
+        const r = rest[1] === "keep" ? leftoversCard.keep() : await leftoversCard.remove(((await req.json().catch(() => null)) as { fingerprint?: unknown } | null)?.fingerprint);
+        return Response.json(r, { status: r.ok ? 200 : r.status });
       }
       if (rest[0] === "jump" && rest.length === 2) {
         const employee = employeeOf(rest[1]);
@@ -1732,6 +1747,13 @@ export function startServer({
   const processTimer = setInterval(checkProcesses, Math.min(5_000, offlineAfterMs / 4));
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
   const boardTimer = setInterval(readBoards, boardPollMs);
+  // The reading changes as sessions report and as windows reset; push when it does (and let a stale leftovers list refresh).
+  let lastUsage = JSON.stringify(usageView(gaugesFile, clock()));
+  const usageTimer = setInterval(() => {
+    leftoversCard.current();
+    const seen = JSON.stringify(usageView(gaugesFile, clock()));
+    if (seen !== lastUsage) (lastUsage = seen, push());
+  }, 15_000);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
@@ -1741,6 +1763,7 @@ export function startServer({
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
     clearInterval(recoveryTimer);
+    clearInterval(usageTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);
     db.close();

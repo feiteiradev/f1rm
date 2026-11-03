@@ -1,6 +1,6 @@
 // Docker tagging: a task's containers, networks and volumes are found by label and removed; nothing untagged is touched. Fake docker only.
 import { expect, test } from "bun:test";
-import { leftovers, removeLeftovers, stackName, sweep, tagEnv, tagLabels, teardown, type Docker } from "./docker";
+import { dockerWith, leftovers,removeLeftovers, stackName, sweep, tagEnv, tagLabels, teardown, type Docker } from "./docker";
 
 type Res = { kind: "container" | "network" | "volume"; id: string; name: string; state?: string; image?: string; labels: Record<string, string> };
 
@@ -113,6 +113,13 @@ test("leftovers lists untagged -e2e- and review- containers, not postgres, a tag
   ]);
 });
 
+test("removeLeftovers reports the errors of its own re-listing instead of dropping them", async () => {
+  const f = fake([{ kind: "container", id: "e1", name: "app-e2e-1", state: "running", labels: {} }], { down: true });
+  const r = await removeLeftovers(f.d, ["e1"]);
+  expect(r.removed).toEqual([]);
+  expect(r.errors.join(" ")).toContain("Cannot connect to the Docker daemon");
+});
+
 test("removeLeftovers refuses an id not in the fresh list, one that became tagged, and a name", async () => {
   const res = old();
   const f = fake(res);
@@ -150,4 +157,14 @@ test("every call is ps, network, volume or rm, and every rm target was listed fi
     if (a.includes("rm")) { expect(a).toContain("--"); for (const id of a.slice(a.indexOf("--") + 1)) expect(f.listed.has(id)).toBe(true); }
     else seen.add(a[0]!);
   }
+});
+
+// A docker that hangs (a wedged daemon) must not hang the office: the runner kills it and answers 124. The runner is a stand-in program, never a real docker.
+test("a docker that does not answer in time is killed and answers code 124", async () => {
+  const hang = dockerWith(["bun", "-e", "setTimeout(() => {}, 60000)", "--"], 150);
+  const t = Date.now();
+  expect(await hang(["ps"])).toEqual({ code: 124, out: "" });
+  expect(Date.now() - t).toBeLessThan(5000);
+  const quick = dockerWith(["bun", "-e", "console.log(process.argv.slice(1).join(' '))", "--"], 10_000);
+  expect(await quick(["ps", "-a"])).toEqual({ code: 0, out: "ps -a\n" });
 });
