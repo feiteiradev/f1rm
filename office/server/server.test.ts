@@ -818,6 +818,9 @@ test("topic starts lead-<name> with the grilling first command and the generated
   const prompt = spawned[0].argv[6];
   expect(prompt).toStartWith("/mattpocock-skills:grilling Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n");
   expect(prompt).toContain("Team: billing:");
+  expect(prompt).toContain("\nMilestone: topics\n"); // not the topic's own name again
+  expect(prompt).toContain("\nInputs: none\n");
+  expect(prompt).toContain("\nNeeds: nothing from other teams\n");
   expect(prompt).toContain("Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.");
   for (const name of ["Bad Name", "", "a--b", "x/../y", 7, null]) expect((await topicOf({ room: ROOM, name })).status).toBe(400);
   expect((await topicOf({ room: "/nope/.git", name: "billing" })).status).toBe(404);
