@@ -1,7 +1,7 @@
 // The flat hire: `--simple` (the PM's one dev for a simple task), the leads' and the Reviewer's limits, `--level` on the devs, the dev's Review paragraph, and the cap that counts a simple task as a team.
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { checkSlots, planHire, type HireRequest, type LiveHires } from "./hire.ts";
+import { checkSlots, HireRefused, parseHireFlags, planHire, type HireRequest, type LiveHires } from "./hire.ts";
 import { letgo } from "./letgo.ts";
 
 const REPO = "/code/shop";
@@ -120,4 +120,26 @@ test("f1rm letgo lets a simple dev go like a team member: its session, then its 
   } as unknown as Parameters<typeof letgo>[1];
   expect(await letgo(["backend-dev-x"], m, REPO)).toEqual({ lines: ["backend-dev-x: let go, removed its worktree and branch worktree-x"], ok: true });
   expect(calls).toEqual(["rm x", "letgo i1"]); // the worktree goes after the stop and before claude rm
+});
+
+const firstPrompt = (argv: string[]) => argv.find((a) => a.startsWith("/"))!;
+
+test("a topic lead starts with the grilling skill as its first command, then the guidelines and the hire skill in the load-first list", async () => {
+  expect(firstPrompt(await plan({ role: "lead", task: "billing", topic: true }))).toStartWith(
+    "/mattpocock-skills:grilling Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n",
+  );
+  expect(firstPrompt(await plan({ role: "lead", task: "billing" }))).toStartWith("/f1rm:f1rm-guidelines");
+});
+
+test("--topic is for a lead only, and parseHireFlags reads it", async () => {
+  for (const role of ["backend-dev", "designer", "researcher"]) await expect(plan({ role, topic: true, simple: true })).rejects.toThrow("--topic is for a lead only");
+  expect(parseHireFlags(["--topic", "lead", "lead-x", "x", "b"])).toMatchObject({ topic: true, args: ["lead", "lead-x", "x", "b"] });
+  expect(parseHireFlags(["lead", "lead-x", "x", "b"]).topic).toBe(false);
+});
+
+test("a third topic lead with two live teams is refused naming the cap", async () => {
+  const err = await plan({ role: "lead", task: "c", topic: true }, [session("lead-a", REPO), session("lead-b", REPO)]).catch((e) => e);
+  expect(err).toBeInstanceOf(HireRefused);
+  expect(err.message).toContain("the cap is 2");
+  expect(err.working).toBe(2);
 });
