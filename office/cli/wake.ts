@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { agents, claudeEnv, gitCommonDirAsync } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
 import { checkSlots, EX_TEMPFAIL, HireRefused, pmName, projectFolder, realWait, REVIEWER_DISALLOWED, rootTooLong, SECURITY, untilSlot, withEffort, withPonytail, type LiveHires, type Wait } from "./hire.ts";
+import { withUsageTap } from "../usage.ts";
 import { hireName, repoOf, type HireName } from "./letgo.ts";
 import { headAsync, hires, startsTurn, tailAsync, textOf } from "./status.ts";
 
@@ -141,7 +142,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const note = `${req.message?.trim() || DEFAULT_NOTE}\nReport to: ${reportTo}${hold ? SECURITY : ""}`;
   const extra = req.extra ?? [];
   const model = extra.some((a) => a === "--model" || a.startsWith("--model=")) ? null : await d.modelOf(cwd, sessionId);
-  const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...withEffort(hire.role, withPonytail(hire.role, extra)), ...(model ? ["--model", model] : [])];
+  const argv = ["claude", "--bg", "--resume", sessionId, "--agent", `f1rm:${hire.role}`, "--name", name, note, ...withUsageTap(withEffort(hire.role, withPonytail(hire.role, extra))), ...(model ? ["--model", model] : [])];
   if (hire.role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
   return { argv, cwd, name, sessionId };
 }

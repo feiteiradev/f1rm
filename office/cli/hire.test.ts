@@ -52,7 +52,10 @@ function hire(stub: ReturnType<typeof stubClaude>, args: string[], cwd = process
 }
 
 const pmArgs = ["--report-to", "pm-shop"];
-const FULL = '{"env":{"PONYTAIL_DEFAULT_MODE":"full"}}';
+// The statusLine runs the CLI by absolute path: a `claude --bg` session may have no `f1rm` on its PATH.
+const TAP_OBJ = { type: "command", command: `'${process.execPath}' '${join(import.meta.dir, "f1rm.ts")}' usage-tap` };
+const TAP = `"statusLine":${JSON.stringify(TAP_OBJ)}`;
+const FULL = `{"env":{"PONYTAIL_DEFAULT_MODE":"full"},${TAP}}`;
 /** The value of the one --settings flag in an argv, or null if there is none. */
 const settingsOf = (argv: string[] | null) => {
   const at = argv?.indexOf("--settings") ?? -1;
@@ -68,7 +71,7 @@ test("every hire but a lead is started at ponytail full by its own --settings, w
   }
   const lead = stubClaude([]);
   expect(hire(lead, [...pmArgs, "lead", "lead-checkout", "checkout", BRIEF]).code).toBe(0);
-  expect(settingsOf(lead.argv())).toBeNull();
+  expect(settingsOf(lead.argv())).toBe(`{${TAP}}`); // no ponytail env, but every hire reports its usage
 });
 
 /** The values of every --effort in an argv. */
@@ -93,10 +96,10 @@ test("a reviewer's --settings stays ahead of --disallowedTools, which would swal
   expect(rv.argv()!.indexOf("--settings")).toBeLessThan(rv.argv()!.indexOf("--disallowedTools"));
   const own = stubClaude([]);
   expect(hire(own, [...pmArgs, "designer", "designer-x", "x", BRIEF, "--settings", '{"disableAllHooks":true,"env":{"A":"1"}}']).code).toBe(0);
-  expect(JSON.parse(settingsOf(own.argv())!)).toEqual({ disableAllHooks: true, env: { A: "1", PONYTAIL_DEFAULT_MODE: "full" } });
+  expect(JSON.parse(settingsOf(own.argv())!)).toEqual({ disableAllHooks: true, env: { A: "1", PONYTAIL_DEFAULT_MODE: "full" }, statusLine: TAP_OBJ });
   const set = stubClaude([]);
   hire(set, [...pmArgs, "designer", "designer-y", "y", BRIEF, "--settings", '{"env":{"PONYTAIL_DEFAULT_MODE":"lite"}}']);
-  expect(JSON.parse(settingsOf(set.argv())!)).toEqual({ env: { PONYTAIL_DEFAULT_MODE: "lite" } });
+  expect(JSON.parse(settingsOf(set.argv())!)).toEqual({ env: { PONYTAIL_DEFAULT_MODE: "lite" }, statusLine: TAP_OBJ });
 });
 
 test("a lead hired from a subfolder of the repo is started in the repo root, which is where status looks for it; outside git it is started where the command ran", () => {
@@ -483,6 +486,7 @@ test("a lead runs as lead-<team> in the repo, with no worktree, starting with th
   expect(stub.argv()).toEqual([
     "--bg", "--agent", "f1rm:lead", "--name", "lead-checkout",
     `/f1rm:f1rm-guidelines Before you start, load these with the Skill tool: f1rm:hire. Report to: pm-shop\n\n${BRIEF}`,
+    "--settings", `{${TAP}}`,
     "--effort", "medium",
   ]);
 });

@@ -5,6 +5,7 @@ import { FOUNDER_ONLY, MODELS, roleOfAgentType } from "../people.ts";
 import { editionFile, readEdition, type Edition } from "../server/editions.ts";
 import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from "../server/pause.ts";
 import { claudeEnv, machine } from "../server/machine.ts";
+import { withUsageTap } from "../usage.ts";
 
 export const USAGE =
   "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
@@ -248,7 +249,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   const prompt = `/${first}${more}${reportName ? ` Report to: ${reportName}` : ""}\n\n${content ? "This branch holds no code: use the content checklist.\n" : ""}${dev ? reviewParagraph(task, basename(cwd), level ?? "medium") + "\n\n" : ""}${brief}`;
   // The flags go after the prompt: --disallowedTools takes any number of values and would swallow a prompt that follows it.
   // A lead writes no code, and a content Reviewer reads the branch from its own scratch worktree, so both work in the repo itself: they start at its root, whatever folder `f1rm hire` ran from.
-  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withEffort(role, withPonytail(role, extra))];
+  const argv = ["claude", "--bg", "--agent", `f1rm:${role}`, "--name", name, ...(lead || role === "reviewer" ? [] : ["--worktree", task]), prompt, ...withUsageTap(withEffort(role, withPonytail(role, extra)))];
   if (model) argv.push("--model", model);
   else if (content && !extra.includes("--model")) argv.push("--model", "sonnet");
   if (role === "reviewer") argv.push(...REVIEWER_DISALLOWED);
