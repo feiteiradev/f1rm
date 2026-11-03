@@ -398,6 +398,8 @@ test("B1: every topic is a lead, and the PM hires no one", () => {
   expect(String(role("pm").fm.description)).not.toContain("hires specialists");
   expect(pmPromptText()).not.toContain("Hire only leads");
   expect(pmPromptText()).toContain("hire no one");
+  expect(pmPromptText()).not.toContain("a merge");
+  expect(pmPromptText()).toContain("never ask me about a cap, a push, the cleanup, or a plan");
 });
 
 test("B1: no line says a specialist reports to the PM or that the PM lets specialists go", () => {
@@ -603,7 +605,8 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   expect(trows[0]).toContain("Ask");
   expect(trows[0]).toContain("Tell");
   expect(trows[0]).toContain("(a lead records it on its team board)");
-  expect(trows[1]).toContain("Leads of its project and its simple tasks' devs only (enforced)");
+  expect(trows[1]).toContain("Leads of its project only (enforced)");
+  expect(trows[1]).not.toContain("simple tasks' devs");
   for (const s of ["`NEEDS YOU <team>: <topic>`", "`DONE <team>`", "`resume`"]) expect(talk, s).toContain(s);
   expect(trows[2]).toContain("The PM, other leads and the members of its own team");
   expect(trows[3]).toContain("`DONE`, `APPROVED`, `CHANGES REQUESTED`, `BLOCKED`, `ESCALATE`");

@@ -327,6 +327,23 @@ test("the Hire dialog's route refuses a hire into a paused project, with a point
   expect(spawned).toBe(1);
 });
 
+test("the New topic route refuses a topic in a paused project with the pause's reason, and starts it after the resume", async () => {
+  const p = project();
+  world(p);
+  const o = start(p);
+  await seat(o.server, "lead", "lead-checkout", "f1rm:lead", p.repo);
+  await settle();
+  const topic = () => post(o.server, "topic", { room: p.room, name: "search" });
+  await post(o.server, "pause", { room: p.room, why: "lunch" });
+  const refused = await topic();
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as any).error).toMatch(/is paused \(manual: lunch\).*`f1rm resume`/);
+  expect(spawned).toBe(0);
+  await post(o.server, "resume", { room: p.room });
+  expect((await topic()).status).toBe(200);
+  expect(spawned).toBe(1);
+});
+
 test("a pause that cannot read the process table fails and says so, and never says All N stopped", async () => {
   const p = project();
   world(p);

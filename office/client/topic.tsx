@@ -1,16 +1,17 @@
 // The New topic dialog: one name, and the project's room starts lead-<name> that opens with grilling. It reuses the Hire dialog's shell.
 import { useEffect, useId, useRef, useState } from "react";
 import { send } from "./post.ts";
-import { startTopic, topicProblem } from "./topic.ts";
+import { editTopic, startDisabled, submitTopic, topicProblem, type TopicForm } from "./topic.ts";
 import "./hire.css";
 
 /** `live` are the names of the project's leads that are live now. */
 export function TopicDialog({ room, name, live, onClose }: { room: string; name: string; live: string[]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const field = useRef<HTMLInputElement>(null);
-  const [topic, setTopic] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | null>(null);
+  const [form, setForm] = useState<TopicForm>({ topic: "", busy: false, refused: null });
+  const latest = useRef(form); // a double click lands before the re-render
+  const store = { get: () => latest.current, set: (u: (f: TopicForm) => TopicForm) => setForm((latest.current = u(latest.current))) };
+  const { topic, refused } = form;
   const id = useId();
   const problem = topicProblem(topic, live);
 
@@ -21,15 +22,7 @@ export function TopicDialog({ room, name, live, onClose }: { room: string; name:
     return () => opener?.focus?.();
   }, []);
 
-  async function start() {
-    if (problem !== null || busy) return;
-    setBusy(true);
-    setRefused(null);
-    const error = await startTopic(room, topic, send, live);
-    if (error === null) return onClose();
-    setBusy(false);
-    setRefused(error);
-  }
+  const start = () => submitTopic(store, room, live, send, onClose);
 
   return (
     <dialog
@@ -50,14 +43,14 @@ export function TopicDialog({ room, name, live, onClose }: { room: string; name:
             id={`${id}-name`}
             ref={field}
             value={topic}
-            onChange={(e) => setTopic(e.target.value)}
+            onChange={(e) => store.set((f) => editTopic(f, e.target.value))}
             aria-describedby={`${id}-help`}
             aria-invalid={!!problem}
             autoComplete="off"
             spellCheck={false}
           />
           <p id={`${id}-help`} className="help">Lowercase words joined by hyphens. It starts lead-{topic || "<topic>"}, which opens by grilling you.</p>
-          <button type="submit" disabled={problem !== null || busy}>{busy ? "Starting…" : "Start"}</button>
+          <button type="submit" disabled={startDisabled(form, live)}>{form.busy ? "Starting…" : "Start"}</button>
           <p className="problem" role="alert">{refused ?? problem}</p>
         </div>
       </form>

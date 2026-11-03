@@ -137,6 +137,13 @@ test("--topic is for a lead only, and parseHireFlags reads it", async () => {
   expect(parseHireFlags(["lead", "lead-x", "x", "b"]).topic).toBe(false);
 });
 
+test("--topic with a slash-only --skills is refused; with a plain --skills it is accepted and grilling stays the first command", async () => {
+  for (const s of ["research", "pstack:architect"]) await expect(plan({ role: "lead", task: "billing", topic: true, skills: [s] })).rejects.toThrow("drop the slash-only skill");
+  const prompt = firstPrompt(await plan({ role: "lead", task: "billing", topic: true, skills: ["ponytail:ponytail"] }));
+  expect(prompt).toStartWith("/mattpocock-skills:grilling Before you start, load these with the Skill tool: ");
+  expect(prompt.split("\n")[0]).toContain("ponytail:ponytail");
+});
+
 test("a third topic lead with two live teams is refused naming the cap", async () => {
   const err = await plan({ role: "lead", task: "c", topic: true }, [session("lead-a", REPO), session("lead-b", REPO)]).catch((e) => e);
   expect(err).toBeInstanceOf(HireRefused);
