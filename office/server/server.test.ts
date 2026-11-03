@@ -805,6 +805,28 @@ test("Hire reports to the project's PM when it has one, and takes a lower model"
   expect(spawned[1].argv).not.toContain("--model");
 });
 
+test("topic starts lead-<name> with the grilling first command and the generated brief, reporting to the PM; a bad name is 400, an unknown project 404, and a full project 409", async () => {
+  start(SHOP);
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  const topicOf = (body: unknown) => ui("topic", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const ok = await topicOf({ room: ROOM, name: "billing" });
+  expect([ok.status, await ok.json()]).toEqual([200, { ok: true }]);
+  expect(spawned[0].cwd).toBe("/code/shop");
+  expect(spawned[0].argv.slice(0, 6)).toEqual(["claude", "--bg", "--agent", "f1rm:lead", "--name", "lead-billing"]);
+  const prompt = spawned[0].argv[6];
+  expect(prompt).toStartWith("/mattpocock-skills:grilling Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n");
+  expect(prompt).toContain("Team: billing:");
+  expect(prompt).toContain("Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.");
+  for (const name of ["Bad Name", "", "a--b", "x/../y", 7, null]) expect((await topicOf({ room: ROOM, name })).status).toBe(400);
+  expect((await topicOf({ room: "/nope/.git", name: "billing" })).status).toBe(404);
+  expect(spawned.length).toBe(1);
+  liveToo = [{ name: "lead-a", state: "working", cwd: "/code/shop" }, { name: "lead-b", state: "working", cwd: "/code/shop" }];
+  const full = await topicOf({ room: ROOM, name: "third" });
+  expect([full.status, ((await full.json()) as any).error]).toEqual([409, "this project already has 2 teams (the cap is 2)."]);
+  expect(spawned.length).toBe(1);
+});
+
 test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));

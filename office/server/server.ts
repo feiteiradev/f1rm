@@ -14,7 +14,7 @@ import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten,
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
-import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, planHire, readRoles } from "../cli/hire.ts";
+import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
@@ -1379,6 +1379,28 @@ export function startServer({
           return Response.json({ error: (err as Error).message }, { status: 400 });
         }
         // ponytail: two hires posted at the same instant can both pass the count before either shows in `claude agents`; serialize them if that is felt.
+        return machine.spawnBackground(argv, folder).then(
+          () => Response.json({ ok: true }),
+          (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
+        );
+      }
+      if (rest[0] === "topic" && rest.length === 1) {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+        const { room, name } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
+        if (typeof name !== "string" || !SLUG.test(name)) return Response.json({ error: "A topic name is lowercase words joined by hyphens." }, { status: 400 });
+        const folder = folderOf(room);
+        const paused = pausedOf(room);
+        if (paused) return Response.json({ error: hireRefusal(roomName(room), paused), working: null }, { status: 409 });
+        let common: string | null | undefined;
+        const git = { gitCommonDir: () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common) };
+        let argv: string[];
+        try {
+          argv = await planHire({ role: "lead", task: name, cwd: folder, edition: editions[room] ?? null, brief: topicBrief(name), topic: true, reportTo: () => pmName(folder, git) }, { backgroundSessions: () => machine.backgroundSessions(), ...git });
+        } catch (err) {
+          if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
+          return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
         return machine.spawnBackground(argv, folder).then(
           () => Response.json({ ok: true }),
           (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),

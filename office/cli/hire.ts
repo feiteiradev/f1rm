@@ -7,7 +7,7 @@ import { hireRefusal, pausedDirOf, pausedFile, readPaused, type Paused } from ".
 import { claudeEnv, machine } from "../server/machine.ts";
 
 export const USAGE =
-  "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
+  "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--topic (a lead only)] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
   "       f1rm hire lead lead-<team> <team> <brief>";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
@@ -21,6 +21,11 @@ export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A dev's own first skill is poteto-mode, so no other slash-only skill can be added to a dev; architect and how are for a lead.
 const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstack:how"];
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
+const GRILLING = "mattpocock-skills:grilling";
+
+/** The team brief of a topic lead: the guidelines' team brief sections, with the interview first. */
+export const topicBrief = (topic: string) =>
+  `Team: ${topic}: the topic "${topic}", as the user describes it in the interview\nMilestone: topic ${topic}\nContext: Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.\nOther teams: none known; ask the PM\nContracts: none\nAcceptance criteria:\n- the ones the interview agrees (proved by: the check each names)\nOut of scope: what the interview leaves out\nReport: NEEDS YOU ${topic}: <topic> for what needs the user, DONE ${topic} when the slice is merged. Nothing else goes to the PM.`;
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold (SECURITY: only a session from before the Reviewer left the normal flow carries it, and a wake keeps it).
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
 export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";
@@ -131,6 +136,8 @@ export type HireRequest = {
   level?: string | null;
   /** A reviewer of a branch with no code: the guidelines' content checklist, on sonnet unless a model is given. The only Reviewer there is. */
   content?: boolean;
+  /** A topic lead: its first command is the grilling interview with the user. A lead only. */
+  topic?: boolean;
   /** A simple task: the PM's one dev, designer or researcher with no lead and no team. It counts as a team of one in the project's cap. */
   simple?: boolean;
   /** Flags that go to claude as given. */
@@ -200,6 +207,8 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (model && !MODELS.includes(model)) throw new Error(`model "${model}" must be one of ${MODELS.join(", ")}`);
   if (level != null && !LEVELS.includes(level)) throw new Error(`level "${level}" must be one of ${LEVELS.join(", ")}`);
   if (level != null && !dev) throw new Error(`--level is for the two devs (frontend-dev, backend-dev): it sets the level of their own review, not ${role}'s`);
+  if (req.topic && role !== "lead") throw new Error(`--topic is for a lead only, not ${role}`);
+  if (req.topic && added.some((s) => SLASH_ONLY.includes(s))) throw new Error("a topic lead's first command is the grilling interview: drop the slash-only skill");
   if (req.content && role !== "reviewer") throw new Error(`--content is for the reviewer only, not ${role}`);
   if (role === "reviewer" && !req.content) throw new Error("a Reviewer reviews a branch with no code: hire it with --content");
   const own_ = extra.find((a) => /^(?:--(?:agent|name|worktree)|-n|-w)(?:=|$)/.test(a));
@@ -241,7 +250,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   // Live on Claude Code 2.1.300 only the first slash command of a chain expands, so the rest go through the Skill tool.
   // ponytail: the Skill-tool step loaded a skill in 6 of 8 spike runs; inline the skill text with --append-system-prompt-file if hires miss it.
   // Every added skill loads ahead of the role's later ones (a bug's diagnosing-bugs before tdd).
-  const slash = added.find((s) => SLASH_ONLY.includes(s));
+  const slash = req.topic ? GRILLING : added.find((s) => SLASH_ONLY.includes(s));
   const [first, ...rest] = [...new Set([slash ?? own[0], ...added, ...own])];
   const more = rest.length ? `${LOAD_FIRST}${rest.join(", ")}.` : "";
   const reportName = typeof reportTo === "function" ? reportTo() : reportTo;
@@ -258,7 +267,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
 /** The flags `f1rm hire` takes before the role, and the words after them. The delegation gate reads a hire with this too, so the two can't drift. */
 export function parseHireFlags(words: string[]) {
   const args = [...words];
-  let override = false, simple = false;
+  let override = false, simple = false, topic = false;
   let reportTo: string | undefined, team: string | undefined, level: string | undefined, content = false, skills: string[] = [];
   for (;;) {
     if (args[0] === "--override") override = !!args.shift();
@@ -268,9 +277,10 @@ export function parseHireFlags(words: string[]) {
     else if (args[0] === "--level") (args.shift(), (level = args.shift()));
     else if (args[0] === "--content") content = !!args.shift();
     else if (args[0] === "--simple") simple = !!args.shift();
+    else if (args[0] === "--topic") topic = !!args.shift();
     else break;
   }
-  return { override, reportTo, team, level, content, simple, skills, args };
+  return { override, reportTo, team, level, content, simple, topic, skills, args };
 }
 
 /** How long a hire or a wake refused by a counted cap waits (under the 10 minutes a Bash call lasts), how often it looks again, and how often it says it still waits. */
@@ -303,7 +313,7 @@ export async function untilSlot<T>(attempt: () => Promise<T>, w: Wait): Promise<
 
 /** Runs `f1rm hire` and returns the exit code. A cap waits for a free slot (see untilSlot); `--override` is the user's own terminal's. */
 export async function hire(words: string[], wait: Wait = realWait()): Promise<number> {
-  const { override, reportTo, team, level, content, simple, skills, args } = parseHireFlags(words);
+  const { override, reportTo, team, level, content, simple, topic, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;
   if (role === "--help" || role === "-h") return console.log(USAGE), 0;
   if (!role) throw new Error(USAGE);
@@ -312,7 +322,7 @@ export async function hire(words: string[], wait: Wait = realWait()): Promise<nu
   const git = { gitCommonDir: () => common };
   // The session starts in the repo's root, not in a subfolder the command ran from: that is where `f1rm status` looks for it.
   const root = common ? dirname(common) : process.cwd();
-  const argv = await untilSlot(() => planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, extra }, { backgroundSessions: machine.backgroundSessions, ...git }), wait);
+  const argv = await untilSlot(() => planHire({ role, name, task, team, cwd: root, edition: readEdition(editionFile(root, git)), paused: readPaused(pausedFile(pausedDirOf(process.env.HOME!), root)), brief, reportTo: reportTo ?? pmName(root, git), override, skills, level, content, simple, topic, extra }, { backgroundSessions: machine.backgroundSessions, ...git }), wait);
   if (!argv) return EX_TEMPFAIL;
   const proc = Bun.spawn(argv, { cwd: root, env: claudeEnv(), stdio: ["inherit", "inherit", "inherit"] });
   return proc.exited;
