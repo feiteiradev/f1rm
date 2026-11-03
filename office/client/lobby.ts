@@ -51,6 +51,7 @@ export function projectState(state: OfficeState, roomId: string): OfficeState {
     interns: keep(state.interns, (i) => i.parent in employees),
     ...(state.boards?.[roomId] && { boards: { [roomId]: state.boards[roomId] } }),
     ...(state.teamBoards?.[roomId] && { teamBoards: { [roomId]: state.teamBoards[roomId] } }),
+    ...(state.topics?.[roomId] && { topics: { [roomId]: state.topics[roomId] } }),
     ...(state.editions?.[roomId] && { editions: { [roomId]: state.editions[roomId] } }),
     ...(state.commands?.[roomId] && { commands: { [roomId]: state.commands[roomId] } }),
     // The raised hands of this project's hires, for the cards on their desks; a recording has none.

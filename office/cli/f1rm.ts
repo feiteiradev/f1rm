@@ -284,7 +284,7 @@ function serve() {
   const approvalHook = (settings.hooks?.PermissionRequest ?? []).flatMap((g) => g.hooks).find(isF1rm);
   if (!(Number(approvalHook?.timeout) > approvalTimeout)) throw new Error("F1RM_APPROVAL_TIMEOUT must be shorter than the installed PermissionRequest hook timeout: run `f1rm install` again, or lower it");
 
-  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
+  startServer({ port, secret: hook.secret, token, machine, clientDir, dbPath: join(F1RM_DIR, "events.db"), boardsDir: join(F1RM_DIR, "boards"), evidenceDir: join(F1RM_DIR, "evidence"), projectsDir: projectsDir(), pausedDir: pausedDirOf(process.env.HOME!), checkpointsDir: checkpointsDirOf(process.env.HOME!), fullStop: realFullStop(), offlineAfterMs, removeAfterMs, approvalTimeoutMs: approvalTimeout * 1000, recovery: { everyMs: seconds("F1RM_RECOVERY_EVERY", 60) * 1000, deps: realRecoveryDeps(process.env.HOME!) } });
   const url = `http://127.0.0.1:${port}/${token}/`;
   writePrivate(URL_TMP, url);
   renameSync(URL_TMP, URL_FILE); // one step, so a reader never sees the file empty

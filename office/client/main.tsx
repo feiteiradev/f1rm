@@ -11,6 +11,7 @@ import { handsOf, needsYouTag, type Anchor } from "./approvals.ts";
 import { CommandsCard } from "./commands.tsx";
 import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
+import { Progress } from "./progress.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
 import { HireDialog } from "./hire.tsx";
 import { TopicDialog } from "./topic.tsx";
@@ -223,6 +224,7 @@ function Project({ room, state, onHire }: { room: string; state: OfficeState; on
       {selected && <Panel key={selected} state={state} id={selected} entries={history[selected] ?? []} onAsk={(q) => ask(selected, q)} onTell={(m) => tell(selected, m)} onIntern={(t) => tell(selected, t, true)} onClose={() => select(null)} />}
       {board && isProject(board.id) && state.rooms[board.id] && <BoardPanel key={`${board.id}/${board.team ?? ""}`} state={state} id={board.id} team={board.team} onClose={() => setBoard(null)} />}
       {isProject(room) && <BoardList state={state} onOpen={openBoard} />}
+      {isProject(room) && <Progress topics={state.topics?.[room] ?? []} repo={state.rooms[room]?.name ?? ""} />}
       {pmNote && <p className="note low pm-note" role="status">{pmNote}</p>}
       {/* The canvas has no accessible tree, so the roster is the keyboard and screen-reader way in. */}
       <ul className="roster">
