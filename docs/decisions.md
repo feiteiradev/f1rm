@@ -519,3 +519,24 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: dozens of per-task containers from other projects piled up (about 27 running, 12 exited).
 - Rejected: pruning images or untagged resources on our own; removing by name pattern without the user's click.
 - Where: T103, docker-tags 6a44343, task-cleanup fc5cd36
+
+## 2026-11-05 Living spec per project
+
+- Decision: each project repo keeps `docs/spec.md`: what the software does now, one short present-tense section per capability. The first task that changes a behaviour creates it with only its own section, and existing behaviour is never backfilled. A task that changes behaviour edits its section in the same commit, its brief has the criterion "the living spec section <capability> says <behaviour>", and the review blocks on a missing update. A repo's `CLAUDE.md` can name other files; f1rm's are the guidelines and `README.md`. No `merge=union`, since sections are edited in place.
+- Why: the decisions log keeps the why, but nothing said what the software does now; spec tools fail on volume, so one short file, kept current in each task's own commit.
+- Rejected: a constitution file (every session already loads the repo's `CLAUDE.md`); OpenSpec's per-change folder and archive step in the repo (the team board and briefs already live outside it); backfilling the spec for existing behaviour.
+- Where: sdd-rules (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/lead.md, CLAUDE.md)
+
+## 2026-11-05 Size gate for small tasks
+
+- Decision: a task is small when it is one task touching about 3 files at most, holds no product, design or business choice and no core decision, and touches none of the gates, authentication, secrets, shell execution, money or data removal. It gets a short brief; a topic that is one small task gets no grilling rounds (a one-line understanding and the check, then the user's "go"); the lead reads its diff in place of the review subagent. It keeps the failing test first, the full check and `f1rm merge`, and the lead logs each "small" call in calls.md.
+- Why: spec tools turn small fixes into piles of documents (Kiro: one small bug became four user stories and 16 criteria), and the full flow costs more than the work.
+- Rejected: one flow for every size; dropping the failing test or the full check for small tasks.
+- Where: sdd-rules (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/lead.md)
+
+## 2026-11-05 Converge a topic once at close
+
+- Decision: the lead writes the topic's acceptance criteria, each with its proved by, under `## Acceptance criteria` on its team board when it plans. Once every task is merged, before the batch task, it runs each criterion's check once on main; each failing criterion becomes one more task through the same flow, and one still failing after that is listed as open in `DONE <team>`.
+- Why: every task can pass its own criteria while the topic as a whole misses one, since agents skip parts of a spec.
+- Rejected: Spec Kit's loop until converged (rounds that never converge: the 30-round lesson); no check at close.
+- Where: sdd-rules (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/lead.md)

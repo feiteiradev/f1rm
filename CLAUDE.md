@@ -11,3 +11,7 @@ Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, 
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root (created lazily). See `docs/agents/domain.md`.
+
+### Living spec
+
+f1rm's living spec is `plugin/skills/f1rm-guidelines/SKILL.md` (the company rules) and `README.md` (the office).
