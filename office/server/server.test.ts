@@ -749,8 +749,18 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
 const SHOP = { "/code/shop": "/code/shop/.git" };
 const ROOM = "/code/shop/.git";
 const ui = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`${base()}/${token}/${path}`, init);
-const hireOf = (body: unknown, init: RequestInit = {}, token = TOKEN) =>
-  ui("hire", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+// Hire reads `~/.f1rm/usage.json` through HOME: an empty HOME keeps this machine's weekly pace and holds out of the caps under test.
+const emptyHome = mkdtempSync(join(tmpdir(), "f1rm-home-"));
+const hireOf = async (body: unknown, init: RequestInit = {}, token = TOKEN) => {
+  const home = process.env.HOME;
+  process.env.HOME = emptyHome; // shortcut: two hireOf calls in flight at once would race on HOME; none overlap, so await each
+  try {
+    return await ui("hire", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
+  } finally {
+    if (home === undefined) delete process.env.HOME;
+    else process.env.HOME = home;
+  }
+};
 const FULL_SETTINGS = JSON.stringify({ env: { PONYTAIL_DEFAULT_MODE: "full" }, statusLine: { type: "command", command: `'${process.execPath}' '${join(import.meta.dir, "..", "cli", "f1rm.ts")}' usage-tap` } });
 const ASSIGN = { room: ROOM, role: "designer", task: "login-page", brief: "Design the login page. Reply OK and stop." };
 const inRoom = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", ...extra });
