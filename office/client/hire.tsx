@@ -6,8 +6,8 @@ import { JumpButton } from "./jump.tsx";
 import { failure, send } from "./post.ts";
 import "./hire.css";
 
-/** The working hires against the cap; `working` is null when the office couldn't count them. */
-type Hires = { working: number | null; cap: number };
+/** The working hires on the machine; `working` is null when the office couldn't count them. */
+type Hires = { working: number | null };
 type Role = { id: string; title: string; description: string; skills: string[]; model: string; working: number };
 
 const DEMO = import.meta.env.MODE === "demo";
@@ -31,6 +31,13 @@ function useRoles(room: string) {
   return { roles, hires, setHires, error };
 }
 
+/** The dialog's count line: how many hires work, with no cap. */
+export const HireCount = ({ working }: Hires) => (
+  <p className="count" role="status">
+    {working == null ? "The working hires couldn't be counted." : `${working} hires working.`}
+  </p>
+);
+
 /** `teams` are the project's live teams, which a specialist can join. */
 export function HireDialog({ room, name, pm, teams, onClose }: { room: string; name: string; pm: { sessionId: string; name: string } | null; teams: string[]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -42,7 +49,7 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
   const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // The office refused for the cap, so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
+  // The office gave a counted refusal (the usage pacing), so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
   const [capped, setCapped] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const briefBox = useRef<HTMLTextAreaElement>(null);
@@ -56,7 +63,6 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
     return () => opener?.focus?.();
   }, []);
 
-  const full = hires?.working != null && hires.working >= hires.cap;
   const role = roles?.find((r) => r.id === (roleId ?? roles[0]?.id));
   const lead = role?.id === "lead";
   // The task name follows the brief until it is edited by hand.
@@ -109,11 +115,7 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
         <p className="loading" role="status">Reading the roles…</p>
       ) : (
         <form onSubmit={(e) => (e.preventDefault(), hire())}>
-          <p className="count" role="status" data-full={full || undefined}>
-            {hires?.working == null
-              ? "The working hires couldn't be counted."
-              : `${hires.working} of ${hires.cap} hires working.${full ? " That is the cap, so a plain hire is refused." : ""}`}
-          </p>
+          <HireCount working={hires?.working ?? null} />
           <fieldset className="roles">
             <legend>Role</legend>
             {roles.map((r) => (

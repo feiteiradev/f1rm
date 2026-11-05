@@ -111,7 +111,6 @@
 }
 
 .hire .count { grid-column: 1 / -1; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
-.hire .count[data-full] { color: var(--amber); }
 .hire .fields > button.anyway { color: var(--amber); background: transparent; border-color: var(--amber); }
 .hire .fields > button.anyway:hover { color: var(--bg); background: var(--amber); }
 .hire .confirm { margin-top: 8px; padding: 8px; border: 1px solid var(--amber); }

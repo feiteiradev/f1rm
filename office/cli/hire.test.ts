@@ -158,7 +158,7 @@ test("f1rm hire checks the path length of the repo root, in a git repo only: a l
       const r = lead(cwd);
       expect([cwd.length, r.code === 0, r.started]).toEqual([length, false, false]);
       expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
-      // Not a cap refusal: the message stands alone, without the advice to leave the task todo.
+      // Not a counted refusal: the message stands alone, without the advice to leave the task todo.
       expect(r.err).not.toContain("Do not hire");
     }
   } finally {
@@ -431,33 +431,23 @@ test("a usage file at 95% of the 5-hour window holds the real hire (code 75, the
   expect(hire(stubClaude([]), [...pmArgs, "designer", "designer-x", "x", BRIEF], process.cwd(), { HOME: home }).code).toBe(0);
 });
 
-test("at 8 working background sessions, hire waits for a slot, then gives up with code 75 and tells the session to ask nobody", () => {
-  const stub = stubClaude([...Array(7).fill(bg("working")), bg("blocked")]);
-  const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]);
+test("under a usage hold, hire waits for a slot, then gives up with code 75 and tells the session to ask nobody", () => {
+  const home = tmp("f1rm-home-");
+  mkdirSync(join(home, ".f1rm"), { recursive: true });
+  writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: 95, resetsAt: Date.now() / 1000 + 3600 }, readAt: 0 }));
+  const stub = stubClaude([]);
+  const r = hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], process.cwd(), { HOME: home });
   expect(r.code).toBe(75);
-  expect(r.err).toContain("waiting for a slot: 8 hires are already working (the cap is 8)");
+  expect(r.err).toContain("waiting for a slot: usage hold: 5-hour usage is 95%");
   expect(r.err).toContain("no slot yet: run the same command again. Ask nobody; it is not a decision for the user.");
   expect(r.err).not.toContain("--override");
   expect(r.err).not.toContain("asks the user");
   expect(stub.argv()).toBeNull();
 });
 
-test("below the cap hire goes ahead: finished hires and interactive sessions do not count", () => {
-  const stub = stubClaude([
-    ...Array(7).fill(bg("working")),
-    bg("done"),
-    bg("stopped"),
-    bg("failed"),
-    { kind: "interactive" },
-  ]);
+test("9 working background sessions on the machine and hire still goes ahead: there is no machine cap", () => {
+  const stub = stubClaude([...Array(8).fill(bg("working")), bg("blocked"), bg("done"), { kind: "interactive" }]);
   expect(hire(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF]).code).toBe(0);
-  expect(stub.argv()).not.toBeNull();
-});
-
-test("--override hires past the cap", () => {
-  const stub = stubClaude(Array(8).fill(bg("working")));
-  const r = hire(stub, ["--override", ...pmArgs, "designer", "designer-x", "x", BRIEF]);
-  expect(r.code).toBe(0);
   expect(stub.argv()![2]).toBe("f1rm:designer");
 });
 
@@ -557,48 +547,18 @@ test("f1rm hire --simple starts one dev with no lead and no team: <role>-<task> 
   }
 });
 
-test("a project runs at most 2 teams: a third lead is refused, leads elsewhere do not count, and --override passes", () => {
+test("a project runs any number of teams: a third lead is hired beside two live ones", () => {
   const repo = repoDir();
   const two = [bg("done", "lead-checkout", repo), bg("working", "lead-search", repo), bg("working", "lead-blog", "/code/blog")];
-  const r = hire(stubClaude(two), [...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo);
-  expect(r.code).not.toBe(0);
-  expect(r.err).toContain("this project already has 2 teams (the cap is 2)");
-  expect(hire(stubClaude(two.slice(1)), [...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo).code).toBe(0);
-  expect(hire(stubClaude(two), ["--override", ...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo).code).toBe(0);
+  expect(hire(stubClaude(two), [...pmArgs, "lead", "lead-cart", "cart", BRIEF], repo).code).toBe(0);
 });
 
-test("a team works at most 2 at once, its Reviewer included; finished members free their slot", () => {
+test("a team has no cap on working members: a third joins two busy or blocked ones, its Reviewer among them", () => {
   const repo = repoDir();
-  const lead = bg("done", "lead-checkout", repo);
-  const busy = [lead, bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("blocked", "checkout.reviewer-review-api", worktree(repo, "review-api"))];
-  const r = hire(stubClaude(busy), ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo);
-  expect(r.err).toContain("team checkout already has 2 working (the cap is 2 per team)");
-  const freed = [lead, bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("done", "checkout.backend-dev-api", worktree(repo, "api"))];
-  expect(hire(stubClaude(freed), ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
-  expect(hire(stubClaude(busy), ["--override", "--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
-});
-
-test("an idle member frees its team slot though its state still says working; busy, blocked and unreadable status still count", () => {
-  const repo = repoDir();
-  const lead = bg("done", "lead-checkout", repo);
-  const at = (state: string, name: string, task: string, status?: unknown): Session => ({ ...bg(state, `checkout.${name}`, worktree(repo, task)), status });
-  const designer = ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF];
-  const form = at("working", "frontend-dev-form", "form", "busy");
-  // Two devs sent DONE and went idle: Claude Code keeps their state "working", their status says idle.
-  const idle = [lead, at("working", "backend-dev-api", "api", "idle"), at("working", "backend-dev-cart", "cart", "idle")];
-  expect(hire(stubClaude(idle), designer, repo).code).toBe(0);
-  expect(hire(stubClaude([...idle, form]), designer, repo).code).toBe(0);
-  // A busy member, a blocked one (no status) and one whose status is unreadable all count as working.
-  for (const other of [at("working", "backend-dev-api", "api", "busy"), at("blocked", "backend-dev-api", "api"), at("blocked", "backend-dev-api", "api", "idle"), at("working", "backend-dev-api", "api"), at("working", "backend-dev-api", "api", 7), at("working", "backend-dev-api", "api", "IDLE")]) {
-    const r = hire(stubClaude([lead, form, other]), designer, repo);
-    expect(r.err).toContain("team checkout already has 2 working (the cap is 2 per team)");
-  }
-});
-
-test("an idle member frees its slot in the team cap only: the machine cap still counts it", () => {
-  const stub = stubClaude([...Array(8).fill({ ...bg("working"), status: "idle" })]);
-  const r = hire(stub, [...pmArgs, "frontend-dev", "frontend-dev-landing", "landing", BRIEF]);
-  expect(r.err).toContain("8 hires are already working (the cap is 8)");
+  const busy = [bg("done", "lead-checkout", repo), bg("working", "checkout.frontend-dev-form", worktree(repo, "form")), bg("blocked", "checkout.reviewer-review-api", worktree(repo, "review-api"))];
+  const stub = stubClaude(busy);
+  expect(hire(stub, ["--team", "checkout", "designer", "checkout.designer-landing", "landing", BRIEF], repo).code).toBe(0);
+  expect(stub.argv()![4]).toBe("checkout.designer-landing");
 });
 
 test("one specialist per task: a task a live session works in is refused, even with --override", () => {
@@ -673,11 +633,20 @@ function clock(onSleep: (n: number) => void = () => {}) {
   return { wait, said, sleeps: () => n };
 }
 
+/** A HOME whose usage file holds the 5-hour window at `pct`; `set` rewrites it (a test lowers it to lift the hold). */
+function usageHome(pct: number) {
+  const home = tmp("f1rm-home-");
+  mkdirSync(join(home, ".f1rm"), { recursive: true });
+  const set = (p: number) => writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: p, resetsAt: Date.now() / 1000 + 3600 }, readAt: 0 }));
+  set(pct);
+  return { home, set };
+}
+
 /** `f1rm hire` run in this process (so its waiting is injected), in `cwd`, against the stub `claude`. */
-async function inProcess(stub: ReturnType<typeof stubClaude>, words: string[], wait: Wait, cwd = repoDir()) {
+async function inProcess(stub: ReturnType<typeof stubClaude>, words: string[], wait: Wait, cwd = repoDir(), home = tmp("f1rm-home-")) {
   const saved = { path: process.env.PATH, home: process.env.HOME, cwd: process.cwd() };
   process.env.PATH = `${stub.bin}:${saved.path}`;
-  process.env.HOME = tmp("f1rm-home-");
+  process.env.HOME = home;
   process.chdir(cwd);
   try {
     return await hireCommand(words, wait);
@@ -688,19 +657,21 @@ async function inProcess(stub: ReturnType<typeof stubClaude>, words: string[], w
   }
 }
 
-test("a hire refused by the machine cap polls, prints one waiting line, and hires as soon as a slot frees", async () => {
-  const stub = stubClaude(Array(8).fill(bg("working")));
-  const c = clock((n) => n === 2 && writeFileSync(join(stub.bin, "agents.json"), JSON.stringify(Array(7).fill(bg("working")))));
-  expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], c.wait)).toBe(0);
+test("a hire refused by the usage hold polls, prints one waiting line, and hires as soon as the hold lifts", async () => {
+  const stub = stubClaude([]);
+  const u = usageHome(95);
+  const c = clock((n) => n === 2 && u.set(50));
+  expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], c.wait, repoDir(), u.home)).toBe(0);
   expect(c.sleeps()).toBe(2);
-  expect(c.said).toEqual(["waiting for a slot: 8 hires are already working (the cap is 8)."]);
+  expect(c.said).toHaveLength(1);
+  expect(c.said[0]).toStartWith("waiting for a slot: usage hold: 5-hour usage is 95%");
   expect(stub.argv()![2]).toBe("f1rm:designer");
 });
 
 test("a hire that never gets a slot waits 8 minutes, says so at most once a minute, then exits 75 and starts nothing", async () => {
-  const stub = stubClaude(Array(8).fill(bg("working")));
+  const stub = stubClaude([]);
   const c = clock();
-  expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], c.wait)).toBe(75);
+  expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], c.wait, repoDir(), usageHome(95).home)).toBe(75);
   expect(c.sleeps()).toBe(24);
   expect(c.said.filter((l) => l.startsWith("waiting for a slot: ")).length).toBe(9);
   expect(c.said.at(-1)).toBe(NO_SLOT);
@@ -711,9 +682,9 @@ test("F1RM_SLOT_WAIT_MS that is not a number falls back to the 8 minutes, and 0 
   const saved = process.env.F1RM_SLOT_WAIT_MS;
   try {
     process.env.F1RM_SLOT_WAIT_MS = "abc";
-    const stub = stubClaude(Array(8).fill(bg("working")));
+    const stub = stubClaude([]);
     const c = clock();
-    expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], { ...c.wait, total: realWait().total })).toBe(75);
+    expect(await inProcess(stub, [...pmArgs, "designer", "designer-x", "x", BRIEF], { ...c.wait, total: realWait().total }, repoDir(), usageHome(95).home)).toBe(75);
     expect(c.sleeps()).toBe(24);
     process.env.F1RM_SLOT_WAIT_MS = "0";
     expect(realWait().total).toBe(0);
@@ -722,24 +693,15 @@ test("F1RM_SLOT_WAIT_MS that is not a number falls back to the 8 minutes, and 0 
   }
 });
 
-test("the team and project caps wait too; a refusal that is no counted cap is immediate", async () => {
+test("a refusal that is no usage wait is immediate, with 9 sessions working", async () => {
   const repo = repoDir();
-  const lead = bg("working", "lead-checkout", repo);
-  const members = [bg("working", "checkout.designer-a", worktree(repo, "a")), bg("working", "checkout.researcher-b", worktree(repo, "b"))];
-  const team = clock();
-  expect(await inProcess(stubClaude([lead, ...members]), ["--team", "checkout", "designer", "checkout.designer-c", "c", BRIEF], team.wait, repo)).toBe(75);
-  expect(team.said[0]).toBe("waiting for a slot: team checkout already has 2 working (the cap is 2 per team).");
-  const teams = clock();
-  const two = [bg("working", "lead-a", repo), bg("working", "lead-b", repo)];
-  expect(await inProcess(stubClaude(two), [...pmArgs, "lead", "lead-c", "c", BRIEF], teams.wait, repo)).toBe(75);
-  expect(teams.said[0]).toBe("waiting for a slot: this project already has 2 teams (the cap is 2).");
   // One specialist per task, a role not allowed, a name that does not fit: they throw at once and never sleep.
   for (const [words, why] of [
     [["frontend-dev", "frontend-dev-landing", "landing", BRIEF], "one specialist per task"],
     [["janitor", "janitor-x", "x", BRIEF], 'unknown role "janitor"'],
   ] as const) {
     const c = clock();
-    const crowd = [...Array(8).fill(bg("working")), bg("done", "designer-landing", worktree(repo, "landing"))];
+    const crowd = [...Array(9).fill(bg("working")), bg("done", "designer-landing", worktree(repo, "landing"))];
     await expect(inProcess(stubClaude(crowd), [...pmArgs, ...words], c.wait, repo)).rejects.toThrow(why);
     expect([why, c.sleeps(), c.said]).toEqual([why, 0, []]);
   }

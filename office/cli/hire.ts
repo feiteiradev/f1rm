@@ -1,4 +1,4 @@
-// `f1rm hire`: the only way the PM starts a lead or a specialist and a lead starts its team, so the caps live in code. The office's Hire dialog uses `planHire` too.
+// `f1rm hire`: the only way the PM starts a lead or a specialist and a lead starts its team, so the hire checks and the usage hold live in code. The office's Hire dialog uses `planHire` too.
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { FOUNDER_ONLY, MODELS, roleOfAgentType } from "../people.ts";
@@ -12,10 +12,6 @@ export const USAGE =
   "       f1rm hire lead lead-<team> <team> <brief>";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
-/** Working background sessions on the whole machine, leads and the user's own included. */
-export const CAP = 8;
-/** Live leads in one repo, and working sessions in one team (its Reviewer included). */
-export const TEAMS = 2, TEAM_CAP = 2;
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // /research is a slash command: given in `--skills` it becomes the brief's first command instead of joining the list.
 // pstack's poteto-mode, architect and how carry disable-model-invocation, so the Skill tool refuses them: each runs only as the first command, and a hire has one.
@@ -105,7 +101,7 @@ export function readRoles(): Role[] {
 }
 
 /**
- * A hire was refused. `working` is the number of working hires when a cap refused it: the caller then adds the advice to leave the task todo and tell the session to report to.
+ * A hire was refused. `working` is the number of working hires when a counted refusal (the usage hold, the one-team pace) refused it: the hire waits for a slot.
  * It is null for any other refusal (the hires couldn't be counted, the repo's path is too long): the message then stands alone.
  */
 export class HireRefused extends Error {
@@ -142,7 +138,7 @@ export type HireRequest = {
   content?: boolean;
   /** A topic lead: its first command is the grilling interview with the user. A lead only. */
   topic?: boolean;
-  /** A simple task: the PM's one dev, designer or researcher with no lead and no team. It counts as a team of one in the project's cap. */
+  /** A simple task: the PM's one dev, designer or researcher with no lead and no team. It counts as a team of one in the one-team pace. */
   simple?: boolean;
   /** Flags that go to claude as given. */
   extra?: string[];
@@ -153,12 +149,13 @@ export type HireRequest = {
 /** The live background sessions Claude Code lists, as `machine.backgroundSessions` gives them. */
 export type LiveHires = { name: string; state: string; cwd: string; status?: "busy" | "idle" }[];
 
-/** A HireRefused by the usage hold: a counted wait like a cap, but the office's auto-wake keeps its stop for a later tick instead of reporting a failed wake. */
+/** A HireRefused by the usage hold: a counted wait, but the office's auto-wake keeps its stop for a later tick instead of reporting a failed wake. */
 export class UsageHold extends HireRefused {}
 
 /**
- * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the caps
- * (8 working on the machine, 2 teams per project, 2 working per team). A simple task is a team of one: live leads and live simple tasks make up the teams. Throws an Error, or a HireRefused for a cap. `override` skips the caps only.
+ * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the usage pacing
+ * (the hold, and one team per project while the weekly usage runs ahead of pace). No count of sessions, teams or members caps a start. A simple task is a team of one: live leads and live simple tasks make up the teams.
+ * Throws an Error, or a HireRefused for the pacing. `override` skips the pacing only.
  */
 export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override, usage, now }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean; usage?: Usage | null; now?: number }): void {
   const lead = role === "lead";
@@ -168,23 +165,20 @@ export function checkSlots(live: LiveHires, { role, name, task, team, cwd, overr
   if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
   // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
   if (role === "reviewer" && live.some((s) => s.name === name && s.cwd === cwd)) throw new Error(`a session named "${name}" is already running: one Reviewer per task`);
-  // One specialist per task, whatever the caps say: a second hire there would work the same branch.
+  // One specialist per task: a second hire there would work the same branch.
   if (!lead && live.some((s) => s.cwd === join(cwd, ".claude", "worktrees", task))) throw new Error(`a session already works on task "${task}": one specialist per task`);
   if (!override) {
     // No reading, no pacing: only the real callers (the hire command, the Hire route, planWake) hand one in.
     const at = now ?? Date.now() / 1000;
     const pace = pacing(usage ?? null, at);
     if (pace.hold) throw new UsageHold(`usage hold: ${pace.hold.reason}; new sessions wait until ${when(pace.hold.until, at)}`, busy.length);
-    if (busy.length >= CAP) throw new HireRefused(`${busy.length} hires are already working (the cap is ${CAP}).`, busy.length);
-    // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
-    const worktrees = join(cwd, ".claude", "worktrees") + "/";
-    const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
-    const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
-    if ((lead || simple) && teams >= TEAMS) throw new HireRefused(`this project already has ${teams} teams (the cap is ${TEAMS}).`, busy.length);
-    if ((lead || simple) && pace.oneTeam && teams >= 1) throw new HireRefused("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)", busy.length);
-    // A member that ended its turn (after its DONE, say) sits idle but keeps state "working", so only that pair frees the slot; a blocked member, or one with no or another status, counts as working.
-    const members = team ? busy.filter((s) => s.name.startsWith(`${team}.`) && !(s.state === "working" && s.status === "idle")).length : 0;
-    if (members >= TEAM_CAP) throw new HireRefused(`team ${team} already has ${members} working (the cap is ${TEAM_CAP} per team).`, busy.length);
+    if ((lead || simple) && pace.oneTeam) {
+      // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
+      const worktrees = join(cwd, ".claude", "worktrees") + "/";
+      const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
+      const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
+      if (teams >= 1) throw new HireRefused("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)", busy.length);
+    }
   }
 }
 
@@ -194,12 +188,12 @@ const reviewParagraph = (task: string, repo: string, level: string) =>
   `${level === "high" ? ", and the security-review skill on that same diff" : ""}. Have it sort its findings as blocking or non-blocking. Fix the blocking findings ONCE and run your checks again. ` +
   `Send the non-blocking findings to ~/.f1rm/kept/${repo}/findings.md as lines in its table format (| date | area | status | finding | evidence |). ` +
   `If a second review would still have blocking findings, run \`f1rm report ESCALATE ${task}\` and send \`ESCALATE ${task}\` to your Report to session instead of fixing again: its owner decides (re-scope, one more fix pass, or accept with the finding logged). ` +
-  `Implement inline and never delegate the implementation: the one subagent you start is this reviewer (and at most 2 interns, as before). Your DONE states the review round count and the review level. ` +
+  `Implement inline and never delegate the implementation: the one subagent you start is this reviewer. Your DONE states the review round count and the review level. ` +
   `Put at least one failing test in every task: a branch of test-only or renamed tests has no failing new test, and \`f1rm merge\` will not land it. If the task cannot have one, send \`ESCALATE ${task}\`: its owner decides.`;
 
 /**
  * Checks a hire and returns the exact `claude` argv that starts it. Throws an Error for a bad role, task name or model,
- * and a HireRefused when the cap is full, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
+ * and a HireRefused when the usage pacing holds it, the working hires can't be counted, or the repo's path is too long. The caller spawns it.
  */
 export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgroundSessions" | "gitCommonDir"> = machine): Promise<string[]> {
   const { role, task, team, cwd, brief, model, override, level, simple, skills: added = [], extra = [] } = req;
@@ -295,7 +289,7 @@ export function parseHireFlags(words: string[]) {
   return { override, reportTo, team, level, content, simple, topic, skills, args };
 }
 
-/** How long a hire or a wake refused by a counted cap waits (under the 10 minutes a Bash call lasts), how often it looks again, and how often it says it still waits. */
+/** How long a hire or a wake refused by a counted refusal (the usage pacing) waits (under the 10 minutes a Bash call lasts), how often it looks again, and how often it says it still waits. */
 export const WAIT_MS = 8 * 60_000, POLL_MS = 20_000, SAY_MS = 60_000;
 export const NO_SLOT = "no slot yet: run the same command again. Ask nobody; it is not a decision for the user.";
 /** The exit code of a hire or a wake that found no slot in time: EX_TEMPFAIL, run it again. */
@@ -305,7 +299,7 @@ export type Wait = { sleep: (ms: number) => Promise<unknown>; now: () => number;
 export const realWait = (): Wait => ({ sleep: Bun.sleep, now: Date.now, total: Number(process.env.F1RM_SLOT_WAIT_MS ?? WAIT_MS) || (process.env.F1RM_SLOT_WAIT_MS === "0" ? 0 : WAIT_MS), say: (line) => console.error(line) });
 
 /**
- * Runs `attempt` until no counted cap (a HireRefused with a working count) refuses it, polling every POLL_MS and saying `waiting for a slot: <the cap>` at the start and then once a minute.
+ * Runs `attempt` until no counted refusal (a HireRefused with a working count) refuses it, polling every POLL_MS and saying `waiting for a slot: <the refusal>` at the start and then once a minute.
  * Returns null, after saying NO_SLOT, when `total` has passed. Any other refusal is thrown at once.
  */
 export async function untilSlot<T>(attempt: () => Promise<T>, w: Wait): Promise<T | null> {
@@ -323,7 +317,7 @@ export async function untilSlot<T>(attempt: () => Promise<T>, w: Wait): Promise<
   }
 }
 
-/** Runs `f1rm hire` and returns the exit code. A cap waits for a free slot (see untilSlot); `--override` is the user's own terminal's. */
+/** Runs `f1rm hire` and returns the exit code. The usage pacing waits for a free slot (see untilSlot); `--override` is the user's own terminal's. */
 export async function hire(words: string[], wait: Wait = realWait()): Promise<number> {
   const { override, reportTo, team, level, content, simple, topic, skills, args } = parseHireFlags(words);
   const [role, name, task, brief, ...extra] = args;

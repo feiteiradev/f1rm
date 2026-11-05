@@ -1,7 +1,7 @@
-// The flat hire: `--simple` (the PM's one dev for a simple task), the leads' and the Reviewer's limits, `--level` on the devs, the dev's Review paragraph, and the cap that counts a simple task as a team.
+// The flat hire: `--simple` (the PM's one dev for a simple task), the leads' and the Reviewer's limits, `--level` on the devs, the dev's Review paragraph, and no team cap on a simple task.
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { checkSlots, HireRefused, parseHireFlags, planHire, type HireRequest, type LiveHires } from "./hire.ts";
+import { checkSlots, parseHireFlags, planHire, type HireRequest, type LiveHires } from "./hire.ts";
 import { letgo } from "./letgo.ts";
 
 const REPO = "/code/shop";
@@ -67,7 +67,7 @@ test("the dev's prompt carries the Review: one fresh-context subagent, fixed onc
   expect(text).toContain("Fix the blocking findings ONCE and run your checks again.");
   expect(text).toContain("Send the non-blocking findings to ~/.f1rm/kept/shop/findings.md as lines in its table format");
   expect(text).toContain("If a second review would still have blocking findings, run `f1rm report ESCALATE merge-cmd` and send `ESCALATE merge-cmd` to your Report to session instead of fixing again: its owner decides (re-scope, one more fix pass, or accept with the finding logged).");
-  expect(text).toContain("Implement inline and never delegate the implementation: the one subagent you start is this reviewer");
+  expect(text).toContain("Implement inline and never delegate the implementation: the one subagent you start is this reviewer. Your DONE"); // no intern cap named
   expect(text).toContain("Your DONE states the review round count and the review level.");
   expect(text).toContain("Put at least one failing test in every task");
   expect(text).toContain("send `ESCALATE merge-cmd`: its owner decides");
@@ -79,32 +79,20 @@ test("the dev's prompt carries the Review: one fresh-context subagent, fixed onc
   for (const role of ["designer", "researcher"]) expect(promptOf(await plan({ role }))).not.toContain("run ONE review");
 });
 
-test("the cap counts a simple task as a team of one: live leads and live simple tasks together make 2 teams, a third is refused, and --override, another repo and a team's member do not count", async () => {
+test("no cap counts teams or sessions: a third and a fourth team start beside a lead and a simple task, and so does a hire with 9 working on the machine", async () => {
   const solo = session("backend-dev-y", wt("y"));
   const ask = (live: LiveHires, over: Partial<Parameters<typeof checkSlots>[1]> = {}) =>
     checkSlots(live, { role: "backend-dev", name: "backend-dev-x", task: "x", cwd: REPO, ...over });
   const lead = (name: string) => ({ role: "lead", name, task: name.slice(5), cwd: REPO });
-  // a lead and a simple task are two teams
-  expect(() => ask([LEAD, solo])).toThrow("this project already has 2 teams (the cap is 2)");
-  expect(() => checkSlots([LEAD, solo], lead("lead-cart"))).toThrow("this project already has 2 teams (the cap is 2)");
-  expect(() => ask([solo, session("designer-z", wt("z"), "done")])).toThrow("2 teams");
-  // one team is room for a simple task, or a lead
-  expect(() => ask([LEAD])).not.toThrow();
-  expect(() => ask([solo])).not.toThrow();
-  expect(() => checkSlots([solo], lead("lead-cart"))).not.toThrow();
-  // override passes; a simple task of another repo, a team's member and the lead's own worktree session do not count
-  expect(() => ask([LEAD, solo], { override: true })).not.toThrow();
-  expect(() => ask([LEAD, session("backend-dev-q", "/code/blog/.claude/worktrees/q")])).not.toThrow();
-  expect(() => ask([LEAD, session("checkout.backend-dev-w", wt("w"))])).not.toThrow();
-  // the cap does not depend on a flag: a team-less hire the Hire dialog or a plain session starts is a team too, and what refuses a wake refuses it
-  expect(() => checkSlots([LEAD, solo], { role: "designer", name: "designer-x", task: "x", cwd: REPO })).toThrow("this project already has 2 teams");
-  // a team's member, a Reviewer and a lead's own hires are not hired as a team of one
-  expect(() => checkSlots([LEAD, solo], { role: "designer", name: "checkout.designer-x", task: "x", team: "checkout", cwd: REPO })).not.toThrow();
-  expect(() => checkSlots([LEAD, solo], { role: "reviewer", name: "reviewer-review-x", task: "review-x", cwd: REPO })).not.toThrow();
-  // a session of the user's own (a name that is no hire's) working in a worktree of the repo is no team
-  expect(() => ask([LEAD, session("my-own-session", wt("mine"))])).not.toThrow();
-  // the machine cap of 8 counts everyone
-  expect(() => ask(Array(8).fill(session("elsewhere-x", "/elsewhere")))).toThrow("8 hires are already working");
+  // a lead and a simple task are two teams; a third simple task, a third lead and a fourth one all start
+  expect(() => ask([LEAD, solo])).not.toThrow();
+  expect(() => checkSlots([LEAD, solo], lead("lead-cart"))).not.toThrow();
+  expect(() => checkSlots([LEAD, solo, session("lead-cart", REPO)], lead("lead-pay"))).not.toThrow();
+  expect(() => checkSlots([LEAD, solo], { role: "designer", name: "designer-x", task: "x", cwd: REPO })).not.toThrow();
+  // 9 working on the machine
+  expect(() => ask(Array(9).fill(session("elsewhere-x", "/elsewhere")))).not.toThrow();
+  // one specialist per task still refuses
+  expect(() => ask([LEAD, session("backend-dev-x", wt("x"))])).toThrow("one specialist per task");
 });
 
 test("f1rm letgo lets a simple dev go like a team member: its session, then its worktree and branch", async () => {
@@ -144,9 +132,6 @@ test("--topic with a slash-only --skills is refused; with a plain --skills it is
   expect(prompt.split("\n")[0]).toContain("ponytail:ponytail");
 });
 
-test("a third topic lead with two live teams is refused naming the cap", async () => {
-  const err = await plan({ role: "lead", task: "c", topic: true }, [session("lead-a", REPO), session("lead-b", REPO)]).catch((e) => e);
-  expect(err).toBeInstanceOf(HireRefused);
-  expect(err.message).toContain("the cap is 2");
-  expect(err.working).toBe(2);
+test("a third topic lead with two live teams is hired: a project has no team cap", async () => {
+  expect((await plan({ role: "lead", task: "c", topic: true }, [session("lead-a", REPO), session("lead-b", REPO)]))[5]).toBe("lead-c");
 });

@@ -1,10 +1,10 @@
-// Seam: the office's recovery tick. createRecovery against an injected `claude agents --json --all`, transcripts, boards, store, clock, wake and tell; the real wake code (planWake) for the caps.
+// Seam: the office's recovery tick. createRecovery against an injected `claude agents --json --all`, transcripts, boards, store, clock, wake and tell; the real wake code (planWake) for the hire checks.
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recoveryFile } from "../cli/status.ts";
-import { HireRefused, LOAD_FIRST } from "../cli/hire.ts";
+import { HireRefused, LOAD_FIRST, UsageHold } from "../cli/hire.ts";
 import { planWake } from "../cli/wake.ts";
 import { parseBoard, type BoardRow } from "./board.ts";
 import { sleepGrace } from "./sleep.ts";
@@ -348,7 +348,7 @@ test("a live idle simple dev whose turn ended without a report is nudged in its 
   }
 });
 
-test("the caps are the same code as hire and wake: a full team is not woken past its cap, and its Report to is told", async () => {
+test("the auto-wake goes through the same checks as hire and wake, with no cap: a team with two working and 9 on the machine is woken; a second session on the task is not, and its Report to is told", async () => {
   // The wake is planWake itself, against the fake listing: its refusals are the ones `f1rm wake` gives.
   const planning = () => {
     const o: ReturnType<typeof office> = office({
@@ -363,19 +363,20 @@ test("the caps are the same code as hire and wake: a full team is not woken past
     return o;
   };
   const team = [live("lead-shop", "lead-sid", REPO), live("shop.designer-a", "a-sid", wt("a"))];
-  const full = planning();
-  stoppedDev(full, [say("compiling", 1)]);
-  full.w.list = [...team, live("shop.designer-b", "b-sid", wt("b")), ended(DEV, "dev-1", DEV_CWD)];
-  await full.tick();
-  expect(full.w.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped; f1rm wake ${DEV}` }]);
-  expect(full.w.store[REPO][DEV].note).toContain("already has 2 working");
-  // The same stop with room in the team goes through planWake and is woken: no refusal, nobody told.
-  const free = planning();
-  stoppedDev(free, [say("compiling", 1)]);
-  free.w.list = [...team, ended(DEV, "dev-1", DEV_CWD)];
-  await free.tick();
-  expect(free.w.told).toEqual([]);
-  expect(free.w.store[REPO][DEV].wokeFrom).toBe("dev-1");
+  const crowd = Array.from({ length: 9 }, (_, i) => live(`far.designer-${i}`, `far-${i}`, `/code/far/.claude/worktrees/t${i}`));
+  const busy = planning();
+  stoppedDev(busy, [say("compiling", 1)]);
+  busy.w.list = [...team, live("shop.designer-b", "b-sid", wt("b")), ...crowd, ended(DEV, "dev-1", DEV_CWD)];
+  await busy.tick();
+  expect(busy.w.told).toEqual([]);
+  expect(busy.w.store[REPO][DEV].wokeFrom).toBe("dev-1");
+  // A refusal planWake still gives is a failed wake: its Report to is told.
+  const taken = planning();
+  stoppedDev(taken, [say("compiling", 1)]);
+  taken.w.list = [...team, live("shop.backend-dev-other", "o-sid", DEV_CWD), ended(DEV, "dev-1", DEV_CWD)];
+  await taken.tick();
+  expect(taken.w.told).toEqual([{ to: "lead-shop", message: `${DEV} stopped; f1rm wake ${DEV}` }]);
+  expect(taken.w.store[REPO][DEV].note).toContain("one specialist per task");
 });
 
 test("it never wakes an interactive session, the PM, a let-go hire, a stop whose report was sent, or a project that is not registered", async () => {
@@ -1199,43 +1200,54 @@ test("a tick gap of exactly 2 minutes is no sleep", async () => {
   expect(o.w.woke).toEqual([{ repo: REPO, name: DEV, note: NOTE_ENDED }]);
 });
 
-test("a resume wakes the hires the pause stopped one at a time, leads first, and waits for a free slot when the cap of 8 is full", async () => {
-  const DEV_B = "shop.backend-dev-other";
-  const planning = () => {
-    const o: ReturnType<typeof office> = office({
-      wake: async (repo, name, note) => {
-        const plan = await planWake({ target: name, message: note, cwd: repo }, {
-          agents: async (all) => (all ? o.w.list : o.w.list.filter((a) => a.pid || a.state === "blocked")),
-          gitCommonDir: () => `${repo}/.git`, home: "/nonexistent-home", now: T0, exists: () => true, modelOf: () => null, promptOf: () => null,
-        });
-        o.w.woke.push({ repo, name, note });
-        o.w.list.push(live(name, `new-${name}`, plan.cwd)); // the woken session is a live working one: it holds a slot
-      },
-    });
-    return o;
-  };
-  const o = planning();
-  const others = Array.from({ length: 7 }, (_, i) => live(`far.designer-${i}`, `far-${i}`, `/code/far/.claude/worktrees/t${i}`));
+/** An office whose wake is the real planWake against the fake listing, reading usage from `home`; a woken session joins the listing as a live working one. */
+const resuming = (home = "/nonexistent-home") => {
+  const o: ReturnType<typeof office> = office({
+    wake: async (repo, name, note) => {
+      const plan = await planWake({ target: name, message: note, cwd: repo }, {
+        agents: async (all) => (all ? o.w.list : o.w.list.filter((a) => a.pid || a.state === "blocked")),
+        gitCommonDir: () => `${repo}/.git`, home, now: T0, exists: () => true, modelOf: () => null, promptOf: () => null,
+      });
+      o.w.woke.push({ repo, name, note });
+      o.w.list.push(live(name, `new-${name}`, plan.cwd));
+    },
+  });
+  return o;
+};
+const DEV_B = "shop.backend-dev-other";
+/** The shop's lead and two devs the pause stopped, a third dev whose row is done, and `others` working elsewhere. */
+const pausedShop = (o: ReturnType<typeof office>, others: Listed[]) => {
   o.w.list = [...others, ended("lead-shop", "lead-old", REPO), ended(DEV, "dev-1", DEV_CWD), ended(DEV_B, "dev-2", wt("other")), ended("shop.backend-dev-done", "dev-3", wt("done"))];
   o.w.boards.pm = [row("lead-shop", "doing", "shop")];
   o.w.boards.shop = [row(DEV, "doing", "checkout"), row(DEV_B, "review", "other"), row("shop.backend-dev-done", "done", "done")];
-  // 7 working elsewhere: the lead takes the 8th slot. The next wake finds the cap full and waits; a slot is freed at the third wait.
-  const freed: string[] = [];
-  o.w.onSleep = () => {
-    const far = (a: Listed) => String(a.name).startsWith("far.");
-    if (o.w.slept.length >= 3 && o.w.list.some(far)) {
-      const gone = o.w.list.findIndex(far);
-      freed.push(String(o.w.list[gone].name));
-      o.w.list.splice(gone, 1);
-    }
-    expect(o.w.woke.length).toBeLessThanOrEqual(1 + freed.length); // never past the cap
-  };
+};
+
+test("a resume wakes the hires the pause stopped one at a time, leads first, with 9 working elsewhere and no wait: there is no machine cap", async () => {
+  const o = resuming();
+  pausedShop(o, Array.from({ length: 9 }, (_, i) => live(`far.designer-${i}`, `far-${i}`, `/code/far/.claude/worktrees/t${i}`)));
+  const stop = new AbortController();
+  o.w.onSleep = () => stop.abort(); // a wait would be a cap: end the resume there
   const where = `${NOTE_PAUSE} You stopped at checkpoint cp-9: your task other.`;
-  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"], undefined, undefined, { [DEV_B]: where });
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"], stop.signal, undefined, { [DEV_B]: where });
   // Leads first; the one whose row is done is not woken; a hire with a where-it-stopped note from the manifest gets it, the others the plain pause note.
   expect(o.w.woke).toEqual(["lead-shop", DEV, DEV_B].map((name) => ({ repo: REPO, name, note: name === DEV_B ? where : NOTE_PAUSE })));
-  expect(o.w.slept).toEqual([10_000, 10_000, 10_000, 10_000]); // the first dev waits three times (the third frees a slot), the second once
-  expect(freed).toHaveLength(2);
+  expect(o.w.slept).toEqual([]);
+});
+
+test("a resume under the usage hold waits and asks again until the hold lifts, then wakes the rest", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hold-"));
+  mkdirSync(join(home, ".f1rm"), { recursive: true });
+  const usage = (pct: number) => writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: pct, resetsAt: T0 / 1000 + 3600 }, readAt: 0 }));
+  usage(95);
+  const o = resuming(home);
+  pausedShop(o, []);
+  o.w.onSleep = () => {
+    expect(o.w.woke).toEqual([]); // nothing starts while the hold is on
+    if (o.w.slept.length >= 3) usage(50);
+  };
+  await o.rec.resume(REPO, [DEV, "shop.backend-dev-done", DEV_B, "lead-shop"]);
+  expect(o.w.woke.map((x) => x.name)).toEqual(["lead-shop", DEV, DEV_B]);
+  expect(o.w.slept).toEqual([10_000, 10_000, 10_000]); // the lead waits three times; the hold lifts at the third
 });
 
 test("a resume from a manifest gives each hire its own note, where it stopped, leads first, and the default pause note to one with none", async () => {
@@ -1276,7 +1288,7 @@ test("a resume that is aborted stops waiting, and a wake refused for another rea
   await o.rec.resume(REPO, [DEV, "shop.backend-dev-b", "lead-shop"]);
   expect(o.w.woke.map((x) => x.name)).toEqual(["lead-shop", "shop.backend-dev-b"]);
   expect(o.w.store[REPO][DEV].note).toContain("let go");
-  const stuck = office({ wake: async () => { throw new HireRefused("8 hires are already working (the cap is 8).", 8); } });
+  const stuck = office({ wake: async () => { throw new UsageHold("usage hold: 5-hour usage is 95% (resets 20:00); new sessions wait until 20:00", 1); } });
   stuck.w.boards.pm = [row("lead-shop", "doing", "shop")];
   const stop = new AbortController();
   stuck.w.onSleep = () => stop.abort();
@@ -1332,7 +1344,7 @@ test("a wake refused by the usage hold is not a failed wake: no stop is marked, 
         expect(o.w.store[REPO][DEV].wokeFrom).toBe("dev-1");
       }
     }
-    // the wake itself is a counted refusal, like a cap
+    // the wake itself is a counted refusal
     const o = planning();
     stoppedDev(o, [say("compiling", 1)]);
     usage(95);

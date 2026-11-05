@@ -36,7 +36,7 @@ export async function pauseCall(verb: "pause" | "resume", words: string[], d: Pa
   }
   if (!names) return `${all ? "no project is" : "this project is not"} paused`;
   const lost = (body.lost ?? []).map((l) => `\nNOT woken: ${l.name} (${l.why})`).join("");
-  return `resumed ${names}${body.waking ? `: continuing ${body.waking} ${body.waking === 1 ? "hire" : "hires"} one at a time, as the cap of 8 allows (\`f1rm status\` shows them)` : ""}${lost}`;
+  return `resumed ${names}${body.waking ? `: continuing ${body.waking} ${body.waking === 1 ? "hire" : "hires"} one at a time (\`f1rm status\` shows them)` : ""}${lost}`;
 }
 
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;

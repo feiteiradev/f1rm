@@ -16,7 +16,7 @@ import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
 import { readUsage, usageFile } from "../usage.ts";
 import { evidenceFile, proofType, topicProgress, type Topic } from "./progress.ts";
-import { CAP, HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
+import { HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
@@ -32,8 +32,8 @@ import { createLeftovers, usageView } from "./gauges.ts";
 const MAX_MESSAGE = 4000;
 const MAX_WHY = 200;
 const STOP_TRIES = 3; // `claude stop` attempts on one busy session of a paused project
-// The company limits a hook can hold. Only the PM and the leads hire, and no company employee runs more than INTERNS interns
-// at once. Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
+// The company limits a hook can hold. Only the PM and the leads hire, and no company employee starts a role as an intern.
+// Freelancers are the user's own sessions and are never held. With the office down the hooks fail open, and the rules
 // in the plugin are what is left.
 // A raw `claude --bg` or `claude -p` is held too (see claudeStart); `bash -c "claude -p …"`, an alias or a script that runs it is not seen.
 // `f1rm hire` counts only in command position (see splitCommands), so a command that merely mentions it passes.
@@ -334,7 +334,6 @@ const linkedWorktree = (cwd: string, gitDir: string, bases: string[], worktree: 
 };
 const isLink = (file: string) => { try { return lstatSync(file).isSymbolicLink(); } catch { return false; } };
 const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
-export const INTERNS = 2;
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
 const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED|NEEDS[\s_-]+YOU)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
@@ -422,8 +421,6 @@ const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) =
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
 /** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
 const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
-// An Agent call let through counts as an intern until its SubagentStart, or for this long if that never comes.
-const PENDING_MS = 60_000;
 const MAX_BRIEF = 8000;
 /** How long the SendMessage gate waits for `claude agents --json --all`. The hook gives up after 5 s and then lets the call through, so a slower listing must read as "can't say" and end in the unknown-name refusal. */
 export const GATE_LISTING_MS = 3000;
@@ -585,8 +582,6 @@ export function startServer({
 
   // ponytail: replays the whole log on every start; add snapshots or pruning when startup gets slow.
   let state = emptyOffice();
-  // Agent calls let through and not started yet, by session: parallel calls all reach PreToolUse before any SubagentStart.
-  const pendingInterns = new Map<string, number[]>();
   // The skills a hire's first prompt names, and the ones its Skill calls have loaded, by session. The prompt itself is never kept.
   // ponytail: in memory, so an office restart empties it and the gate fails open; persist it if hires outlive restarts in practice.
   // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
@@ -806,7 +801,7 @@ export function startServer({
       if (hires.some((h) => h.role === "lead")) return refuse("hire", "A lead hires specialists for its own team, never another lead. Ask the PM for a new team.");
       if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
     }
-    // A cap makes a hire or a wake wait for a free slot; `--override` is the user's own terminal's and the Hire dialog's, never a session's.
+    // The usage hold makes a hire or a wake wait for a free slot; `--override` is the user's own terminal's and the Hire dialog's, never a session's.
     if (role && commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isOverrideWord)))) {
       return refuse("override", "No session exceeds a cap. Run the same command again: it waits for a free slot.");
     }
@@ -856,13 +851,8 @@ export function startServer({
     if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
       return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
     }
-    if (tool === "Agent" || tool === "Task") {
-      if (String(input.subagent_type ?? "").startsWith("f1rm:")) return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
-      const now = clock();
-      const pending = (pendingInterns.get(sessionId) ?? []).filter((t) => now - t < PENDING_MS);
-      const running = Object.values(state.interns).filter((i) => i.parent === sessionId).length;
-      if (running + pending.length >= INTERNS) return refuse("interns", `You already have ${INTERNS} interns working, the most an employee runs at once. Wait for one to finish, or do this step yourself.`);
-      pendingInterns.set(sessionId, [...pending, now]);
+    if ((tool === "Agent" || tool === "Task") && String(input.subagent_type ?? "").startsWith("f1rm:")) {
+      return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
     }
     return null;
   }
@@ -1157,9 +1147,6 @@ export function startServer({
             if (why) return Response.json({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } });
           }
           trackSession(event);
-          if (event.kind === "SubagentStart" || (event.kind === "PostToolUseFailure" && ["Agent", "Task"].includes(String(payload.tool_name)))) {
-            pendingInterns.get(event.sessionId)?.shift();
-          }
           if (event.kind === "PermissionRequest") {
             server.timeout(req, 0); // the hold outlasts the idle timeout
             const tool = String(payload.tool_name ?? "");
@@ -1323,7 +1310,7 @@ export function startServer({
           const known = roleOfAgentType(`f1rm:${id}`);
           return known === "lead" ? ROLE_IDS.length : known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length + 1;
         };
-        // The cap counts every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
+        // Every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
         const hires = await machine.workingHires();
         return Response.json({
           roles: readRoles()
@@ -1335,7 +1322,7 @@ export function startServer({
               const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
               return { ...r, title: known ? ROLES[known].title : r.id, working };
             }),
-          hires: { working: hires, cap: CAP },
+          hires: { working: hires },
         });
       }
       if ((rest[0] === "pause" || rest[0] === "resume") && rest.length === 1) {

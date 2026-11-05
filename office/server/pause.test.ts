@@ -3,7 +3,8 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HireRefused } from "../cli/hire.ts";
+import { UsageHold } from "../cli/hire.ts";
+import { planWake } from "../cli/wake.ts";
 import { projectFile } from "./editions.ts";
 import { pausedFile, PAUSE_ANSWER, writePaused } from "./pause.ts";
 import { startServer } from "./server.ts";
@@ -205,6 +206,46 @@ test("the office's recovery leaves a paused project alone, and a resume wakes th
   expect(readdirSync(pausedDir)).toEqual([]);
 });
 
+test("f1rm resume wakes the stopped hire through the real wake checks with 9 sessions working elsewhere: no cap holds it", async () => {
+  const boards = mkdtempSync(join(dir, "boards-"));
+  writeFileSync(join(boards, "-code-shop.team.checkout.md"), "# Board: shop / checkout\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | checkout.backend-dev-a | doing | worktree-a | x |\n");
+  const DEV = "checkout.backend-dev-a";
+  const far = Array.from({ length: 9 }, (_, i) => ({ id: `far${i}0000`, kind: "background", name: `far.designer-${i}`, sessionId: `far-${i}`, cwd: `/code/far/.claude/worktrees/t${i}`, pid: 50 + i, startedAt: 1, state: "working", status: "busy" }));
+  const lead = { id: "lead0000", kind: "background", name: "lead-checkout", sessionId: "lead", cwd: "/code/shop", pid: 40, startedAt: 1, state: "working", status: "busy" };
+  let sessions: any[] = [...far, lead];
+  const woke: string[] = [];
+  const home = mkdtempSync(join(dir, "home-")); // no usage file: no hold
+  const recovery = {
+    everyMs: 50,
+    deps: {
+      now: () => now,
+      sessions: async () => sessions,
+      tail: async () => "", mtime: async () => null, promptOf: async () => null, commitTime: async () => null,
+      store: { load: () => ({}), save: () => {} },
+      sleep: () => Bun.sleep(100), // a counted refusal would wait here
+      wake: async (repo: string, name: string, note: string) => {
+        await planWake({ target: name, message: note, cwd: repo }, {
+          agents: async (all: boolean) => (all ? sessions : sessions.filter((a) => a.pid || a.state === "blocked")),
+          gitCommonDir: () => `${repo}/.git`, home, now, exists: () => true, modelOf: () => null, promptOf: () => null,
+        });
+        woke.push(name);
+        sessions = [...sessions.filter((a) => a.name !== name), { id: "new11111", kind: "background", name, sessionId: "new", cwd: "/code/shop/.claude/worktrees/a", pid: 9, startedAt: 9, state: "working", status: "busy" }];
+      },
+    },
+  };
+  const { server } = start(undefined, undefined, { boardsDir: boards, recovery, boardPollMs: 30 });
+  await seat(server, "dev", DEV, "f1rm:backend-dev");
+  listed = new Map([["dev", { pid: 2, status: "busy" }]]);
+  await post(server, "pause", { room: SHOP });
+  now += 30_000;
+  await settle();
+  listed = new Map();
+  sessions = [...sessions, { id: "dev11111", kind: "background", name: DEV, sessionId: "dev", cwd: "/code/shop", state: "stopped", startedAt: 1 }];
+  expect(await (await post(server, "resume", { room: SHOP })).json()).toMatchObject({ ok: true, waking: 1 });
+  await settle(300);
+  expect(woke).toEqual([DEV]);
+});
+
 test("a paused hire's next call meets the gate too: continue:false lets the call in flight run, so the same answer denies it", async () => {
   const { server } = start();
   await seat(server, "lead", "lead-checkout", "f1rm:lead");
@@ -306,10 +347,10 @@ test("a pause during a resume ends that resume and hands its unfinished hires to
       sessions: async () => [{ id: "dev11111", kind: "background", name: DEV, sessionId: "dev", cwd: "/code/shop", state: "stopped", startedAt: 1 }],
       tail: async () => "", mtime: async () => null, promptOf: async () => null, commitTime: async () => null,
       store: { load: () => ({}), save: () => {} },
-      sleep: () => Bun.sleep(200), // the cap is full: every try waits
+      sleep: () => Bun.sleep(200), // the usage hold is on: every try waits
       wake: async (_repo: string, _name: string, note: string) => {
         notes.push(note);
-        throw new HireRefused("8 hires are already working (the cap is 8).", 8);
+        throw new UsageHold("usage hold: 5-hour usage is 95% (resets 20:00); new sessions wait until 20:00", 1);
       },
     },
   };

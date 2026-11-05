@@ -99,6 +99,20 @@ test("one team while the weekly usage runs ahead of pace: a 2nd lead or simple t
   expect(() => ask([lead], { role: "lead", name: "lead-pay", task: "pay" })).not.toThrow();
 });
 
+test("with no caps left the usage holds are what refuses: on pace a third and a fourth lead start beside 9 working, ahead of pace a third is refused by the one-team rule, and the hold still holds", () => {
+  const crowd = [...Array(9).fill(WORKER), session("lead-cart", REPO), session("lead-pay", REPO)];
+  const third = { role: "lead", name: "lead-ship", task: "ship" };
+  put(week(50)); // on pace
+  expect(() => ask(crowd, third)).not.toThrow();
+  expect(() => ask([...crowd, session("lead-ship", REPO)], { role: "lead", name: "lead-tax", task: "tax" })).not.toThrow();
+  put(week(50, 6 * D)); // ahead of pace
+  expect(() => ask(crowd, third)).toThrow("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)");
+  put(five(95));
+  const e = refusal(() => ask(crowd, third));
+  expect(e).toBeInstanceOf(UsageHold);
+  expect(e.working).toBe(11);
+});
+
 test("oneTeam counts a lead that finished (it still holds its team) and ignores a Reviewer", () => {
   put(week(50, 6 * D));
   const lead = (state: string) => session("lead-cart", REPO, state);

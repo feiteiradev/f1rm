@@ -87,7 +87,7 @@ export const SLASH_RULE = "A wake message cannot start with a slash: the resumed
 
 /**
  * Checks a wake and returns the `claude --bg --resume` argv that does it, with the folder it runs in (the hire's own, so the resumed session works in its worktree).
- * Throws an Error for a hire that can't be woken (let go, another project's, live, unknown, not a hire), and a HireRefused when a cap, the team's lead or the task's one specialist stops it,
+ * Throws an Error for a hire that can't be woken (let go, another project's, live, unknown, not a hire, its team's lead not running, its task's one specialist taken), and a HireRefused when the usage pacing holds it,
  * through the same checks as a hire. Who may wake is the gate's to judge (see mayWake), not this command's: it cannot tell who runs it.
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
@@ -169,7 +169,7 @@ export function realWakeDeps(home: string): WakeDeps {
   };
 }
 
-/** `planWake`, but a cap that refuses it waits for a free slot (see untilSlot): null when none came. The sessions are read again at every look. */
+/** `planWake`, but the usage pacing that refuses it waits for a free slot (see untilSlot): null when none came. The sessions are read again at every look. */
 export const planWakeWaiting = (req: WakeRequest, mkDeps: () => WakeDeps, w: Wait): Promise<WakePlan | null> => untilSlot(() => planWake(req, mkDeps()), w);
 
 /** Runs `f1rm wake` and returns the exit code. */
