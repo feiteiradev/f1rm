@@ -982,7 +982,7 @@ const pmPost = (path: "decide" | "start-pm", body: unknown, init: RequestInit = 
   ui(path, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
 const PM_SOCKET = { "x-f1rm-messaging-socket": "/tmp/cc-socks/pm.sock" };
 
-test("Let the PM decide tells the project's PM the need and asks them to hire per the guidelines", async () => {
+test("Let the PM decide tells the project's PM the need and asks them to start a topic lead for it per the guidelines", async () => {
   start(SHOP);
   await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
   await inRoom("des1", { agent_type: "f1rm:designer" });
@@ -992,7 +992,8 @@ test("Let the PM decide tells the project's PM the need and asks them to hire pe
   expect(calls).toHaveLength(1);
   expect(calls[0]).toStartWith("tell /tmp/cc-socks/pm.sock pm1 ");
   expect(calls[0]).toContain("per the f1rm guidelines");
-  expect(calls[0]).toContain("f1rm hire");
+  expect(calls[0]).toContain("f1rm hire --topic lead lead-<topic> <topic>");
+  expect(calls[0]).not.toContain("--simple");
   expect(calls[0]).toEndWith("The need:\nA login page with passkeys.");
 });
 
