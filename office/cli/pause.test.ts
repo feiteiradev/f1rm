@@ -35,7 +35,7 @@ test("--all asks for every project and sends no folder, so it works anywhere", a
 });
 
 test("resume says how many stopped hires it is waking, and that a project that was not paused is not", async () => {
-  expect(await pauseCall("resume", [], office({ body: { waking: 3 } }).deps)).toContain("continuing 3 hires one at a time");
+  expect(await pauseCall("resume", [], office({ body: { waking: 3 } }).deps)).toBe("resumed shop: continuing 3 hires one at a time (`f1rm status` shows them)"); // no cap named
   expect(await pauseCall("resume", [], office({ body: { waking: 1 } }).deps)).toContain("continuing 1 hire one at a time");
   expect(await pauseCall("resume", [], office().deps)).toBe("resumed shop");
   expect(await pauseCall("resume", [], office({ body: { rooms: [] } }).deps)).toBe("this project is not paused");

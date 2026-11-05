@@ -749,11 +749,14 @@ test("Tell needs the UI token, a POST, a known employee and a sane message", asy
 const SHOP = { "/code/shop": "/code/shop/.git" };
 const ROOM = "/code/shop/.git";
 const ui = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`${base()}/${token}/${path}`, init);
-// Hire reads `~/.f1rm/usage.json` through HOME: an empty HOME keeps this machine's weekly pace and holds out of the caps under test.
+// Hire reads `~/.f1rm/usage.json` through HOME: an empty HOME keeps this machine's weekly pace and holds out of the tests; `holdHome` holds the 5-hour window at 95%.
 const emptyHome = mkdtempSync(join(tmpdir(), "f1rm-home-"));
-const hireOf = async (body: unknown, init: RequestInit = {}, token = TOKEN) => {
+const holdHome = mkdtempSync(join(tmpdir(), "f1rm-home-"));
+mkdirSync(join(holdHome, ".f1rm"));
+writeFileSync(join(holdHome, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: 95, resetsAt: Date.now() / 1000 + 86400 }, readAt: 0 }));
+const hireOf = async (body: unknown, init: RequestInit = {}, token = TOKEN, homeDir = emptyHome) => {
   const home = process.env.HOME;
-  process.env.HOME = emptyHome; // shortcut: two hireOf calls in flight at once would race on HOME; none overlap, so await each
+  process.env.HOME = homeDir; // shortcut: two hireOf calls in flight at once would race on HOME; none overlap, so await each
   try {
     return await ui("hire", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
   } finally {
@@ -775,7 +778,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   working = 3;
   const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
   const roles = reply.roles;
-  expect(reply.hires).toEqual({ working: 3, cap: 8 });
+  expect(reply.hires).toEqual({ working: 3 }); // no cap: the dialog says only how many work
   const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
@@ -788,7 +791,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
   expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
   working = null;
-  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null, cap: 8 });
+  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null });
 });
 
 test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
@@ -816,7 +819,7 @@ test("Hire reports to the project's PM when it has one, and takes a lower model"
   expect(spawned[1].argv).not.toContain("--model");
 });
 
-test("topic starts lead-<name> with the grilling first command and the generated brief, reporting to the PM; a bad name is 400, an unknown project 404, and a full project 409", async () => {
+test("topic starts lead-<name> with the grilling first command and the generated brief, reporting to the PM; a bad name is 400, an unknown project 404, and a third beside two live teams starts", async () => {
   start(SHOP);
   await inRoom("p", { agent_type: "f1rm:pm" });
   await office((s) => ROOM in s.rooms);
@@ -838,9 +841,8 @@ test("topic starts lead-<name> with the grilling first command and the generated
   expect((await topicOf({ room: "/nope/.git", name: "billing" })).status).toBe(404);
   expect(spawned.length).toBe(1);
   liveToo = [{ name: "lead-a", state: "working", cwd: "/code/shop" }, { name: "lead-b", state: "working", cwd: "/code/shop" }];
-  const full = await topicOf({ room: ROOM, name: "third" });
-  expect([full.status, ((await full.json()) as any).error]).toEqual([409, "this project already has 2 teams (the cap is 2)."]);
-  expect(spawned.length).toBe(1);
+  expect((await topicOf({ room: ROOM, name: "third" })).status).toBe(200);
+  expect(spawned.map((s) => s.argv[5])).toEqual(["lead-billing", "lead-third"]);
 });
 
 test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
@@ -884,17 +886,13 @@ test("Hire follows the flat rules of `f1rm hire`: no frontend-dev or backend-dev
   expect(spawned[1].argv[6]).toContain("This branch holds no code: use the content checklist.");
 });
 
-test("Hire is held to the project's cap of 2 teams like f1rm hire and f1rm wake: a lead and a simple task fill it, a third team-less hire is refused unless the dialog's override is set", async () => {
+test("Hire holds no team cap, like f1rm hire and f1rm wake: a third team-less hire starts beside a lead and a simple task", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
   liveToo = [{ name: "lead-checkout", state: "done", cwd: "/code/shop" }, { name: "backend-dev-y", state: "working", cwd: "/code/shop/.claude/worktrees/y" }];
-  const refused = await hireOf({ ...ASSIGN, role: "backend-dev" });
-  expect([refused.status, ((await refused.json()) as any).error]).toEqual([409, "this project already has 2 teams (the cap is 2)."]);
-  expect(spawned).toEqual([]);
-  expect((await hireOf({ ...ASSIGN, role: "backend-dev", override: true })).status).toBe(200);
-  liveToo = liveToo.slice(1);
-  expect((await hireOf({ ...ASSIGN, role: "researcher", task: "other" })).status).toBe(200);
+  expect((await hireOf({ ...ASSIGN, role: "backend-dev" })).status).toBe(200);
+  expect(spawned.map((s) => s.argv[5])).toEqual(["backend-dev-login-page"]);
 });
 
 test("Hire refuses a project whose path is over 150 characters with the path message, hires one of 150, and spawns nothing for the first", async () => {
@@ -927,34 +925,31 @@ test("Hire asks git for the common dir once at most, and not at all for a reques
   expect((spawned.at(-1)!.argv.find((a) => a.includes("Report to:")) ?? "")).toContain("Report to: pm-shop");
 });
 
-test("at the cap Hire answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
+test("Hire starts with 9 working on the machine; under the usage hold it answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 7;
+  working = 9;
   expect((await hireOf(ASSIGN)).status).toBe(200);
   spawned.length = 0;
-  working = 8;
-  const capped = await hireOf(ASSIGN);
-  expect([capped.status, await capped.json()]).toEqual([409, { error: "8 hires are already working (the cap is 8).", working: 8 }]);
+  const held = await hireOf(ASSIGN, {}, TOKEN, holdHome);
+  expect([held.status, (await held.json()) as any]).toEqual([409, { error: expect.stringContaining("usage hold: 5-hour usage is 95%"), working: 9 }]);
   working = null;
   const blind = await hireOf(ASSIGN);
   expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
   expect(spawned).toEqual([]);
 });
 
-test("Hire anyway: override spends a slot past the cap, a plain hire after it is still refused, and override must be a boolean", async () => {
+test("Hire anyway: override skips the usage hold, a plain hire after it is still held, and override must be a boolean", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
   await office((s) => ROOM in s.rooms);
-  working = 8;
-  expect((await hireOf({ ...ASSIGN, override: false })).status).toBe(409);
+  expect((await hireOf({ ...ASSIGN, override: false }, {}, TOKEN, holdHome)).status).toBe(409);
   expect(spawned).toEqual([]);
-  expect((await hireOf({ ...ASSIGN, override: "yes" })).status).toBe(400);
-  expect((await hireOf({ ...ASSIGN, override: true })).status).toBe(200);
+  expect((await hireOf({ ...ASSIGN, override: "yes" }, {}, TOKEN, holdHome)).status).toBe(400);
+  expect((await hireOf({ ...ASSIGN, override: true }, {}, TOKEN, holdHome)).status).toBe(200);
   expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
-  working = 9;
-  expect((await hireOf(ASSIGN)).status).toBe(409);
+  expect((await hireOf(ASSIGN, {}, TOKEN, holdHome)).status).toBe(409);
   expect(spawned.length).toBe(1);
 });
 
@@ -1806,7 +1801,7 @@ async function gateOffice() {
 
 test("a PM hires only leads, with any flags before the role; a specialist hire, or a lead hire named only in the brief, is refused", async () => {
   const bash = await gateOffice();
-  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
+  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --topic lead lead-checkout checkout 'what the user asked'","f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
   for (const command of allowed) expect([command, await bash("p", command)]).toEqual([command, null]);
   const refused = ["f1rm hire backend-dev backend-dev-a a brief", "f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --override --skills x designer designer-a a b", "cd x && f1rm hire reviewer reviewer-a review-a b", "f1rm hire backend-dev backend-dev-a a lead", "echo hi | f1rm hire --report-to lead designer designer-a a b"];
   for (const command of refused) {
@@ -1816,7 +1811,7 @@ test("a PM hires only leads, with any flags before the role; a specialist hire, 
   }
 });
 
-test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
+test("no session passes --override to `f1rm hire` or `f1rm wake`: the usage pacing waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
   const bash = await gateOffice();
   const override = [
     "f1rm hire --override lead lead-checkout checkout b",
@@ -1832,7 +1827,7 @@ test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits fo
     for (const command of commands) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session exceeds a cap. Run the same command again: it waits for a free slot.");
+      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session goes past the usage pacing. Run the same command again: it waits for a free slot.");
     }
   }
   // Without it the same commands run as before, and a brief that only mentions the word is no flag.
@@ -1844,7 +1839,7 @@ test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits fo
 test("a quote-split --override is the same flag to the shell, so the gate refuses it too; a sub-agent of the PM or a lead is held to it", async () => {
   const bash = await gateOffice();
   const spellings = ['--over""ride', "\\--override", "--over'ride'", '"--over"ride'];
-  const reason = "No session exceeds a cap. Run the same command again: it waits for a free slot.";
+  const reason = "No session goes past the usage pacing. Run the same command again: it waits for a free slot.";
   for (const [id, hire, wake] of [["p", "lead lead-checkout checkout b", "lead-checkout"], ["l", "--team checkout designer checkout.designer-a a b", "checkout.designer-a"]] as const) {
     for (const flag of spellings) {
       for (const command of [`f1rm hire ${hire} ${flag}`, `timeout 600 f1rm hire ${hire} ${flag}`, `f1rm wake ${flag} ${wake}`, `timeout 5 f1rm wake ${wake} ${flag}`]) {
@@ -2415,27 +2410,19 @@ test("a refusal is logged with the role, title, tool and rule, and never the com
   expect(lines).toEqual(["refused pm p-title Bash landing", "refused lead l-title Write write", "refused pm p-title Agent intern-role", "refused designer d-title Bash hire"]);
 });
 
-test("a company employee runs at most 2 interns at once, counting calls not started yet; a freelancer is never held", async () => {
+test("an employee has no intern cap: a third and a fourth intern pass, started or not; an f1rm role as an intern is still refused", async () => {
   start();
   await hook({ ...common("d", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:designer" });
-  await hook({ ...common("f", "UserPromptSubmit"), prompt: "go" });
-  await office((s) => Object.keys(s.employees).length === 2);
-  const agent = (id: string) => hook(preToolUse(id, "Agent", { description: "look", prompt: "look around", subagent_type: "Explore" }));
+  await office((s) => Object.keys(s.employees).length === 1);
+  const agent = (id: string, subagent_type = "Explore") => hook(preToolUse(id, "Agent", { description: "look", prompt: "look around", subagent_type }));
+  for (let i = 0; i < 4; i++) expect([i, await held(await agent("d"))]).toEqual([i, null]);
+  const sub = (agent_id: string) => hook({ ...common("d", "SubagentStart"), agent_id, agent_type: "Explore" });
+  for (const id of ["a1", "a2", "a3"]) await sub(id);
+  await office((s) => Object.keys(s.interns).length === 3);
   expect(await held(await agent("d"))).toBeNull();
-  expect(await held(await agent("d"))).toBeNull();
-  const third = await held(await agent("d"));
-  expect(third?.permissionDecision).toBe("deny");
-  expect(third.permissionDecisionReason).toContain("2 interns working");
-  for (let i = 0; i < 4; i++) expect(await held(await agent("f"))).toBeNull();
-
-  // Both start, then one stops: a slot frees.
-  const sub = (event: string, agent_id: string) => hook({ ...common("d", event), agent_id, agent_type: "Explore" });
-  await sub("SubagentStart", "a1");
-  await sub("SubagentStart", "a2");
-  expect((await held(await agent("d")))?.permissionDecision).toBe("deny");
-  await sub("SubagentStop", "a1");
-  await office((s) => Object.keys(s.interns).length === 1);
-  expect(await held(await agent("d"))).toBeNull();
+  const role = await held(await agent("d", "f1rm:backend-dev"));
+  expect(role?.permissionDecision).toBe("deny");
+  expect(role.permissionDecisionReason).toContain("A role is hired with `f1rm hire`, never started as an intern.");
 });
 
 test("a Founder project lists and hires the founder roles; a Work project, or one with no edition, refuses them", async () => {

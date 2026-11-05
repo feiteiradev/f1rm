@@ -3,7 +3,7 @@ import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { HireRefused, LOAD_FIRST, NO_SLOT, projectFolder as folder, SECURITY, type Wait } from "./hire.ts";
+import { HireRefused, LOAD_FIRST, NO_SLOT, projectFolder as folder, SECURITY, UsageHold, type Wait } from "./hire.ts";
 import { hireName } from "./letgo.ts";
 import { clearPaused, pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
 import { DEFAULT_NOTE, firstPrompt, lastModel, mayWake, parseWakeArgs, planWake, planWakeWaiting } from "./wake.ts";
@@ -39,6 +39,12 @@ const deps = (list: Entry[], more: { home?: string; exists?: (p: string) => bool
 const plan = (target: string, list: Entry[], req: { message?: string; override?: boolean; extra?: string[] } = {}, more: Parameters<typeof deps>[1] = {}) =>
   planWake({ target, cwd: REPO, ...req }, deps(list, more));
 const failure = async (p: Promise<unknown>) => p.then(() => null, (e: Error) => e);
+/** A HOME whose usage file holds the 5-hour window at `pct`, resetting an hour after `nowMs`: the wake reads it at its own clock. */
+const usageHome = (pct: number, nowMs: number, home = tmp("f1rm-wake-home-")) => {
+  mkdirSync(join(home, ".f1rm"), { recursive: true });
+  writeFileSync(join(home, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: pct, resetsAt: nowMs / 1000 + 3600 }, readAt: 0 }));
+  return home;
+};
 
 const TAP_OBJ = { type: "command", command: `'${process.execPath}' '${join(import.meta.dir, "f1rm.ts")}' usage-tap` };
 const TAPPED = JSON.stringify({ statusLine: TAP_OBJ });
@@ -324,29 +330,23 @@ test("a hire with a live session is refused whichever of its ids is given: messa
   expect((await failure(plan("shop.backend-dev-checkout", [lead, doneIdle])))?.message).toContain("is live");
 });
 
-test("the wake counts against the caps like a hire: the team's two working, the machine's eight, the lead's team, one specialist per task", async () => {
+test("a wake is held by no cap: a team with two working, 9 working on the machine and a third lead all wake; the lead's team, one specialist per task and the usage hold still refuse", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
   const two = [running("shop.frontend-dev-a", "a", wt("a")), running("shop.designer-b", "b", wt("b"))];
-  const teamFull = await failure(plan("shop.backend-dev-checkout", [lead, dev, ...two]));
-  expect(teamFull).toBeInstanceOf(HireRefused);
-  expect(teamFull?.message).toBe("team shop already has 2 working (the cap is 2 per team).");
-  // The blocked session being woken is not counted against its own team.
-  expect((await plan("shop.backend-dev-checkout", [lead, dev, two[0]])).sessionId).toBe("dev-sid-1");
-  // Members that ended their turn (state working, status idle) leave their slots free.
-  expect((await plan("shop.backend-dev-checkout", [lead, dev, idle("shop.frontend-dev-a", "a", wt("a")), idle("shop.designer-b", "b", wt("b"))])).sessionId).toBe("dev-sid-1");
-  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
-  const machineFull = await failure(plan("shop.backend-dev-checkout", [lead, dev, ...crowd]));
-  expect(machineFull).toBeInstanceOf(HireRefused);
-  expect(machineFull?.message).toBe("8 hires are already working (the cap is 8).");
-  // A woken lead fills a team slot of the project: two leads already run.
+  const crowd = Array.from({ length: 9 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  expect((await plan("shop.backend-dev-checkout", [lead, dev, ...two, ...crowd])).sessionId).toBe("dev-sid-1");
   const leads = [running("lead-a", "la", REPO), running("lead-b", "lb", REPO)];
-  expect((await failure(plan("lead-shop", [stopped("lead-shop", "ls", REPO, "done"), ...leads])))?.message).toBe("this project already has 2 teams (the cap is 2).");
-  // A member needs its lead running, and no second session may work its task.
+  expect((await plan("lead-shop", [stopped("lead-shop", "ls", REPO, "done"), ...leads])).sessionId).toBe("ls");
+  // A member needs its lead running, and no second session may work its task, --override or not.
   expect((await failure(plan("shop.backend-dev-checkout", [dev])))?.message).toContain("has no lead running");
   expect((await failure(plan("shop.backend-dev-checkout", [lead, dev, running("shop.backend-dev-other", "x", wt("checkout"))])))?.message).toContain("one specialist per task");
-  // --override skips the caps and nothing else.
-  expect((await plan("shop.backend-dev-checkout", [lead, dev, ...two], { override: true })).sessionId).toBe("dev-sid-1");
   expect((await failure(plan("shop.backend-dev-checkout", [dev], { override: true })))?.message).toContain("has no lead running");
+  // The usage hold is a counted refusal; --override skips it.
+  const home = usageHome(95, NOW);
+  const held = await failure(plan("shop.backend-dev-checkout", [lead, dev], {}, { home }));
+  expect(held).toBeInstanceOf(UsageHold);
+  expect((held as HireRefused).working).toBe(1);
+  expect((await plan("shop.backend-dev-checkout", [lead, dev], { override: true }, { home })).sessionId).toBe("dev-sid-1");
 });
 
 test("who may wake follows who may hire: the PM wakes leads, a lead its own team's members, a specialist nobody", () => {
@@ -363,18 +363,19 @@ test("who may wake follows who may hire: the PM wakes leads, a lead its own team
   }
 });
 
-test("a stopped simple dev (no team) is woken in its own worktree, reports to the PM, and the wake counts it as a team of one", async () => {
+test("a stopped simple dev (no team) is woken in its own worktree, reports to the PM, and two other live teams do not hold it", async () => {
   const solo = stopped("backend-dev-x", "solo-sid", wt("x"));
   const p = await plan("backend-dev-x", [solo]);
   expect(p.argv.slice(0, 9)).toEqual(["claude", "--bg", "--resume", "solo-sid", "--agent", "f1rm:backend-dev", "--name", "backend-dev-x", "resumed; continue your task\nReport to: pm-shop"]);
   expect(p.cwd).toBe(wt("x"));
-  // Two other teams (a lead, another simple task) fill the project: the wake is refused like a third hire; one other team leaves room.
-  const other = running("designer-y", "y", wt("y"));
-  const full = await failure(plan("backend-dev-x", [solo, lead, other]));
-  expect(full).toBeInstanceOf(HireRefused);
-  expect(full?.message).toBe("this project already has 2 teams (the cap is 2).");
-  expect((await plan("backend-dev-x", [solo, other])).sessionId).toBe("solo-sid");
-  expect((await plan("backend-dev-x", [solo, lead, other], { override: true })).sessionId).toBe("solo-sid");
+  // Two other teams (a lead, another simple task) run: there is no team cap, so it wakes as a third.
+  expect((await plan("backend-dev-x", [solo, lead, running("designer-y", "y", wt("y"))])).sessionId).toBe("solo-sid");
+  // Ahead of the weekly pace a project runs one team: another live simple task holds it, its own stopped copy does not.
+  const ahead = tmp("f1rm-wake-home-");
+  mkdirSync(join(ahead, ".f1rm"), { recursive: true });
+  writeFileSync(join(ahead, ".f1rm", "usage.json"), JSON.stringify({ sevenDay: { usedPct: 50, resetsAt: NOW / 1000 + 6 * 86400 }, readAt: 0 }));
+  expect((await failure(plan("backend-dev-x", [solo, running("designer-y", "y", wt("y"))], {}, { home: ahead })))?.message).toBe("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)");
+  expect((await plan("backend-dev-x", [solo], {}, { home: ahead })).sessionId).toBe("solo-sid");
   // The Report to its first prompt named wins over the default.
   expect((await plan("backend-dev-x", [solo], {}, { promptOf: () => "/pstack:poteto-mode Report to: pm-other\n\nbrief" })).argv[8]).toBe("resumed; continue your task\nReport to: pm-other");
 });
@@ -403,10 +404,11 @@ function repoWith(task: string) {
   mkdirSync(wt(task, repo), { recursive: true });
   return repo;
 }
-const run = (bin: string, repo: string, ...args: string[]) => {
-  const r = Bun.spawnSync(["bun", CLI, "wake", ...args], { cwd: repo, env: { ...process.env, HOME: tmp("f1rm-wake-home-"), PATH: `${bin}:${process.env.PATH}` } });
+const runIn = (home: string, bin: string, repo: string, ...args: string[]) => {
+  const r = Bun.spawnSync(["bun", CLI, "wake", ...args], { cwd: repo, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` } });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
+const run = (bin: string, repo: string, ...args: string[]) => runIn(tmp("f1rm-wake-home-"), bin, repo, ...args);
 
 test("f1rm wake starts claude from the hire's worktree with the resume argv, and says which session it started", () => {
   const repo = repoWith("checkout");
@@ -425,17 +427,15 @@ test("f1rm wake starts claude from the hire's worktree with the resume argv, and
   });
 });
 
-test("f1rm wake that a cap refuses waits, gives up with code 75 and the ask-nobody line, and starts nothing", async () => {
+test("f1rm wake under a usage hold waits, gives up with code 75 and the ask-nobody line, and starts nothing", async () => {
   const repo = repoWith("checkout");
   const bin = stub([
     running("lead-shop", "lead-sid", repo),
     stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout", repo)),
-    running("shop.frontend-dev-a", "a", wt("a", repo)),
-    running("shop.designer-b", "b", wt("b", repo)),
   ]);
-  const r = run(bin, repo, "shop.backend-dev-checkout");
+  const r = runIn(usageHome(95, Date.now()), bin, repo, "shop.backend-dev-checkout");
   expect(r.code).toBe(75);
-  expect(r.err).toContain("waiting for a slot: team shop already has 2 working (the cap is 2 per team)");
+  expect(r.err).toContain("waiting for a slot: usage hold: 5-hour usage is 95%");
   expect(r.err).toContain("no slot yet: run the same command again. Ask nobody; it is not a decision for the user.");
   expect(r.err).not.toContain("--override");
   expect(await Bun.file(join(bin, "argv.log")).exists()).toBe(false);
@@ -450,29 +450,30 @@ function clock(onSleep: (n: number) => void = () => {}) {
   return { wait, said, sleeps: () => n };
 }
 
-test("a wake refused by a cap polls, prints one waiting line, and plans the wake as soon as a slot frees", async () => {
+test("a wake refused by the usage hold polls, prints one waiting line, and plans the wake as soon as the hold lifts", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
-  const two = [running("shop.frontend-dev-a", "a", wt("a")), running("shop.designer-b", "b", wt("b"))];
-  let list = [lead, dev, ...two];
-  const c = clock((n) => n === 2 && (list = [lead, dev, two[0]]));
-  const p = await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps(list), c.wait);
+  const home = usageHome(95, NOW);
+  const c = clock((n) => n === 2 && usageHome(50, NOW, home));
+  const p = await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([lead, dev], { home }), c.wait);
   expect(p?.sessionId).toBe("dev-sid-1");
-  expect([c.sleeps(), c.said]).toEqual([2, ["waiting for a slot: team shop already has 2 working (the cap is 2 per team)."]]);
+  expect(c.sleeps()).toBe(2);
+  expect(c.said).toHaveLength(1);
+  expect(c.said[0]).toStartWith("waiting for a slot: usage hold: 5-hour usage is 95%");
 });
 
 test("a wake that never gets a slot waits 8 minutes, says so at most once a minute, then gives up with the ask-nobody line", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
-  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  const home = usageHome(95, NOW);
   const c = clock();
-  expect(await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([lead, dev, ...crowd]), c.wait)).toBeNull();
+  expect(await planWakeWaiting({ target: "shop.backend-dev-checkout", cwd: REPO }, () => deps([lead, dev], { home }), c.wait)).toBeNull();
   expect(c.sleeps()).toBe(24);
-  expect(c.said.filter((l) => l.startsWith("waiting for a slot: 8 hires")).length).toBe(9);
+  expect(c.said.filter((l) => l.startsWith("waiting for a slot: usage hold")).length).toBe(9);
   expect(c.said.at(-1)).toBe(NO_SLOT);
 });
 
-test("a wake refused for anything but a counted cap is immediate: one specialist per task, a missing lead, a paused project", async () => {
+test("a wake refused for anything but a counted wait is immediate: one specialist per task, a missing lead, a paused project", async () => {
   const dev = stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout"), "blocked");
-  const crowd = Array.from({ length: 7 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
+  const crowd = Array.from({ length: 9 }, (_, i) => running(`other-${i}`, `o${i}`, `/elsewhere/${i}`));
   for (const [list, why] of [
     [[lead, dev, ...crowd, running("shop.backend-dev-other", "x", wt("checkout"))], "one specialist per task"],
     [[dev, ...crowd], "has no lead running"],

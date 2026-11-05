@@ -1,5 +1,5 @@
 // The office's recovery tick: wakes the background hires and leads of a registered project whose process ended while their board row is doing/review, once per stop, and says so when it cannot.
-// It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the caps), machine.tell (the inbox), the boards and transcripts.
+// It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the hire checks and the usage hold), machine.tell (the inbox), the boards and transcripts.
 import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
@@ -202,7 +202,7 @@ const active = (rows: BoardRow[], name: string, h: HireName) =>
 /**
  * The recovery tick. For each registered project, each background hire or lead whose board row is doing or review is judged by its newest session:
  * ended, it is woken once per stop (a limit stop a minute after its reset time) or its Report to is told; live and idle for 20 minutes after a turn that ended without a report, it is nudged once.
- * Nothing here starts a session itself: `deps.wake` runs the same checks as `f1rm wake`, caps included.
+ * Nothing here starts a session itself: `deps.wake` runs the same checks as `f1rm wake`, the usage hold included.
  */
 export function createRecovery(d: RecoveryDeps) {
   async function recoverRepo(repo: string, all: any[]) {
@@ -380,7 +380,7 @@ export function createRecovery(d: RecoveryDeps) {
 
   /**
    * After a resume: continues the hires `names` (the ones the pause halted or stopped) whose board row is doing or review, leads first, one at a time: a live one is told in its inbox, an ended one is woken through the same checks as `f1rm wake`.
-   * A full cap is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts, which the office does when the project is paused again; `done` hears of each hire as it is reached). Any other refusal (let go, its lead not running) is noted
+   * A counted refusal (the usage pacing) is waited out and asked again every SLOT_WAIT_MS, so the resume ends only when every one is up (or `signal` aborts, which the office does when the project is paused again; `done` hears of each hire as it is reached). Any other refusal (let go, its lead not running) is noted
    * for `f1rm status` and left to the recovery tick, which takes the project back when this ends. `notes` gives a hire its own note (where it stopped, from the checkpoint), NOTE_PAUSE to one without.
    */
   async function resume(repo: string, names: string[], signal?: AbortSignal, done?: (name: string) => void, notes: Record<string, string> = {}) {
@@ -473,7 +473,7 @@ export function realRecoveryDeps(home: string): Omit<RecoveryDeps, "board" | "te
       return r ? Date.parse(r.at) : null;
     },
     held: () => pacing(readUsage(usageFile(home), Date.now() / 1000), Date.now() / 1000).hold !== null,
-    // The same checks as `f1rm wake`, caps included; the start is `claude --bg --resume` in the hire's own folder.
+    // The same checks as `f1rm wake`, the usage hold included; the start is `claude --bg --resume` in the hire's own folder.
     wake: async (repo, name, note) => {
       const plan = await planWake({ target: name, message: note, cwd: repo }, realWakeDeps(home));
       await machine.spawnBackground(plan.argv, plan.cwd);

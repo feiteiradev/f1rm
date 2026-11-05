@@ -87,7 +87,7 @@ export const SLASH_RULE = "A wake message cannot start with a slash: the resumed
 
 /**
  * Checks a wake and returns the `claude --bg --resume` argv that does it, with the folder it runs in (the hire's own, so the resumed session works in its worktree).
- * Throws an Error for a hire that can't be woken (let go, another project's, live, unknown, not a hire), and a HireRefused when a cap, the team's lead or the task's one specialist stops it,
+ * Throws an Error for a hire that can't be woken (let go, another project's, live, unknown, not a hire, its team's lead not running, its task's one specialist taken), and a HireRefused when the usage pacing holds it,
  * through the same checks as a hire. Who may wake is the gate's to judge (see mayWake), not this command's: it cannot tell who runs it.
  */
 export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan> {
@@ -124,11 +124,11 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const cwd = own ?? String(target.cwd);
   if (!d.exists(cwd)) throw new Error(`${name} was let go; hire a new one`);
 
-  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one still holds a slot, and must not count against itself.
+  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one is still listed, and must not count against itself (one specialist per task, the one-team pace).
   const listed = (await d.agents(false)) ?? [];
   const live: LiveHires = background(listed)
     .filter((a) => !(a.name === name && !a.pid))
-    .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }) }));
+    .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
   // A Reviewer's task is review-<task>, as `f1rm hire` names it; hireName gives the task it reviews, whose dev may be idle in its worktree.
   checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override, now: d.now / 1000, usage: readUsage(usageFile(d.home), d.now / 1000) });
 
@@ -169,7 +169,7 @@ export function realWakeDeps(home: string): WakeDeps {
   };
 }
 
-/** `planWake`, but a cap that refuses it waits for a free slot (see untilSlot): null when none came. The sessions are read again at every look. */
+/** `planWake`, but the usage pacing that refuses it waits for a free slot (see untilSlot): null when none came. The sessions are read again at every look. */
 export const planWakeWaiting = (req: WakeRequest, mkDeps: () => WakeDeps, w: Wait): Promise<WakePlan | null> => untilSlot(() => planWake(req, mkDeps()), w);
 
 /** Runs `f1rm wake` and returns the exit code. */
