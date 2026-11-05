@@ -651,7 +651,7 @@ export function startServer({
       }
       // A simple task is the PM's alone: no lead, no specialist, no intern (the PM's included) and no session with no role; the user's terminal or `!` still runs it.
       if (commands.some((c) => hireOf(hireArgs(c))?.simple) && (role !== "pm" || payload.agent_id)) {
-        return refuse("hire", "Only the PM hires with --simple, from its own session: a lead hires into its own team, with --team, and anyone else asks the PM.");
+        return refuse("hire", "Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
       }
     }
     if (!role) return null;
@@ -794,7 +794,7 @@ export function startServer({
       return refuse("hire", "--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer.");
     }
     if (role === "pm" && hires.some((h) => !h.simple && h.role !== "lead")) {
-      return refuse("hire", "PMs hire leads; send this to a lead, or hire one dev, designer or researcher for a simple task with `--simple`. A lead hires the specialists of its team.");
+      return refuse("hire", "The PM starts only leads, with `f1rm hire --topic lead lead-<topic> <topic> \"<brief>\"`; a lead hires the specialists of its team.");
     }
     if (role === "lead") {
       const team = teamOf(state.employees[sessionId]);
@@ -1419,9 +1419,11 @@ export function startServer({
         if (paused) return Response.json({ error: hireRefusal(roomName(room), paused), working: null }, { status: 409 });
         let common: string | null | undefined;
         const git = { gitCommonDir: () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common) };
+        const live = await machine.backgroundSessions();
+        const leads = (live ?? []).filter((s) => s.name.startsWith("lead-") && s.name !== `lead-${name}` && s.cwd === folder).map((s) => s.name);
         let argv: string[];
         try {
-          argv = await planHire({ role: "lead", task: name, cwd: folder, edition: editions[room] ?? null, brief: topicBrief(name), topic: true, reportTo: () => pmName(folder, git) }, { backgroundSessions: () => machine.backgroundSessions(), ...git });
+          argv = await planHire({ role: "lead", task: name, cwd: folder, edition: editions[room] ?? null, brief: topicBrief(name, leads), topic: true, reportTo: () => pmName(folder, git) }, { backgroundSessions: async () => live, ...git });
         } catch (err) {
           if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
           return Response.json({ error: (err as Error).message }, { status: 400 });

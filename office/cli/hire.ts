@@ -20,9 +20,9 @@ const SLASH_ONLY = ["research", "pstack:poteto-mode", "pstack:architect", "pstac
 const LEAD_ONLY = ["pstack:architect", "pstack:how"];
 const GRILLING = "mattpocock-skills:grilling";
 
-/** The team brief of a topic lead: the guidelines' team brief sections, with the interview first. */
-export const topicBrief = (topic: string) =>
-  `Team: ${topic}: the topic "${topic}", as the user describes it in the interview\nMilestone: topics\nContext: Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.\nOther teams: none known; ask the PM\nContracts: none\nAcceptance criteria:\n- the ones the interview agrees (proved by: the check each names)\nOut of scope: what the interview leaves out\nReport: NEEDS YOU ${topic}: <topic> for what needs the user, DONE ${topic} when the slice is merged. Nothing else goes to the PM.`;
+/** The team brief of a topic lead: the guidelines' team brief sections, with the interview first. `leads` are the project's other live leads. */
+export const topicBrief = (topic: string, leads: string[]) =>
+  `Team: ${topic}: the topic "${topic}", as the user describes it in the interview\nMilestone: topics\nContext: Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.\nOther teams: ${leads.length ? `${leads.join(", ")} (live in this project): agree contracts with them directly` : "none live"}\nContracts: none\nAcceptance criteria: set by the lead in its interview\nOut of scope: set by the lead in its interview\nReport: NEEDS YOU ${topic}: <topic> for what needs the user, DONE ${topic} when the slice is merged. Nothing else goes to the PM.`;
 // The skill gate (server.ts) reads these two sentences from the first prompt: the list to load, and the APPROVED hold (SECURITY: only a session from before the Reviewer left the normal flow carries it, and a wake keeps it).
 export const LOAD_FIRST = " Before you start, load these with the Skill tool: ";
 export const SECURITY = " Before you send APPROVED, run security-review with the Skill tool from the scratch worktree, with <base>...<merge sha> as its args.";

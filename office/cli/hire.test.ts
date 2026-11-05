@@ -4,7 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { longRepos } from "./long-repo.test-helper.ts";
-import { hire as hireCommand, NO_SLOT, realWait, withEffort, withPonytail, type Wait } from "./hire.ts";
+import { hire as hireCommand, NO_SLOT, realWait, topicBrief, withEffort, withPonytail, type Wait } from "./hire.ts";
+
+test("topicBrief names the project's live leads under Other teams, or none live, and leaves the criteria and scope to the lead", () => {
+  const two = topicBrief("billing", ["lead-a", "lead-b"]);
+  expect(two).toContain("\nOther teams: lead-a, lead-b (live in this project): agree contracts with them directly\n");
+  expect(two).toContain("\nAcceptance criteria: set by the lead in its interview\nOut of scope: set by the lead in its interview\n");
+  expect(two).not.toContain("ask the PM");
+  expect(topicBrief("billing", [])).toContain("\nOther teams: none live\n");
+});
 
 test("withPonytail merges into a --settings=<json> and never adds a second --settings", () => {
   const out = withPonytail("backend-dev", ['--settings={"env":{"A":"1"}}', "--model", "x"]);
