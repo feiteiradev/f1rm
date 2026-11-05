@@ -458,7 +458,7 @@ test("three gates, the README's hiring line, and the content checklist match the
   expect(section("Gates")).toContain("With the office stopped, none runs.");
   expect(section("Gates")).not.toContain("neither runs");
   const readme = readFileSync(join(REPO, "README.md"), "utf8");
-  expect(readme).toContain("The PM hires team leads, or one specialist directly for a simple task.");
+  expect(readme).toContain("You talk to the PM, which starts a team lead for each piece of work you ask for.");
   expect(readme).not.toContain("The PM hires the rest.");
   for (const text of [section("Review and landing"), role("reviewer").body]) {
     expect(text).toContain("research a brief puts in the repo");
@@ -558,8 +558,8 @@ test("R8b: the talk rules are stated once in the guidelines and pointed to from 
     "The user talks to each lead directly", "in the lead's own session (the office's Jump)", "a numbered round", "its recommended answer", '"yes to all"', "open question on its team board",
     "`NEEDS YOU <team>: <topic>`", "a one-liner", "lead-<team> needs you about <topic>: Jump to lead-<team> in the office", "never an id or a `claude attach` command",
     "approve <name>'s request in the office", "helps the user decide when asked", "writes the end-of-milestone report",
-    "In ops and the simple workflow the PM stays the user's contact", "Status, `BLOCKED` and `ESCALATE` stay with the lead, which answers them; only a `NEEDS YOU` goes up",
-    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the office's permission card for a permission, the lead for anything else. In the simple workflow the dev reports to the PM: its `NEEDS YOU <slug>` is the PM's to put to the user, its `BLOCKED` and `ESCALATE` are the PM's to answer, and a permission goes to the office's card.",
+    "In ops and a legacy simple task the PM stays the user's contact", "Status, `BLOCKED` and `ESCALATE` stay with the lead, which answers them; only a `NEEDS YOU` goes up",
+    "On `NEEDS YOU` the PM sends the user to the session that acts on the answer: the office's permission card for a permission, the lead for anything else. A simple task already running (the legacy `--simple` flow) reports to the PM: its dev's `NEEDS YOU <slug>` is the PM's to put to the user, its `BLOCKED` and `ESCALATE` are the PM's to answer, and a permission goes to the office's card.",
   ]) expect(talk, s).toContain(s);
   expect(guidelines.split("lead-<team> needs you about <topic>: Jump to lead-<team> in the office")).toHaveLength(2);
   expect(guidelines).not.toMatch(/claude attach <id>/);
@@ -591,7 +591,7 @@ test("R8b: the guidelines hold a Spawning table and a Messaging table, each cell
   const held = "enforced for a specialist's or a Reviewer's intern; a PM's or a lead's intern is held to its parent's row (enforced), so what its parent may do passes (rule only)";
   expect(srows[3].split("|")[2]).toContain(held);
   expect(srows[3].split("|")[6]).toContain(held);
-  expect(srows[0]).toContain("Leads, and one dev, designer or researcher with `--simple` (enforced)");
+  expect(srows[0]).toContain("Leads only (enforced), and the legacy `--simple`, which the gate still passes and the PM no longer uses (rule only)");
   expect(srows[1]).toContain("of its own team, never a dev or a lead (enforced)");
   expect(srows[2]).toContain("Nothing (enforced)");
   expect(spawn).not.toContain("At most 2");
@@ -1240,7 +1240,7 @@ const pluginReadme = () => readFileSync(join(PLUGIN, "README.md"), "utf8");
 const hireSkill = () => readFileSync(join(PLUGIN, "skills", "hire", "SKILL.md"), "utf8");
 const pmDecides = () => /const PM_DECIDES =\s*("[^\n]*");/.exec(readFileSync(join(REPO, "office", "server", "server.ts"), "utf8"))![1];
 
-test("the PM prompt is the scribe's: duties and cleanup order, no interview, no hire, no workflow pick", () => {
+test("the PM prompt is the scribe's: duties and cleanup order, no interview, only topic leads, no workflow pick", () => {
   const prompt = pmPromptText();
   for (const s of ["scribe", "milestones file", "New topic button", "DONE <team>", "f1rm letgo lead-<team>", "f1rm letgo --leftovers", "f1rm archives --prune", "f1rm push", "interview no one", "do no work yourself", "already running finish in the current flow"]) expect(prompt, s).toContain(s);
   expect(prompt.indexOf("f1rm letgo --leftovers")).toBeLessThan(prompt.indexOf("f1rm archives --prune"));
@@ -1250,12 +1250,12 @@ test("the PM prompt is the scribe's: duties and cleanup order, no interview, no 
 
 test("flat: the PM hires no simple task, so the prompt keeps none of its flow", () => {
   const forms = section("Roster and hiring playbook").split("```")[1];
-  expect(forms).not.toContain("f1rm hire --simple"); // the PM hires none: only the prompt and the code keep the legacy flow
+  expect(forms).not.toContain("f1rm hire --simple"); // the PM starts only leads: only the code keeps the legacy flow
   for (const s of ["f1rm hire --simple", "f1rm merge", "Hire only leads for a milestone"]) expect(pmPromptText(), `prompt: ${s}`).not.toContain(s);
-  for (const s of ["f1rm hire --simple", "Hire only leads"]) expect(role("pm").body, `pm.md: ${s}`).not.toContain(s); // the PM hires no one
-  expect(pmDecides()).toContain("f1rm hire --simple");
-  expect(pmDecides()).toContain("f1rm hire lead");
-  expect(hireSkill()).toContain("--simple");
+  for (const s of ["f1rm hire --simple", "Hire only leads"]) expect(role("pm").body, `pm.md: ${s}`).not.toContain(s); // the PM starts only topic leads
+  expect(pmDecides()).toContain("f1rm hire --topic lead");
+  expect(pmDecides()).not.toContain("--simple");
+  expect(hireSkill()).toContain("--simple"); // named as the legacy flag
 });
 
 test("flat: a dev reviews its own branch inside its session, once, and a second blocking round is ESCALATE", () => {
@@ -1544,7 +1544,7 @@ describe("sdd borrow rules", () => {
     for (const s of ["**Size gate.**", "about 3 files", "no product, design or business choice and no core decision", "the gates, authentication, user data, secrets, shell execution, money or data removal", "short brief", "no grilling rounds", "one-line understanding and the check", "the user's \"go\"", "reads a small task's diff itself", "failing test first", "full check", "only through `f1rm merge`", "\"small\" call in `~/.f1rm/kept/<repo>/calls.md`"]) expect(gate, s).toContain(s);
     expect(section("Brief format")).toContain("A small task (Teams 11) has a short brief: only Task, one or two acceptance criteria each with its proved by, and Out of scope.");
     expect(teamsItem(8)).toContain("for a small task, the lead reads the diff itself (Teams 11)");
-    expect(teamsItem(10)).toContain("A topic that is one small task gets no grilling rounds (Teams 11).");
+    expect(teamsItem(10)).toContain("A topic that is one small task gets no grilling rounds; its one-line understanding goes the same way (Teams 11).");
     expect(leadStep(3)).toContain("A topic that is one small task (Teams 11 in the guidelines) gets no rounds");
     expect(leadStep(5)).toContain("or, for a small task, read the diff yourself (Teams 11 in the guidelines); then send the blocking findings back");
     expect(section("Brief format")).toContain("Write exactly these sections, in this order (a small task uses the short form below).");
@@ -1578,7 +1578,7 @@ describe("sdd borrow rules", () => {
 
 // rules-text (2026-11-05): no spawn caps, and the PM starts a topic lead whenever the user asks, then tells him only when it needs him.
 describe("no spawn caps, and the PM starts leads on request", () => {
-  const REMOVED = ["8 background sessions", "8 working sessions", "8 sessions on the machine", "**2 teams**", "2 teams per project", "2 teams,", "2 working in a team", "2 working per team", "at most 2 interns", "at most 2 sub-agents", "at most 2 implementers", "at most two sub-agents", "up to two teams", "one or two teams", "one or two live", "At most 2 topics live", "cap of 8", "cap of 2", "a third waits for a slot", "one team per project", "1 team per project"];
+  const REMOVED = ["8 background sessions", "8 working sessions", "8 sessions on the machine", "**2 teams**", "2 teams per project", "2 teams,", "2 working in a team", "2 working per team", "at most 2 interns", "at most 2 sub-agents", "at most 2 implementers", "at most two sub-agents", "at most 2 at a time", "its 2 sub-agents", "up to two teams", "one or two teams", "one or two live", "At most 2 topics live", "cap of 8", "cap of 2", "a third waits for a slot", "one team per project", "1 team per project"];
   const teamsItem = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(section("Teams"))?.[0] ?? "";
   test("the guidelines state none of the removed caps or the one-team rule", () => {
     for (const s of REMOVED) expect(guidelines.toLowerCase(), s).not.toContain(s.toLowerCase());
@@ -1589,7 +1589,7 @@ describe("no spawn caps, and the PM starts leads on request", () => {
   });
   test("the Cap rule says no cap counts sessions, teams, members or interns, and keeps one specialist per task, one Reviewer, the team's lead and the usage holds", () => {
     const cap = section("Cap rule");
-    for (const s of ["No cap counts sessions, teams, members or interns", "**One specialist per task**", "One Reviewer per task", "A `--team` hire needs its lead running", "`waiting for a slot: usage hold: ...`", "`f1rm resume`", "auto-wake", "run independent tasks in parallel", "the usage holds are the brake"]) expect(cap, s).toContain(s);
+    for (const s of ["No cap counts sessions, teams, members or interns", "still refuse or wait, and say why:", "**One specialist per task**", "One Reviewer per task", "A `--team` hire needs its lead running", "`waiting for a slot: usage hold: ...`", "`f1rm resume`", "auto-wake", "run independent tasks in parallel", "the usage holds are the brake"]) expect(cap, s).toContain(s);
   });
   test("Teams 3 says live topics have no cap and queue only by dependency, and owners run independent implementers in parallel", () => {
     expect(teamsItem(3)).toContain("**No cap on live topics**");
@@ -1605,7 +1605,9 @@ describe("no spawn caps, and the PM starts leads on request", () => {
   });
   test("the Interns rule says there is no cap and keeps the independent-subtask and Haiku guidance", () => {
     const interns = section("Interns");
-    for (const s of ["No cap counts interns", "independent of your other work", "on Haiku unless the subtask needs more", "implementer and review subagents are sub-agents too"]) expect(interns, s).toContain(s);
+    for (const s of ["No cap counts interns", "independent of your other work", "on Haiku unless the subtask needs more", "implementer and review subagents follow the same independence rule and run on the model their work needs"]) expect(interns, s).toContain(s);
+    expect(interns).not.toContain("sub-agents too");
+    expect(section("Review and landing")).toContain("the one subagent it starts is this reviewer (interns aside, see Interns)");
     for (const name of SPECIALISTS) expect(role(name).body, name).toContain("Run an intern only for a subtask independent of your other work, on Haiku unless it needs more.");
   });
   test("the usage pacing notes ahead of pace and holds nothing for it", () => {
@@ -1621,10 +1623,48 @@ describe("no spawn caps, and the PM starts leads on request", () => {
     expect(teamsItem(4)).toContain("The user, or the PM on his request, starts a lead");
     expect(section("Who talks to whom")).toContain("the PM relays no question and no answer");
   });
-  test("a topic lead's first round goes through NEEDS YOU, in the guidelines and lead.md", () => {
+  test("a topic lead's first round goes through NEEDS YOU, in the guidelines and lead.md, and so does a small task's one-line understanding", () => {
     for (const s of ["the user's words verbatim", "its first one too", "`NEEDS YOU <team>: <topic>` before it waits"]) expect(teamsItem(10), s).toContain(s);
+    expect(teamsItem(11)).toContain("it writes its one-line understanding and the check under `## Open question for the user` with `NEEDS YOU <team>: <topic>`, like a round, and starts on the user's \"go\"");
     const lead = role("lead").body;
-    for (const s of ["the first one too", "`NEEDS YOU <team>: <topic>` before you wait"]) expect(lead, s).toContain(s);
+    for (const s of ["the first one too", "`NEEDS YOU <team>: <topic>` before you wait", "write your one-line understanding and the check under `## Open question for the user` with `NEEDS YOU <team>: <topic>`, like a round, and start on the user's \"go\"", "A topic lead, started from the office or by the PM, has the grilling interview as its first command."]) expect(lead, s).toContain(s);
+  });
+  test("the PM starts only leads: --simple is a legacy flag wherever the rules name it", () => {
+    const texts: [string, string][] = [["guidelines", guidelines], ["README", readFileSync(join(REPO, "README.md"), "utf8")], ["plugin README", pluginReadme()], ["hire skill", hireSkill()], ["pm.md", role("pm").body], ["PM_DECIDES", pmDecides()]];
+    for (const [name, text] of texts) expect(text, name).not.toMatch(/one dev, designer or researcher with `(f1rm hire )?--simple|PM's one dev|one specialist directly|PM hires with `--simple`|In ops and the simple workflow/);
+    expect(/^5\. .*$/m.exec(section("Roster and hiring playbook"))?.[0]).toContain("the PM starts only leads");
+    expect(section("Roster and hiring playbook")).toContain("`--simple` is a legacy flag the code still accepts");
+    expect(section("Roster and hiring playbook")).toContain("A simple task already running finishes in that flow; the PM starts no new one.");
+    expect(section("Who talks to whom")).toContain("**In ops and a legacy simple task the PM stays the user's contact.**");
+    expect(section("Gates")).toContain("The PM's `f1rm hire` runs only for a lead, or the legacy `--simple`");
+    expect(hireSkill()).toContain("The PM starts only leads");
+    expect(readFileSync(join(REPO, "README.md"), "utf8")).toContain("You talk to the PM, which starts a team lead for each piece of work you ask for.");
+    expect(pluginReadme()).toContain("it starts no simple task");
+  });
+  test("the Team brief says which fields the PM's topic brief fills and leaves the criteria to the lead", () => {
+    const brief = section("Team brief");
+    for (const s of [
+      "it plans nothing, so it writes no criteria of its own", "**Team**: the topic slug, and the user's words verbatim as the goal.", "**Milestone**: the one the user named, else `topics`.",
+      "**Context**: what else the user said, and the installed skills that fit.", "**Other teams**: the live leads and their topics.", "**Contracts**: `none`, or what is already agreed.",
+      "**Acceptance criteria** and **Out of scope**: `set by the lead in its interview`.", "**Report**: as above.",
+    ]) expect(brief, s).toContain(s);
+    for (const t of [/^   - `--topic`.*$/m.exec(section("Roster and hiring playbook"))?.[0] ?? "", role("pm").body, pmPromptText()]) expect(t).toContain("Team brief");
+  });
+  test("a lead asks the open scope questions and runs the board check; the PM plans nothing", () => {
+    const talk = section("Who talks to whom");
+    for (const s of ["A lead asks at most 3 open scope questions per topic, each with a recommended answer", "a default the lead writes under an `Assumptions` line", "**Board check before the first task.** Before its first task the lead checks"]) expect(talk, s).toContain(s);
+    for (const s of ["The PM asks at most 3", "The PM checks that every acceptance criterion"]) expect(talk, s).not.toContain(s);
+    expect(section("Brief format")).toContain("each default the lead chose for a gap");
+    expect(role("lead").body).toContain("Before your first task run the board check, and ask at most 3 open scope questions (Who talks to whom in the guidelines).");
+    expect(role("pm").body).not.toContain("board check");
+    expect(readFileSync(join(REPO, "README.md"), "utf8")).toContain("Each lead asks at most three open scope questions per topic");
+    expect(readFileSync(join(REPO, "README.md"), "utf8")).not.toContain("The PM asks at most three");
+    expect(pluginReadme()).not.toContain("the PM interviews you before it plans");
+  });
+  test("the office's Let the PM decide asks the PM to start a topic lead with the need verbatim, then to speak only when that lead needs the user", () => {
+    const decides = pmDecides();
+    for (const s of ["f1rm:f1rm-guidelines", "f1rm hire --topic lead lead-<topic> <topic>", "verbatim", "in one line which lead you started", "only when that lead needs him"]) expect(decides, s).toContain(s);
+    for (const s of ["--simple", "interview first", "f1rm hire lead"]) expect(decides, s).not.toContain(s);
   });
   test("pm.md and the f1rm pm prompt start a topic lead with f1rm hire --topic when the user asks, and tell the user only when a lead needs him", () => {
     const pm = role("pm").body;
@@ -1636,8 +1676,8 @@ describe("no spawn caps, and the PM starts leads on request", () => {
   test("docs/decisions.md has the entries No spawn caps and The PM starts leads on request", () => {
     const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m);
     const caps = entries.find((e) => e.startsWith("2026-11-05 No spawn caps\n")) ?? "";
-    for (const s of ["- Decision:", "- Why:", "- Rejected: higher caps; dropping the usage holds", "- Where: no-caps-code 3500ab6, drop-one-team, rules-text", "One specialist per task", "usage holds"]) expect(caps, s).toContain(s);
+    for (const s of ["- Decision:", "- Why:", "- Rejected: higher caps; dropping the usage holds", "- Where: no-caps-code 3500ab6, drop-one-team, rules-text", "Kept: one specialist per task", "usage holds"]) expect(caps, s).toContain(s);
     const pm = entries.find((e) => e.startsWith("2026-11-05 The PM starts leads on request\n")) ?? "";
-    for (const s of ["- Decision:", "f1rm hire --topic", "- Why:", "- Rejected:", "relays the lead's questions and answers", "New topic button as the only way", "- Where: rules-text"]) expect(pm, s).toContain(s);
+    for (const s of ["- Decision:", "f1rm hire --topic", "The PM starts only leads", "still watches and wakes its leads", "its other unprompted items stay", "- Why:", "- Rejected:", "relays the lead's questions and answers", "New topic button as the only way", "- Where: rules-text"]) expect(pm, s).toContain(s);
   });
 });
