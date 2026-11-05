@@ -1661,6 +1661,17 @@ describe("no spawn caps, and the PM starts leads on request", () => {
     expect(readFileSync(join(REPO, "README.md"), "utf8")).not.toContain("The PM asks at most three");
     expect(pluginReadme()).not.toContain("the PM interviews you before it plans");
   });
+  test("when the PM starts a lead it adds the team's row `doing` to its board and watches it, so the office can wake it", () => {
+    const pmFlow = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("pm**"))!;
+    const row = "add the team's row to the board at once (owner `lead-<team>`, status `doing`, branch `-`, task the user's goal in one line: Board format) and restart the watcher with the new lead: the office wakes a lead only while its row says `doing` or `review`";
+    for (const step of [/^  3\. .*$/m.exec(pmFlow)?.[0], pmStep(3)]) expect(step).toContain(row);
+    expect(pmPromptText()).toContain("add its row \\`doing\\` to the board and watch it"); // the source escapes its backticks
+  });
+  test("Ask the user only for big decisions gives the PM no interview", () => {
+    const big = section("Who talks to whom").split("\n").find((l) => l.startsWith("- **Ask the user only for big decisions.**")) ?? "";
+    expect(big).toContain("Every question to the user covers only business");
+    expect(big).not.toContain("The PM's interview");
+  });
   test("the office's Let the PM decide asks the PM to start a topic lead with the need verbatim, then to speak only when that lead needs the user", () => {
     const decides = pmDecides();
     for (const s of ["f1rm:f1rm-guidelines", "f1rm hire --topic lead lead-<topic> <topic>", "verbatim", "in one line which lead you started", "only when that lead needs him"]) expect(decides, s).toContain(s);
