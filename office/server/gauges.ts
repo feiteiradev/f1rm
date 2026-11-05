@@ -6,7 +6,7 @@ import { leftovers, removeLeftovers, type Docker } from "../docker.ts";
 import { pacing, readUsage, warn, type Usage } from "../usage.ts";
 import { writePrivate } from "./private.ts";
 
-export type UsageView = Usage & { warn: { fiveHour: boolean; sevenDay: boolean }; hold: { until: number; reason: string } | null; oneTeam: boolean };
+export type UsageView = Usage & { warn: { fiveHour: boolean; sevenDay: boolean }; hold: { until: number; reason: string } | null; ahead: boolean };
 export type LeftoverGroup = { prefix: string; running: number; exited: number; names: string[] };
 /** `fingerprint` is a hash of the sorted container ids: what the click names as the list it was shown, never the ids themselves. */
 export type LeftoversView = { count: number; running: number; exited: number; groups: LeftoverGroup[]; moreGroups: number; fingerprint: string };

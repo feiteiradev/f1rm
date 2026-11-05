@@ -363,19 +363,18 @@ test("who may wake follows who may hire: the PM wakes leads, a lead its own team
   }
 });
 
-test("a stopped simple dev (no team) is woken in its own worktree, reports to the PM, and two other live teams do not hold it", async () => {
+test("a stopped simple dev (no team) is woken in its own worktree, reports to the PM, and two other live teams do not hold it, on pace or ahead of it", async () => {
   const solo = stopped("backend-dev-x", "solo-sid", wt("x"));
   const p = await plan("backend-dev-x", [solo]);
   expect(p.argv.slice(0, 9)).toEqual(["claude", "--bg", "--resume", "solo-sid", "--agent", "f1rm:backend-dev", "--name", "backend-dev-x", "resumed; continue your task\nReport to: pm-shop"]);
   expect(p.cwd).toBe(wt("x"));
   // Two other teams (a lead, another simple task) run: there is no team cap, so it wakes as a third.
   expect((await plan("backend-dev-x", [solo, lead, running("designer-y", "y", wt("y"))])).sessionId).toBe("solo-sid");
-  // Ahead of the weekly pace a project runs one team: another live simple task holds it, its own stopped copy does not.
+  // Ahead of the weekly pace nothing changes: it wakes beside a lead and another live simple task.
   const ahead = tmp("f1rm-wake-home-");
   mkdirSync(join(ahead, ".f1rm"), { recursive: true });
   writeFileSync(join(ahead, ".f1rm", "usage.json"), JSON.stringify({ sevenDay: { usedPct: 50, resetsAt: NOW / 1000 + 6 * 86400 }, readAt: 0 }));
-  expect((await failure(plan("backend-dev-x", [solo, running("designer-y", "y", wt("y"))], {}, { home: ahead })))?.message).toBe("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)");
-  expect((await plan("backend-dev-x", [solo], {}, { home: ahead })).sessionId).toBe("solo-sid");
+  expect((await plan("backend-dev-x", [solo, lead, running("designer-y", "y", wt("y"))], {}, { home: ahead })).sessionId).toBe("solo-sid");
   // The Report to its first prompt named wins over the default.
   expect((await plan("backend-dev-x", [solo], {}, { promptOf: () => "/pstack:poteto-mode Report to: pm-other\n\nbrief" })).argv[8]).toBe("resumed; continue your task\nReport to: pm-other");
 });

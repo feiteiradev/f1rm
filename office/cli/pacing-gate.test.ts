@@ -1,4 +1,4 @@
-// The usage hold and the one-team pace in checkSlots (hire and wake both pass it), and the wait that says when a hold ends.
+// The usage hold in checkSlots (hire and wake both pass it), the weekly pace that holds no start, and the wait that says when a hold ends.
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,57 +86,28 @@ test("a hold refuses a start with sessions live and leaves them as they were; th
   expect(() => ask([session("backend-dev-x", wt("x"), "done")], { override: true })).toThrow("one specialist per task");
 });
 
-test("one team while the weekly usage runs ahead of pace: a 2nd lead or simple task is refused, a specialist into a team is not", () => {
-  const lead = session("lead-cart", REPO);
-  put(week(50, 6 * D)); // 14% of the week gone, 50% used: ahead
-  const e = refusal(() => ask([lead], { role: "lead", name: "lead-pay", task: "pay" }));
-  expect(e.message).toContain("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)");
-  expect(e.working).toBe(1);
-  expect(() => ask([lead])).toThrow("the cap is 1");
-  expect(() => ask([lead], { role: "designer", name: "cart.designer-a", task: "a", team: "cart" })).not.toThrow();
-  expect(() => ask([lead], { role: "lead", name: "lead-pay", task: "pay", override: true })).not.toThrow();
-  put(week(50)); // 86% of the week gone: on pace, two teams
-  expect(() => ask([lead], { role: "lead", name: "lead-pay", task: "pay" })).not.toThrow();
+test("ahead of the weekly pace no team count holds a start: a second and a third lead, a simple task and a designer all start", () => {
+  put(week(50, 6 * D)); // 14% of the week gone, 50% used: ahead of pace
+  const cart = session("lead-cart", REPO), solo = session("backend-dev-y", wt("y"));
+  expect(() => ask([cart], { role: "lead", name: "lead-pay", task: "pay" })).not.toThrow();
+  expect(() => ask([cart, session("lead-pay", REPO)], { role: "lead", name: "lead-ship", task: "ship" })).not.toThrow();
+  expect(() => ask([session("lead-cart", REPO, "done"), solo], { role: "lead", name: "lead-pay", task: "pay" })).not.toThrow();
+  expect(() => ask([cart, solo])).not.toThrow(); // a simple task beside a lead and another simple task
+  expect(() => ask([cart, session("designer-z", wt("z"), "done")], { role: "designer", name: "designer-x", task: "x" })).not.toThrow();
 });
 
-test("with no caps left the usage holds are what refuses: on pace a third and a fourth lead start beside 9 working, ahead of pace a third is refused by the one-team rule, and the hold still holds", () => {
+test("with no caps left the usage holds are what refuses: on pace or ahead of it a third and a fourth lead start beside 9 working, and the hold still holds", () => {
   const crowd = [...Array(9).fill(WORKER), session("lead-cart", REPO), session("lead-pay", REPO)];
   const third = { role: "lead", name: "lead-ship", task: "ship" };
-  put(week(50)); // on pace
-  expect(() => ask(crowd, third)).not.toThrow();
-  expect(() => ask([...crowd, session("lead-ship", REPO)], { role: "lead", name: "lead-tax", task: "tax" })).not.toThrow();
-  put(week(50, 6 * D)); // ahead of pace
-  expect(() => ask(crowd, third)).toThrow("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)");
+  for (const left of [D, 6 * D]) {
+    put(week(50, left)); // on pace, then ahead of it
+    expect(() => ask(crowd, third)).not.toThrow();
+    expect(() => ask([...crowd, session("lead-ship", REPO)], { role: "lead", name: "lead-tax", task: "tax" })).not.toThrow();
+  }
   put(five(95));
   const e = refusal(() => ask(crowd, third));
   expect(e).toBeInstanceOf(UsageHold);
   expect(e.working).toBe(11);
-});
-
-test("ahead of pace the one-team rule counts this repo's live leads and simple tasks as teams; another repo's simple task, a team's member, a user's own session, a member's or a Reviewer's start do not", () => {
-  put(week(50, 6 * D)); // ahead of pace
-  const pay = { role: "lead", name: "lead-pay", task: "pay" };
-  const solo = session("backend-dev-y", wt("y"));
-  // a live simple task in this repo's worktree, finished or not, is a team: a lead, a simple task and a team-less designer (the Hire dialog's) are refused
-  expect(() => ask([solo], pay)).toThrow("this project already has 1 team");
-  expect(() => ask([solo])).toThrow("this project already has 1 team");
-  expect(() => ask([session("designer-z", wt("z"), "done")], { role: "designer", name: "designer-x", task: "x" })).toThrow("this project already has 1 team");
-  // no team: a simple task of another repo, a team's member, a session of the user's own in a worktree of this repo
-  expect(() => ask([session("backend-dev-q", "/code/blog/.claude/worktrees/q")], pay)).not.toThrow();
-  expect(() => ask([session("checkout.backend-dev-w", wt("w"))], pay)).not.toThrow();
-  expect(() => ask([session("my-own-session", wt("mine"))], pay)).not.toThrow();
-  // a team's member and a Reviewer are no team of one: they start beside a live team
-  const lead = session("lead-checkout", REPO);
-  expect(() => ask([lead, solo], { role: "designer", name: "checkout.designer-x", task: "x", team: "checkout" })).not.toThrow();
-  expect(() => ask([lead, solo], { role: "reviewer", name: "reviewer-review-x", task: "review-x" })).not.toThrow();
-});
-
-test("oneTeam counts a lead that finished (it still holds its team) and ignores a Reviewer", () => {
-  put(week(50, 6 * D));
-  const lead = (state: string) => session("lead-cart", REPO, state);
-  expect(() => ask([lead("done")], { role: "lead", name: "lead-pay", task: "pay" })).toThrow("the cap is 1");
-  const reviewer = session("cart.reviewer-review-x", REPO);
-  expect(() => ask([reviewer], { role: "lead", name: "lead-pay", task: "pay" })).not.toThrow();
 });
 
 test("a wait that ends at a usage hold says again when it ends, with the NO_SLOT text", async () => {

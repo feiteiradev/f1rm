@@ -18,7 +18,7 @@ const view = (five: number | null, seven: number | null, over: Partial<UsageView
   readAt: NOW,
   warn: { fiveHour: (five ?? 0) >= WARN_5H, sevenDay: (seven ?? 0) >= WARN_7D },
   hold: null,
-  oneTeam: false,
+  ahead: false,
   ...over,
 });
 const html = (usage: UsageView | null) => renderToStaticMarkup(<Gauges usage={usage} now={NOW} />);
@@ -89,9 +89,10 @@ test("warning and paused differ by words, not colour alone: a plain chip against
 
 test("ahead of pace: a notch at the elapsed share and the note, on the weekly gauge only", () => {
   // Weekly resets Mon 9 Nov 09:00; now Tue 3 Nov 12:00: 5d21h left, so 17.0% of 7 days is gone... 64% used is ahead.
-  const h = html(view(35, 64, { oneTeam: true }));
-  expect(h).toContain('aria-label="Weekly window: 64% used, resets Monday 09:00, ahead of pace, 1 team per project"');
-  expect(h).toContain("<span>Ahead of pace,</span> <span>1 team per project</span>");
+  const h = html(view(35, 64, { ahead: true }));
+  expect(h).toContain('aria-label="Weekly window: 64% used, resets Monday 09:00, ahead of pace"');
+  expect(h).toContain('<span class="pace-note">Ahead of pace</span>');
+  expect(h).not.toContain("team per project");
   expect(h.match(/class="pace"/g)).toHaveLength(1);
   expect(h).toContain('class="pace" style="left:16.');
   expect(html(view(35, 64))).not.toContain("Ahead of pace");
@@ -136,7 +137,7 @@ test("announcements: crossing a threshold, resuming and a pace flip are spoken; 
   expect(a(view(70, 10), view(78, 10))).toBe("5-hour usage is near limit: 78% used, resets 18:40.");
   expect(a(view(80, 10), view(93, 10))).toBe("5-hour usage reached 93%. Paused until 18:40: no hire, wake or auto-wake wait starts.");
   expect(a(view(93, 10), view(3, 10))).toBe("Paused work resumes: 5-hour window reset.");
-  expect(a(view(10, 60), view(10, 64, { oneTeam: true }))).toBe("Weekly usage is ahead of pace: 1 team per project.");
+  expect(a(view(10, 60), view(10, 64, { ahead: true }))).toBe("Weekly usage is ahead of pace.");
   expect(a(view(40, 10), view(44, 12))).toBeNull();
   expect(a(view(78, 10), view(80, 10))).toBeNull();
   expect(a(null, view(78, 10))).toBeNull(); // a first reading that is only near the limit is not news

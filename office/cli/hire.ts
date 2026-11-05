@@ -101,7 +101,7 @@ export function readRoles(): Role[] {
 }
 
 /**
- * A hire was refused. `working` is the number of working hires when a counted refusal (the usage hold, the one-team pace) refused it: the hire waits for a slot.
+ * A hire was refused. `working` is the number of working hires when a counted refusal (the usage hold) refused it: the hire waits for a slot.
  * It is null for any other refusal (the hires couldn't be counted, the repo's path is too long): the message then stands alone.
  */
 export class HireRefused extends Error {
@@ -138,7 +138,7 @@ export type HireRequest = {
   content?: boolean;
   /** A topic lead: its first command is the grilling interview with the user. A lead only. */
   topic?: boolean;
-  /** A simple task: the PM's one dev, designer or researcher with no lead and no team. It counts as a team of one in the one-team pace. */
+  /** A simple task: the PM's one dev, designer or researcher with no lead and no team. */
   simple?: boolean;
   /** Flags that go to claude as given. */
   extra?: string[];
@@ -153,14 +153,12 @@ export type LiveHires = { name: string; state: string; cwd: string }[];
 export class UsageHold extends HireRefused {}
 
 /**
- * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the usage pacing
- * (the hold, and one team per project while the weekly usage runs ahead of pace). No count of sessions, teams or members caps a start. A simple task is a team of one: live leads and live simple tasks make up the teams.
- * Throws an Error, or a HireRefused for the pacing. `override` skips the pacing only.
+ * The checks every start of a session passes, a new hire or a woken one (`f1rm wake`): the team's lead runs, one Reviewer and one specialist per task, and the usage hold.
+ * No count of sessions, teams or members caps a start, and neither does the weekly pace.
+ * Throws an Error, or a HireRefused for the hold. `override` skips the hold only.
  */
 export function checkSlots(live: LiveHires, { role, name, task, team, cwd, override, usage, now }: { role: string; name: string; task: string; team?: string | null; cwd: string; override?: boolean; usage?: Usage | null; now?: number }): void {
   const lead = role === "lead";
-  // A hire with no team that is no lead and no Reviewer is a team of one, whoever starts it (the PM's --simple, the Hire dialog) and whether it is started or woken.
-  const simple = !lead && !team && role !== "reviewer";
   const busy = live.filter((s) => s.state === "working" || s.state === "blocked");
   if (team && !live.some((s) => s.name === `lead-${team}` && s.cwd === cwd)) throw new Error(`team "${team}" has no lead running in this repo (lead-${team})`);
   // A Reviewer has no worktree of its own, so its name is what tells two reviews of one task apart.
@@ -172,13 +170,6 @@ export function checkSlots(live: LiveHires, { role, name, task, team, cwd, overr
     const at = now ?? Date.now() / 1000;
     const pace = pacing(usage ?? null, at);
     if (pace.hold) throw new UsageHold(`usage hold: ${pace.hold.reason}; new sessions wait until ${when(pace.hold.until, at)}`, busy.length);
-    if ((lead || simple) && pace.oneTeam) {
-      // A simple task is a hire named <role>-<task> (no team, no lead, no Reviewer) in a worktree of this repo; a session of the user's own with another name is none.
-      const worktrees = join(cwd, ".claude", "worktrees") + "/";
-      const solo = new RegExp(`^(?:${readRoles().map((r) => r.id).filter((id) => id !== "lead" && id !== "reviewer").join("|")})-${SLUG.source.slice(1, -1)}$`);
-      const teams = live.filter((s) => (s.name.startsWith("lead-") && s.cwd === cwd) || (solo.test(s.name) && s.cwd.startsWith(worktrees))).length;
-      if (teams >= 1) throw new HireRefused("this project already has 1 team (the cap is 1 while the weekly usage runs ahead of pace)", busy.length);
-    }
   }
 }
 
