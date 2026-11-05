@@ -1513,3 +1513,59 @@ describe("usage pacing and docker rules", () => {
     for (const t of ["Pace on the official usage windows", "Tag and tear down each task's Docker stack"]) expect(log).toContain(`## 2026-11-03 ${t}\n`);
   });
 });
+
+describe("sdd borrow rules", () => {
+  const teamsItem = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(section("Teams"))?.[0] ?? "";
+  const leadStep = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(role("lead").body)?.[0] ?? "";
+  test("the living spec: docs/spec.md, one present-tense section per capability, created lazily, edited in the same commit, and a repo's CLAUDE.md can name another", () => {
+    const md = section("Milestones and decisions");
+    for (const s of ["**The living spec.**", "`docs/spec.md`", "one short section per capability, in the present tense", "The first task that changes a behaviour creates it, holding only that task's section", "never backfilled", "edits its section in the same commit", "no `merge=union`", "goes back through `f1rm merge`", "A repo whose `CLAUDE.md` names another file or files as its living spec uses those instead.", "`docs/decisions.md` and git history stay, and so does the living spec."]) expect(md, s).toContain(s);
+    expect(section("Brief format")).toContain('When a task changes what the software does, a criterion reads "the living spec section <capability> says <behaviour>"');
+    expect(role("lead").body).toContain('"the living spec section <capability> says <behaviour>"');
+  });
+  test("a missing living spec update the brief asks for blocks, in review step 2, the content checklist and reviewer.md", () => {
+    const flow = section("Review and landing");
+    expect(flow).toContain("A `docs/decisions.md` entry or a living spec update the brief asks for and the diff lacks is blocking.");
+    expect(flow).toContain("- every `docs/decisions.md` entry and living spec update the brief asks for is there.");
+    expect(role("reviewer").body).toContain("and every living spec update it asks for, is in the branch. A missing one blocks.");
+  });
+  test("f1rm's CLAUDE.md names the guidelines and the README as its living spec", () => {
+    const claude = readFileSync(join(REPO, "CLAUDE.md"), "utf8").split(/^### /m).find((s) => s.startsWith("Living spec\n")) ?? "";
+    for (const s of ["`plugin/skills/f1rm-guidelines/SKILL.md` (the company rules)", "`README.md` (the office)"]) expect(claude, s).toContain(s);
+  });
+  test("the size gate is Teams 11, with pointers in Brief format, Teams 8, Teams 10, the lead's Workflows steps, Definition of done and lead.md steps 3 and 5", () => {
+    const gate = teamsItem(11);
+    for (const s of ["**Size gate.**", "about 3 files", "no product, design or business choice and no core decision", "the gates, authentication, user data, secrets, shell execution, money or data removal", "short brief", "no grilling rounds", "one-line understanding and the check", "the user's \"go\"", "reads a small task's diff itself", "failing test first", "full check", "only through `f1rm merge`", "\"small\" call in `~/.f1rm/kept/<repo>/calls.md`"]) expect(gate, s).toContain(s);
+    expect(section("Brief format")).toContain("A small task (Teams 11) has a short brief: only Task, one or two acceptance criteria each with its proved by, and Out of scope.");
+    expect(teamsItem(8)).toContain("for a small task, the lead reads the diff itself (Teams 11)");
+    expect(teamsItem(10)).toContain("A topic that is one small task gets no grilling rounds (Teams 11).");
+    expect(leadStep(3)).toContain("A topic that is one small task (Teams 11 in the guidelines) gets no rounds");
+    expect(leadStep(5)).toContain("or, for a small task, read the diff yourself (Teams 11 in the guidelines); then send the blocking findings back");
+    expect(section("Brief format")).toContain("Write exactly these sections, in this order (a small task uses the short form below).");
+    const wf = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("lead**")) ?? "";
+    expect(wf).toContain("(a topic that is one small task: no rounds, Teams 11)");
+    expect(wf).toContain("(a small task: the lead reads the diff itself, Teams 11)");
+    expect(section("Definition of done")).toContain("the lead's own reading of a small task's diff (Teams 11)");
+    const entry = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).find((e) => e.startsWith("2026-11-05 Size gate for small tasks\n")) ?? "";
+    expect(entry).toContain("authentication, user data, secrets");
+  });
+  test("the topic converges once at close: criteria on the team board (Teams 6), one check on main before the batch task (Teams 9), named in Workflows and lead.md step 7", () => {
+    expect(teamsItem(6)).toContain("the topic's acceptance criteria, each with its proved by, under `## Acceptance criteria` on its team board");
+    const close = teamsItem(9);
+    for (const s of ["converges once", "runs each check of the topic's acceptance criteria once on main", "each failing criterion becomes one more task through the same flow", "listed as open in `DONE <team>`, with no second round"]) expect(close, s).toContain(s);
+    expect(close.indexOf("converges once")).toBeLessThan(close.indexOf("one batch task"));
+    expect(section("Workflows")).toContain("Close the team (Teams 9): the converge check, the batch task,");
+    const step7 = leadStep(7);
+    for (const s of ["converge once", "`## Acceptance criteria`", "on main", "one more task through the same flow", "open in your `DONE <team>`", "no second round"]) expect(step7, s).toContain(s);
+    expect(step7.indexOf("converge once")).toBeLessThan(step7.indexOf("batch task"));
+  });
+  test("docs/decisions.md has the three sdd entries", () => {
+    const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m);
+    for (const t of ["Living spec per project", "Size gate for small tasks", "Converge a topic once at close"]) {
+      const entry = entries.find((e) => e.startsWith(`2026-11-05 ${t}\n`)) ?? "";
+      for (const s of ["- Decision:", "- Why:", "- Rejected:", "- Where: sdd-rules (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/lead.md"]) expect(entry, `${t}: ${s}`).toContain(s);
+    }
+    const rejected = entries.filter((e) => e.startsWith("2026-11-05 ")).join("");
+    for (const s of ["constitution file", "per-change folder", "loop until converged"]) expect(rejected, s).toContain(s);
+  });
+});

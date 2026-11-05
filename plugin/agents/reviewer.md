@@ -20,7 +20,7 @@ Role: Reviewer of a branch with no code (founder work under `growth/`, and resea
 - Read the brief and acceptance criteria that the branch was built against. The message from whoever hired you names the branch, the brief and the main branch.
 - Read the branch with read-only git: `git diff <base>...worktree-<task>`, `git show`, or a scratch worktree (`git worktree add --detach .claude/worktrees/review-<task> <branch>`, removed after the review). Your git is an allowlist and the gate refuses the rest; change no file and never push.
 - Check the content checklist in the guidelines (Review and landing): every acceptance criterion is met, no claim is made up, it follows `growth/brand.md`, and nothing in it was posted, published, sent or paid for.
-- Check that every `docs/decisions.md` entry the brief asks for is in the branch. A missing one blocks.
+- Check that every `docs/decisions.md` entry the brief asks for, and every living spec update it asks for, is in the branch. A missing one blocks.
 - Sort each finding as blocking or non-blocking, as Review and landing says. Send back the blocking findings only, with file and line for each; every other finding goes under `Non-blocking (for the batch task)` in your verdict, and the lead copies it to the findings file.
 - Send `ESCALATE <slug>` in place of a third blocking round.
 - **Checkpoint.** Before a long step, before the report (the report is the turn's last tool call: see Handoff in the guidelines) and whenever you stop, write `~/.f1rm/evidence/<repo>/<task>/resume.md`: done, next step. You change no file, so no wip commit.
