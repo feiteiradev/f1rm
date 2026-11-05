@@ -59,11 +59,11 @@ test("usage is null with no usage file, and without one configured", async () =>
   expect((await office((s) => "usage" in s)).usage).toBeNull();
 });
 
-test("usage at 51% and 62% carries both windows, no warning, no hold, no pace limit", async () => {
+test("usage at 51% and 62% carries both windows, no warning, no hold, not ahead of pace", async () => {
   const file = usageAt(home(), { fiveHour: { usedPct: 51, resetsAt: NOW + 3600 }, sevenDay: { usedPct: 62, resetsAt: NOW + 2 * 86400 } });
   start({ usageFile: file });
   const { usage } = await office((s) => !!s.usage);
-  expect(usage).toMatchObject({ fiveHour: { usedPct: 51, resetsAt: NOW + 3600 }, sevenDay: { usedPct: 62 }, readAt: NOW, warn: { fiveHour: false, sevenDay: false }, hold: null, oneTeam: false });
+  expect(usage).toMatchObject({ fiveHour: { usedPct: 51, resetsAt: NOW + 3600 }, sevenDay: { usedPct: 62 }, readAt: NOW, warn: { fiveHour: false, sevenDay: false }, hold: null, ahead: false });
 });
 
 test("usage at 91% five-hour holds until its reset, and warns", async () => {
@@ -75,12 +75,12 @@ test("usage at 91% five-hour holds until its reset, and warns", async () => {
   expect(usage.hold.reason).toContain("5-hour usage is 91%");
 });
 
-test("a weekly reading above the elapsed share of its window is ahead of pace: one team", async () => {
+test("a weekly reading above the elapsed share of its window is ahead of pace", async () => {
   // 3 of 7 days gone (43%); 62% used is ahead
   const file = usageAt(home(), { sevenDay: { usedPct: 62, resetsAt: NOW + 4 * 86400 } });
   start({ usageFile: file });
   const { usage } = await office((s) => !!s.usage);
-  expect(usage.oneTeam).toBe(true);
+  expect(usage.ahead).toBe(true);
   expect(usage.fiveHour).toBeUndefined();
 });
 

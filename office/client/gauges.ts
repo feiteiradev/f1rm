@@ -52,14 +52,14 @@ export function gaugeModel(kind: Kind, win: Win | undefined, now: number, ahead 
     kind, name, state, pct, reset, ahead: isAhead, ticks,
     resetIso: new Date(win.resetsAt * 1000).toISOString(),
     pace: isAhead ? Math.min(100, Math.max(0, (1 - (win.resetsAt - now) / WEEK) * 100)) : null,
-    label: `${name} window: ${body}${isAhead ? ", ahead of pace, 1 team per project" : ""}`,
+    label: `${name} window: ${body}${isAhead ? ", ahead of pace" : ""}`,
     hold: state === "paused" ? `No hire, wake or auto-wake wait starts until ${reset}.` : null,
   };
 }
 
 export const gaugesOf = (u: UsageView | null | undefined, now: number) => [
   gaugeModel("fiveHour", u?.fiveHour, now),
-  gaugeModel("sevenDay", u?.sevenDay, now, !!u?.oneTeam),
+  gaugeModel("sevenDay", u?.sevenDay, now, !!u?.ahead),
 ];
 
 /** What a polite status region says when `next` differs from `prev` in a way worth hearing; null otherwise (and for the first reading, and for ordinary drift). */
@@ -73,6 +73,6 @@ export function announce(prev: UsageView | null | undefined, next: UsageView | n
     if (p.state === "paused") return `Paused work resumes: ${n.name} window reset.`;
     if (n.state === "warn") return `${n.name} usage is near limit: ${n.pct}% used, resets ${n.reset}.`;
   }
-  if (prev && !before[1]!.ahead && after[1]!.ahead) return "Weekly usage is ahead of pace: 1 team per project.";
+  if (prev && !before[1]!.ahead && after[1]!.ahead) return "Weekly usage is ahead of pace.";
   return null;
 }

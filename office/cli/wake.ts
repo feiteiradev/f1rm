@@ -124,7 +124,7 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const cwd = own ?? String(target.cwd);
   if (!d.exists(cwd)) throw new Error(`${name} was let go; hire a new one`);
 
-  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one is still listed, and must not count against itself (one specialist per task, the one-team pace).
+  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one is still listed, and must not count against itself (one specialist per task).
   const listed = (await d.agents(false)) ?? [];
   const live: LiveHires = background(listed)
     .filter((a) => !(a.name === name && !a.pid))

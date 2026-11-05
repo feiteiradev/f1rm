@@ -80,17 +80,17 @@ test("pacing holds until the later reset when both windows are over", () => {
   expect(pacing(u(99, 99), NOW).hold?.until).toBe(NOW + 3.5 * 86400);
 });
 
-test("oneTeam when the 7-day used share is ahead of the elapsed share of the week", () => {
+test("ahead when the 7-day used share is ahead of the elapsed share of the week", () => {
   // half the week gone: 50% elapsed
-  expect(pacing(u(undefined, 51), NOW).oneTeam).toBe(true);
-  expect(pacing(u(undefined, 50), NOW).oneTeam).toBe(false);
-  expect(pacing(u(undefined, 50.4), NOW).oneTeam).toBe(false); // the display floors to 50: equal numbers are not ahead
-  expect(pacing(u(undefined, 10), NOW).oneTeam).toBe(false);
-  expect(pacing(u(99), NOW).oneTeam).toBe(false);
+  expect(pacing(u(undefined, 51), NOW).ahead).toBe(true);
+  expect(pacing(u(undefined, 50), NOW).ahead).toBe(false);
+  expect(pacing(u(undefined, 50.4), NOW).ahead).toBe(false); // the display floors to 50: equal numbers are not ahead
+  expect(pacing(u(undefined, 10), NOW).ahead).toBe(false);
+  expect(pacing(u(99), NOW).ahead).toBe(false);
 });
 
-test("oneTeam at 10% of the week elapsed, and at the clamp ends", () => {
-  const at = (pct: number, left: number) => pacing({ sevenDay: { usedPct: pct, resetsAt: NOW + left }, readAt: NOW }, NOW).oneTeam;
+test("ahead at 10% of the week elapsed, and at the clamp ends", () => {
+  const at = (pct: number, left: number) => pacing({ sevenDay: { usedPct: pct, resetsAt: NOW + left }, readAt: NOW }, NOW).ahead;
   const week = 7 * 86400;
   expect([at(20, 0.9 * week), at(5, 0.9 * week)]).toEqual([true, false]);
   expect(at(1, week + 86400)).toBe(true); // reset far ahead: elapsed clamps to 0
@@ -126,9 +126,9 @@ test("usage-tap with an empty HOME writes nothing, not even a relative path, and
   expect(existsSync(join(dir, ".f1rm"))).toBe(false); // (bun itself may create a Library/ cache folder for an empty HOME)
 });
 
-test("null or empty usage means no hold and one team's worth of nothing", () => {
-  expect(pacing(null, NOW)).toEqual({ hold: null, oneTeam: false });
-  expect(pacing({ readAt: NOW }, NOW)).toEqual({ hold: null, oneTeam: false });
+test("null or empty usage means no hold and not ahead of pace", () => {
+  expect(pacing(null, NOW)).toEqual({ hold: null, ahead: false });
+  expect(pacing({ readAt: NOW }, NOW)).toEqual({ hold: null, ahead: false });
 });
 
 test("warn flags 5-hour from 75% and 7-day from 85%", () => {

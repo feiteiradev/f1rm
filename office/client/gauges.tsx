@@ -26,7 +26,7 @@ function GaugeCell({ g }: { g: Gauge }) {
           </>
         )}
       </span>
-      {g.ahead && <span className="pace-note"><span>Ahead of pace,</span> <span>1 team per project</span></span>}
+      {g.ahead && <span className="pace-note">Ahead of pace</span>}
     </div>
   );
 }
