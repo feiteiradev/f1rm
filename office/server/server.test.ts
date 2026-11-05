@@ -845,6 +845,24 @@ test("topic starts lead-<name> with the grilling first command and the generated
   expect(spawned.map((s) => s.argv[5])).toEqual(["lead-billing", "lead-third"]);
 });
 
+test("topic's brief names this project's other live leads under Other teams, or none live, and leaves the criteria to the lead", async () => {
+  start(SHOP);
+  await inRoom("p", { agent_type: "f1rm:pm" });
+  await office((s) => ROOM in s.rooms);
+  const topicOf = (name: string) => ui("topic", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, name }) });
+  expect((await topicOf("billing")).status).toBe(200);
+  expect(spawned[0].argv[6]).toContain("\nOther teams: none live\n");
+  expect(spawned[0].argv[6]).toContain("\nAcceptance criteria: set by the lead in its interview\nOut of scope: set by the lead in its interview\n");
+  liveToo = [
+    { name: "lead-a", state: "working", cwd: "/code/shop" },
+    { name: "lead-other", state: "working", cwd: "/code/blog" },
+    { name: "backend-dev-y", state: "working", cwd: "/code/shop" },
+    { name: "lead-search", state: "working", cwd: "/code/shop" },
+  ];
+  expect((await topicOf("search")).status).toBe(200);
+  expect(spawned[1].argv[6]).toContain("\nOther teams: lead-a (live in this project): agree contracts with them directly\n");
+});
+
 test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
   start(SHOP);
   await hook(sessionStart("s1", "/code/shop"));
@@ -1808,7 +1826,7 @@ test("a PM hires only leads, with any flags before the role; a specialist hire, 
   for (const command of refused) {
     const out = await bash("p", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain("PMs hire leads; send this to a lead");
+    expect(out.permissionDecisionReason).toContain("The PM starts only leads, with `f1rm hire --topic lead lead-<topic> <topic> \"<brief>\"`; a lead hires the specialists of its team.");
   }
 });
 
@@ -3034,13 +3052,13 @@ test("only the PM hires with --simple, one dev, designer or researcher with no t
   for (const command of ["f1rm hire backend-dev backend-dev-x x b", "f1rm hire --simple --team checkout backend-dev checkout.backend-dev-x x b", "f1rm hire --simple lead lead-cart cart b", "f1rm hire --simple reviewer reviewer-review-x review-x b", "f1rm hire --content reviewer reviewer-review-x review-x b"]) {
     const out = await bash("p", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toMatch(/PMs hire leads; send this to a lead|--simple is for one dev/);
+    expect(out.permissionDecisionReason).toMatch(/The PM starts only leads, with `f1rm hire --topic lead|--simple is for one dev/);
   }
   // A lead never hires with --simple; its team hires are unchanged. A specialist hires nothing.
   for (const command of ["f1rm hire --simple backend-dev backend-dev-x x b", "f1rm hire --simple --team checkout designer checkout.designer-x x b"]) {
     const out = await bash("l", command);
     expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Only the PM hires with --simple");
+    expect(out.permissionDecisionReason).toContain("Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
   }
   expect(await bash("l", "f1rm hire --team checkout designer checkout.designer-x x b")).toBeNull();
   for (const id of ["s", "d", "m", "rv"]) expect([id, (await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b"))?.permissionDecision]).toEqual([id, "deny"]);
@@ -3048,7 +3066,7 @@ test("only the PM hires with --simple, one dev, designer or researcher with no t
   for (const [who, id, extra] of [["the PM's intern", "p", { agent_id: "i-p" }], ["a role-less session", "f", {}]] as const) {
     const out = await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b", extra);
     expect([who, out?.permissionDecision]).toEqual([who, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Only the PM hires with --simple");
+    expect(out.permissionDecisionReason).toContain("Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
   }
   expect(await bash("f", "f1rm hire designer designer-q q b")).toBeNull();
   expect(await bash("p", "git log --grep='f1rm hire --simple backend-dev x'")).toBeNull();
