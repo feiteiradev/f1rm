@@ -529,7 +529,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 
 ## 2026-11-05 Size gate for small tasks
 
-- Decision: a task is small when it is one task touching about 3 files at most, holds no product, design or business choice and no core decision, and touches none of the gates, authentication, secrets, shell execution, money or data removal. It gets a short brief; a topic that is one small task gets no grilling rounds (a one-line understanding and the check, then the user's "go"); the lead reads its diff in place of the review subagent. It keeps the failing test first, the full check and `f1rm merge`, and the lead logs each "small" call in calls.md.
+- Decision: a task is small when it is one task touching about 3 files at most, holds no product, design or business choice and no core decision, and touches none of the gates, authentication, user data, secrets, shell execution, money or data removal. It gets a short brief; a topic that is one small task gets no grilling rounds (a one-line understanding and the check, then the user's "go"); the lead reads its diff in place of the review subagent. It keeps the failing test first, the full check and `f1rm merge`, and the lead logs each "small" call in calls.md.
 - Why: spec tools turn small fixes into piles of documents (Kiro: one small bug became four user stories and 16 criteria), and the full flow costs more than the work.
 - Rejected: one flow for every size; dropping the failing test or the full check for small tasks.
 - Where: sdd-rules (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/lead.md)

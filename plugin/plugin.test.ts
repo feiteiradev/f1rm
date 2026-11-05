@@ -1533,14 +1533,21 @@ describe("sdd borrow rules", () => {
     const claude = readFileSync(join(REPO, "CLAUDE.md"), "utf8").split(/^### /m).find((s) => s.startsWith("Living spec\n")) ?? "";
     for (const s of ["`plugin/skills/f1rm-guidelines/SKILL.md` (the company rules)", "`README.md` (the office)"]) expect(claude, s).toContain(s);
   });
-  test("the size gate is Teams 11, with pointers in Brief format, Teams 8, Teams 10 and lead.md steps 3 and 5", () => {
+  test("the size gate is Teams 11, with pointers in Brief format, Teams 8, Teams 10, the lead's Workflows steps, Definition of done and lead.md steps 3 and 5", () => {
     const gate = teamsItem(11);
-    for (const s of ["**Size gate.**", "about 3 files", "no product, design or business choice and no core decision", "the gates, authentication, secrets, shell execution, money or data removal", "short brief", "no grilling rounds", "one-line understanding and the check", "the user's \"go\"", "reads a small task's diff itself", "failing test first", "full check", "only through `f1rm merge`", "\"small\" call in `~/.f1rm/kept/<repo>/calls.md`"]) expect(gate, s).toContain(s);
+    for (const s of ["**Size gate.**", "about 3 files", "no product, design or business choice and no core decision", "the gates, authentication, user data, secrets, shell execution, money or data removal", "short brief", "no grilling rounds", "one-line understanding and the check", "the user's \"go\"", "reads a small task's diff itself", "failing test first", "full check", "only through `f1rm merge`", "\"small\" call in `~/.f1rm/kept/<repo>/calls.md`"]) expect(gate, s).toContain(s);
     expect(section("Brief format")).toContain("A small task (Teams 11) has a short brief: only Task, one or two acceptance criteria each with its proved by, and Out of scope.");
     expect(teamsItem(8)).toContain("for a small task, the lead reads the diff itself (Teams 11)");
     expect(teamsItem(10)).toContain("A topic that is one small task gets no grilling rounds (Teams 11).");
     expect(leadStep(3)).toContain("A topic that is one small task (Teams 11 in the guidelines) gets no rounds");
-    expect(leadStep(5)).toContain("or, for a small task, read the diff yourself (Teams 11)");
+    expect(leadStep(5)).toContain("or, for a small task, read the diff yourself (Teams 11 in the guidelines); then send the blocking findings back");
+    expect(section("Brief format")).toContain("Write exactly these sections, in this order (a small task uses the short form below).");
+    const wf = section("Workflows").split(/^- \*\*/m).find((e) => e.startsWith("lead**")) ?? "";
+    expect(wf).toContain("(a topic that is one small task: no rounds, Teams 11)");
+    expect(wf).toContain("(a small task: the lead reads the diff itself, Teams 11)");
+    expect(section("Definition of done")).toContain("the lead's own reading of a small task's diff (Teams 11)");
+    const entry = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).find((e) => e.startsWith("2026-11-05 Size gate for small tasks\n")) ?? "";
+    expect(entry).toContain("authentication, user data, secrets");
   });
   test("the topic converges once at close: criteria on the team board (Teams 6), one check on main before the batch task (Teams 9), named in Workflows and lead.md step 7", () => {
     expect(teamsItem(6)).toContain("the topic's acceptance criteria, each with its proved by, under `## Acceptance criteria` on its team board");
