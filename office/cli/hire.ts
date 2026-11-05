@@ -147,7 +147,7 @@ export type HireRequest = {
 };
 
 /** The live background sessions Claude Code lists, as `machine.backgroundSessions` gives them. */
-export type LiveHires = { name: string; state: string; cwd: string; status?: "busy" | "idle" }[];
+export type LiveHires = { name: string; state: string; cwd: string }[];
 
 /** A HireRefused by the usage hold: a counted wait, but the office's auto-wake keeps its stop for a later tick instead of reporting a failed wake. */
 export class UsageHold extends HireRefused {}

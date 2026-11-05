@@ -6,7 +6,7 @@ import { letgo } from "./letgo.ts";
 
 const REPO = "/code/shop";
 const wt = (task: string) => join(REPO, ".claude", "worktrees", task);
-const session = (name: string, cwd: string, state = "working", status?: "busy" | "idle"): LiveHires[number] => ({ name, state, cwd, ...(status && { status }) });
+const session = (name: string, cwd: string, state = "working"): LiveHires[number] => ({ name, state, cwd });
 const machine = (sessions: LiveHires | null = []) => ({ backgroundSessions: async () => sessions, gitCommonDir: () => null });
 const req = (over: Partial<HireRequest> = {}): HireRequest => ({ role: "backend-dev", task: "x", cwd: REPO, brief: "Task: x", reportTo: "pm-shop", ...over });
 const plan = (over: Partial<HireRequest> = {}, sessions: LiveHires | null = []) => planHire(req(over), machine(sessions));

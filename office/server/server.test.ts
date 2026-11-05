@@ -1811,7 +1811,7 @@ test("a PM hires only leads, with any flags before the role; a specialist hire, 
   }
 });
 
-test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
+test("no session passes --override to `f1rm hire` or `f1rm wake`: the usage pacing waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
   const bash = await gateOffice();
   const override = [
     "f1rm hire --override lead lead-checkout checkout b",
@@ -1827,7 +1827,7 @@ test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits fo
     for (const command of commands) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session exceeds a cap. Run the same command again: it waits for a free slot.");
+      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session goes past the usage pacing. Run the same command again: it waits for a free slot.");
     }
   }
   // Without it the same commands run as before, and a brief that only mentions the word is no flag.
@@ -1839,7 +1839,7 @@ test("no session passes --override to `f1rm hire` or `f1rm wake`: a cap waits fo
 test("a quote-split --override is the same flag to the shell, so the gate refuses it too; a sub-agent of the PM or a lead is held to it", async () => {
   const bash = await gateOffice();
   const spellings = ['--over""ride', "\\--override", "--over'ride'", '"--over"ride'];
-  const reason = "No session exceeds a cap. Run the same command again: it waits for a free slot.";
+  const reason = "No session goes past the usage pacing. Run the same command again: it waits for a free slot.";
   for (const [id, hire, wake] of [["p", "lead lead-checkout checkout b", "lead-checkout"], ["l", "--team checkout designer checkout.designer-a a b", "checkout.designer-a"]] as const) {
     for (const flag of spellings) {
       for (const command of [`f1rm hire ${hire} ${flag}`, `timeout 600 f1rm hire ${hire} ${flag}`, `f1rm wake ${flag} ${wake}`, `timeout 5 f1rm wake ${wake} ${flag}`]) {

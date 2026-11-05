@@ -34,8 +34,19 @@ function useRoles(room: string) {
 /** The dialog's count line: how many hires work, with no cap. */
 export const HireCount = ({ working }: Hires) => (
   <p className="count" role="status">
-    {working == null ? "The working hires couldn't be counted." : `${working} hires working.`}
+    {working == null ? "The working hires couldn't be counted." : `${working} ${working === 1 ? "hire" : "hires"} working.`}
   </p>
+);
+
+/** The explicit yes or no to "Hire anyway" after the usage pacing refused a hire. `working` is the count the refusal gave. */
+export const HireAnyway = ({ role, working, onYes, onCancel }: { role: string; working: number; onYes: () => void; onCancel: () => void }) => (
+  <div className="confirm" role="group" aria-label="Confirm hiring past the usage pacing">
+    <p>
+      Hire a {role.toLowerCase()} past the usage pacing? That makes {working + 1} hires working, each using your Claude usage. Your yes is the approval to go past it.
+    </p>
+    <button type="button" onClick={onYes}>Yes, hire anyway</button>
+    <button type="button" onClick={onCancel}>Cancel</button>
+  </div>
 );
 
 /** `teams` are the project's live teams, which a specialist can join. */
@@ -49,8 +60,8 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
   const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // The office gave a counted refusal (the usage pacing), so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
-  const [capped, setCapped] = useState(false);
+  // The usage pacing refused (a counted refusal), so "Hire anyway" is on offer; `confirming` is its explicit yes or no.
+  const [held, setHeld] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const briefBox = useRef<HTMLTextAreaElement>(null);
   const id = useId();
@@ -73,14 +84,14 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
     if (!ready) return;
     setBusy(true);
     setProblem(null);
-    setCapped(false);
+    setHeld(false);
     setConfirming(false);
     const { error, reply } = await send("hire", { room, role: role.id, task: taskName, team: !lead && team ? team : null, brief: brief.trim(), model: model || null, override });
     if (error === null) return onClose();
     setBusy(false);
     setProblem(error);
     if (typeof reply?.working === "number") {
-      setCapped(true);
+      setHeld(true);
       setHires((h) => h && { ...h, working: reply.working as number });
     }
   }
@@ -175,17 +186,11 @@ export function HireDialog({ room, name, pm, teams, onClose }: { room: string; n
             </select>
             <button type="submit" disabled={!ready}>{busy ? "Hiring…" : role ? `Hire a ${role.title.toLowerCase()}` : "Hire"}</button>
             <p className="problem" role="alert">{problem}</p>
-            {capped && !confirming && (
+            {held && !confirming && (
               <button type="button" className="anyway" onClick={() => setConfirming(true)}>Hire anyway</button>
             )}
-            {capped && confirming && (
-              <div className="confirm" role="group" aria-label="Confirm hiring past the cap">
-                <p>
-                  Hire a {role!.title.toLowerCase()} past the cap? That makes {(hires?.working ?? 0) + 1} hires working, each using your Claude usage. Your yes is the approval to exceed the cap.
-                </p>
-                <button type="button" onClick={() => hire(true)}>Yes, hire anyway</button>
-                <button type="button" onClick={() => setConfirming(false)}>Cancel</button>
-              </div>
+            {held && confirming && (
+              <HireAnyway role={role!.title} working={hires?.working ?? 0} onYes={() => hire(true)} onCancel={() => setConfirming(false)} />
             )}
           </div>
           <div className="pm">

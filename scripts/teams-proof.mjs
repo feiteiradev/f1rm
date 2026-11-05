@@ -1,7 +1,7 @@
 // Drives the built office page in a real browser against an in-process server whose machine only records, and checks
 // teams in the office: two pods with their leads at the head and their signs, a team's board on its sign and in its panel,
-// "Team" in the panel, and the Hire dialog's Team choice and Team lead card, which hire a specialist into a team and a lead
-// past the 2-teams cap only after Hire anyway. Saves a screenshot per state, and one at phone width.
+// "Team" in the panel, and the Hire dialog's Team choice and Team lead card, which hire a specialist into a team and a third
+// team's lead at once (no team cap: no refusal, no confirm). Saves a screenshot per state, and one at phone width.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/teams-proof.mjs
 import assert from "node:assert/strict";
@@ -19,6 +19,8 @@ const OUT = resolve(process.env.OUT ?? "teams-proof-out");
 mkdirSync(OUT, { recursive: true });
 
 const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440), ROOM = "/code/shop/.git";
+// The Hire route reads `~/.f1rm/usage.json` through HOME: a temp HOME keeps this machine's usage pacing out of the proof.
+process.env.HOME = mkdtempSync(join(tmpdir(), "f1rm-proof-home-"));
 const boardsDir = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
 writeFileSync(teamBoardFile(boardsDir, ROOM, "checkout"), "# Board: shop / checkout\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | checkout.designer-landing | done | worktree-landing | Design the cart page |\n| T2 | checkout.frontend-dev-form | doing | worktree-form | Build the cart form |\n| T3 | - | todo | - | Wire the payment step |\n");
 const spawned = [];
@@ -129,21 +131,19 @@ try {
   await page.getByLabel("Brief", { exact: true }).fill("Team: cart: the cart slice.");
   await page.getByLabel("Team name", { exact: true }).fill("cart");
   assert.match(await dialog.locator(".help").first().innerText(), /its lead lead-cart/);
+  await page.screenshot({ path: join(OUT, "05-third-team.png") });
+  // Two leads already run in the project: the third starts at once.
   await page.getByRole("button", { name: "Hire a team lead" }).click();
-  await page.getByText("this project already has 2 teams (the cap is 2).").waitFor();
-  assert.equal(spawned.length, 1, "a third team is refused");
-  await page.screenshot({ path: join(OUT, "05-teams-cap.png") });
-  await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
-  await dialog.getByRole("button", { name: "Yes, hire anyway", exact: true }).click();
   await dialog.waitFor({ state: "detached" });
+  assert.equal(spawned.length, 2, "a third team starts: no refusal, no confirm");
   assert.deepEqual(spawned.at(-1).argv.slice(0, 6), ["claude", "--bg", "--agent", "f1rm:lead", "--name", "lead-cart"]);
   assert.ok(!spawned.at(-1).argv.includes("--worktree"), "a lead gets no worktree");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(OUT, "06-phone.png") });
-  assert.deepEqual(errors, ["Failed to load resource: the server responded with a status of 409 (Conflict)"], "no page errors but the browser's own note of the cap's 409");
-  console.log(`teams-proof: all checks passed; screenshots in ${OUT}`);
+  assert.deepEqual(errors, [], "no page errors, and no 409: nothing was refused");
+  console.log(`PASS teams: two pods with their leads and signs, a team's board on its sign and in its panel, Team in the panel, a specialist hired into a team, a third team's lead started at once with no refusal or confirm, a phone view; screenshots in ${OUT}`);
 } finally {
   await browser.close();
   server.stop(true);

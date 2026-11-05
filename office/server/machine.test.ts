@@ -74,7 +74,7 @@ test("workingHires counts the background sessions that are working or blocked, a
   expect((await run("machine.workingHires()", "[]", { all: 1 })).value).toBeNull();
 });
 
-test("backgroundSessions lists the live background sessions with name, state, folder and a busy/idle status, and no status for any other", async () => {
+test("backgroundSessions lists the live background sessions with name, state and folder, and no status: no hire check reads it", async () => {
   const out = JSON.stringify([
     { kind: "interactive", name: "pm-shop", cwd: "/code/shop", status: "idle" },
     { kind: "background", name: "shop.dev-a", cwd: "/code/shop/w", state: "working", status: "idle" },
@@ -83,7 +83,7 @@ test("backgroundSessions lists the live background sessions with name, state, fo
     { kind: "background", name: "shop.dev-d", cwd: "/code/shop/z", state: "working", status: 7 },
   ]);
   expect((await run("machine.backgroundSessions()", out)).value).toEqual([
-    { name: "shop.dev-a", state: "working", cwd: "/code/shop/w", status: "idle" },
+    { name: "shop.dev-a", state: "working", cwd: "/code/shop/w" },
     { name: "shop.dev-b", state: "blocked", cwd: "/code/shop/x" },
     { name: "shop.dev-c", state: "working", cwd: "/code/shop/y" },
     { name: "shop.dev-d", state: "working", cwd: "/code/shop/z" },

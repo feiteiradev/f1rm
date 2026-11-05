@@ -113,6 +113,24 @@ test("with no caps left the usage holds are what refuses: on pace a third and a 
   expect(e.working).toBe(11);
 });
 
+test("ahead of pace the one-team rule counts this repo's live leads and simple tasks as teams; another repo's simple task, a team's member, a user's own session, a member's or a Reviewer's start do not", () => {
+  put(week(50, 6 * D)); // ahead of pace
+  const pay = { role: "lead", name: "lead-pay", task: "pay" };
+  const solo = session("backend-dev-y", wt("y"));
+  // a live simple task in this repo's worktree, finished or not, is a team: a lead, a simple task and a team-less designer (the Hire dialog's) are refused
+  expect(() => ask([solo], pay)).toThrow("this project already has 1 team");
+  expect(() => ask([solo])).toThrow("this project already has 1 team");
+  expect(() => ask([session("designer-z", wt("z"), "done")], { role: "designer", name: "designer-x", task: "x" })).toThrow("this project already has 1 team");
+  // no team: a simple task of another repo, a team's member, a session of the user's own in a worktree of this repo
+  expect(() => ask([session("backend-dev-q", "/code/blog/.claude/worktrees/q")], pay)).not.toThrow();
+  expect(() => ask([session("checkout.backend-dev-w", wt("w"))], pay)).not.toThrow();
+  expect(() => ask([session("my-own-session", wt("mine"))], pay)).not.toThrow();
+  // a team's member and a Reviewer are no team of one: they start beside a live team
+  const lead = session("lead-checkout", REPO);
+  expect(() => ask([lead, solo], { role: "designer", name: "checkout.designer-x", task: "x", team: "checkout" })).not.toThrow();
+  expect(() => ask([lead, solo], { role: "reviewer", name: "reviewer-review-x", task: "review-x" })).not.toThrow();
+});
+
 test("oneTeam counts a lead that finished (it still holds its team) and ignores a Reviewer", () => {
   put(week(50, 6 * D));
   const lead = (state: string) => session("lead-cart", REPO, state);

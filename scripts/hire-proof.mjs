@@ -1,13 +1,14 @@
 // Drives the built office page in a real browser against an in-process server whose machine only records the spawn, and
 // checks the Hire dialog: the Hire button and an empty desk open it, the roles come from the plugin folder, the hire
-// leaves the server as the exact claude argv, the working-hire count shows, a plain hire at the cap spawns nothing, Hire anyway needs a confirm that can be cancelled,
+// leaves the server as the exact claude argv, the working-hire count shows with no cap, a plain hire under the usage hold spawns nothing, Hire anyway needs a confirm that can be cancelled,
 // the PM section (Let the PM decide tells the PM the need, Start PM opens a PM tab in the repo folder only when there is no PM),
 // the panel's Give them an intern (a Tell with the subtask) and Let go (only for a background hire, behind a confirm that can be cancelled),
 // and the static demo explains that hiring needs a live office.
 // Run `bun run build` first, then:
 //   PLAYWRIGHT_CORE=/path/to/playwright-core CHROME=/path/to/chrome OUT=/some/dir bun scripts/hire-proof.mjs
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startServer } from "../office/server/server.ts";
 import { registered } from "./registered.mjs";
@@ -19,6 +20,9 @@ const OUT = resolve(process.env.OUT ?? "hire-proof-out");
 mkdirSync(OUT, { recursive: true });
 
 const SECRET = "proof-secret", TOKEN = "proof-token", SCALE = scaleFor(1440);
+// The Hire route reads `~/.f1rm/usage.json` through HOME at each request: a temp HOME keeps this machine's usage out, and `usage` puts the 5-hour window at `pct`.
+const HOME = (process.env.HOME = mkdtempSync(join(tmpdir(), "f1rm-proof-home-")));
+const usage = (pct) => (mkdirSync(join(HOME, ".f1rm"), { recursive: true }), writeFileSync(join(HOME, ".f1rm", "usage.json"), JSON.stringify({ fiveHour: { usedPct: pct, resetsAt: Date.now() / 1000 + 3600 }, readAt: 0 })));
 const spawned = [], told = [], pmTabs = [], letGone = [];
 const backgroundIds = { des1: "7c5dcf5d" };
 let working = 1;
@@ -73,7 +77,8 @@ try {
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
   const names = await dialog.locator(".role .name").allInnerTexts();
   assert.deepEqual([...names].sort(), ["Backend dev", "Designer", "Frontend dev", "Researcher", "Reviewer", "Team lead"], "six roles by title, and no PM");
-  assert.equal(await dialog.locator(".count").innerText(), "1 of 8 hires working.", "the dialog counts the working hires against the cap");
+  assert.equal(await dialog.locator(".count").innerText(), "1 hire working.", "the dialog counts the working hires, with no cap");
+  await dialog.locator(".count").screenshot({ path: join(OUT, "01b-count.png") });
   const maya = dialog.locator(".role", { hasText: "Designer" });
   assert.match(await maya.innerText(), /1 working/, "the Designer row counts the Designer already working");
   assert.match(await maya.innerText(), /sonnet.*design-pipeline/s, "the row names the model and skills");
@@ -94,15 +99,14 @@ try {
   await page.screenshot({ path: join(OUT, "02-filled.png") });
   await page.getByRole("button", { name: "Hire a designer" }).click();
   await dialog.waitFor({ state: "detached" });
-  assert.deepEqual(spawned, [
-    {
-      cwd: "/code/shop",
-      argv: [
-        "claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page",
-        "/design-pipeline Report to: pm-shop\n\nDesign the login page. Reply OK and stop. More.", "--model", "haiku",
-      ],
-    },
+  assert.deepEqual(spawned.map((s) => s.cwd), ["/code/shop"]);
+  assert.deepEqual(spawned[0].argv.slice(0, 9), [
+    "claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page",
+    "/design-pipeline Report to: pm-shop\n\nDesign the login page. Reply OK and stop. More.",
   ]);
+  // Then the hire's own --settings (ponytail level, usage tap), the role's effort and the chosen model.
+  assert.equal(spawned[0].argv[9], "--settings");
+  assert.deepEqual(spawned[0].argv.slice(11), ["--effort", "high", "--model", "haiku"]);
 
   const s = await new Promise((r) => {
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}/${TOKEN}/ws`, { headers: { origin: base } });
@@ -122,23 +126,25 @@ try {
   await dialog.waitFor({ state: "detached" });
   assert.equal(await page.locator(".panel").count(), 0, "an empty desk opens no employee panel");
 
-  working = 7;
+  working = 9;
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "7 of 8 hires working.");
+  assert.equal(await dialog.locator(".count").innerText(), "9 hires working.", "past the old 8 the count names no cap");
   await page.getByLabel("Brief", { exact: true }).fill("One more");
-  working = 8;
+  working = 10;
+  usage(95); // over the 90% hold of the 5-hour window
   await page.getByRole("button", { name: /^Hire / }).click();
-  await page.getByText("8 hires are already working (the cap is 8).").waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "8 of 8 hires working. That is the cap, so a plain hire is refused.", "a refusal corrects a stale count");
-  assert.equal(spawned.length, 1, "nothing spawned at the cap");
-  assert.equal(await dialog.getByRole("group", { name: "Confirm hiring past the cap" }).count(), 0, "no confirm until Hire anyway is pressed");
-  await page.screenshot({ path: join(OUT, "03-cap.png") });
+  await page.getByText(/^usage hold: 5-hour usage is 95% .*new sessions wait until \d\d:\d\d$/).waitFor();
+  assert.equal(await dialog.locator(".count").innerText(), "10 hires working.", "a refusal corrects a stale count");
+  assert.equal(spawned.length, 1, "nothing spawned under the usage hold");
+  assert.equal(await dialog.getByRole("group", { name: "Confirm hiring past the usage pacing" }).count(), 0, "no confirm until Hire anyway is pressed");
+  await page.screenshot({ path: join(OUT, "03-hold.png") });
 
   await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
-  const confirm = dialog.getByRole("group", { name: "Confirm hiring past the cap" });
-  assert.match(await confirm.innerText(), /Hire a designer past the cap\? That makes 9 hires working/);
+  const confirm = dialog.getByRole("group", { name: "Confirm hiring past the usage pacing" });
+  assert.equal(await confirm.locator("p").innerText(), "Hire a designer past the usage pacing? That makes 11 hires working, each using your Claude usage. Your yes is the approval to go past it.");
   await page.screenshot({ path: join(OUT, "03b-confirm.png") });
+  await confirm.screenshot({ path: join(OUT, "03c-confirm-box.png") });
   await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(await confirm.count(), 0, "Cancel closes the confirm");
   assert.equal(await dialog.evaluate((d) => d.open), true, "Cancel leaves the dialog and the brief alone");
@@ -148,13 +154,14 @@ try {
   await dialog.getByRole("button", { name: "Hire anyway", exact: true }).click();
   await dialog.getByRole("button", { name: "Yes, hire anyway", exact: true }).click();
   await dialog.waitFor({ state: "detached" });
-  assert.equal(spawned.length, 2, "a confirmed Hire anyway spawns past the cap");
+  assert.equal(spawned.length, 2, "a confirmed Hire anyway spawns past the usage pacing");
   assert.equal(spawned[1].argv[spawned[1].argv.indexOf("--agent") + 1], "f1rm:designer");
-  assert.match(spawned[1].argv.at(-1), /\n\nOne more$/);
+  assert.match(spawned[1].argv[8], /\n\nOne more$/);
 
   await page.getByRole("button", { name: "Hire", exact: true }).click();
   await dialog.locator(".role").first().waitFor();
-  assert.equal(await dialog.locator(".count").innerText(), "8 of 8 hires working. That is the cap, so a plain hire is refused.", "the count at the cap shows on opening");
+  assert.equal(await dialog.locator(".count").innerText(), "10 hires working.", "the count shows on opening, with no cap sentence");
+  usage(50); // the hold lifts for the states that follow
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
 
@@ -234,8 +241,15 @@ try {
   await page.context().close();
   await phone.context().close();
 
-  const files = Bun.spawn(["python3", "-m", "http.server", "4398", "--bind", "127.0.0.1"], { cwd: resolve(import.meta.dir, "../office/demo/dist"), stdout: "ignore", stderr: "ignore" });
-  await Bun.sleep(800);
+  // A static file server for the demo build (python's http.server hangs on a reverse DNS lookup where DNS is blocked).
+  const demoDir = resolve(import.meta.dir, "../office/demo/dist");
+  const files = Bun.serve({
+    port: 4398, hostname: "127.0.0.1",
+    fetch: async (req) => {
+      const file = Bun.file(join(demoDir, new URL(req.url).pathname.replace(/\/$/, "/index.html")));
+      return (await file.exists()) ? new Response(file) : new Response("not found", { status: 404 });
+    },
+  });
   try {
     const demo = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
     watch(demo);
@@ -249,11 +263,11 @@ try {
     assert.ok(!asked.some((p) => p.includes("roles") || p.includes("hire")), "the demo asks no server for roles");
     await demo.screenshot({ path: join(OUT, "05-demo.png") });
   } finally {
-    files.kill();
+    files.stop(true);
   }
 
-  assert.deepEqual(errors, ["Failed to load resource: the server responded with a status of 409 (Conflict)"], "no page errors but the browser's own note of the cap's 409");
-  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the count and the cap, refuses a plain hire there, hires anyway only after a confirm, tells an intern's subtask, lets a background hire go only after a confirm, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
+  assert.deepEqual(errors, ["Failed to load resource: the server responded with a status of 409 (Conflict)"], "no page errors but the browser's own note of the usage hold's 409");
+  console.log(`PASS Hire dialog: opens from the button and an empty desk, lists ${names.length} roles from the plugin folder, hires with the exact argv, shows the count with no cap, refuses a plain hire under the usage hold, hires anyway only after a confirm, tells an intern's subtask, lets a background hire go only after a confirm, fits a phone, explains itself in the demo; screenshots in ${OUT}`);
 } finally {
   await browser.close();
   server.stop(true);

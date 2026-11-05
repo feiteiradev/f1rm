@@ -803,7 +803,7 @@ export function startServer({
     }
     // The usage hold makes a hire or a wake wait for a free slot; `--override` is the user's own terminal's and the Hire dialog's, never a session's.
     if (role && commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isOverrideWord)))) {
-      return refuse("override", "No session exceeds a cap. Run the same command again: it waits for a free slot.");
+      return refuse("override", "No session goes past the usage pacing. Run the same command again: it waits for a free slot.");
     }
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));

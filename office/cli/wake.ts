@@ -124,11 +124,11 @@ export async function planWake(req: WakeRequest, d: WakeDeps): Promise<WakePlan>
   const cwd = own ?? String(target.cwd);
   if (!d.exists(cwd)) throw new Error(`${name} was let go; hire a new one`);
 
-  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one still holds a slot, and must not count against itself.
+  // The same checks as a hire. The sessions of this name that have no process are the one being woken and its older copies: a blocked one is still listed, and must not count against itself (one specialist per task, the one-team pace).
   const listed = (await d.agents(false)) ?? [];
   const live: LiveHires = background(listed)
     .filter((a) => !(a.name === name && !a.pid))
-    .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? ""), ...((a.status === "busy" || a.status === "idle") && { status: a.status as "busy" | "idle" }) }));
+    .map((a) => ({ name: String(a.name), state: String(a.state ?? ""), cwd: String(a.cwd ?? "") }));
   // A Reviewer's task is review-<task>, as `f1rm hire` names it; hireName gives the task it reviews, whose dev may be idle in its worktree.
   checkSlots(live, { role: hire.role, name, task: hire.reviewer ? `review-${hire.task}` : hire.task, team: hire.role === "lead" ? null : hire.team, cwd: repo, override: req.override, now: d.now / 1000, usage: readUsage(usageFile(d.home), d.now / 1000) });
 
