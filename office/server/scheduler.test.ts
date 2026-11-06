@@ -422,3 +422,11 @@ test("the close step ends with a retro, nobody asked: measured evidence, unfixed
     for (const s of ["retro", "nobody to ask", "f1rm cost", "refused", "needs-triage", "at most 3", "ready=1 drop=2", "1. Build it", "2. Drop it", "Change no file yourself"]) expect(prompt, s).toContain(s);
   }
 });
+
+test("a Build it that GitHub refuses answers nothing: the proposal stays in the tray", async () => {
+  const proposal = decision(43, { body: "<!-- f1rm:decision risk=high spec=40 recommended=1 ready=1 drop=2 -->\nBuild this change?\n\n1. Build it\n2. Drop it\n" });
+  const { s, resolved } = harness([], { decisions: async () => [proposal], approve: async () => Promise.reject(new Error("label not found")) });
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#43`, 0)).toEqual({ ok: false, error: "GitHub refused the answer: label not found" });
+  expect([resolved, s.decisions().map((x) => x.number)]).toEqual([[], [43]]);
+});
