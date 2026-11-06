@@ -3,7 +3,7 @@ import { createScheduler, stepArgv, type Issue, type SchedulerDeps, type Started
 
 const REPO = "/r/app";
 const ME = "owner";
-const spec = (number: number, over: Partial<Issue> = {}): Issue => ({ number, author: ME, parent: null, subIssues: 0, blockedBy: 0, pr: false, ...over });
+const spec = (number: number, over: Partial<Issue> = {}): Issue => ({ number, author: ME, parent: null, subIssues: 0, subDone: 0, blockedBy: 0, pr: false, ...over });
 const ticket = (number: number, of: number, over: Partial<Issue> = {}): Issue => spec(number, { parent: of, ...over });
 
 function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Started = {}) {
@@ -15,7 +15,7 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     owner: async () => ME,
     ready: async () => issues,
     labeledBy: async (_repo, n) => (labels.has(n) ? labels.get(n)! : ME),
-    start: async (repo, step, n) => void started.push(`${repo} ${step} #${n}`),
+    start: async (repo, step, n, round) => void started.push(`${repo} ${step} #${n}${round > 1 ? ` round ${round}` : ""}`),
     held: () => false,
     paused: () => false,
     live: async () => [],
@@ -129,4 +129,45 @@ test("the implement step builds the spec on spec-<n> with interns in their own w
   const prompt = argv[6];
   expect(prompt).toStartWith("/mattpocock-skills:implement-spec #7");
   for (const s of ["spec-7", "checkout -b ticket-<number> spec-7", "ticket-<number>", 'isolation: "worktree"', "one at a time", "/usr/bin/git", "no pull request", "main"]) expect(prompt).toContain(s);
+});
+
+const BUILT = { "tickets-7": { at: 1 }, "implement-7": { at: 2 } };
+
+test("once every ticket of a spec the office built is closed and its implement step ended, one close step starts", async () => {
+  const { s, started } = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, BUILT);
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} close #7`]);
+});
+
+test("the close step waits while the implement step runs, and never starts for a spec the office did not build", async () => {
+  const running = harness([spec(7, { subIssues: 2, subDone: 2 })], { live: async () => ["implement-7"] }, BUILT);
+  await running.s.tick([REPO]);
+  const byHand = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, { "tickets-7": { at: 1 } });
+  await byHand.s.tick([REPO]);
+  expect([...running.started, ...byHand.started]).toEqual([]);
+});
+
+test("a criterion the close step turned into a ticket gets one more round: implement, then a last close, and nothing after", async () => {
+  const closed = { ...BUILT, "close-7": { at: 3 } };
+  const more = harness([spec(7, { subIssues: 3, subDone: 2 }), ticket(10, 7)], {}, closed);
+  await more.s.tick([REPO]);
+  expect(more.started).toEqual([`${REPO} implement #7 round 2`]);
+  const last = harness([spec(7, { subIssues: 3, subDone: 3 })], {}, { ...closed, "implement-7-2": { at: 4 } });
+  await last.s.tick([REPO]);
+  expect(last.started).toEqual([`${REPO} close #7 round 2`]);
+  const after = harness([spec(7, { subIssues: 4, subDone: 3 }), ticket(11, 7)], {}, { ...closed, "implement-7-2": { at: 4 }, "close-7-2": { at: 5 } });
+  await after.s.tick([REPO]);
+  expect(after.started).toEqual([]);
+});
+
+test("the close step checks the criteria on spec-<n>, lands it with f1rm merge, pushes, cleans the branches and closes the spec; its last round opens no ticket", () => {
+  const first = stepArgv("close", 7, 1);
+  expect(first.slice(0, 6)).toEqual(["claude", "--bg", "--agent", "f1rm:step", "--name", "close-7"]);
+  for (const s of ["acceptance criteria", "spec-7", "--parent 7", "f1rm merge spec-7", "f1rm push", "git branch -d spec-7", "worktree-agent-", "gh issue close 7"]) expect(first[6]).toContain(s);
+  const last = stepArgv("close", 7, 2);
+  expect(last[5]).toBe("close-7-2");
+  expect(last[6]).toContain("last round");
+  expect(last[6]).not.toContain("--parent 7");
+  expect(stepArgv("implement", 7, 2)[5]).toBe("implement-7-2");
 });

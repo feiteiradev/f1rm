@@ -785,7 +785,9 @@ export function startServer({
       return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
     }
     // `f1rm push` pushes the base branch to origin, fast-forward only, once the suite is green: the PM's, at the end of a milestone. A lead, a specialist, a Reviewer and any intern are refused.
-    if ((role !== "pm" || payload.agent_id) && commands.some((c) => hireArgs(c, "push"))) {
+    // shortcut: an office close step (`close-<n>`, a lead by role until #92 gives steps their own) pushes its landed spec too.
+    const closeStep = role === "lead" && /^close-\d+(?:-\d+)?$/.test(state.employees[sessionId]?.title ?? "");
+    if ((!(role === "pm" || closeStep) || payload.agent_id) && commands.some((c) => hireArgs(c, "push"))) {
       return refuse("push-cmd", "Only the PM pushes, with `f1rm push` at the end of a milestone, once everything landed and the suite is green. Tell the session in your Report to that the work is ready.");
     }
     // The `--check` value of `f1rm push` and `f1rm merge` runs under `sh -c`, so it is read as a command line of its own: the suite, never a push or a merge.

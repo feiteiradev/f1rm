@@ -91,6 +91,25 @@ test("a reviewed branch lands: new tests red on the base, the check green on the
   expect(statSync(evidence(s, "merge.json")).mode & 0o777).toBe(0o600);
 });
 
+test("a spec's integration branch lands with no DONE report: `f1rm merge spec-<n>` takes spec-<n> as it is, with the same red check and suite, and still refuses a settings change", async () => {
+  const s = setup();
+  const spec = join(s.repo, ".claude", "worktrees", "spec-7");
+  git(s.repo, "worktree", "add", "-q", spec, "-b", "spec-7");
+  const tip = commit(spec, { "add.ts": ADD, "add.test.ts": ADD_TEST }, "Merge ticket-8 (#8) into spec-7");
+  const base = git(s.repo, "rev-parse", "HEAD");
+  const r = await mergeIn(["spec-7", "--check", "true"], s.repo, { home: s.home, now: () => Date.parse("2026-11-06T12:00:00Z") });
+  expect([r.code, r.err]).toEqual([0, ""]);
+  expect(git(s.repo, "rev-parse", "HEAD^1")).toBe(base);
+  expect(git(s.repo, "rev-parse", "HEAD^2")).toBe(tip);
+  expect(lines(r.out).some((l) => l.includes("add.test.ts") && /red/i.test(l))).toBe(true);
+  const other = join(s.repo, ".claude", "worktrees", "spec-8");
+  git(s.repo, "worktree", "add", "-q", other, "-b", "spec-8");
+  commit(other, { ".claude/settings.json": "{}\n", "b.ts": ADD, "b.test.ts": ADD_TEST.replace("./add.ts", "./b.ts") }, "widen");
+  const refused = await mergeIn(["spec-8", "--check", "true"], s.repo, { home: s.home });
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("settings");
+});
+
 test("the f1rm command wires it: steps on stdout as they happen, the last line `merged <sha>`, a refusal on stderr with a non-zero exit, and the usage lists it", async () => {
   const s = setup();
   feature(s);

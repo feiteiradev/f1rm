@@ -98,18 +98,20 @@ export async function mergeIn(argv: string[], cwd: string, deps: Partial<MergeDe
 }
 
 async function land(task: string, flagCheck: string | undefined, noRed: string | undefined, cwd: string, deps: Pick<MergeDeps, "home" | "now" | "env">, say: (line: string) => void) {
-  const branch = `worktree-${task}`;
+  // A spec's integration branch (`spec-<n>`, built by the office's implement step) lands as it is: its tickets were reviewed on it, and no DONE report names its tip.
+  const spec = /^spec-\d+$/.test(task);
+  const branch = spec ? task : `worktree-${task}`;
   const main = mainDir(cwd);
   if (!run(main, ["symbolic-ref", "-q", "HEAD"]).ok) throw new Refused("the main working directory has a detached HEAD: there is no base branch to land on");
   const baseBranch = git(main, "symbolic-ref", "--short", "HEAD");
 
   const reportPath = reportFile(deps.home, basename(main), task);
-  const report = readReport(reportPath);
-  if (report?.kind !== "DONE" || !report.commit) throw new Refused(`no DONE report with a commit for ${task} in ${reportPath}: the dev sends \`f1rm report DONE ${task} --commit <sha>\` first`);
+  const report = spec ? null : readReport(reportPath);
+  if (!spec && (report?.kind !== "DONE" || !report.commit)) throw new Refused(`no DONE report with a commit for ${task} in ${reportPath}: the dev sends \`f1rm report DONE ${task} --commit <sha>\` first`);
   if (!run(main, ["rev-parse", "-q", "--verify", `refs/heads/${branch}`]).ok) throw new Refused(`no branch ${branch}`);
   const tip = git(main, "rev-parse", `refs/heads/${branch}`);
-  if (!tip.startsWith(report.commit.toLowerCase())) throw new Refused(`tip moved: send the work back to the dev (${branch} is at ${tip.slice(0, 9)}, its DONE says ${report.commit.slice(0, 9)})`);
-  say(`tip ${tip.slice(0, 9)} is the DONE commit`);
+  if (report && !tip.startsWith(report.commit!.toLowerCase())) throw new Refused(`tip moved: send the work back to the dev (${branch} is at ${tip.slice(0, 9)}, its DONE says ${report.commit!.slice(0, 9)})`);
+  say(report ? `tip ${tip.slice(0, 9)} is the DONE commit` : `tip ${tip.slice(0, 9)} of the integration branch ${branch}`);
   if (run(main, ["merge-base", "--is-ancestor", tip, "HEAD"]).ok) throw new Refused(`${branch} is already on ${baseBranch}`);
   const check = suiteCommand(main, deps.home, flagCheck);
   const custom = flagCheck !== undefined;

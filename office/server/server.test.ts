@@ -2048,6 +2048,7 @@ async function mainOffice() {
     ["p", "f1rm:pm", "p-title", "/code/shop"], ["l", "f1rm:lead", "lead-checkout", "/code/shop"], ["v", "f1rm:reviewer", "v-title", "/code/shop"],
     ["b", "f1rm:backend-dev", "checkout.backend-dev-add-a", WORKTREE], ["bm", "f1rm:backend-dev", "checkout.backend-dev-add-b", "/code/shop"],
     ["d", "f1rm:designer", "d-title", "/code/shop"], ["r", "f1rm:researcher", "r-title", "/code/shop"], ["f", undefined, "f-title", "/code/shop"],
+    ["c", "f1rm:step", "close-7", "/code/shop"], ["i", "f1rm:step", "implement-7", "/code/shop"],
   ] as const;
   const cwds = Object.fromEntries(sessions.map(([id, , , cwd]) => [id, cwd]));
   for (const [id, type, session_title, cwd] of sessions) await hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title, ...(type && { agent_type: type }) });
@@ -2073,15 +2074,16 @@ test("only the PM, a lead and the user's own session run `f1rm merge`: a dev, a 
 test("only the PM runs `f1rm push`: a lead, a dev, a designer, a researcher, a Reviewer and any intern are refused, the PM's raw `git push`, a forced one, one of another branch and `gh pr merge` stay refused, and none of those messages sends anyone to the user", async () => {
   const bash = await mainOffice();
   const forms = ["f1rm push", "f1rm push --check 'bun run check'", "cd /code/shop && f1rm push", "bun office/cli/f1rm.ts push", "npx f1rm push", "timeout 900 f1rm push"];
-  for (const id of ["p", "f"]) for (const command of forms) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
-  for (const id of ["l", "b", "bm", "d", "r", "v"]) {
+  // An office close step pushes its landed spec too; the other steps do not.
+  for (const id of ["p", "f", "c"]) for (const command of forms) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
+  for (const id of ["l", "i", "b", "bm", "d", "r", "v"]) {
     for (const command of forms) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
       expect(out.permissionDecisionReason).toContain("Only the PM pushes, with `f1rm push` at the end of a milestone");
     }
   }
-  for (const id of ["p", "l"]) expect([id, (await bash(id, "f1rm push", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
+  for (const id of ["p", "l", "c"]) expect([id, (await bash(id, "f1rm push", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
   for (const id of ["l", "b", "d", "v"]) for (const command of ["git log --grep 'f1rm push'", "echo 'f1rm push'", "f1rm status", "f1rm report DONE add-a --note ready"]) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   const raw = ["git push", "git push --force", "git push -f origin main", "git push origin other-branch", "git push origin main:other", "git push --force-with-lease", "git push --tags", "git push origin +main", "timeout 60 git push", "env git push", "gh pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge"];
   for (const id of ["p", "l"]) {
