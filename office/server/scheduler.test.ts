@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createScheduler, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
+import { createScheduler, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
 
 const REPO = "/r/app";
 const ME = "owner";
@@ -430,4 +430,16 @@ test("a Build it that GitHub refuses answers nothing: the proposal stays in the 
   await s.tick([REPO]);
   expect(await s.answer(`${REPO}#43`, 0)).toEqual({ ok: false, error: "GitHub refused the answer: label not found" });
   expect([resolved, s.decisions().map((x) => x.number)]).toEqual([[], [43]]);
+});
+
+test("a ticket whose parent is only named in its text (## Parent #5, or Part of #5) is that spec's ticket, never a spec of its own", () => {
+  expect(parentOf({ parent_issue_url: null, body: "## Parent\n\n#5\n\n## What to build\n..." })).toBe(5);
+  expect(parentOf({ parent_issue_url: null, body: "Part of #12\n\nBuild it." })).toBe(12);
+  expect(parentOf({ parent_issue_url: "https://api.github.com/repos/o/r/issues/7", body: "## Parent\n\n#5" })).toBe(7);
+  expect(parentOf({ parent_issue_url: null, body: "A spec that mentions #5 in passing" })).toBeNull();
+});
+
+test("the tickets step links every ticket as a sub-issue and checks it, and links the spec's unlinked tickets instead of publishing them again", () => {
+  const prompt = stepArgv("tickets", 7)[6];
+  for (const s of ["sub-issue of #7", "--parent 7", "check that #7 lists them", "already exist", "link them"]) expect(prompt, s).toContain(s);
 });

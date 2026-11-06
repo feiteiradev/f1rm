@@ -62,6 +62,14 @@ export type SchedulerDeps = {
   everyMs?: number;
 };
 
+/** An issue's spec: its native parent, else the one its text names (`## Parent` then `#5`, or `Part of #5`, as the tracker doc writes it without sub-issues). A ticket the tickets step forgot to link is still a ticket, never a spec. */
+export function parentOf(i: { parent_issue_url?: string | null; body?: string | null }): number | null {
+  const native = Number(/\/issues\/(\d+)$/.exec(String(i.parent_issue_url ?? ""))?.[1]);
+  if (native) return native;
+  const named = /^## Parent\s+#(\d+)/m.exec(String(i.body ?? "")) ?? /^Part of #(\d+)/m.exec(String(i.body ?? ""));
+  return named ? Number(named[1]) : null;
+}
+
 /** A spec is a ready issue that is no ticket (no parent); it has tickets once the tickets step published them. */
 const isSpec = (i: Issue) => !i.pr && i.parent === null;
 /** A low-risk decision nobody answers takes its recommendation after this long. */
@@ -300,6 +308,7 @@ const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => s
     `/mattpocock-skills:to-tickets #${spec}\n\n` +
     `You run the tickets step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `Publish your breakdown without asking: the breakdown is the company's call. ` +
+    `Make each ticket a sub-issue of #${spec} (gh issue create --parent ${spec}, or gh issue edit ${spec} --add-sub-issue <ticket> after), then check that #${spec} lists them (gh api repos/{owner}/{repo}/issues/${spec}/sub_issues): a ticket that is not linked is not built. If tickets for #${spec} already exist (an earlier run published them without the link), link them instead of publishing them again. ` +
     `Give each ticket a Boundary: line (the files it owns, so parallel interns never collide) and a Depends: line (the tickets it waits for). ` +
     `Label each ticket that is not code with its role (${Object.keys(roleSkills(founder)).map((r) => `role:${r}`).join(", ")}); a code ticket gets no role label. ` +
     `Then comment the breakdown on #${spec} (each ticket's number, title and blockers), and end.`,
@@ -361,7 +370,7 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
           number: i.number,
           title: String(i.title ?? ""),
           author: String(i.user?.login ?? ""),
-          parent: Number(/\/issues\/(\d+)$/.exec(String(i.parent_issue_url ?? ""))?.[1]) || null,
+          parent: parentOf(i),
           subIssues: Number(i.sub_issues_summary?.total ?? 0),
           subDone: Number(i.sub_issues_summary?.completed ?? 0),
           blockedBy: Number(i.issue_dependencies_summary?.blocked_by ?? 0),
