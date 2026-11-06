@@ -21,6 +21,7 @@ import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { createScheduler, type SchedulerDeps } from "./scheduler.ts";
+import type { PluginLag } from "./office.ts";
 import { due, liveTasksOf, sweepTick } from "./dockersweep.ts";
 import type { Docker } from "../docker.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
@@ -484,19 +485,13 @@ type Options = {
   scheduler?: { everyMs: number; deps: Omit<SchedulerDeps, "paused"> };
 };
 
-/** The installed f1rm plugin's version and this office's, while the installed one is older; null when they match, nothing is installed or a file can't be read. */
-export function installedLag({ installed, own }: { installed: string; own: string }): { installed: string; own: string } | null {
+/** The installed f1rm plugin's version and this office's, while the installed one is older (the newest of its scopes); null when they match, nothing is installed or a file can't be read. */
+export function installedLag({ installed, own }: { installed: string; own: string }): PluginLag | null {
   try {
-    const mine = String(JSON.parse(readFileSync(own, "utf8")).version);
-    const entries = Object.entries(JSON.parse(readFileSync(installed, "utf8")).plugins ?? {}).filter(([k]) => k.startsWith("f1rm@")).flatMap(([, v]) => (Array.isArray(v) ? v : [v]));
-    const parts = (v: string) => v.split(".").map(Number);
-    const older = (a: string, b: string) => {
-      const [x, y] = [parts(a), parts(b)];
-      for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
-      return false;
-    };
-    const newest = entries.map((e: any) => String(e?.version ?? "")).filter(Boolean).sort((a, b) => (older(a, b) ? 1 : -1))[0];
-    return newest && older(newest, mine) ? { installed: newest, own: mine } : null;
+    const office = String(JSON.parse(readFileSync(own, "utf8")).version);
+    const versions = Object.entries(JSON.parse(readFileSync(installed, "utf8")).plugins).filter(([k]) => k.startsWith("f1rm@")).flatMap(([, v]) => (v as { version?: string }[]).map((e) => String(e.version)));
+    const newest = versions.sort((a, b) => Bun.semver.order(b, a))[0];
+    return newest && Bun.semver.order(newest, office) < 0 ? { installed: newest, office } : null;
   } catch {
     return null;
   }
@@ -600,7 +595,7 @@ export function startServer({
   const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
   // The installed f1rm plugin never updates by itself: sessions keep the old rules while the office enforces the new ones. Read again on the usage tick, so an update clears the warning.
   let pluginLag = pluginFiles ? installedLag(pluginFiles) : null;
-  if (pluginLag) console.log(`f1rm office: the installed f1rm plugin is ${pluginLag.installed}, older than this office's ${pluginLag.own}: run \`claude plugin update f1rm@f1rm\``);
+  if (pluginLag) console.log(`f1rm office: the installed f1rm plugin is ${pluginLag.installed}, older than this office's ${pluginLag.office}: run \`claude plugin update f1rm@f1rm\``);
 
   const db = new Database(dbPath, { create: true });
   // Another process reading the log (a backup, `sqlite3`) holds a lock; an insert waits for it instead of failing and losing the event.
@@ -1785,7 +1780,10 @@ export function startServer({
   const usageTimer = setInterval(() => {
     leftoversCard.current();
     const lag = pluginFiles ? installedLag(pluginFiles) : null;
-    if (JSON.stringify(lag) !== JSON.stringify(pluginLag)) (pluginLag = lag, push());
+    if (JSON.stringify(lag) !== JSON.stringify(pluginLag)) {
+      if (lag) console.log(`f1rm office: the installed f1rm plugin is ${lag.installed}, older than this office's ${lag.office}: run \`claude plugin update f1rm@f1rm\``);
+      (pluginLag = lag, push());
+    }
     const seen = JSON.stringify(usageView(gaugesFile, clock()));
     if (seen !== lastUsage) (lastUsage = seen, push());
   }, 15_000);

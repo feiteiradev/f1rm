@@ -3404,9 +3404,13 @@ test("the office warns once the installed f1rm plugin is older than its own, and
   const plugins = (version: string) => writeFileSync(installed, JSON.stringify({ version: 2, plugins: { "f1rm@f1rm": [{ scope: "user", version }], "other@x": [{ version: "9.0.0" }] } }));
   plugins("0.3.0");
   start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
-  expect(((await office((s: any) => s.plugin !== undefined)) as any).plugin).toEqual({ installed: "0.3.0", own: "0.6.0" });
+  expect(((await office((s: any) => s.plugin !== undefined)) as any).plugin).toEqual({ installed: "0.3.0", office: "0.6.0" });
   server.stop(true);
-  for (const write of [() => plugins("0.6.0"), () => plugins("0.10.0"), () => writeFileSync(installed, JSON.stringify({ version: 2, plugins: {} }))]) {
+  plugins("0.6.0-rc.1");
+  start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
+  expect(((await office((s: any) => s.plugin !== undefined)) as any).plugin).toEqual({ installed: "0.6.0-rc.1", office: "0.6.0" });
+  server.stop(true);
+  for (const write of [() => plugins("0.6.0"), () => plugins("0.10.0"), () => writeFileSync(installed, JSON.stringify({ version: 2, plugins: {} })), () => writeFileSync(installed, "not json")]) {
     write();
     start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
     expect(((await office(() => true)) as any).plugin ?? null).toBeNull();

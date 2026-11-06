@@ -3,6 +3,8 @@ import { basename } from "node:path";
 import { nameFor, roleOfAgentType, type RoleId } from "../people.ts";
 import type { Approval } from "./approvals.ts";
 import type { Decision } from "./scheduler.ts";
+/** The installed f1rm plugin's version and this office's, while the installed one is older. */
+export type PluginLag = { installed: string; office: string };
 import type { Cmd } from "./projectcmds.ts";
 import type { BoardRow } from "./board.ts";
 import type { Topic } from "./progress.ts";
@@ -73,7 +75,7 @@ export type OfficeState = {
   /** The registered projects' open decision tickets (see scheduler.ts). Added by the server like `approvals`, and absent when the office reads no tickets. */
   decisions?: Decision[];
   /** The installed f1rm plugin's version and this office's, while the installed one is older (see installedLag in server.ts). Added by the server only then. */
-  plugin?: { installed: string; own: string };
+  plugin?: PluginLag;
 };
 
 export type F1rmEvent = {
