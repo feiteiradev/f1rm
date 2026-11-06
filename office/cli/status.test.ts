@@ -8,7 +8,7 @@ import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
 import { reportFile } from "./report.ts";
 import { pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
-import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, watch, type Hire } from "./status.ts";
+import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -258,15 +258,6 @@ test("status says so on stderr and exits 1 when claude agents can't be read", as
   expect(r.err).toContain("claude agents --json");
 });
 
-test("the arguments are parsed once: usage errors, no names, and the names with their :waiting suffix, empty ones dropped", () => {
-  expect(parseArgs([])).toEqual({ watch: false, json: false });
-  expect(parseArgs(["--json"])).toEqual({ watch: false, json: true });
-  for (const bad of [["--bogus"], ["--json", "x"], ["--watch", "--json"], ["--watch", "a", "-x"], ["x", "--watch"]]) expect([bad, parseArgs(bad)]).toEqual([bad, { error: expect.stringContaining("usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...") }]);
-  expect(parseArgs(["--watch", "a:waiting", "b", "", "c:waiting"])).toEqual({ watch: true, names: [{ name: "a", waiting: true }, { name: "b", waiting: false }, { name: "c", waiting: true }] });
-  expect(parseArgs(["--watch", ":waiting", ""])).toEqual({ watch: true, names: [] }); // a bare suffix is no name
-  expect(parseArgs(["--watch"])).toEqual({ watch: true, names: [] });
-});
-
 // f1rm status --watch <name>...: the stall rule the PM's and the leads' background watcher runs. The clock and the sleep are injected, so nothing here waits.
 type Member = { name: string; ago?: number | null; limit?: boolean; ended?: boolean };
 
@@ -284,115 +275,8 @@ function fleet(h: string, members: Member[]) {
 }
 
 /** The names of a `--watch` call, parsed as the command parses them. */
-const namesOf = (names: string[]) => {
-  const parsed = parseArgs(["--watch", ...names]);
-  if (!("names" in parsed)) throw new Error("not a watch");
-  return parsed.names;
-};
-
-/** Runs the watcher on a fleet. Each sleep moves the clock on; after `cap` sleeps without a wake it gives up and says `woke: false`. */
-async function watchFleet(names: string[], members: Member[], cap = 30, onSleep: (n: number, h: string, clock: number) => unknown = () => {}, h = home()) {
-  const listed = fleet(h, members);
-  let clock = NOW, sleeps = 0, loads = 0;
-  try {
-    const r = await watch(namesOf(names), {
-      repo: REPO, home: h, now: () => clock,
-      loadAgents: async () => { if (++loads > 100) throw new Error("runaway"); return listed; },
-      sleep: async (ms) => { if (++sleeps > cap) throw new Error("never woke"); clock += ms; const jump = onSleep(sleeps, h, clock); if (typeof jump === "number") clock += jump; }, // a number it returns is a sleep: the clock jumps by that many ms
-    });
-    return { ...r, sleeps, woke: true };
-  } catch (e) {
-    if ((e as Error).message === "never woke") return { out: "", err: "", code: -1, sleeps, woke: false };
-    throw e;
-  }
-}
 
 const a = (extra: Partial<Member> = {}): Member => ({ name: "lead-a", ago: 3, ...extra });
-
-test("a name given as name:waiting is judged only for ended, missing and a limit stop: never idle, never without an activity time", async () => {
-  expect(await watchFleet(["lead-a"], [a({ ago: 600 })])).toMatchObject({ woke: true, out: "lead-a: idle 601 minutes\n" }); // the plain name is judged for idle
-  expect((await watchFleet(["lead-a:waiting"], [a({ ago: 600 })], 100)).woke).toBe(false); // the waiting one is not
-  expect((await watchFleet(["lead-a:waiting"], [a({ ago: null })], 100)).woke).toBe(false); // nor for a missing activity time
-  expect(await watchFleet(["lead-a:waiting"], [a({ ended: true })])).toMatchObject({ woke: true, sleeps: 1, out: "lead-a: ended\n" });
-  expect(await watchFleet(["lead-a:waiting"], [a({ limit: true })])).toMatchObject({ woke: true, sleeps: 1, out: "lead-a: limit stop until 8:40pm (Europe/Lisbon)\n" });
-  expect(await watchFleet(["lead-gone:waiting"], [a()])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
-  // A waiting lead is judged on itself, not on its team; a plain name beside it still wakes for idle.
-  expect((await watchFleet(["lead-t:waiting"], [{ name: "lead-t", ago: 90 }, { name: "t.backend-dev-x", ago: 90 }], 100)).woke).toBe(false);
-  expect(await watchFleet(["lead-a:waiting", "lead-b"], [a({ ago: 600 }), a({ name: "lead-b", ago: 19 })])).toMatchObject({ sleeps: 1, out: "lead-b: idle 20 minutes\n" });
-});
-
-test("a quiet fleet is polled once a minute after a first sleep: 17 sleeps to reach 20 minutes idle; the fake loader's budget makes a watcher that never sleeps fail", async () => {
-  // watchFleet throws "runaway" after 100 polls, so a watcher that never sleeps fails the test instead of hanging.
-  const r = await watchFleet(["lead-a"], [a()]);
-  expect(r.sleeps).toBe(17);
-});
-
-test("watch sleeps first, then names each stalled session with its reason on the first poll that finds one, and exits 0", async () => {
-  for (const [why, extra, reason] of [
-    ["idle", { ago: 19 }, "lead-b: idle 20 minutes"],
-    ["ended", { ended: true }, "lead-b: ended"],
-    ["limit", { limit: true }, "lead-b: limit stop until 8:40pm (Europe/Lisbon)"],
-    ["no activity time", { ago: null }, "lead-b: no activity time"],
-  ] as const) {
-    const r = await watchFleet(["lead-a", "lead-b"], [a(), a({ name: "lead-b", ...extra })]);
-    expect([why, r.code, r.sleeps, r.out, r.err]).toEqual([why, 0, 1, expect.stringContaining(reason), ""]);
-    expect(r.out).not.toContain("lead-a");
-  }
-});
-
-test("watch keeps polling a quiet session once a minute until it has been idle 20 minutes, and ignores a stalled one it was not asked about", async () => {
-  const r = await watchFleet(["lead-a"], [a(), { name: "lead-z", ended: true, ago: 99 }]);
-  expect([r.woke, r.sleeps, r.out]).toEqual([true, 17, "lead-a: idle 20 minutes\n"]); // 3 minutes idle at the start, 20 after 17 polls
-  expect((await watchFleet(["lead-a"], [a({ ago: 19 })])).sleeps).toBe(1);
-});
-
-test("watch wakes for a named session that the list does not have", async () => {
-  expect(await watchFleet(["lead-a", "lead-gone"], [a()])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
-  expect(await watchFleet(["lead-gone"], [])).toMatchObject({ woke: true, sleeps: 1, out: "lead-gone: missing from the list\n" });
-});
-
-test("watch skips empty names, and with none left prints no names and exits 0 without polling", async () => {
-  expect(await watchFleet([], [a()])).toMatchObject({ code: 0, out: "no names\n", sleeps: 0 });
-  expect(await watchFleet(["", ""], [a({ ended: true })])).toMatchObject({ code: 0, out: "no names\n", sleeps: 0 });
-  expect(await watchFleet(["lead-a", ""], [a()])).toMatchObject({ sleeps: 17 }); // a stray empty name is not a missing session
-});
-
-test("watch exits 1 with the reason on stderr when claude agents can't be read, at the first poll or a later one", async () => {
-  const h = home();
-  const listed = fleet(h, [a()]);
-  let clock = NOW, polls = 0, sleeps = 0;
-  const deps = (readable: number) => ({ repo: REPO, home: h, now: () => clock, sleep: async (ms: number) => { if (++sleeps > 100) throw new Error("runaway"); clock += ms; }, loadAgents: async () => (++polls > readable ? null : listed) });
-  for (const readable of [0, 3]) {
-    polls = 0;
-    sleeps = 0;
-    const r = await watch(namesOf(["lead-a"]), deps(readable));
-    expect([r.code, r.out, r.err]).toEqual([1, "", expect.stringContaining("claude agents --json")]);
-    expect(polls).toBe(readable + 1);
-  }
-});
-
-test("a lead is stalled only when it and every hire of its team are quiet: ended or without activity counts as quiet, a hire of another team does not count", async () => {
-  const lead = (extra: Partial<Member> = {}): Member => ({ name: "lead-t", ago: 45, ...extra });
-  const member = (ago: number | null, extra: Partial<Member> = {}): Member => ({ name: "t.backend-dev-x", ago, ...extra });
-  const sleeps = async (members: Member[]) => (await watchFleet(["lead-t"], members)).sleeps;
-  expect(await sleeps([lead(), member(3)])).toBe(17); // woken when its last active hire went quiet, not at the first poll
-  expect(await sleeps([lead(), member(3), { name: "t.reviewer-review-x", ago: 60 }])).toBe(17);
-  expect(await sleeps([lead(), member(40)])).toBe(1);
-  expect(await sleeps([lead()])).toBe(1);
-  expect(await sleeps([lead(), member(null)])).toBe(1); // no activity time is not an active hire
-  expect(await sleeps([lead(), member(5, { ended: true })])).toBe(1); // nor is one let go a moment ago
-  expect(await sleeps([lead(), { name: "other.backend-dev-x", ago: 3 }])).toBe(1); // nor one of another team
-  expect(await sleeps([lead({ ago: 5, ended: true }), member(3)])).toBe(1); // a lead that ended wakes at once, whatever its hires do
-  expect(await sleeps([lead({ ago: 5, limit: true }), member(3)])).toBe(1);
-  expect(await sleeps([lead({ ago: 5 }), member(40)])).toBe(15); // quiet itself after 15 more minutes
-});
-
-test("a lead waiting on a hire stopped by a limit is not stalled, until that hire has been silent for 6 hours", async () => {
-  const lead: Member = { name: "lead-t", ago: 45 };
-  const limited = (ago: number): Member => ({ name: "t.backend-dev-x", ago, limit: true });
-  expect((await watchFleet(["lead-t"], [lead, limited(40)], 100)).woke).toBe(false); // still waiting for the reset
-  expect((await watchFleet(["lead-t"], [lead, limited(350)])).sleeps).toBe(10); // 360 minutes: the reset is long past, so the lead wakes
-});
 
 test("an ended hire whose recorded folder is a subfolder of the repo is listed, one of another repo with a similar name is not", () => {
   const h = home();
@@ -422,37 +306,6 @@ test("a live session in a folder under the repo that is not a worktree (a repo n
   expect(nested).toEqual([]);
 });
 
-test("with two entries of one name, the stall is judged on the one with the newest activity", async () => {
-  // an old session left next to a re-hired one: 300 minutes silent beside 3 minutes
-  const r = await watchFleet(["lead-a"], [a({ ago: 300 }), a({ ago: 3 })]);
-  expect([r.sleeps, r.out]).toEqual([17, "lead-a: idle 20 minutes\n"]);
-});
-
-test("a waiting name is watched as a plain one as soon as it writes again: an approved hire that then goes idle wakes, one that never writes stays waiting", async () => {
-  const touch = (at: number) => (n: number, h: string, clock: number) => {
-    if (n !== at) return;
-    const cwd = `${REPO}/.claude/worktrees/x`;
-    const file = join(h, ".claude", "projects", folder(cwd), "w0aaaaaa.jsonl");
-    utimesSync(file, new Date(clock), new Date(clock));
-  };
-  const hire: Member = { name: "shop.backend-dev-x", ago: 3 };
-  // It writes at the 5th minute, so it is plain from the 5th poll, and idle for 20 minutes at the 25th.
-  const approved = await watchFleet(["shop.backend-dev-x:waiting"], [hire], 100, touch(5));
-  expect([approved.woke, approved.sleeps, approved.out]).toEqual([true, 25, "shop.backend-dev-x: idle 20 minutes\n"]);
-  // One that never writes (a Reviewer waiting after CHANGES REQUESTED, one waiting for letgo) is never woken for being quiet.
-  expect((await watchFleet(["shop.backend-dev-x:waiting"], [hire], 100)).woke).toBe(false);
-  // A waiting name with no transcript yet that starts writing is plain from then on too.
-  const late = await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: null }], 100, (n, h, clock) => {
-    if (n === 2) transcript(h, `${REPO}/.claude/worktrees/x`, "w0aaaaaa", [talk("x")], 0);
-  });
-  expect([late.woke, late.sleeps]).toEqual([true, 20]); // its first line is at NOW, so it is idle for 20 minutes at the 20th poll
-});
-
-test("a fresh re-hire with no transcript yet is the newest entry of its name, not the old one beside it", async () => {
-  const r = await watchFleet(["lead-a"], [a({ ago: 300 }), a({ ago: null })]);
-  expect([r.sleeps, r.out]).toEqual([1, "lead-a: no activity time\n"]);
-});
-
 test("an ended hire whose main transcript is outside the window is not listed, whatever its sub-agents wrote", () => {
   const h = home();
   transcript(h, REPO, "old00001", [...named("old00001", "lead-old")], 30 * 60);
@@ -468,15 +321,6 @@ test("a stop whose text says only rate_limit_error is a limit stop with no time"
   const cwd = `${REPO}/.claude/worktrees/checkout`;
   transcript(h, cwd, "rle00001", [limitStop("API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}")], 3);
   expect(hires(base(h, [live("shop.backend-dev-checkout", "rle00001", cwd)]))[0].limitUntil).toBe("unknown");
-});
-
-test("a waiting name whose wrap-up writes during the first minute stays waiting", async () => {
-  const touch = (n: number, h: string, clock: number) => {
-    if (n !== 1) return;
-    const file = join(h, ".claude", "projects", folder(`${REPO}/.claude/worktrees/x`), "w0aaaaaa.jsonl");
-    utimesSync(file, new Date(clock), new Date(clock));
-  };
-  expect((await watchFleet(["shop.backend-dev-x:waiting"], [{ name: "shop.backend-dev-x", ago: 3 }], 100, touch)).woke).toBe(false);
 });
 
 test("a sibling project's folder is never read, and the worktree folder of the longest repo f1rm status accepts is found, also with a task slug long enough for Claude Code to cut its name", () => {
@@ -502,40 +346,6 @@ test("a sibling project's folder is never read, and the worktree folder of the l
   // The hash suffix here is a guess; the match does not depend on it, only on the 200 characters that keep the whole prefix.
   transcript(h, cwd, "long0001", [talk("x")], 6, cwd, `${folder(cwd).slice(0, 200)}-9f8e7d`);
   expect(hires({ ...base(h, [live(`shop.backend-dev-${task}`, "long0001", cwd)]), repo }).map((x) => [x.name, x.idleMinutes])).toEqual([[`shop.backend-dev-${task}`, 6]]);
-});
-
-test("statusFor outside git says so, and asks for the repo only when there is something to serve", async () => {
-  const deps = { home: home(), now: () => NOW, loadAgents: async () => [], sleep: async () => {}, commitTime: () => null };
-  expect(await statusFor(parseArgs(["--json"]), null, deps)).toEqual({ out: "", err: "f1rm: not in a git repo", code: 1 });
-  expect(await statusFor(parseArgs(["--watch", "lead-a"]), null, deps)).toMatchObject({ code: 1, err: "f1rm: not in a git repo" });
-  let asked = 0;
-  const lazy = () => (asked++, "/code/shop");
-  await statusFor(parseArgs(["--bogus"]), lazy, deps);
-  await statusFor(parseArgs(["--watch", ":waiting"]), lazy, deps);
-  expect(asked).toBe(0); // a usage mistake and a watch with no names never ask git
-  expect((await statusFor(parseArgs(["--json"]), lazy, deps)).code).toBe(0);
-  expect(asked).toBe(1);
-});
-
-test("a named watch gets past the length check at 150 characters, and is refused at 151, with the work injected", async () => {
-  const repos = longRepos();
-  try {
-    const deps = { home: home(), now: () => NOW, loadAgents: async () => null, sleep: async () => {}, commitTime: () => null };
-    const args = parseArgs(["--watch", "lead-a"]);
-    // At 150 it goes on to poll (and here finds claude agents unreadable): the error is that, not the path.
-    const fine = await statusFor(args, repos.repo(150, { git: false }), deps);
-    expect([fine.code, fine.err]).toEqual([1, expect.stringContaining("claude agents --json")]);
-    expect(fine.err).not.toContain("too long");
-    // statusFor answers, before it looks at the path: no names, and a usage mistake.
-    const longRepo = repos.repo(151, { git: false });
-    expect(await statusFor(parseArgs(["--watch"]), longRepo, deps)).toEqual({ out: "no names\n", err: "", code: 0 });
-    expect(await statusFor(parseArgs(["--watch", ":waiting"]), longRepo, deps)).toMatchObject({ out: "no names\n", code: 0 });
-    expect(await statusFor(parseArgs(["--bogus"]), longRepo, deps)).toMatchObject({ code: 1, err: expect.stringContaining("usage: f1rm status") });
-    const long = await statusFor(args, longRepo, deps);
-    expect([long.code, long.err]).toEqual([1, expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)")]);
-  } finally {
-    repos.cleanup();
-  }
 });
 
 test("what the office's recovery noted about a hire shows as its NOTE and as `recovery` in --json; a hire it noted nothing about shows none", async () => {
@@ -621,65 +431,12 @@ const report = (h: string, slug: string, seq: number, more: object = {}) => {
 const lead = { name: "lead-a", ago: 3 };
 const dev = { name: "shop.backend-dev-x", ago: 3 };
 
-test("a watched hire's new report wakes the watcher with its kind, short commit and seq, and exit 0", async () => {
-  const r = await watchFleet(["shop.backend-dev-x"], [dev], 100, (n, h) => n === 3 && report(h, "x", 3));
-  expect(r).toMatchObject({ woke: true, sleeps: 3, code: 0, out: "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 3)\n" });
-});
-
-test("a Reviewer's report is read from review-<task>, a CHANGES one reads as CHANGES REQUESTED, and a report with no commit names none", async () => {
-  const r = await watchFleet(["reviewer-review-x"], [{ name: "reviewer-review-x", ago: 3 }], 100, (n, h) => n === 1 && report(h, "review-x", 1, { kind: "CHANGES", commit: null }));
-  expect(r.out).toBe("reviewer-review-x: reported CHANGES REQUESTED (report.json seq 1)\n");
-});
-
-test("a simple dev (no team) is watched like a team member: its report is read from its task, NEEDS reads as NEEDS YOU, and it stalls when quiet", async () => {
-  const solo = { name: "backend-dev-x", ago: 3 };
-  const needs = await watchFleet(["backend-dev-x"], [solo], 100, (n, h) => n === 2 && report(h, "x", 1, { kind: "NEEDS", commit: null }));
-  expect(needs.out).toBe("backend-dev-x: reported NEEDS YOU (report.json seq 1)\n");
-  expect((await watchFleet(["backend-dev-x"], [solo], 100, (n, h) => n === 1 && report(h, "x", 1))).out).toBe("backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n");
-  expect(await watchFleet(["backend-dev-x"], [solo])).toMatchObject({ woke: true, out: "backend-dev-x: idle 20 minutes\n" });
-  expect((await watchFleet(["backend-dev-x:waiting"], [solo], 100)).woke).toBe(false);
-  expect(await watchFleet(["backend-dev-x"], [{ ...solo, ended: true }])).toMatchObject({ out: "backend-dev-x: ended\n" });
-  const h = home();
-  const table = (await status({ json: false }, { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => fleet(h, [solo]) })).out.split("\n");
-  expect(table[1]).toStartWith("backend-dev-x  backend-dev  -");
-});
-
 test("f1rm status shows a NEEDS report as NEEDS YOU, as the watcher does", async () => {
   const h = home();
   const listed = fleet(h, [dev]);
   report(h, "x", 1, { kind: "NEEDS", commit: null });
   const table = (await status({ json: false }, { repo: REPO, home: h, now: NOW, commitTime: () => null, loadAgents: async () => listed })).out;
   expect(table).toContain("NEEDS YOU #1");
-});
-
-test("a waiting name is woken by a new report, though it writes nothing", async () => {
-  const r = await watchFleet(["shop.backend-dev-x:waiting"], [dev], 100, (n, h) => n === 4 && report(h, "x", 1));
-  expect([r.woke, r.sleeps, r.out]).toEqual([true, 4, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\n"]);
-});
-
-test("each seq wakes once: the announced one is kept in ~/.f1rm/watch/<repo>.json, a later watcher skips it, and the next seq wakes again", async () => {
-  const h = home();
-  report(h, "x", 1);
-  const first = await watchFleet(["shop.backend-dev-x"], [dev], 100, () => {}, h);
-  expect([first.woke, first.sleeps]).toEqual([true, 1]);
-  const file = join(h, ".f1rm", "watch", "-code-shop.json");
-  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ "shop.backend-dev-x": 1 });
-  expect(statSync(file).mode & 0o777).toBe(0o600);
-  // The same report is not announced again; the watcher runs on until the hire is quiet.
-  expect(await watchFleet(["shop.backend-dev-x"], [dev], 100, () => {}, h)).toMatchObject({ sleeps: 17, out: "shop.backend-dev-x: idle 20 minutes\n" });
-  const next = await watchFleet(["shop.backend-dev-x"], [dev], 100, (n, h2) => n === 2 && report(h2, "x", 2), h);
-  expect([next.sleeps, next.out]).toEqual([2, "shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 2)\n"]);
-});
-
-test("a report of a hire that is not named in the watch is not announced", async () => {
-  const r = await watchFleet(["lead-a"], [lead, dev], 100, (n, h) => n === 1 && report(h, "x", 1));
-  expect(r.out).toBe("lead-a: idle 20 minutes\n");
-  expect(r.sleeps).toBe(17);
-});
-
-test("a report that is still there when the watch sees an ended hire is announced beside the stall", async () => {
-  const r = await watchFleet(["shop.backend-dev-x"], [{ ...dev, ended: true }], 100, (n, h) => n === 1 && report(h, "x", 1));
-  expect(r.out).toBe("shop.backend-dev-x: reported DONE (commit abc1234, report.json seq 1)\nshop.backend-dev-x: ended\n");
 });
 
 test("f1rm status shows each hire's last report (kind, seq, how long ago) in a REPORT column and a report field", async () => {
@@ -694,13 +451,6 @@ test("f1rm status shows each hire's last report (kind, seq, how long ago) in a R
   const json = JSON.parse((await status({ json: true }, deps)).out);
   expect(json.find((x: Hire) => x.name === "shop.backend-dev-x").report).toEqual({ kind: "BLOCKED", seq: 3, at: new Date(NOW - 12 * MIN).toISOString() });
   expect(json.find((x: Hire) => x.name === "lead-a").report).toBeNull();
-});
-
-test("a watcher that wakes from a sleep (a gap over 2 minutes between polls) judges no one stalled for 5 minutes, and then does", async () => {
-  const r = await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n) => (n === 1 ? 3 * MIN : undefined));
-  expect(r).toMatchObject({ woke: true, sleeps: 6, out: "lead-a: idle 609 minutes\n" }); // the poll that ends the grace is the 5th minute after the first one back
-  // A gap of exactly 2 minutes (the poll's minute and one more) is no sleep.
-  expect(await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n) => (n === 1 ? MIN : undefined))).toMatchObject({ woke: true, sleeps: 1 });
 });
 
 // ── a paused project ───────────────────────────────────────────────────────
@@ -721,12 +471,4 @@ test("status says the project is paused on a line of its own above the table, an
   pause(h);
   expect((await status({ json: false }, { ...deps, loadAgents: async () => [] })).out).toBe(`PAUSED (manual) since ${SINCE}; \`f1rm resume\` wakes it\nno hires\n`);
   expect((await status({ json: true }, deps)).out).toBe(json); // the json stays one array of hires
-});
-
-test("a watcher reports no stall while the project is paused, and the first poll after the resume does", async () => {
-  const r = await watchFleet(["lead-a"], [a({ ago: 600 })], 20, (n, home) => {
-    if (n === 1) pause(home);
-    if (n === 5) rmSync(pausedFile(pausedDirOf(home), REPO));
-  });
-  expect(r).toMatchObject({ woke: true, sleeps: 5, out: "lead-a: idle 605 minutes\n" }); // polls 1 to 4 find it idle for 20 minutes and say nothing
 });

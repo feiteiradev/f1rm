@@ -16,9 +16,9 @@ import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
 import { readUsage, usageFile } from "../usage.ts";
 import { evidenceFile, proofType, topicProgress, type Topic } from "./progress.ts";
-import { HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
+import { HireRefused, parseHireFlags, pmName, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
-import { isSimple, mayWake } from "../cli/wake.ts";
+import { mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
 import { createScheduler, type SchedulerDeps } from "./scheduler.ts";
 import type { PluginLag } from "./office.ts";
@@ -41,7 +41,6 @@ const STOP_TRIES = 3; // `claude stop` attempts on one busy session of a paused 
 // `f1rm hire` counts only in command position (see splitCommands), so a command that merely mentions it passes.
 // The PM and the leads coordinate: they write boards, milestones, kept files, memory, evidence and scratch files, and leave code and landing to others.
 // While a hire still has skills to load, only these run: reading, loading the skill, and telling someone it can't.
-const READING = new Set(["Skill", "Read", "Grep", "Glob", "ToolSearch", "SendMessage"]);
 const COORDINATORS = new Set(["pm", "lead"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 const LANDING = new Set(["commit", "merge", "push", "rebase", "reset", "cherry-pick", "pull", "am", "revert"]);
@@ -121,12 +120,6 @@ const hireArgs = (words: string[], verb = "hire") => {
 };
 /** A word the shell reads as `--override` once its quotes and backslashes go (`--over""ride`, `\--override`); a quoted brief with spaces in it is prose. */
 const isOverrideWord = (w: string) => !/\s/.test(w) && w.replace(/[\\"']/g, "").includes("override");
-/** The role, `--team` and `--simple` of the words after `f1rm hire`, read with the CLI's own flag parser so the two can't drift; `--help` hires nobody. */
-const hireOf = (args: string[] | null) => {
-  if (!args) return null;
-  const { team, simple, args: [role] } = parseHireFlags(args);
-  return role === "--help" || role === "-h" ? null : { role, team, simple };
-};
 /** Where the words after the options start: a flag that takes a value takes the next word with it. */
 const skipOptions = (args: string[], i: number, withValue: Set<string>) => {
   while (args[i]?.startsWith("-")) i += withValue.has(args[i]) ? 2 : 1;
@@ -335,42 +328,12 @@ const linkedWorktree = (cwd: string, gitDir: string, bases: string[], worktree: 
   }
 };
 const isLink = (file: string) => { try { return lstatSync(file).isSymbolicLink(); } catch { return false; } };
-const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "advisor", "marketer", "seo", "social", "sales", "strategist"]);
-// A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
-const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED|NEEDS[\s_-]+YOU)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.
 // Folded for comparing: past links, with `/System/Volumes/Data` put aside and letter case ignored (APFS ignores it).
 const fold = (path: string) => path.replace(/^\/System\/Volumes\/Data(?=\/|$)/, "").toLowerCase();
 const homeKey = (path: string) => fold(realPath(resolve(path)));
 const REAL_HOME = homeKey(((): string => { try { return userInfo().homedir; } catch { return homedir(); } })()); // no passwd entry for the uid: HOME decides
-/** Whether one real folder is the other or inside it, and the outer is no broad one: not `/` (which `inside` never says holds anything but itself), the home folder or a folder that holds it. */
-const sameFolder = (x: string, y: string) => {
-  const holds = (outer: string, path: string) => inside(outer, path) && outer !== "/" && !inside(fold(outer), REAL_HOME);
-  return holds(x, y) || holds(y, x);
-};
 const leadOf = (team: string | null, fallback = "your lead (the Report to of your brief)") => (team ? `lead-${team}` : fallback);
-/** Who talks to whom: for each kind of company employee, the sessions of its project it may message (its own team, when it has one, is `team`) and the way out when a target is refused. */
-const TALK = {
-  pm: { allows: (_team: string | null, e: Employee) => e.role === "lead" || isSimpleEmployee(e), wayOut: (_team: string | null, e: Employee) => `The PM messages the leads of this project and its simple tasks' devs, and no one else. A member of a team is reached through its lead: tell ${leadOf(teamOf(e), "their lead")}.` },
-  lead: {
-    allows: (team: string | null, e: Employee) => e.role === "pm" || e.role === "lead" || (!!team && teamOf(e) === team),
-    wayOut: (team: string | null, e: Employee) => `A lead messages the PM, other leads and the members of its own team (${team ?? "<team>"}.…). Another team's members are reached through their lead: tell ${leadOf(teamOf(e), "their lead")}.`,
-  },
-  member: {
-    allows: (team: string | null, e: Employee) => !!team && teamOf(e) === team,
-    wayOut: (team: string | null) => `A team member messages its own lead and the members of its own team. The PM and other teams are reached through your lead: ask ${leadOf(team)}.`,
-  },
-  // A simple task's session has no lead and no team: the PM is its lead, and the only session its reports (DONE, BLOCKED, NEEDS YOU, ESCALATE) go to.
-  simple: {
-    allows: (_team: string | null, e: Employee) => e.role === "pm",
-    wayOut: (_team: string | null, _e: Employee, pm: string) => `A simple task's session messages the PM (${pm}) only, its reports included. Anyone else is reached through the PM: ask ${pm}.`,
-  },
-};
-/** Whether an employee is a simple task's session: a specialist whose name has no team (`backend-dev-x`), not a lead or a Reviewer. */
-function isSimpleEmployee(e: Employee) {
-  const h = e.title ? hireName(e.title) : null;
-  return !!h && isSimple(h);
-}
 // A raw session start: `claude` with --bg or -p/--print. `--resume` is how the PM or a lead wakes a session it hired.
 // A second-office proof gives the command a HOME of its own: a `HOME=<value>` prefix (or `env HOME=<value>`) of that very command, the value a literal absolute path or
 // `$(mktemp -d)`, and neither the user's real home (see REAL_HOME) nor the HOME this office runs with (a second office is measured by its own sessions).
@@ -426,8 +389,6 @@ const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").to
 const MAX_BRIEF = 8000;
 /** How long the SendMessage gate waits for `claude agents --json --all`. The hook gives up after 5 s and then lets the call through, so a slower listing must read as "can't say" and end in the unknown-name refusal. */
 export const GATE_LISTING_MS = 3000;
-const PM_DECIDES =
-  "The user opened the f1rm office's Hire dialog and left the choice of who to hire to you. Start a topic lead for this need per the f1rm guidelines (load f1rm:f1rm-guidelines): `f1rm hire --topic lead lead-<topic> <topic> \"<brief>\"`, a team brief with the need below, verbatim, as its goal. Tell the user in one line which lead you started, then tell him only when that lead needs him.\n\nThe need:\n";
 const INTERN =
   "The user asked, from the f1rm office, that you hand a subtask to an intern: spawn a sub-agent for it, give it everything it needs to work alone, and use its result in your own work. Keep going on your own task meanwhile.\n\nThe subtask:\n";
 
@@ -522,43 +483,6 @@ const transcriptMtime = (path?: string) => {
 
 const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
 
-/**
- * The skills a session has tried with the Skill tool, whether it ran them or the tool refused (a skill marked disable-model-invocation, or an unknown one).
- * A refusal fires no hook event at all (Claude Code 2.1.308 fails the call at validation, before any hook), so the session's own transcript is the only trace.
- * The path must be `<transcriptsDir>/<project folder>/<sessionId>.jsonl`: the session id and the directory are the office's own, and only the project folder comes from the hook's `transcript_path`.
- * It guards against slips; it is not a security boundary, since the same user can write any line into a transcript.
- * Only the skill names of the session's own (non-sidechain) assistant Skill calls are kept, from the first 8 MB. Anything odd means none: the gate then holds as before.
- */
-function skillsTried(transcriptsDir: string, sessionId: string, hint: unknown): Set<string> {
-  const tried = new Set<string>();
-  try {
-    if (typeof hint !== "string" || hint.split(sep).includes("..")) return tried;
-    const path = resolve(hint);
-    if (basename(path) !== `${sessionId}.jsonl`) return tried; // before any disk access
-    const realDir = realpathSync(resolve(transcriptsDir));
-    const real = realpathSync(path); // a link that leads elsewhere is not the session's file
-    if (real !== join(realDir, basename(dirname(path)), basename(path))) return tried;
-    const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a pipe at the path must not hang the office
-    let text: string;
-    try {
-      const info = fstatSync(fd);
-      if (!info.isFile()) return tried;
-      const buffer = Buffer.alloc(Math.min(info.size, TRANSCRIPT_READ_MAX));
-      text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
-    } finally {
-      closeSync(fd);
-    }
-    for (const line of text.split("\n")) {
-      if (!line.includes('"Skill"')) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type !== "assistant" || entry.isSidechain || !Array.isArray(entry.message?.content)) continue;
-        for (const block of entry.message.content) if (block?.type === "tool_use" && block.name === "Skill" && typeof block.input?.skill === "string") tried.add(block.input.skill);
-      } catch {} // a line that is not JSON counts for nothing
-    }
-  } catch {} // missing, unreadable or odd: no skill counts
-  return tried;
-}
 /** Constant-time credential check. */
 function same(given: string | null | undefined, expected: string) {
   const a = Buffer.from(given ?? ""), b = Buffer.from(expected);
@@ -605,44 +529,14 @@ export function startServer({
 
   // ponytail: replays the whole log on every start; add snapshots or pruning when startup gets slow.
   let state = emptyOffice();
-  // The skills a hire's first prompt names, and the ones its Skill calls have loaded, by session. The prompt itself is never kept.
-  // ponytail: in memory, so an office restart empties it and the gate fails open; persist it if hires outlive restarts in practice.
   // The sub-agent ids each session has started, kept after they stop: the reducer drops a finished intern, and its parent may still resume it.
   // ponytail: a session's ids go when its SessionEnd comes through the hook; one swept away by the office (a crash) keeps its few ids until a restart.
   const subagents = new Map<string, Set<string>>();
-  /** The sessions that have had a prompt, live or replayed: only the first one can arm the skill gate. */
-  const prompted = new Set<string>();
   /** Kept for each event the office takes in, live or replayed from the log. */
   const trackSession = (e: F1rmEvent) => {
-    if (e.kind === "UserPromptSubmit") prompted.add(e.sessionId);
     if (e.kind === "SubagentStart" && e.intern) subagents.set(e.sessionId, (subagents.get(e.sessionId) ?? new Set()).add(e.intern.id));
     if (e.kind === "SessionEnd") subagents.delete(e.sessionId);
   };
-  const skillGates = new Map<string, { required: string[]; security: boolean; loaded: Set<string> }>();
-  /** `machine.sessions()` within the gate's time; null when it can't say, a timeout included. */
-  const gateSessions = async () => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), gateListingMs)));
-    try {
-      return await Promise.race([Promise.resolve(machine.sessions?.()).catch(() => null), late]);
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  /**
-   * The hire of the sender's project that `name` (its name, session id or short id) points at when no session of that name has a live process: `claude agents --json --all` lists
-   * it done, stopped, failed or blocked on a limit, with no pid. An employee-shaped record in the sender's room, so the same checks apply to it; null for anything else (no project, no such hire,
-   * another project's, or a name that has a live session). A listing that can't be read finds none.
-   */
-  async function endedHire(me: Employee, name: string): Promise<Employee | null> {
-    if (!me || me.room === ELSEWHERE.id) return null;
-    const project = folderOf(me.room);
-    const mine = ((await gateSessions()) ?? []).filter((s) => s.kind === "background" && hireName(s.name) && repoOf(s.cwd) === project);
-    const found = mine.find((s) => s.name === name || s.sessionId === name || s.id === name);
-    const hire = found && hireName(found.name);
-    if (!found || !hire || mine.some((s) => s.name === found.name && s.pid)) return null;
-    return { sessionId: found.sessionId ?? found.id, name: found.name, role: roleOfAgentType(`f1rm:${hire.role}`) ?? null, title: found.name, status: "offline", activity: "", tool: "", cwd: found.cwd, room: me.room, lastEventAt: 0 } as Employee;
-  }
   /** True when a command line names this office: its link key, the saved link file or its address and port. */
   const namesOffice = (line: string) => line.includes(token) || line.includes("office-url") || new RegExp(`(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${server.port}\\b`).test(line);
   /** Why the company's rules stop this tool call, or null to let it run. */
@@ -672,67 +566,13 @@ export function startServer({
       if (commands.some((c) => ["pause", "resume"].some((verb) => hireArgs(c, verb)?.includes("--all")))) {
         return refuse("pause-all", "`--all` is the user's alone (their terminal, the /f1rm:stop-all and /f1rm:resume-all commands they type, the top bar): a session pauses and resumes only its own project, and only the PM does that.");
       }
-      // A simple task is the PM's alone: no lead, no specialist, no intern (the PM's included) and no session with no role; the user's terminal or `!` still runs it.
-      if (commands.some((c) => hireOf(hireArgs(c))?.simple) && (role !== "pm" || payload.agent_id)) {
-        return refuse("hire", "Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
-      }
     }
     if (!role) return null;
-    // Only the hire itself is held: a sub-agent, such as the one its first slash command forks, works at once.
-    const gate = payload.agent_id ? undefined : skillGates.get(sessionId);
-    if (gate) {
-      // A refused Skill call leaves no hook event, so a call about to be held looks in the transcript for a try of the skills the first prompt named.
-      // The security hold counts only a skill that ran (its PostToolUse), never a try: security-review is never taken from the transcript.
-      let missing = READING.has(tool) ? [] : gate.required.filter((r) => !gate.loaded.has(r));
-      if (missing.length) {
-        for (const skill of skillsTried(transcriptsDir, sessionId, payload.transcript_path)) if (skill !== "security-review" && gate.required.includes(skill)) gate.loaded.add(skill);
-        missing = missing.filter((r) => !gate.loaded.has(r));
-      }
-      if (missing.length) return refuse("skills", `Load these first with the Skill tool: ${missing.join(", ")}. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send \`BLOCKED <task>\` with its name to the session in your Report to.`);
-      if (gate.security && !gate.loaded.has("security-review") && tool === "SendMessage" && FORMAL_REPORT.exec(String(input.message ?? ""))?.[0].includes("APPROVED")) {
-        return refuse("security", "Run security-review with the Skill tool on the merge before you send APPROVED.");
-      }
-    }
-    // Projects are isolated: a message goes to "main", to the sender's own sub-agent (finished ones too: SendMessage resumes them), or to a session of the sender's own room.
-    // A target is a title, a session id or a `uds:<socket path>` (an employee's `socket`); an offline session answers to none of them.
-    // ponytail: a ` [ref]` after a name is ignored, because the office cannot compute the ref Claude Code builds; a mirror of the same session is in the same project, so the bare name decides.
-    // A name that no session answers to, or that sessions in two rooms answer to, is unknown and refused. The sender's room is the one the office holds for it.
-    // Elsewhere is no room: two sessions there may message each other only when one's cwd is inside the other's folder, and that folder is not / or the home folder.
-    // "main" is the user's own top-level session, open to everyone, unless a session is titled main: then the checks below apply to it. From a sub-agent "main" is its parent conversation, whatever a session is titled.
-    // Within the project, who talks to whom: an intern only to its parent or "main", the PM only to leads, a lead to the PM, leads and its team, a member to its lead and its team,
-    // and a member's formal report only to its lead. A sender with no role is never held, and the user is no session.
+    // Sessions talk through issues and git (decision "Sessions talk through issues and git"): a company session messages only its own interns, and an intern only its parent.
     if (tool === "SendMessage" && input.to !== undefined) {
       const to = String(input.to);
-      const name = to.trim().replace(/\s+\[[^\]]*\]$/, "");
-      const socket = /^uds:(.+)$/.exec(name)?.[1];
-      let answering = Object.values(state.employees).filter((e) => e.status !== "offline" && (socket ? e.socket?.replace(/^uds:/, "") === socket : e.title === name || e.sessionId === name));
-      const intern = !!payload.agent_id;
-      // A hire of the sender's project whose process has ended answers to no employee, and a message to it would be queued and never arrive: it goes through the checks below as the hire it is, then is refused with the way back.
-      const gone = !intern && !socket && !answering.length && to !== "main" && !subagents.get(sessionId)?.has(to) ? await endedHire(state.employees[sessionId], name) : null;
-      if (gone) answering = [gone];
-      const rooms = new Set(answering.map((e) => e.room));
-      if ((to !== "main" || (!intern && answering.length > 0)) && (intern || !subagents.get(sessionId)?.has(to))) {
-        const me = state.employees[sessionId];
-        if (rooms.size !== 1) return refuse("project-unknown", "Projects are isolated, and that name is unknown to the office, or more than one project answers to it. Use the `uds:` address of the session in your own project; a problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
-        if (!rooms.has(me.room)) return refuse("project", "Projects are isolated: message only sessions of your own project. A problem with f1rm itself goes to the user as `f1rm feedback: <problem> -> <suggestion>`, addressed to no session.");
-        if (me.room === ELSEWHERE.id && !answering.every((e) => sameFolder(realCwd(me.cwd), realCwd(e.cwd)))) {
-          return refuse("elsewhere", "Elsewhere is no room: a session outside every project may message only a session working under the same folder. Use `f1rm feedback: <problem> -> <suggestion>` for the user, addressed to no session.");
-        }
-        if (intern) {
-          if (answering.some((e) => e.sessionId !== sessionId && (me.title === undefined || e.title !== me.title))) return refuse("intern-message", "An intern messages only its parent session or \"main\": put what you found in your result.");
-        } else {
-          const team = teamOf(me), talk = TALK[role === "pm" || role === "lead" ? role : isSimpleEmployee(me) ? "simple" : "member"];
-          const bad = answering.find((e) => !talk.allows(team, e));
-          if (bad) return refuse("messaging", `Who talks to whom: ${talk.wayOut(team, bad, Object.values(state.employees).find((e) => e.room === me.room && e.role === "pm")?.title ?? "the PM")}`);
-          if (!COORDINATORS.has(role) && talk !== TALK.simple && FORMAL_REPORT.test(String(input.message ?? "")) && answering.some((e) => e.role !== "lead")) {
-            return refuse("formal-report", `Who talks to whom: a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE, NEEDS YOU) goes to your lead only, ${leadOf(team)}, never to a peer. Tell a peer in plain words.`);
-          }
-          if (gone) {
-            const target = hireName(gone.title!)!;
-            const wayOut = mayWake({ role, team }, target) ? "Wake it, then message it." : target.role === "lead" ? "The PM wakes a lead: resend after the wake." : `Only the lead of its team wakes a member: ask ${leadOf(team)}, and resend after the wake.`;
-            return refuse("no-live-session", `${gone.title}: no live session; f1rm wake ${gone.title} resumes it in place, with its context. ${wayOut} A message to a session that has ended is queued and never arrives.`);
-          }
-        }
+      if (payload.agent_id ? to !== "main" : !subagents.get(sessionId)?.has(to)) {
+        return refuse("messaging", "Sessions talk through issues and git: comment on the spec or its ticket, or open a decision ticket for what only the user decides. A session messages only its own interns, and an intern only its parent.");
       }
     }
     // A permission request is answered by the user's browser only: a command that names an answer route (approve, deny, always, and commands, which approves a project's command list) of this office, by its port, its link key or the saved link, is refused.
@@ -754,34 +594,14 @@ export function startServer({
     if (tool === "Bash" && writesSettings(split, String(input.command ?? ""), gitCall)) return refuse("settings", SETTINGS_REFUSAL);
     // A hire's permissions are the user's: no session starts or wakes one with a flag that sets them (the user's terminal still can). Judged before the hire rules: a flag's value would read as the role there.
     if (commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isWideningFlag)))) return refuse("widen", WIDENING_REFUSAL);
-    const hires = commands.flatMap((c) => hireOf(hireArgs(c)) ?? []);
-    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c))) {
-      return refuse("hire", "Only the PM and team leads hire. Send what you need to the session named in your brief's Report to.");
+    // Nobody hires (decision "Labels pick the roles"): the office starts each step from the issues, and a ticket's role label picks its intern's skills.
+    if (commands.some((c) => hireArgs(c))) {
+      return refuse("hire", "Nobody hires: the office starts each step from the issues, and a ticket's role label picks its intern's skills.");
     }
-    // The PM's or a lead's sub-agent (an implementer or a reviewer) works in its worktree and hires nobody: its parent decides who joins the team.
+    // The PM's or a step's sub-agent (an implementer, a merger, a reviewer) works in its own worktree.
     const subOfCoordinator = COORDINATORS.has(role) && !!payload.agent_id;
-    if (subOfCoordinator && commands.some((c) => hireArgs(c))) {
-      return refuse("hire", "Only the PM and team leads hire, from their own session: a sub-agent does not. Put what you need in your result for the session that started you.");
-    }
     const here = state.employees[sessionId]?.room;
     const worktree = subOfCoordinator && here && here !== ELSEWHERE.id && typeof payload.cwd === "string" ? worktreeOf(folderOf(here), payload.cwd) : null;
-    // `f1rm wake` follows the hire rules: whoever may hire a name may wake it. The target is a name, or a session id the listing resolves to one; an unknown one is the command's own refusal.
-    if (SPECIALISTS.has(role) && commands.some((c) => hireArgs(c, "wake"))) {
-      return refuse("wake", "Only the PM and team leads wake a hire. Send what you need to the session named in your brief's Report to.");
-    }
-    const wakeCalls = COORDINATORS.has(role) ? commands.map((c) => hireArgs(c, "wake")).filter((a): a is string[] => !!a) : [];
-    if (wakeCalls.length) {
-      const sessions = (await gateSessions()) ?? [];
-      const me = state.employees[sessionId];
-      for (const args of wakeCalls) {
-        const target = args.find((a) => !a.startsWith("-"));
-        const name = target && (hireName(target) ? target : sessions.find((s) => s.kind === "background" && (s.sessionId === target || s.id === target))?.name);
-        const hire = name ? hireName(name) : null;
-        if (hire && !mayWake({ role, team: teamOf(me) }, hire)) {
-          return refuse("wake", role === "pm" ? "The PM wakes leads and its simple tasks' devs; a lead wakes the members of its own team. Ask that lead to wake it." : `A lead wakes only the members of its own team (${teamOf(me) ?? "<team>"}.…); the PM wakes leads. Ask ${hire.team ? leadOf(hire.team, "their lead") : "the PM"}.`);
-        }
-      }
-    }
     // `f1rm letgo` follows the wake rules, names are all it needs: the PM lets go leads and its simple hires, a lead its own team's members, nobody else (an intern included). `--leftovers` is the PM's milestone clean-up.
     const letgoCalls = commands.map((c) => hireArgs(c, "letgo")).filter((a): a is string[] => !!a);
     if (letgoCalls.length) {
@@ -817,21 +637,6 @@ export function startServer({
     const checks = commands.flatMap((c) => ["push", "merge"].flatMap((verb) => (hireArgs(c, verb) ?? []).flatMap((a, i, all) => (a === "--check" && all[i + 1] !== undefined ? [all[i + 1]] : []))));
     if (checks.some((v) => splitCommands(v).some(({ words: w }) => gitCall(w)?.sub === "push" || ghLands(w) || hireArgs(w, "push")))) {
       return refuse("check-push", "A --check command runs the project's suite; it may not push or merge. The PM pushes with plain `f1rm push` at the end of a milestone.");
-    }
-    if (role === "pm" && hires.some((h) => h.simple && (h.team || h.role === "lead" || h.role === "reviewer"))) {
-      return refuse("hire", "--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer.");
-    }
-    if (role === "pm" && hires.some((h) => !h.simple && h.role !== "lead")) {
-      return refuse("hire", "The PM starts only leads, with `f1rm hire --topic lead lead-<topic> <topic> \"<brief>\"`; a lead hires the specialists of its team.");
-    }
-    if (role === "lead") {
-      const team = teamOf(state.employees[sessionId]);
-      if (hires.some((h) => h.role === "lead")) return refuse("hire", "A lead hires specialists for its own team, never another lead. Ask the PM for a new team.");
-      if (hires.some((h) => !team || h.team !== team)) return refuse("hire", `A lead hires only into its own team: add --team ${team ?? "<your team>"}.`);
-    }
-    // The usage hold makes a hire or a wake wait for a free slot; `--override` is the user's own terminal's and the Hire dialog's, never a session's.
-    if (role && commands.some((c) => ["hire", "wake"].some((verb) => hireArgs(c, verb)?.some(isOverrideWord)))) {
-      return refuse("override", "No session goes past the usage pacing. Run the same command again: it waits for a free slot.");
     }
     if (COORDINATORS.has(role) && WRITE_TOOLS.has(tool)) {
       const file = resolve(String(payload.cwd ?? "/"), String(input.file_path ?? input.notebook_path ?? ""));
@@ -933,9 +738,7 @@ export function startServer({
       const h = hireName(e.title!)!;
       const pid = listing ? listing.get(e.sessionId)?.pid : pids.get(e.sessionId);
       if (was && !pid) continue; // stopped by an earlier pause and already in its manifest
-      const rows = (h.role === "lead" || !h.team ? boards[id] : teamBoards[id]?.[h.team]) ?? [];
-      const row = rows.find((r) => r.owner === clip(e.title!, MAX_CELL.owner) || (h.reviewer && r.branch === clip(`worktree-${h.task}`, MAX_CELL.branch))) ?? null;
-      hires.push({ name: e.title!, role: h.role, task: h.task, sessionId: e.sessionId, cwd: e.cwd, ...(pid && { pid }), row });
+      hires.push({ name: e.title!, role: h.role, task: h.task, sessionId: e.sessionId, cwd: e.cwd, ...(pid && { pid }), row: null });
     }
     const protect = deps.protect ?? [process.pid];
     if (was && !hires.length && !claim(await deps.procs(), { roots: [], worktrees: join(realRealpath(repo), ".claude", "worktrees"), protect }).length) {
@@ -1081,16 +884,11 @@ export function startServer({
   }
   const processEnded = (e: Employee) => pids.has(e.sessionId) && !isAlive(pids.get(e.sessionId)!);
 
-  let boards: Record<string, BoardRow[]> = {};
-  let teamBoards: Record<string, Record<string, BoardRow[]>> = {};
-  let topics: Record<string, Topic[]> = {};
   let editions: Record<string, Edition> = {};
   const approvals = createBroker(approvalTimeoutMs, () => push());
   // Without a settings folder there is nowhere to keep an edition, so the page isn't told about editions at all and never asks.
-  // The teams (room and team, one string) whose board holds an open question for the user.
-  let asking = new Set<string>();
-  // A lead waits on the user while its own permission request is held, or its team's board holds an open question. The reducer never sees this; the snapshot adds it.
-  const needsYou = (e: Employee) => e.role === "lead" && (approvals.list().some((a) => a.sessionId === e.sessionId) || asking.has(`${e.room}\n${teamOf(e)}`));
+  // A step waits on the user while its own permission request is held. The reducer never sees this; the snapshot adds it.
+  const needsYou = (e: Employee) => e.role === "lead" && approvals.list().some((a) => a.sessionId === e.sessionId);
   const employeesNow = () => Object.fromEntries(Object.entries(state.employees).map(([id, e]) => [id, needsYou(e) ? { ...e, needsYou: true } : e]));
   // A project's command list (projectcmds.ts) shows as a card until the user approves it. The list is derived from the main checkout and kept 30 s, so a push does not read the disk; the approval is a file in the settings folder, read once.
   const proposals = new Map<string, { at: number; list: Cmd[] }>();
@@ -1111,7 +909,7 @@ export function startServer({
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
   const leftoversCard = createLeftovers({ docker, file: leftoversFile, clock, onChange: () => push() });
-  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards: scheduling ? issueBoards() : boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }), ...(pluginLag && { plugin: pluginLag }) });
+  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards: issueBoards(), ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }), ...(pluginLag && { plugin: pluginLag }) });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1137,7 +935,7 @@ export function startServer({
           // A SessionEnd removes the employee, so its role is read first.
           const role = event.role ?? state.employees[event.sessionId]?.role;
           state = reduce(state, event);
-          // Other ways a room empties (the sweep, a process that died) are caught by the board poll within boardPollMs.
+          // Other ways a room empties (the sweep, a process that died) are caught by pollProjects within boardPollMs.
           if (event.kind === "SessionEnd") dropStaleDoors();
           // A new process (a resumed session keeps its id) has no known pid: ask `claude agents` for it at the next check.
           if (event.kind === "SessionStart") {
@@ -1150,17 +948,6 @@ export function startServer({
           // An event releases only the requests of its own thread: the main thread's, or the one sub-agent's it comes from (a reviewer's /code-review fork, a dev's interns share the session id). The exception is the notification about the very prompt being held.
           if (!event.kind.startsWith("Notification/")) approvals.releaseOwn(event.sessionId, agentId);
           push();
-          // A company employee's first prompt may name skills to load; a successful Skill call from the session itself loads one, and a try read from its transcript counts for the named ones.
-          // Only the first: a later prompt or message may quote the sentence, and arming again would swap in names the session cannot load.
-          // A session that keeps its id (`claude attach`, or a flagless `claude --bg --resume` that continues it) has had its first prompt already. One woken by `f1rm wake` (or forked on resume) is a new session id whose first prompt is the resume note, which re-lists no skills; it arms only when the note repeats the security sentence, as a woken high-level Reviewer's does, on purpose.
-          if (event.kind === "UserPromptSubmit" && !prompted.has(event.sessionId) && state.employees[event.sessionId]?.role) {
-            const prompt = String(payload.prompt ?? "");
-            const at = prompt.indexOf(LOAD_FIRST);
-            const required = at < 0 ? [] : prompt.slice(at + LOAD_FIRST.length).split(/\.(?:\s|$)/)[0].split(",").map((s) => s.trim()).filter(Boolean);
-            const security = prompt.includes(SECURITY);
-            if (required.length || security) skillGates.set(event.sessionId, { required, security, loaded: new Set() });
-          }
-          if (event.kind === "PostToolUse" && payload.tool_name === "Skill" && !payload.agent_id) skillGates.get(event.sessionId)?.loaded.add(String(payload.tool_input?.skill ?? ""));
           // A paused project's company sessions stop at this step, whatever the event: no refusal, no hold. The PM keeps working (it runs `f1rm resume` and answers the user), and so does a session that is no employee.
           const paused = event.room.id !== ELSEWHERE.id ? pausedOf(event.room.id) : null;
           if (paused && role && role !== "pm") {
@@ -1298,9 +1085,6 @@ export function startServer({
         state = { ...state, rooms: kept };
         const { [room]: _e, ...left } = editions;
         editions = left;
-        delete boards[room];
-        delete teamBoards[room];
-        delete topics[room];
         push();
         return Response.json({ ok: true });
       }
@@ -1340,30 +1124,6 @@ export function startServer({
         endSession(employee);
         push();
         return Response.json({ ok: true });
-      }
-      if (rest[0] === "roles" && rest.length === 1) {
-        if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: { allow: "GET" } });
-        const room = url.searchParams.get("room");
-        const staff = Object.values(state.employees);
-        // Company order, like the desks, but the specialists first: they are the usual hire, so the first one is preselected. Then the lead, then a role file the office doesn't know.
-        const order = (id: string) => {
-          const known = roleOfAgentType(`f1rm:${id}`);
-          return known === "lead" ? ROLE_IDS.length : known ? ROLE_IDS.indexOf(known) : ROLE_IDS.length + 1;
-        };
-        // Every working background hire on the machine, as `claude agents` lists them, not this project's. Null when it can't be counted.
-        const hires = await machine.workingHires();
-        return Response.json({
-          roles: readRoles()
-            // A Work project hires no founder role; a project with no edition chosen counts as Work.
-            .filter((r) => editions[room ?? ""] === "founder" || !FOUNDER_ONLY.has(roleOfAgentType(`f1rm:${r.id}`)!))
-            .sort((a, b) => order(a.id) - order(b.id))
-            .map((r) => {
-              const known = roleOfAgentType(`f1rm:${r.id}`);
-              const working = staff.filter((e) => known && e.role === known && e.room === room && (e.status === "working" || e.status === "waiting")).length;
-              return { ...r, title: known ? ROLES[known].title : r.id, working };
-            }),
-          hires: { working: hires },
-        });
       }
       if ((rest[0] === "pause" || rest[0] === "resume") && rest.length === 1) {
         // `f1rm pause|resume` act on the project of the caller's folder, or on every project with `all`. Who may run them is the gate's to judge (see refusal).
@@ -1422,75 +1182,16 @@ export function startServer({
         push();
         return Response.json({ ok: true });
       }
-      if (rest[0] === "hire" && rest.length === 1) {
+      // New spec: a PM in a new iTerm tab of the repo, which interviews the user and publishes the spec.
+      if (rest[0] === "start-pm" && rest.length === 1) {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
-        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-        const { room, role, task, team, brief, model, override } = body ?? {};
+        const room = ((await req.json().catch(() => null)) as Record<string, unknown> | null)?.room;
         if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        if (typeof role !== "string" || typeof task !== "string" || typeof brief !== "string" || !brief.trim() || brief.length > MAX_BRIEF || (model != null && typeof model !== "string") || (team != null && typeof team !== "string") || (override != null && typeof override !== "boolean")) {
-          return Response.json({ error: `Hire needs a role, a task name, a model and a team that are strings, an override that is true or false, and a brief of 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
-        }
-        const folder = folderOf(room);
-        const paused = pausedOf(room);
-        if (paused) return Response.json({ error: hireRefusal(roomName(room), paused), working: null }, { status: 409 });
-        // Asked at most once, and only when something needs it: the PM's name and the path limit both read it, after the cheap checks.
-        let common: string | null | undefined;
-        const lookup = () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common);
-        let argv: string[];
-        try {
-          argv = await planHire({ role, task, team: team ?? null, cwd: folder, edition: editions[room] ?? null, brief: brief.trim(), content: role === "reviewer", reportTo: pmOf(room) ? () => pmName(folder, { gitCommonDir: lookup }) : null, model, override: override === true, usage: readUsage(usageFile(process.env.HOME ?? ""), Date.now() / 1000) }, { backgroundSessions: () => machine.backgroundSessions(), gitCommonDir: lookup });
-        } catch (err) {
-          if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
-          return Response.json({ error: (err as Error).message }, { status: 400 });
-        }
-        // ponytail: two hires posted at the same instant can both pass the count before either shows in `claude agents`; serialize them if that is felt.
-        return machine.spawnBackground(argv, folder).then(
+        if (pmOf(room)) return Response.json({ error: "This project already has a PM." }, { status: 409 });
+        return machine.startPmInIterm(folderOf(room)).then(
           () => Response.json({ ok: true }),
-          (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
+          (err: Error) => Response.json({ error: `Start PM failed: ${err.message}` }, { status: 502 }),
         );
-      }
-      if (rest[0] === "topic" && rest.length === 1) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
-        const { room, name } = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
-        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        if (typeof name !== "string" || !SLUG.test(name)) return Response.json({ error: "A topic name is lowercase words joined by hyphens." }, { status: 400 });
-        const folder = folderOf(room);
-        const paused = pausedOf(room);
-        if (paused) return Response.json({ error: hireRefusal(roomName(room), paused), working: null }, { status: 409 });
-        let common: string | null | undefined;
-        const git = { gitCommonDir: () => (common === undefined ? (common = machine.gitCommonDir(folder)) : common) };
-        const live = await machine.backgroundSessions();
-        const leads = (live ?? []).filter((s) => s.name.startsWith("lead-") && s.name !== `lead-${name}` && s.cwd === folder).map((s) => s.name);
-        let argv: string[];
-        try {
-          argv = await planHire({ role: "lead", task: name, cwd: folder, edition: editions[room] ?? null, brief: topicBrief(name, leads), topic: true, reportTo: () => pmName(folder, git) }, { backgroundSessions: async () => live, ...git });
-        } catch (err) {
-          if (err instanceof HireRefused) return Response.json({ error: err.message, working: err.working }, { status: 409 });
-          return Response.json({ error: (err as Error).message }, { status: 400 });
-        }
-        return machine.spawnBackground(argv, folder).then(
-          () => Response.json({ ok: true }),
-          (err: Error) => Response.json({ error: `Hire failed: ${err.message}` }, { status: 502 }),
-        );
-      }
-      if ((rest[0] === "decide" || rest[0] === "start-pm") && rest.length === 1) {
-        if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
-        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-        const { room, need } = body ?? {};
-        if (typeof room !== "string" || room === ELSEWHERE.id || !Object.hasOwn(state.rooms, room)) return Response.json({ error: "No such project." }, { status: 404 });
-        const pm = pmOf(room);
-        if (rest[0] === "start-pm") {
-          if (pm) return Response.json({ error: "This project already has a PM." }, { status: 409 });
-          return machine.startPmInIterm(folderOf(room)).then(
-            () => Response.json({ ok: true }),
-            (err: Error) => Response.json({ error: `Start PM failed: ${err.message}` }, { status: 502 }),
-          );
-        }
-        if (typeof need !== "string" || !need.trim() || need.length > MAX_BRIEF) {
-          return Response.json({ error: `Describe the need in 1 to ${MAX_BRIEF} characters.` }, { status: 400 });
-        }
-        if (!pm) return Response.json({ error: "This project has no PM." }, { status: 409 });
-        return tellEmployee(pm, PM_DECIDES + need.trim());
       }
       if (path === "ws") return server.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
       const file = resolve(clientDir, path || "index.html");
@@ -1578,63 +1279,21 @@ export function startServer({
   }
   // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
   let reading = false;
-  async function readBoards() {
-    if (reading) return;
-    reading = true;
+  // Every boardPollMs: a door whose room emptied another way (the sweep, a process that died) goes, and each project's edition is read from its file.
+  let polling = false;
+  function pollProjects() {
+    if (polling) return;
+    polling = true;
     try {
       if (dropStaleDoors()) push();
-      const nextEditions: Record<string, Edition> = {};
-      const projects = Object.keys(state.rooms).filter((id) => id !== ELSEWHERE.id); // Elsewhere has no edition and no board
-      for (const id of projectsDir ? projects : []) {
+      const next: Record<string, Edition> = {};
+      for (const id of projectsDir ? Object.keys(state.rooms).filter((r) => r !== ELSEWHERE.id) : []) {
         const edition = readEdition(projectFile(projectsDir!, id));
-        if (edition) nextEditions[id] = edition;
+        if (edition) next[id] = edition;
       }
-      if (JSON.stringify(nextEditions) !== JSON.stringify(editions)) {
-        editions = nextEditions;
-        push();
-      }
-      if (!boardsDir) return;
-      const next: Record<string, BoardRow[]> = {};
-      const nextTeams: Record<string, Record<string, BoardRow[]>> = {};
-      const nextAsking = new Set<string>();
-      const nextTopics: Record<string, Topic[]> = {};
-      const files = (() => {
-        try {
-          return readdirSync(boardsDir);
-        } catch {
-          return []; // no boards folder yet
-        }
-      })().filter((f) => f.endsWith(".md"));
-      for (const id of projects) {
-        const rows = await readBoard(boardFile(boardsDir, id));
-        if (rows.length) next[id] = rows;
-        // Only the boards of teams someone in the room works in.
-        const teams = new Set(Object.values(state.employees).filter((e) => e.room === id).map(teamOf).filter((t): t is string => t !== null && /^[A-Za-z0-9-]+$/.test(t))); // a team joins into a path, so it passes the same check as a file-derived one
-        // A topic stays on the room's progress after its lead is gone: every team board of the repo counts. ponytail: finished topics pile up; hide them past a count if that is felt.
-        const prefix = basename(boardFile(boardsDir, id), ".md") + ".team.";
-        const topicTeams = new Set([...teams, ...files.filter((f) => f.startsWith(prefix)).map((f) => f.slice(prefix.length, -3)).filter((t) => /^[A-Za-z0-9-]+$/.test(t))]);
-        for (const team of topicTeams) {
-          const text = await readBoardText(teamBoardFile(boardsDir, id, team));
-          const desk = evidenceDir ? await readBoardText(join(evidenceDir, roomName(id), `lead-${team}`, "desk.md")) : "";
-          const topic = topicProgress(text, desk);
-          if (topic.total || topic.desk.length) (nextTopics[id] ??= []).push({ team, ...topic });
-        }
-        for (const team of teams) {
-          const text = await readBoardText(teamBoardFile(boardsDir, id, team)); // read once: the rows and the open question come from the same text
-          const teamRows = parseBoard(text);
-          if (teamRows.length) (nextTeams[id] ??= {})[team] = teamRows;
-          if (openQuestion(text)) nextAsking.add(`${id}\n${team}`);
-        }
-      }
-      if (JSON.stringify(next) !== JSON.stringify(boards) || JSON.stringify(nextTeams) !== JSON.stringify(teamBoards) || JSON.stringify(nextTopics) !== JSON.stringify(topics) || [...nextAsking].sort().join() !== [...asking].sort().join()) {
-        boards = next;
-        topics = nextTopics;
-        teamBoards = nextTeams;
-        asking = nextAsking;
-        push();
-      }
+      if (JSON.stringify(next) !== JSON.stringify(editions)) (editions = next, push());
     } finally {
-      reading = false;
+      polling = false;
     }
   }
   // The safety net for hires nobody let go: a done f1rm hire whose branch is merged goes, with its worktree and branch, after anything it left uncommitted is archived (see letGoHire).
@@ -1772,14 +1431,14 @@ export function startServer({
       dockerSweeping = false;
     }
   };
-  const recoverOnce = () => (void sweepDockerOnce().catch(() => {}), recovering?.tick(registered()));
-  const ready = Promise.all([sweepOnce(), readBoards()]);
+  const recoverOnce = () => void sweepDockerOnce().catch(() => {});
+  const ready = Promise.all([sweepOnce(), pollProjects()]);
   void letGoDone(); // not awaited: a hanging `claude agents` must not hold the office's start
   void checkProcesses(); // likewise: the replayed employees learn who is busy now, not a tick later
   const timer = setInterval(sweepOnce, Math.min(15_000, offlineAfterMs / 4));
   const processTimer = setInterval(checkProcesses, Math.min(5_000, offlineAfterMs / 4));
+  const projectTimer = setInterval(pollProjects, boardPollMs);
   const letGoTimer = setInterval(letGoDone, Math.min(60_000, letGoAfterMs / 4));
-  const boardTimer = setInterval(readBoards, boardPollMs);
   // The reading changes as sessions report and as windows reset; push when it does (and let a stale leftovers list refresh).
   let lastUsage = JSON.stringify(usageView(gaugesFile, clock()));
   const usageTimer = setInterval(() => {
@@ -1806,8 +1465,8 @@ export function startServer({
     closing.abort();
     clearInterval(timer);
     clearInterval(processTimer);
+    clearInterval(projectTimer);
     clearInterval(letGoTimer);
-    clearInterval(boardTimer);
     clearInterval(recoveryTimer);
     clearInterval(schedulerTimer);
     clearInterval(usageTimer);

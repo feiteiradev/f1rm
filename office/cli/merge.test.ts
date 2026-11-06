@@ -348,7 +348,7 @@ test("with no --check and no check script the remembered command is the suite; a
   expect(readFileSync(join(u.repo, ".git", "check-ran"), "utf8").trim()).toBe(join(u.repo, ".claude", "worktrees", "merge-add-a"));
 });
 
-test("--no-red: a test-only branch is refused with the way out named, lands with a reason that is logged in calls.md, and the suite still runs", async () => {
+test("--no-red: a test-only branch is refused with the way out named, lands with a reason it says as a call (no calls.md any more), and the suite still runs", async () => {
   const s = setup();
   const tip = commit(s.wt, { "always.test.ts": PASSES }, "test only");
   await done(s);
@@ -367,17 +367,16 @@ test("--no-red: a test-only branch is refused with the way out named, lands with
   expect(ok.err).toBe("");
   expect(ok.code).toBe(0);
   expect(ok.out).toContain("red: skipped");
-  expect(readFileSync(callsFile(s), "utf8")).toBe("| date | task | call | detail |\n|---|---|---|---|\n| 2026-10-28 | add-a | merge --no-red | renamed / tests only |\n");
+  expect(ok.out).toContain("call: merge --no-red: renamed | tests only");
+  expect(existsSync(callsFile(s))).toBe(false);
   expect(JSON.parse(readFileSync(evidence(s, "merge.json"), "utf8")).red).toEqual([]);
 
-  const c = setup(); // code with no test file, and a calls.md that already has its header
+  const c = setup(); // code with no test file
   commit(c.wt, { "add.ts": ADD }, "refactor");
   await done(c);
-  mkdirSync(join(c.home, ".f1rm", "kept", "shop"), { recursive: true });
-  writeFileSync(callsFile(c), "| date | task | call | detail |\n|---|---|---|---|\n| 2026-10-01 | x | y | z |\n");
   expect((await merge(c)).err).toContain('--no-red "<reason>"');
-  expect((await merge(c, "--no-red", "no new behaviour")).code).toBe(0);
-  expect(readFileSync(callsFile(c), "utf8").trim().split("\n")).toEqual(["| date | task | call | detail |", "|---|---|---|---|", "| 2026-10-01 | x | y | z |", "| 2026-10-28 | add-a | merge --no-red | no new behaviour |"]);
+  const landed = await merge(c, "--no-red", "no new behaviour");
+  expect([landed.code, landed.out.includes("call: merge --no-red: no new behaviour")]).toEqual([0, true]);
 });
 
 test("a branch that touches Claude Code settings, hooks or commands is refused whatever the flags; the message says only the user changes permissions", async () => {
@@ -640,7 +639,7 @@ test("a branch that changes how the suite runs (scripts.check, scripts.suite, sc
     expect(r.err).not.toMatch(/user/i);
     untouched(s, head, tip);
     expect((await merge(s)).code).toBe(0);
-    expect(readFileSync(callsFile(s), "utf8").trim().split("\n").at(-1)).toBe("| 2026-10-28 | add-a | merge --check on a suite change | true |");
+    expect(existsSync(callsFile(s))).toBe(false); // the call is said, for the close step's comment
   }
   const s = setup();
   commit(s.wt, { "add.ts": ADD, "add.test.ts": ADD_TEST, "package.json": JSON.stringify({ scripts: { check: "pwd >> ../../../.git/check-ran", build: "echo hi" } }) });

@@ -90,55 +90,6 @@ async function officeWithRepo() {
   return { boardsDir, projectsDir, next, seen };
 }
 
-test("a missing board is no rows and no error, and an edit reaches the open socket without a reconnect", async () => {
-  const { boardsDir, next, seen } = await officeWithRepo();
-  const room ="/code/shop/.git";
-  const bare = await next((s) => !!s.rooms[room]);
-  expect(bare.boards).toEqual({});
-
-  mkdirSync(boardsDir);
-  const file = boardFile(boardsDir, room);
-  writeFileSync(file, example);
-  const first = await next((s) => s.boards?.[room]?.length === 3);
-  expect(first.boards![room].map((r) => r.status)).toEqual(["done", "doing", "todo"]);
-
-  writeFileSync(file, example.replace("| T3 | - | todo |", "| T3 | - | blocked |"));
-  const edited = await next((s) => s.boards?.[room]?.[2]?.status === "blocked");
-  expect(edited.boards![room].length).toBe(3);
-
-  const mark = seen.length;
-  rmSync(file);
-  await next((s) => Object.keys(s.boards!).length === 0, mark);
-});
-
-test("a board bigger than the read cap still yields a bounded state", async () => {
-  const { boardsDir, next } = await officeWithRepo();
-  mkdirSync(boardsDir);
-  const row = `| T1 | - | todo | - | ${"x".repeat(1000)} |\n`;
-  writeFileSync(boardFile(boardsDir, "/code/shop/.git"), row.repeat(Math.ceil((MAX_BOARD_BYTES * 4) / row.length)));
-  const s = await next((s) => (s.boards?.["/code/shop/.git"]?.length ?? 0) > 0);
-  expect(s.boards!["/code/shop/.git"].length).toBeLessThanOrEqual(65);
-  expect(JSON.stringify(s).length).toBeLessThan(MAX_BOARD_BYTES * 2);
-});
-
-test("a team's board, next to the PM's, reaches the office for every team someone in the room works in", async () => {
-  const { boardsDir, next } = await officeWithRepo();
-  const room = "/code/shop/.git";
-  await fetch(`http://127.0.0.1:${server.port}/ingest`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-f1rm-secret": SECRET },
-    body: JSON.stringify({ session_id: "lead", cwd: "/code/shop", hook_event_name: "UserPromptSubmit", prompt: "go", agent_type: "f1rm:lead", session_title: "lead-checkout" }),
-  });
-  mkdirSync(boardsDir);
-  expect(teamBoardFile(boardsDir, room, "checkout")).toBe(join(boardsDir, "-code-shop.team.checkout.md"));
-  writeFileSync(teamBoardFile(boardsDir, room, "checkout"), example);
-  // A board for a team nobody here works in stays unread.
-  writeFileSync(teamBoardFile(boardsDir, room, "search"), example);
-  const s = await next((s) => s.teamBoards?.[room]?.checkout?.length === 3);
-  expect(Object.keys(s.teamBoards![room])).toEqual(["checkout"]);
-  expect(s.boards).toEqual({});
-});
-
 test("a project's edition reaches the office from its file, and the office sets it only to work or founder for a room it knows", async () => {
   const { projectsDir, next } = await officeWithRepo();
   const room = "/code/shop/.git";

@@ -62,22 +62,6 @@ const reportOf = (home: string, repo: string, name: string) => {
   return slug ? readReport(reportFile(home, basename(repo), slug)) : null;
 };
 
-/** Where the watcher keeps the report `seq` it announced for each name, so each report wakes a lead once: `~/.f1rm/watch/<repo>.json`. */
-const watchFile = (home: string, repo: string) => join(home, ".f1rm", "watch", `${repoKey(repo)}.json`);
-function announced(home: string, repo: string): Record<string, number> {
-  try {
-    return JSON.parse(readFileSync(watchFile(home, repo), "utf8")) ?? {};
-  } catch {
-    return {};
-  }
-}
-function saveAnnounced(home: string, repo: string, seqs: Record<string, number>) {
-  const file = watchFile(home, repo);
-  mkdirSync(dirname(file), { recursive: true });
-  writePrivate(`${file}.tmp`, JSON.stringify(seqs, null, 2) + "\n");
-  renameSync(`${file}.tmp`, file);
-}
-
 /** An ended hire older than this is history, not something to wake. */
 const ENDED_WINDOW_MS = 24 * 60 * 60_000;
 const TAIL = 256 * 1024;
@@ -273,24 +257,15 @@ export function hires({ repo, home, agents: listed, now, commitTime }: HiresDeps
   return [...out, ...[...ended].map(([name, t]) => make(name, t.id, t))];
 }
 
-const usage = "usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...";
+const usage = "usage: f1rm status [--json]";
 type Result = { out: string; err: string; code: number };
-const NO_NAMES: Result = { out: "no names\n", err: "", code: 0 };
-
-const WAITING = ":waiting";
-export type WatchName = { name: string; waiting: boolean };
-/** What the arguments of `f1rm status` ask for: a usage error, a listing, or a watch of some names (empty ones dropped, a `:waiting` suffix read once). */
-export type Args = { error: string } | { watch: false; json: boolean } | { watch: true; names: WatchName[] };
+/** What the arguments of `f1rm status` ask for: a usage error or a listing. */
+export type Args = { error: string } | { json: boolean };
 
 /** Reads the arguments once, for `statusFor`, before it looks at the repo. */
 export function parseArgs(argv: string[]): Args {
-  if (argv[0] === "--watch") {
-    const given = argv.slice(1);
-    if (given.some((n) => n.startsWith("-"))) return { error: usage };
-    const names = given.filter(Boolean).map((n) => (n.endsWith(WAITING) ? { name: n.slice(0, -WAITING.length), waiting: true } : { name: n, waiting: false }));
-    return { watch: true, names: names.filter((n) => n.name) };
-  }
-  return argv.every((a) => a === "--json") ? { watch: false, json: argv.includes("--json") } : { error: usage };
+  if (argv[0] === "--watch") return { error: "f1rm status --watch is gone: the office starts each step and restarts one that ended (see the scheduler)" };
+  return argv.every((a) => a === "--json") ? { json: argv.includes("--json") } : { error: usage };
 }
 
 const ago = (m: number | null) => (m == null ? "-" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m ago`);
@@ -319,92 +294,14 @@ export async function status(args: { json: boolean }, deps: Omit<HiresDeps, "age
   return { out: args.json ? JSON.stringify(list, null, 2) + "\n" : banner + table(list, deps.now), err: "", code: 0 };
 }
 
-const POLL_MS = 60_000;
-const QUIET_MIN = 20;
-/** A hire stopped by a limit keeps its lead from being stalled for this long, which is longer than any reset; after it the lead is told. */
-const LIMITED_MIN = 360;
-
-/** The entry that stands for a name: with two listed entries of one name (an old session beside a re-hired one) the newest, a fresh session with no transcript yet counting as the newest of all. */
-function entryOf(name: string, list: Hire[]): Hire | undefined {
-  const age = (x: Hire) => x.idleMinutes ?? -1;
-  return list.filter((x) => x.name === name).reduce<Hire | undefined>((best, x) => (!best || age(x) < age(best) ? x : best), undefined);
-}
-
-/**
- * Why a named session is stalled, or null if it is not: missing, ended, on a limit stop, without an activity time, or idle for 20 minutes. A lead is idle only when its whole team is.
- * One that is waiting (for an answer, or for the user at its desk) is judged only for the first three, never for being quiet.
- */
-function stalled(name: string, list: Hire[], waiting: boolean): string | null {
-  const h = entryOf(name, list);
-  if (!h) return "missing from the list";
-  if (h.ended) return "ended";
-  if (h.limitUntil) return `limit stop until ${h.limitUntil}`;
-  if (waiting) return null;
-  if (h.idleMinutes == null) return "no activity time";
-  if (h.idleMinutes < QUIET_MIN) return null;
-  // A hire that ended, has no activity time, or is quiet counts as quiet, unless a limit stop holds it (it waits for its reset, which a lead cannot hurry).
-  const quiet = (x: Hire) => x.ended || x.idleMinutes == null || (x.idleMinutes >= QUIET_MIN && !(x.limitUntil && x.idleMinutes < LIMITED_MIN));
-  if (h.role === "lead" && !list.filter((x) => x.team === h.team && x.role !== "lead").every(quiet)) return null;
-  return `idle ${h.idleMinutes} minutes`;
-}
-
-export type WatchDeps = Omit<HiresDeps, "agents" | "now" | "commitTime"> & {
-  now: () => number;
-  loadAgents: () => Promise<any[] | null>;
-  /** Waits `ms`; injected so a test needs no real time. */
-  sleep: (ms: number) => Promise<void>;
-};
-
-/**
- * `f1rm status --watch <name>[:waiting]...`: sleeps a minute, then polls once a minute, and returns when a named session is stalled, with each such name and its reason (exit 0).
- * It fails closed: when `claude agents --json` can't be read it returns exit 1. With no name left it returns at once.
- * A waiting name is watched as a plain one as soon as it writes again. Its activity is noted at the first poll, a minute after the start, whatever that finds (none, for a session
- * with no transcript yet), so what it wrote in that first minute (a wrap-up after its report) does not count; any later write ends the wait, including a message sent to it. That is how
- * an approval at the hire's desk (no message reaches anyone) puts it back, while a Reviewer waiting after CHANGES REQUESTED, which writes nothing, stays waiting.
- */
-export async function watch(names: WatchName[], deps: WatchDeps): Promise<Result> {
-  if (!names.length) return NO_NAMES;
-  const seen = new Map<string, number | null>();
-  const plain = new Set<string>();
-  const resting = sleepGrace();
-  resting(deps.now());
-  for (;;) {
-    await deps.sleep(POLL_MS);
-    const listed = await deps.loadAgents();
-    if (!listed) return { out: "", err: "f1rm: can't read `claude agents --json`, so the watch ends", code: 1 };
-    const list = hires({ ...deps, commitTime: () => null, now: deps.now(), agents: listed });
-    for (const n of names.filter((x) => x.waiting && !plain.has(x.name))) {
-      const at = entryOf(n.name, list)?.lastActivity;
-      const now = at ? Date.parse(at) : null;
-      if (!seen.has(n.name)) seen.set(n.name, now);
-      else if (now != null && now > (seen.get(n.name) ?? -Infinity)) plain.add(n.name);
-    }
-    // A report the watcher has not announced wakes it, a waiting name too; the seq is kept so the same report never wakes twice, whether or not the SendMessage also arrived.
-    const seqs = announced(deps.home, deps.repo);
-    const reported = names.flatMap((n) => {
-      const r = reportOf(deps.home, deps.repo, n.name);
-      if (!r || r.seq <= (seqs[n.name] ?? 0)) return [];
-      seqs[n.name] = r.seq;
-      return [`${n.name}: reported ${SHOWN[r.kind] ?? r.kind} (${r.commit ? `commit ${r.commit.slice(0, 7)}, ` : ""}report.json seq ${r.seq})`];
-    });
-    if (reported.length) saveAnnounced(deps.home, deps.repo, seqs);
-    // Nobody is stalled in a paused project (its sessions are stopped on purpose) or just after the Mac slept (a poll that came more than 2 minutes late); a report still wakes the watcher.
-    const asleep = resting(deps.now());
-    const paused = asleep || !!readPaused(pausedFile(pausedDirOf(deps.home), deps.repo));
-    const out = [...reported, ...names.flatMap((n) => { const why = paused ? null : stalled(n.name, list, n.waiting && !plain.has(n.name)); return why ? [`${n.name}: ${why}`] : []; })];
-    if (out.length) return { out: out.join("\n") + "\n", err: "", code: 0 };
-  }
-}
-
 export type RunDeps = { home: string; now: () => number; loadAgents: () => Promise<any[] | null>; sleep: (ms: number) => Promise<void>; commitTime: (branch: string) => number | null };
 
 /**
- * `f1rm status` for a repo, given as its path, as null (not in git), or as a lookup called only when there is something to serve. It answers, in this order: a usage mistake, a watch with no names, a folder that is not a git repo, a path Claude Code would cut,
+ * `f1rm status` for a repo, given as its path, as null (not in git), or as a lookup called only when there is something to serve. It answers, in this order: a usage mistake, a folder that is not a git repo, a path Claude Code would cut,
  * and else runs what `args` asks for. `deps` default to the real Claude Code, git and clock; a test injects them.
  */
 export async function statusFor(args: Args, repoOrLookup: string | null | (() => string | null), deps: Partial<RunDeps> = {}): Promise<Result> {
   if ("error" in args) return { out: "", err: args.error, code: 1 };
-  if (args.watch && !args.names.length) return NO_NAMES;
   const repo = typeof repoOrLookup === "function" ? repoOrLookup() : repoOrLookup; // asked for only now, when there is something to serve
   if (!repo) return { out: "", err: "f1rm: not in a git repo", code: 1 };
   const tooLong = pathTooLong(repo);
@@ -420,7 +317,6 @@ export async function statusFor(args: Args, repoOrLookup: string | null | (() =>
     },
     ...deps,
   };
-  if (args.watch) return watch(args.names, { repo, home: d.home, now: d.now, loadAgents: d.loadAgents, sleep: d.sleep });
   return status(args, { repo, home: d.home, now: d.now(), loadAgents: d.loadAgents, commitTime: d.commitTime });
 }
 

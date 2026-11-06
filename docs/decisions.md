@@ -245,6 +245,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: arming on every prompt that contained the sentence let a quoted hire prompt (a Reviewer's `/code-review` fork result, a lead's re-review note quoting the brief) re-arm two sessions on 2026-10-21 with names they could not load, and only restarting the office cleared them.
 - Rejected: persisting the gate across restarts (out of scope; it fails open today); a regex that ignores quotes (a quote has no reliable shape).
 - Where: gate-arm, c51f6c6, b3699bf, a29ce4c, 1a3fd3c, b36a111, 2d7ec88
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 A refused skill counts as tried
 
@@ -252,6 +253,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: skills flagged `disable-model-invocation` can never load through the Skill tool, so counting only successes held the hire forever. Measured on Claude Code 2.1.308 in a throwaway `claude -p` with its own hooks: a loadable skill fires PreToolUse then PostToolUse, while a refused one (and an unknown one) fires no hook event at all, not even PostToolUseFailure, because the call fails at validation before any hook; the transcript's Skill `tool_use` is the only trace.
 - Rejected: a hook-based count (no event exists); refusing every such skill in `f1rm hire` for all plugins (hire.ts already refuses pstack ones, other plugins carry the flag too); trusting the hook's `transcript_path` as given (the session id and the directory are the office's own, and only the project folder comes from the hint); counting a refused `security-review` toward the Reviewer's APPROVED (it has not run).
 - Where: gate-arm, c51f6c6, b3699bf, a29ce4c, 1a3fd3c, b36a111, 2d7ec88
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 Who talks to whom (gate)
 
@@ -259,6 +261,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the PM's chat with the user stays free of hire traffic, leads own their teams, and projects and teams stay isolated.
 - Rejected: a gate on message content beyond the formal-report first word; letting peers send formal reports to each other; refusing "main" for formal reports (it is the user's own session, not a peer).
 - Where: gate-messaging, 7e229d2, 4d108e5 (messaging table), 24c8796, f5d773c, bc294d4, f06ce50, 700d77d (round 1), 2cbaad9, 40836d2, bad9f78 (round 2), 9a6868c (round 3), 9a3569d (round 4), 20948f6 (round 5)
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 Who may start what
 
@@ -282,6 +285,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: the PM relaying every question; PLAN and GO round trips for changes the user already approved.
 - Where: workflow-talk, 196837a
 - Superseded: Caps wait, never ask (2026-11-02).
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 f1rm wake
 
@@ -290,6 +294,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: re-hiring a new session with a resume brief for every stop (loses context, wastes a worktree); waking by bare name through SendMessage (it goes to offline Remote Control copies and is queued for good); a wake that skips the caps (a woken hire works like a hired one); reading who the waker is in the command (it cannot know; the gate does, as for hire).
 - Where: wake, 1b20dfe, 24ace42, ae1be73 (prose), 3b118ed (model), e140577 (first-prompt rule, Reviewer task and push block), dfc7f5c (`--override`), 34a2546 (security sentence), 301b785 (isMeta, fail closed, usage error)
 - Superseded: Caps wait, never ask (2026-11-02).
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 A message to a hire with no live process says so
 
@@ -297,6 +302,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: delivery to an offline copy was queued and never arrived, silently, and the refusal of a done hire named the wrong problem.
 - Rejected: waking from the gate (a gate only judges); keeping "unknown to the office" for ended hires of the project; asking `claude agents` on every message (it is asked only when no employee answers the name).
 - Where: wake, 27d4f27, ae1be73 (prose), e8d6a3f (own sub-agents skip the lookup), c2618d3 (the PM wakes a lead), 702e346, ff0eb9e (prose)
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 The office wakes limit-stopped hires
 
@@ -304,6 +310,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: only the user's `claude attach` brought stopped hires back (limit stops never resumed after the reset, an update ended every idle session, `claude agents` kept them as blocked with no pid), and nobody was awake; `f1rm status --watch` only tells a lead, and `f1rm wake` is by hand.
 - Rejected: waking in a loop (a hire that crashes at once would burn the subscription); waking interactive sessions; a daemon outside the office; re-reading the reset from the `resetsAt` field (the text is what status.ts and the guidelines already name); retrying a stop whose wake a cap refused (the notification hands it to a person).
 - Where: office-recovery, a6685ae (the tick, the store, the NOTE, the gate's listing timeout), d331b01 (a report is a SendMessage or text of the last turn; progress counts messages), 9578484 (annotated status, clipped owner), fd53b6e (private store file), 09308d2 (spring-forward gap, later of a doubled hour), f5686e9 (tell by session id, each live seat), 22bdca9 and 3565c1d (prose order), 265481e (no blocking reads), bc2b9ea (the rule: a limit stop first, a report must end the turn and be delivered), b58f298 (names and branches as clipped), 826e536 (a Report to through its newest session), 645b5cd (async git with a timeout, shared reads), 4fabf63 (a handled stop is not read again), 076cb58 (the gap rule), 741ff75 (round 3: a stop is recorded once, only a delivered last SendMessage is a report, one turn-start rule), dfc0752 (round 3 prose), ea1d9b4 (round 4: records cleared when the session runs again, judged only when final, the tip only where needed, a git failure per hire), 2f8d378 (round 4 prose), 999f695 (round 7: a woken specialist resumes in its worktree), 2622559 (round 5: a stop is recorded after its note, an unknown tip is not no branch, a lead is skipped before its tail is read, the nudge skips any delivered report), b34f19e (round 5 prose)
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-22 A hire whose turn ended without its report gets one nudge
 
@@ -311,6 +318,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a Reviewer ended its turn after its review without sending a verdict and the team stood still for 20 minutes.
 - Rejected: nudging in a loop (one nudge per turn end; a hire that ignores it is the lead's to judge); nudging a hire that is busy or waiting on a report it already sent.
 - Where: office-recovery, a6685ae (the nudge), d331b01 (a SendMessage report counts), f5686e9 (nudge by the hire's own session id), 2622559 (the nudge skips any delivered report), b34f19e (prose), 561f050 (a lead with a busy team drops an old NOTE)
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-23 Permissions are answered in the office
 
@@ -359,6 +367,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: `SendMessage` can return success while the message never arrives (anthropics/claude-code #89543, #102975), so a lead could wait for a report its hire had already sent. The watcher the lead already runs must see the report either way, and the ack comes from the receiver reading a file, never from the send's result.
 - Rejected: waiting for a retry of the message; a daemon that re-sends; the lead polling the hire's transcript.
 - Where: report-files, 157908d
+- Superseded: since 2026-11-06 (Sessions talk through issues and git) this is gone, removed in #93: the office starts each step from the issues and restarts one that ended.
 
 ## 2026-10-23 The permission card
 
@@ -626,7 +635,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: no session messages another. Agent-to-agent messages and what was built to make them reliable go: report files and `f1rm report`, `status --watch`, wakes and nudges by agents, the messaging table and the project gate. A step that ends without moving its issue on is restarted once by the office; a second failure opens a decision ticket (retry, drop, or the user looks).
 - Why: `SendMessage` can return success and never arrive, and every fix for that (reports, watchers, nudges, recovery) cost rules and tokens; a step that only reads and writes the tracker and git has nothing to lose in transit.
 - Rejected: keeping messages with file-backed reports.
-- Where: rebuild grilling 2026-11-06, round 3 Q15; the restart and the failure ticket in #90 (office/server/scheduler.ts). A step "ended without moving its issue on" when it is no longer running and what started it is still there (a spec with no tickets, an unblocked ticket left, a spec still open with every ticket closed), and it is not waiting on a decision ticket it opened, judged only 3 minutes after it started (`claude agents` may not list a session yet); a closed ticket since its last start is progress and starts it again without counting. The failure ticket offers Retry it (restarts it, `restart=1`), Drop the spec (closes it as not planned, `drop=2`) and Leave it to me. It differs from #90's wording on one point: a step that only commented and ended has failed too, so a refusal it wrote on the spec reaches the user as a decision ticket instead of waiting unread.
+- Where: rebuild grilling 2026-11-06, round 3 Q15; the old messages, reports, watchers, wakes, nudges and skill gate removed in #93 (a company session messages only its own interns); the restart and the failure ticket in #90 (office/server/scheduler.ts). A step "ended without moving its issue on" when it is no longer running and what started it is still there (a spec with no tickets, an unblocked ticket left, a spec still open with every ticket closed), and it is not waiting on a decision ticket it opened, judged only 3 minutes after it started (`claude agents` may not list a session yet); a closed ticket since its last start is progress and starts it again without counting. The failure ticket offers Retry it (restarts it, `restart=1`), Drop the spec (closes it as not planned, `drop=2`) and Leave it to me. It differs from #90's wording on one point: a step that only commented and ended has failed too, so a refusal it wrote on the spec reaches the user as a decision ticket instead of waiting unread.
 
 ## 2026-11-06 Only the user steers the company
 

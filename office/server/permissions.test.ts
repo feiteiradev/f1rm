@@ -331,15 +331,16 @@ test("a session never widens a hire's permissions: f1rm hire and f1rm wake with 
     ["l", (f) => `f1rm wake checkout.backend-dev-a ${f}`],
   ];
   for (const [id, call] of calls) {
-    expect([id, call(""), await bash(id, call(""))]).toEqual([id, call(""), null]);
+    // With no flag the call is refused too, now for being a hire or a wake at all (nobody hires; wake is gone): the widening refusal comes first when a flag is there.
+    expect([id, call(""), (await bash(id, call("")))?.permissionDecision]).toEqual([id, call(""), call("").includes(" hire ") ? "deny" : undefined]);
     for (const flag of flags) {
       const out = await bash(id, call(flag));
       expect([id, call(flag), out?.permissionDecision]).toEqual([id, call(flag), "deny"]);
       expect(out.permissionDecisionReason).toContain("A session never widens a hire's permissions");
     }
   }
-  // the words in a brief are prose, and the user's own session runs anything
-  expect(await bash("p", "f1rm hire lead lead-checkout checkout 'never pass --settings or --permission-mode'")).toBeNull();
+  // the words in a brief are prose: such a hire is refused for being a hire, not for widening; the user's own session runs anything
+  expect((await bash("p", "f1rm hire lead lead-checkout checkout 'never pass --settings or --permission-mode'"))?.permissionDecisionReason).toStartWith("Nobody hires");
   expect(await bash("f", "f1rm hire --settings '{}' lead lead-checkout checkout b")).toBeNull();
 });
 

@@ -106,27 +106,3 @@ test("the route serves a known project's proof behind the token and origin gate,
   expect((await get("/x/evidence/shop/shot.png")).status).toBe(401);
   expect((await get("/t/evidence/shop/shot.png", { origin: "http://evil.example" })).status).toBe(403);
 });
-
-test("the snapshot carries each team board of the room with its desk lines, even after its lead is gone", async () => {
-  dir = mkdtempSync(join(tmpdir(), "f1rm-ev-"));
-  const boardsDir = join(dir, "boards"), projectsDir = join(dir, "projects"), root = join(dir, "evidence");
-  mkdirSync(boardsDir);
-  mkdirSync(projectsDir);
-  mkdirSync(join(root, "shop", "lead-checkout"), { recursive: true });
-  writeFileSync(join(boardsDir, "-code-shop.team.checkout.md"), board(row("T1", "done"), row("T2", "blocked")));
-  writeFileSync(join(root, "shop", "lead-checkout", "desk.md"), "| 2026-11-03T10:00:00Z | cart | cart.png | the cart lands |\n");
-  const clientDir = mkdtempSync(join(dir, "client-"));
-  writeFileSync(join(clientDir, "index.html"), "<!doctype html>");
-  writeFileSync(projectFile(projectsDir, "/code/shop/.git"), "{}\n");
-  server = startServer({ port: 0, secret: "s", token: "t", clientDir, boardsDir, evidenceDir: root, projectsDir, boardPollMs: 20, machine: { gitCommonDir: () => "/code/shop/.git", isRepo: () => true, liveSessions: async () => new Set<string>() } as any });
-  await fetch(`http://127.0.0.1:${server.port}/ingest`, { method: "POST", headers: { "content-type": "application/json", "x-f1rm-secret": "s" }, body: JSON.stringify({ session_id: "a", cwd: "/code/shop", hook_event_name: "SessionStart" }) });
-  const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/t/ws`, { headers: { origin: `http://127.0.0.1:${server.port}` } } as any);
-  ws.onmessage = (m) => seen.push(JSON.parse(String(m.data)));
-  const t0 = Date.now();
-  while (!seen.some((s) => s.topics?.["/code/shop/.git"]) && Date.now() - t0 < 3000) await Bun.sleep(20);
-  ws.close();
-  const [topic] = seen.findLast((s) => s.topics?.["/code/shop/.git"]).topics["/code/shop/.git"];
-  expect(topic).toMatchObject({ team: "checkout", done: 1, total: 2, stuck: ["T2 blocked: do T2"], last: { task: "cart", at: "2026-11-03T10:00:00Z" } });
-  expect(topic.desk[0].proof).toBe("cart.png");
-});

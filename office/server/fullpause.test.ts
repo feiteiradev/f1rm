@@ -157,7 +157,7 @@ test("a pause stops the sessions and kills what they started, checks that nothin
   expect(latestManifest(dir)?.id).toBe(res.checkpoint);
   expect(m).toMatchObject({ repo: p.repo, why: "lunch", verified: true });
   const dev = m.sessions.find((s) => s.name === "checkout.backend-dev-x")!;
-  expect(dev).toMatchObject({ role: "backend-dev", task: "x", sessionId: "dev", cwd: p.wt, row: { id: "T1", status: "doing", branch: "worktree-x" }, snapshot: { ref: "refs/f1rm/checkpoint/x", dirty: true } });
+  expect(dev).toMatchObject({ role: "backend-dev", task: "x", sessionId: "dev", cwd: p.wt, row: null, snapshot: { ref: "refs/f1rm/checkpoint/x", dirty: true } }); // no board rows any more: the issues are the work
   expect(m.sessions.find((s) => s.name === "lead-checkout")).toMatchObject({ role: "lead", sessionId: "lead" });
   expect(m.killed.map((k) => k.pid)).toEqual([321, 322]);
   expect(git(p.repo, "show", `${dev.snapshot!.sha}:new.txt`)).toBe("untracked");
@@ -171,17 +171,6 @@ test("a pause stops the sessions and kills what they started, checks that nothin
 
   // The flag names the checkpoint and the hires the stop took, for the resume.
   expect(readPaused(pausedFile(o.pausedDir, p.room))).toMatchObject({ by: "manual", why: "lunch", checkpoint: res.checkpoint, stopped: ["lead-checkout", "checkout.backend-dev-x"] });
-});
-
-test("a hire that has no team has its board row on the PM's board, and the manifest finds it there", async () => {
-  const p = project();
-  world(p);
-  const o = start(p);
-  writeFileSync(join(o.boardsDir, `${p.repo.replace(/[^A-Za-z0-9]/g, "-")}.md`), "# Board\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| R1 | researcher-x | review | worktree-x | the question |\n");
-  await seat(o.server, "dev", "researcher-x", "f1rm:researcher", p.wt);
-  await settle();
-  const res = ((await (await post(o.server, "pause", { room: p.room })).json()) as any).results[0];
-  expect(readManifest(checkpointDirOf(o.checkpointsDir, p.room), res.checkpoint)?.sessions[0]).toMatchObject({ name: "researcher-x", row: { id: "R1", status: "review" } });
 });
 
 test("a process that survives SIGKILL makes the pause unverified and is named, and the checkpoint is still taken", async () => {
@@ -281,7 +270,6 @@ test("a resume wakes every session of the manifest, leads first, each with a not
   const dev = r.woke[1]!.note;
   expect(dev).toContain("resumed after a pause; continue your task");
   expect(dev).toContain(`checkpoint ${res.checkpoint}`);
-  expect(dev).toContain("board row T1 (doing, branch worktree-x)");
   expect(dev).toContain("refs/f1rm/checkpoint/x");
   expect(dev).toContain("uncommitted");
   expect(r.woke[0]!.note).toContain(`checkpoint ${res.checkpoint}`);
@@ -307,41 +295,6 @@ test("an office restarted while a project is paused wakes none of its doing and 
   await post(again.server, "resume", { room: p.room });
   await settle(400);
   expect(r.woke.map((w) => w.name)).toEqual(["checkout.backend-dev-x"]);
-});
-
-test("the Hire dialog's route refuses a hire into a paused project, with a pointer to resume, and hires again after it", async () => {
-  const p = project();
-  world(p);
-  const o = start(p);
-  await seat(o.server, "lead", "lead-checkout", "f1rm:lead", p.repo);
-  await settle();
-  const hire = () => post(o.server, "hire", { room: p.room, role: "lead", task: "search", brief: "plan it" });
-  await post(o.server, "pause", { room: p.room, why: "lunch" });
-  const refused = await hire();
-  expect(refused.status).toBe(409);
-  expect(((await refused.json()) as any).error).toMatch(/is paused \(manual: lunch\).*`f1rm resume`/);
-  expect(spawned).toBe(0);
-  await post(o.server, "resume", { room: p.room });
-  const again = await hire();
-  expect([again.status, again.status === 200 ? "" : await again.text()]).toEqual([200, ""]);
-  expect(spawned).toBe(1);
-});
-
-test("the New topic route refuses a topic in a paused project with the pause's reason, and starts it after the resume", async () => {
-  const p = project();
-  world(p);
-  const o = start(p);
-  await seat(o.server, "lead", "lead-checkout", "f1rm:lead", p.repo);
-  await settle();
-  const topic = () => post(o.server, "topic", { room: p.room, name: "search" });
-  await post(o.server, "pause", { room: p.room, why: "lunch" });
-  const refused = await topic();
-  expect(refused.status).toBe(409);
-  expect(((await refused.json()) as any).error).toMatch(/is paused \(manual: lunch\).*`f1rm resume`/);
-  expect(spawned).toBe(0);
-  await post(o.server, "resume", { room: p.room });
-  expect((await topic()).status).toBe(200);
-  expect(spawned).toBe(1);
 });
 
 test("a pause that cannot read the process table fails and says so, and never says All N stopped", async () => {
@@ -426,7 +379,7 @@ test("a weekday goes through 19:00 and 09:00 and the office pauses nothing and r
   expect(o.r.woke).toEqual([]);
 });
 
-test("a flag an old office wrote with by: schedule reads as paused, refuses a hire, and a resume clears it and wakes its hires as usual", async () => {
+test("a flag an old office wrote with by: schedule reads as paused, and a resume clears it and wakes its hires as usual", async () => {
   const p = project();
   world(p);
   const o = clocked(p, utc("10-28T10:00:00"));
@@ -436,8 +389,6 @@ test("a flag an old office wrote with by: schedule reads as paused, refuses a hi
   await seat(o.server, "dev", "checkout.backend-dev-x", "f1rm:backend-dev", p.wt);
   await settle(300);
   expect(o.flag()).toMatchObject({ by: "schedule" }); // no 09:00 look lifts it
-  const hire = await post(o.server, "hire", { room: p.room, role: "backend-dev", task: "y", brief: "do y" });
-  expect(hire.status).toBe(409);
   listed = stoppedListing(p);
   const r = await post(o.server, "resume", { room: p.room });
   expect(r.status).toBe(200);

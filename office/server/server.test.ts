@@ -768,285 +768,9 @@ const FULL_SETTINGS = JSON.stringify({ env: { PONYTAIL_DEFAULT_MODE: "full" }, s
 const ASSIGN = { room: ROOM, role: "designer", task: "login-page", brief: "Design the login page. Reply OK and stop." };
 const inRoom = (id: string, extra: object) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", ...extra });
 
-test("roles lists the plugin's role files, read from the folder, with the PM left out and the working count per project", async () => {
-  start(SHOP);
-  await inRoom("d1", { agent_type: "f1rm:designer" });
-  await inRoom("d2", { agent_type: "f1rm:designer" });
-  await hook({ ...common("d3", "Stop"), cwd: "/code/shop" });
-  await inRoom("p", { agent_type: "f1rm:pm" });
-  await office((s) => Object.keys(s.employees).length === 4);
-  working = 3;
-  const reply = (await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: any[]; hires: unknown };
-  const roles = reply.roles;
-  expect(reply.hires).toEqual({ working: 3 }); // no cap: the dialog says only how many work
-  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
-  const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm" && r !== "step").sort();
-  expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
-  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "advisor", "lead"]);
-  const designer = roles.find((r) => r.id === "designer");
-  const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
-  expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
-  expect(roles.find((r) => r.id === "reviewer").skills).toEqual(["code-review", "f1rm:f1rm-guidelines", "ponytail:ponytail-review", "mattpocock-skills:code-review"]);
-  expect(roles.every((r) => r.id === "designer" || r.working === 0)).toBe(true);
-  const elsewhere = (await (await ui("roles?room=/code/blog/.git")).json()) as { roles: any[] };
-  expect(elsewhere.roles.find((r) => r.id === "designer").working).toBe(0);
-  working = null;
-  expect(((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as any).hires).toEqual({ working: null });
-});
-
-test("Hire starts a background session through the machine: the exact argv, in the room's repo folder, the brief as one argument", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  const brief = "Design the login page.\n$(rm -rf /) 'quoted' --flag";
-  const res = await hireOf({ ...ASSIGN, brief, cwd: "/etc", folder: "/etc" });
-  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
-  expect(spawned).toEqual([
-    {
-      cwd: "/code/shop",
-      argv: ["claude", "--bg", "--agent", "f1rm:designer", "--name", "designer-login-page", "--worktree", "login-page", `/design-pipeline\n\n${brief}`, "--settings", FULL_SETTINGS, "--effort", "high"],
-    },
-  ]);
-});
-
-test("Hire reports to the project's PM when it has one, and takes a lower model", async () => {
-  start(SHOP);
-  await inRoom("p", { agent_type: "f1rm:pm" });
-  await office((s) => ROOM in s.rooms);
-  expect((await hireOf({ ...ASSIGN, model: "haiku" })).status).toBe(200);
-  expect(spawned[0].argv.slice(8)).toEqual(["/design-pipeline Report to: pm-shop\n\n" + ASSIGN.brief, "--settings", FULL_SETTINGS, "--effort", "high", "--model", "haiku"]);
-  expect((await hireOf({ ...ASSIGN, model: null })).status).toBe(200);
-  expect(spawned[1].argv).not.toContain("--model");
-});
-
-test("topic starts lead-<name> with the grilling first command and the generated brief, reporting to the PM; a bad name is 400, an unknown project 404, and a third beside two live teams starts", async () => {
-  start(SHOP);
-  await inRoom("p", { agent_type: "f1rm:pm" });
-  await office((s) => ROOM in s.rooms);
-  const topicOf = (body: unknown) => ui("topic", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const ok = await topicOf({ room: ROOM, name: "billing" });
-  expect([ok.status, await ok.json()]).toEqual([200, { ok: true }]);
-  expect(spawned[0].cwd).toBe("/code/shop");
-  expect(spawned[0].argv.slice(0, 6)).toEqual(["claude", "--bg", "--agent", "f1rm:lead", "--name", "lead-billing"]);
-  const prompt = spawned[0].argv[6];
-  expect(prompt).toStartWith("/mattpocock-skills:grilling Before you start, load these with the Skill tool: f1rm:f1rm-guidelines, f1rm:hire. Report to: pm-shop\n\n");
-  expect(prompt).toContain("Team: billing:");
-  expect(prompt).toContain("\nMilestone: topics\n"); // not the topic's own name again
-  expect(prompt).not.toMatch(/\n(Inputs|Needs):/);
-  const order = ["Team:", "Milestone:", "Context:", "Other teams:", "Contracts:", "Acceptance criteria:", "Out of scope:", "Report:"].map((h) => prompt.indexOf(`\n${h}`) === -1 ? prompt.indexOf(h) : prompt.indexOf(`\n${h}`));
-  expect(order).toEqual([...order].sort((a, b) => a - b));
-  expect(order).not.toContain(-1);
-  expect(prompt).toContain("Interview the user about this topic first; plan about 5 tasks; if bigger, say it splits into topics that queue.");
-  for (const name of ["Bad Name", "", "a--b", "x/../y", 7, null]) expect((await topicOf({ room: ROOM, name })).status).toBe(400);
-  expect((await topicOf({ room: "/nope/.git", name: "billing" })).status).toBe(404);
-  expect(spawned.length).toBe(1);
-  liveToo = [{ name: "lead-a", state: "working", cwd: "/code/shop" }, { name: "lead-b", state: "working", cwd: "/code/shop" }];
-  expect((await topicOf({ room: ROOM, name: "third" })).status).toBe(200);
-  expect(spawned.map((s) => s.argv[5])).toEqual(["lead-billing", "lead-third"]);
-});
-
-test("topic's brief names this project's other live leads under Other teams, or none live, and leaves the criteria to the lead", async () => {
-  start(SHOP);
-  await inRoom("p", { agent_type: "f1rm:pm" });
-  await office((s) => ROOM in s.rooms);
-  const topicOf = (name: string) => ui("topic", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, name }) });
-  expect((await topicOf("billing")).status).toBe(200);
-  expect(spawned[0].argv[6]).toContain("\nOther teams: none live\n");
-  expect(spawned[0].argv[6]).toContain("\nAcceptance criteria: set by the lead in its interview\nOut of scope: set by the lead in its interview\n");
-  liveToo = [
-    { name: "lead-a", state: "working", cwd: "/code/shop" },
-    { name: "lead-other", state: "working", cwd: "/code/blog" },
-    { name: "backend-dev-y", state: "working", cwd: "/code/shop" },
-    { name: "lead-search", state: "working", cwd: "/code/shop" },
-  ];
-  expect((await topicOf("search")).status).toBe(200);
-  expect(spawned[1].argv[6]).toContain("\nOther teams: lead-a (live in this project): agree contracts with them directly\n");
-});
-
-test("Hire refuses an unknown role, a bad task name, a bad model, a bad brief and an unknown project, and spawns nothing", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  const cases: [object | string, number][] = [
-    [{ ...ASSIGN, role: "pm" }, 400],
-    [{ ...ASSIGN, role: "janitor" }, 400],
-    [{ ...ASSIGN, role: "../designer" }, 400],
-    [{ ...ASSIGN, role: 7 }, 400],
-    [{ ...ASSIGN, task: "Login Page" }, 400],
-    [{ ...ASSIGN, task: "--evil" }, 400],
-    [{ ...ASSIGN, task: "" }, 400],
-    [{ ...ASSIGN, model: "gpt-5" }, 400],
-    [{ ...ASSIGN, model: "haiku --dangerously-skip-permissions" }, 400],
-    [{ ...ASSIGN, brief: "  " }, 400],
-    [{ ...ASSIGN, brief: "x".repeat(8001) }, 400],
-    [{ ...ASSIGN, room: "/code/shop" }, 404],
-    [{ ...ASSIGN, room: "constructor" }, 404],
-    ["not json", 404],
-  ];
-  for (const [body, status] of cases) expect([JSON.stringify(body), (await hireOf(body)).status]).toEqual([JSON.stringify(body), status]);
-  expect(spawned).toEqual([]);
-});
-
-test("Hire follows the flat rules of `f1rm hire`: no frontend-dev or backend-dev into a team, no Reviewer without --content, and a dev with no team carries its Review", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  for (const role of ["frontend-dev", "backend-dev"]) {
-    const res = await hireOf({ ...ASSIGN, role, team: "checkout" });
-    expect([role, res.status]).toEqual([role, 400]);
-    expect(((await res.json()) as any).error).toContain("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, an advisor, or a --content reviewer");
-  }
-  expect(spawned).toEqual([]);
-  expect((await hireOf({ ...ASSIGN, role: "backend-dev" })).status).toBe(200);
-  expect(spawned[0].argv[8]).toContain("After your checks pass, run ONE review in a fresh context");
-  // the only Reviewer there is reviews a branch with no code: the dialog hires it as a content one
-  expect((await hireOf({ ...ASSIGN, role: "reviewer", task: "review-login-page" })).status).toBe(200);
-  expect(spawned[1].argv[6]).toContain("This branch holds no code: use the content checklist.");
-});
-
-test("Hire holds no team cap, like f1rm hire and f1rm wake: a third team-less hire starts beside a lead and a simple task", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  liveToo = [{ name: "lead-checkout", state: "done", cwd: "/code/shop" }, { name: "backend-dev-y", state: "working", cwd: "/code/shop/.claude/worktrees/y" }];
-  expect((await hireOf({ ...ASSIGN, role: "backend-dev" })).status).toBe(200);
-  expect(spawned.map((s) => s.argv[5])).toEqual(["backend-dev-login-page"]);
-});
-
-test("Hire refuses a project whose path is over 150 characters with the path message, hires one of 150, and spawns nothing for the first", async () => {
-  const long = `/code/${"x".repeat(145)}`; // 151 characters once encoded
-  const fine = `/code/${"y".repeat(144)}`;
-  expect([long.length, fine.length]).toEqual([151, 150]);
-  start({ [long]: `${long}/.git`, [fine]: `${fine}/.git` });
-  await hook(sessionStart("s1", long));
-  await hook(sessionStart("s2", fine));
-  await office((s) => `${long}/.git` in s.rooms && `${fine}/.git` in s.rooms);
-  const refused = await hireOf({ ...ASSIGN, room: `${long}/.git` });
-  expect(refused.status).toBe(409);
-  expect(await refused.json()).toEqual({ error: expect.stringContaining("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters"), working: null });
-  expect(spawned).toEqual([]);
-  expect((await hireOf({ ...ASSIGN, room: `${fine}/.git` })).status).toBe(200);
-  expect(spawned.map((s) => s.cwd)).toEqual([fine]);
-});
-
-test("Hire asks git for the common dir once at most, and not at all for a request that fails the cheap checks, with a PM in the room too", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await inRoom("p", { agent_type: "f1rm:pm" });
-  await office((s) => ROOM in s.rooms && Object.keys(s.employees).length === 2);
-  gitCalls = 0;
-  const bad = await hireOf({ ...ASSIGN, role: "nonesuch" });
-  expect(bad.status).toBe(400);
-  expect(gitCalls).toBe(0); // the PM's name is not looked up before the role is checked
-  expect((await hireOf(ASSIGN)).status).toBe(200);
-  expect(gitCalls).toBe(1); // the PM's name and the path limit share one lookup
-  expect((spawned.at(-1)!.argv.find((a) => a.includes("Report to:")) ?? "")).toContain("Report to: pm-shop");
-});
-
-test("Hire starts with 9 working on the machine; under the usage hold it answers 409 with the working count and spawns nothing; when it can't count, it doesn't hire", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  working = 9;
-  expect((await hireOf(ASSIGN)).status).toBe(200);
-  spawned.length = 0;
-  const held = await hireOf(ASSIGN, {}, TOKEN, holdHome);
-  expect([held.status, (await held.json()) as any]).toEqual([409, { error: expect.stringContaining("usage hold: 5-hour usage is 95%"), working: 9 }]);
-  working = null;
-  const blind = await hireOf(ASSIGN);
-  expect([blind.status, (await blind.json()).working]).toEqual([409, null]);
-  expect(spawned).toEqual([]);
-});
-
-test("Hire anyway: override skips the usage hold, a plain hire after it is still held, and override must be a boolean", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  expect((await hireOf({ ...ASSIGN, override: false }, {}, TOKEN, holdHome)).status).toBe(409);
-  expect(spawned).toEqual([]);
-  expect((await hireOf({ ...ASSIGN, override: "yes" }, {}, TOKEN, holdHome)).status).toBe(400);
-  expect((await hireOf({ ...ASSIGN, override: true }, {}, TOKEN, holdHome)).status).toBe(200);
-  expect(spawned.map((s) => s.argv.slice(0, 3))).toEqual([["claude", "--bg", "--agent"]]);
-  expect((await hireOf(ASSIGN, {}, TOKEN, holdHome)).status).toBe(409);
-  expect(spawned.length).toBe(1);
-});
-
-test("Hire says so when claude fails to start the session", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  spawnFails = "not a git repository";
-  const res = await hireOf(ASSIGN);
-  expect([res.status, await res.json()]).toEqual([502, { error: "Hire failed: not a git repository" }]);
-});
-
-test("Roles and Hire need the UI token, the right method and the browser's own origin", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  expect((await hireOf(ASSIGN, {}, "wrong")).status).toBe(401);
-  expect((await fetch(`${base()}/hire`, { method: "POST", body: JSON.stringify(ASSIGN) })).status).toBe(401);
-  expect((await ui("hire")).status).toBe(405);
-  expect((await hireOf(ASSIGN, { headers: { origin: "https://evil.example", "content-type": "application/json" } })).status).toBe(403);
-  expect((await hireOf(ASSIGN, { headers: { host: "evil.example", "content-type": "application/json" } })).status).toBe(403);
-  expect((await ui("roles", {}, "wrong")).status).toBe(401);
-  expect((await fetch(`${base()}/roles`)).status).toBe(401);
-  expect((await ui("roles", { method: "POST" })).status).toBe(405);
-  expect((await ui("roles", { headers: { origin: "https://evil.example" } })).status).toBe(403);
-  expect(spawned).toEqual([]);
-});
-
 const pmPost = (path: "decide" | "start-pm", body: unknown, init: RequestInit = {}, token = TOKEN) =>
   ui(path, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body), ...init }, token);
 const PM_SOCKET = { "x-f1rm-messaging-socket": "/tmp/cc-socks/pm.sock" };
-
-test("Let the PM decide tells the project's PM the need and asks them to start a topic lead for it per the guidelines", async () => {
-  start(SHOP);
-  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
-  await inRoom("des1", { agent_type: "f1rm:designer" });
-  await office((s) => Object.keys(s.employees).length === 2);
-  const res = await pmPost("decide", { room: ROOM, need: "  A login page with passkeys.  " });
-  expect([res.status, await res.json()]).toEqual([200, { ok: true }]);
-  expect(calls).toHaveLength(1);
-  expect(calls[0]).toStartWith("tell /tmp/cc-socks/pm.sock pm1 ");
-  expect(calls[0]).toContain("per the f1rm guidelines");
-  expect(calls[0]).toContain("f1rm hire --topic lead lead-<topic> <topic>");
-  expect(calls[0]).not.toContain("--simple");
-  expect(calls[0]).toEndWith("The need:\nA login page with passkeys.");
-});
-
-test("Let the PM decide says so when the project has no PM, the PM has no inbox, or the machine refuses", async () => {
-  start(SHOP);
-  await inRoom("des1", { agent_type: "f1rm:designer" });
-  await office((s) => ROOM in s.rooms);
-  const none = await pmPost("decide", { room: ROOM, need: "x" });
-  expect([none.status, await none.json()]).toEqual([409, { error: "This project has no PM." }]);
-  await inRoom("pm1", { agent_type: "f1rm:pm" });
-  await office((s) => Object.keys(s.employees).length === 2);
-  const quiet = await pmPost("decide", { room: ROOM, need: "x" });
-  expect([quiet.status, await quiet.json()]).toEqual([409, { ok: false, error: "This session has no inbox to tell." }]);
-  await hook({ ...common("pm1", "Stop"), cwd: "/code/shop" }, PM_SOCKET);
-  tellFails = "its inbox socket is gone, so the session has ended";
-  const gone = await pmPost("decide", { room: ROOM, need: "x" });
-  expect([gone.status, await gone.json()]).toEqual([409, { ok: false, error: "Tell failed: its inbox socket is gone, so the session has ended" }]);
-});
-
-test("Let the PM decide refuses an unknown project and a bad need, and tells nobody", async () => {
-  start(SHOP);
-  await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
-  await office((s) => ROOM in s.rooms);
-  const cases: [unknown, number][] = [
-    [{ room: "/code/shop", need: "x" }, 404],
-    [{ room: "constructor", need: "x" }, 404],
-    ["not json", 404],
-    [{ room: ROOM }, 400],
-    [{ room: ROOM, need: "  " }, 400],
-    [{ room: ROOM, need: 7 }, 400],
-    [{ room: ROOM, need: "x".repeat(8001) }, 400],
-  ];
-  for (const [body, status] of cases) expect([JSON.stringify(body), (await pmPost("decide", body)).status]).toEqual([JSON.stringify(body), status]);
-  expect(calls).toEqual([]);
-});
 
 test("Start PM opens a PM tab in the room's repo folder, whatever folder the request names", async () => {
   start(SHOP);
@@ -1073,13 +797,13 @@ test("Start PM opens nothing when the project has a PM, the project is unknown, 
   expect([failed.status, await failed.json()]).toEqual([502, { error: "Start PM failed: iTerm2 isn't installed" }]);
 });
 
-test("Let the PM decide and Start PM need the UI token, a POST and the browser's own origin", async () => {
+test("Start PM needs the UI token, a POST and the browser's own origin", async () => {
   start(SHOP);
   await hook({ ...common("pm1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "plan", agent_type: "f1rm:pm" }, PM_SOCKET);
   await office((s) => ROOM in s.rooms);
   const json = { "content-type": "application/json" };
-  for (const path of ["decide", "start-pm"] as const) {
-    const body = { room: ROOM, need: "x" };
+  for (const path of ["start-pm"] as const) {
+    const body = { room: ROOM };
     expect([path, (await pmPost(path, body, {}, "wrong")).status]).toEqual([path, 401]);
     expect([path, (await fetch(`${base()}/${path}`, { method: "POST", body: JSON.stringify(body) })).status]).toEqual([path, 401]);
     expect([path, (await ui(path)).status]).toEqual([path, 405]);
@@ -1442,44 +1166,11 @@ test("a lead whose own permission request waits on the user is tagged needsYou u
   await hire;
 });
 
-test("a lead with an open question on its team board is tagged needsYou until the board says none", async () => {
-  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
-  const file = join(boards, "-code-shop.team.checkout.md");
-  const board = (middle: string) => `# Board: shop / checkout\n\n${middle}\n\n| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n| T1 | checkout.backend-dev-a | doing | worktree-a | x |\n`;
-  writeFileSync(file, board("## Open question for the user\nShip guest checkout first?"));
-  start({ "/code/shop": "/code/shop/.git" }, undefined, boards, { boardPollMs: 30 });
-  await seatAt("l1", "lead-checkout", "f1rm:lead");
-  await seatAt("l2", "lead-other", "f1rm:lead");
-  await seatAt("m1", "checkout.backend-dev-a", "f1rm:backend-dev");
-  expect(await needing((s) => Object.values(s.employees).some((e) => e.needsYou))).toEqual(["lead-checkout"]); // not the other team's lead, not a member
-  writeFileSync(file, board("## Open question for the user\nnone"));
-  expect(await needing((s) => !Object.values(s.employees).some((e) => e.needsYou))).toEqual([]);
-  writeFileSync(file, board("## Open question for the user\nSpend 5 credits?"));
-  expect(await needing((s) => Object.values(s.employees).some((e) => e.needsYou))).toEqual(["lead-checkout"]);
-});
-
 // The PreToolUse reply: a deny holds the call, an empty 200 lets it run.
 async function held(r: Response) {
   const body = await r.text();
   return body ? JSON.parse(body).hookSpecificOutput : null;
 }
-
-test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's (an advisor's too) is denied, and so is its intern's", async () => {
-  start();
-  const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(id === "l" && { session_title: "lead-checkout" }), ...(agent_type && { agent_type }) });
-  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["a", "f1rm:advisor"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
-  await office((s) => Object.keys(s.employees).length === 6);
-  const run = (id: string, command: string, extra = {}) => hook({ ...preToolUse(id, "Bash", { command }), ...extra });
-  expect(await held(await run("p", "f1rm hire lead lead-checkout checkout 'Task: a'"))).toBeNull();
-  for (const id of ["l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
-  for (const id of ["d", "a"]) for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
-    const out = await held(await run(id, command));
-    expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
-    expect(out.permissionDecisionReason).toContain("Only the PM and team leads hire");
-  }
-  expect((await held(await run("v", "f1rm hire designer designer-a a b", { agent_id: "agent-1", agent_type: "Explore" })))?.permissionDecision).toBe("deny");
-  expect(await held(await run("d", "git status && echo f1rm is hiring"))).toBeNull();
-});
 
 test("`f1rm hire` is held only as a command; a command that merely mentions it passes", async () => {
   await delegationOffice();
@@ -1500,37 +1191,6 @@ test("`f1rm report` is no hire, wake, push or session start: a specialist and a 
       expect([id, command, await run(id, command)]).toEqual([id, command, null]);
     }
   }
-});
-
-test("`f1rm wake` follows the hire rules: the PM wakes a lead, a lead a member of its own team, a specialist nobody; a name or a session id both count", async () => {
-  await talkOffice();
-  sessionList = [
-    ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old"),
-    ended("search.backend-dev-x", "/code/shop/.claude/worktrees/x"),
-    ended("lead-old"),
-  ];
-  const run = async (id: string, command: string) => held(await hook({ ...preToolUse(id, "Bash", { command }), cwd: "/code/shop" }));
-  const decision = async (id: string, command: string) => (await run(id, command))?.permissionDecision ?? null;
-  for (const command of ["f1rm wake checkout.backend-dev-old", "bun office/cli/f1rm.ts wake checkout.backend-dev-old 'more'", "f1rm wake lead-checkout"]) {
-    const out = await run("c1", command); // a specialist
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Only the PM and team leads wake");
-  }
-  expect(await decision("rv", "f1rm wake checkout.backend-dev-old")).toBe("deny");
-  for (const command of ["f1rm wake checkout.backend-dev-old", "f1rm wake sid_checkout.backend-dev-old", "f1rm wake e_checkout.backend-dev-old", "f1rm wake checkout.backend-dev-old 'one more round' --model haiku", "ls && f1rm wake checkout.backend-dev-old", "f1rm wake checkout.backend-dev-gone"]) {
-    expect([command, await decision("l1", command)]).toEqual([command, null]); // the last is unknown: the command itself refuses it
-  }
-  for (const command of ["f1rm wake search.backend-dev-x", "f1rm wake sid_search.backend-dev-x", "f1rm wake lead-old", "f1rm wake lead-search"]) {
-    const out = await run("l1", command);
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toMatch(/A lead wakes only the members of its own team|PM wakes leads/);
-  }
-  expect(await decision("pm", "f1rm wake lead-old")).toBeNull();
-  expect(await decision("pm", "f1rm wake lead-search")).toBeNull();
-  expect(await decision("pm", "f1rm wake checkout.backend-dev-old")).toBe("deny");
-  expect(await decision("pm", "f1rm wake sid_checkout.backend-dev-old")).toBe("deny");
-  expect(await decision("free", "f1rm wake checkout.backend-dev-old")).toBeNull(); // the user's own session
-  for (const command of ['git log --grep "mentions f1rm wake x"', 'grep "f1rm wake" README.md', "f1rm woke"]) expect([command, await decision("c1", command)]).toEqual([command, null]);
 });
 
 test("`f1rm letgo` follows the wake rules: the PM lets go leads and its simple hires and runs --leftovers, a lead the members of its own team, a specialist, an intern and a Reviewer nobody", async () => {
@@ -1765,7 +1425,7 @@ test("no session starts or resumes a claude with /f1rm:stop-all or /f1rm:resume-
   for (const id of ["p", "l", "d", "f"]) expect([id, (await bash(id, "f1rm pause --all"))?.permissionDecision]).toEqual([id, "deny"]);
 });
 
-test("in a second office, whose own HOME is a temp folder, the user's real home still counts as the real one, for claude starts and for Elsewhere", async () => {
+test("in a second office, whose own HOME is a temp folder, the user's real home still counts as the real one for claude starts", async () => {
   await delegationOffice();
   const second = "/tmp/f1rm-second-office-home"; // only a HOME string: nothing is created
   const real = userInfo().homedir;
@@ -1784,17 +1444,6 @@ test("in a second office, whose own HOME is a temp folder, the user's real home 
   // An office with an empty HOME has none to refuse: the folder it runs in is not it.
   process.env.HOME = "";
   expect(await bash("p", `HOME=${process.cwd()} claude -p x`)).toBeNull();
-  // Elsewhere: the user's real home is broad whatever HOME the office runs with, and two sessions at / do not reach each other.
-  const cwds: Record<string, string> = { lh: real, mh: `${real}/proj`, la: "/", lb: "/" };
-  const titles: Record<string, [string, string]> = { lh: ["lead-h", "f1rm:lead"], mh: ["h.designer-m", "f1rm:designer"], la: ["lead-a", "f1rm:lead"], lb: ["lead-b", "f1rm:lead"] };
-  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
-  await office((s) => ["lh", "mh", "la", "lb"].every((id) => s.employees[id]?.room === "elsewhere"));
-  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "x" }), cwd: cwds[id] }));
-  for (const [from, to] of [["lh", "h.designer-m"], ["mh", "lead-h"], ["la", "lead-b"], ["lb", "lead-a"]]) {
-    const out = await send(from, to);
-    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Elsewhere");
-  }
 });
 
 test("a background shell watcher (Bash with run_in_background) is not held for the PM, a lead or anyone else", async () => {
@@ -1817,75 +1466,6 @@ async function gateOffice() {
   await office((s) => Object.keys(s.employees).length === 5);
   return async (id: string, command: string) => held(await hook(preToolUse(id, "Bash", { command })));
 }
-
-test("a PM hires only leads, with any flags before the role; a specialist hire, or a lead hire named only in the brief, is refused", async () => {
-  const bash = await gateOffice();
-  const allowed = ["f1rm hire lead lead-checkout checkout 'Task: a'", "f1rm hire --topic lead lead-checkout checkout 'what the user asked'","f1rm hire --report-to pm-shop lead lead-checkout checkout b", "f1rm hire --skills x,y lead lead-checkout checkout b", "f1rm hire --report-to pm-shop --skills 'a,b' lead lead-checkout checkout b", "bun office/cli/f1rm.ts hire lead lead-a a b", "f1rm hire --help"];
-  for (const command of allowed) expect([command, await bash("p", command)]).toEqual([command, null]);
-  const refused = ["f1rm hire backend-dev backend-dev-a a brief", "f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --override --skills x designer designer-a a b", "cd x && f1rm hire reviewer reviewer-a review-a b", "f1rm hire backend-dev backend-dev-a a lead", "echo hi | f1rm hire --report-to lead designer designer-a a b"];
-  for (const command of refused) {
-    const out = await bash("p", command);
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain("The PM starts only leads, with `f1rm hire --topic lead lead-<topic> <topic> \"<brief>\"`; a lead hires the specialists of its team.");
-  }
-});
-
-test("no session passes --override to `f1rm hire` or `f1rm wake`: the usage pacing waits for a slot, and the PM, a lead and a specialist all get the same answer", async () => {
-  const bash = await gateOffice();
-  const override = [
-    "f1rm hire --override lead lead-checkout checkout b",
-    "f1rm hire --report-to pm-shop --override --skills 'a,b' lead lead-checkout checkout b",
-    "f1rm hire --team checkout --override designer checkout.designer-a a b",
-    "f1rm hire --team checkout designer checkout.designer-a a b --override",
-    "timeout 600 f1rm hire --override --team checkout designer checkout.designer-a a b",
-    "nice -n 5 f1rm wake lead-checkout --override",
-    "cd x && bun office/cli/f1rm.ts wake checkout.designer-a --override 'go'",
-    "f1rm wake --override checkout.designer-a",
-  ];
-  for (const [id, commands] of [["p", override.filter((c) => !c.includes("--team") && !c.includes("designer-a"))], ["l", override.filter((c) => c.includes("designer-a"))], ["d", override]] as const) {
-    for (const command of commands) {
-      const out = await bash(id, command);
-      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      if (id !== "d") expect(out.permissionDecisionReason).toBe("No session goes past the usage pacing. Run the same command again: it waits for a free slot.");
-    }
-  }
-  // Without it the same commands run as before, and a brief that only mentions the word is no flag.
-  for (const [id, command] of [["p", "f1rm hire lead lead-checkout checkout b"], ["p", "f1rm hire lead lead-checkout checkout 'mention --override in prose'"], ["l", "f1rm wake checkout.designer-a"], ["p", "git log --grep=--override"]] as const) {
-    expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
-  }
-});
-
-test("a quote-split --override is the same flag to the shell, so the gate refuses it too; a sub-agent of the PM or a lead is held to it", async () => {
-  const bash = await gateOffice();
-  const spellings = ['--over""ride', "\\--override", "--over'ride'", '"--over"ride'];
-  const reason = "No session goes past the usage pacing. Run the same command again: it waits for a free slot.";
-  for (const [id, hire, wake] of [["p", "lead lead-checkout checkout b", "lead-checkout"], ["l", "--team checkout designer checkout.designer-a a b", "checkout.designer-a"]] as const) {
-    for (const flag of spellings) {
-      for (const command of [`f1rm hire ${hire} ${flag}`, `timeout 600 f1rm hire ${hire} ${flag}`, `f1rm wake ${flag} ${wake}`, `timeout 5 f1rm wake ${wake} ${flag}`]) {
-        const out = await bash(id, command);
-        expect([id, command, out?.permissionDecision, out?.permissionDecisionReason]).toEqual([id, command, "deny", reason]);
-      }
-    }
-  }
-  for (const [id, command] of [["p", "f1rm hire --override lead lead-checkout checkout b"], ["l", "f1rm wake --override checkout.designer-a"]] as const) {
-    const out = await held(await hook({ ...preToolUse(id, "Bash", { command }), agent_id: "agent-1", agent_type: "Explore" }));
-    expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]); // a sub-agent's hire has its own, earlier refusal
-  }
-  // A longer quoted brief that mentions the flag is still prose.
-  expect(await bash("p", `f1rm hire lead lead-checkout checkout "do not pass --over'ride' here"`)).toBeNull();
-});
-
-test("a lead hires only into its own team: not a lead, not without --team, not into another team", async () => {
-  const bash = await gateOffice();
-  const allowed = ["f1rm hire --team checkout backend-dev checkout.backend-dev-a a b", "f1rm hire --report-to x --skills s --team checkout reviewer checkout.reviewer-a review-a b", 'f1rm hire --team "checkout" designer checkout.designer-a a b', "f1rm hire --level high --team checkout reviewer checkout.reviewer-a review-a b", "f1rm hire --help"];
-  for (const command of allowed) expect([command, await bash("l", command)]).toEqual([command, null]);
-  const refused = ["f1rm hire lead lead-other other b", "f1rm hire --team checkout lead lead-other other b", "f1rm hire backend-dev backend-dev-a a b", "f1rm hire --team other backend-dev other.backend-dev-a a b", "f1rm hire backend-dev backend-dev-a a '--team checkout'", "f1rm hire --team check backend-dev check.backend-dev-a a b", "f1rm hire --team checkout-2 backend-dev a a b"];
-  for (const command of refused) {
-    const out = await bash("l", command);
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain(command.includes("hire lead") || command.includes("hire --team checkout lead") ? "never another lead" : "add --team checkout");
-  }
-});
 
 test("no session answers a permission request through the office's approve, deny and always routes; the user's browser does", async () => {
   const bash = await gateOffice();
@@ -2357,7 +1937,7 @@ test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push,
     }
   }
   // What the parent does (hire its own team) is not changed by this.
-  expect(await bash("l", `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a, false)).toBeNull();
+  expect((await bash("l", `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a, false))?.permissionDecisionReason).toStartWith("Nobody hires"); // and nobody hires, the parent neither
 });
 
 test("a PM's or lead's sub-agent cannot turn its worktree into the main checkout: not by its .git file, a folder that is no worktree, main checked out in it, GIT_DIR set earlier, a link followed by `..`, or the base branch as the branch it resets", async () => {
@@ -2453,26 +2033,6 @@ test("an employee has no intern cap: a third and a fourth intern pass, started o
   const role = await held(await agent("d", "f1rm:backend-dev"));
   expect(role?.permissionDecision).toBe("deny");
   expect(role.permissionDecisionReason).toContain("A role is hired with `f1rm hire`, never started as an intern.");
-});
-
-test("a Founder project lists and hires the founder roles; a Work project, or one with no edition, refuses them", async () => {
-  start(SHOP);
-  await hook(sessionStart("s1", "/code/shop"));
-  await office((s) => ROOM in s.rooms);
-  const ids = async () => ((await (await ui(`roles?room=${encodeURIComponent(ROOM)}`)).json()) as { roles: { id: string }[] }).roles.map((r) => r.id);
-  const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
-  expect((await ids()).some((r) => founder.includes(r))).toBe(false);
-  const marketer = { ...ASSIGN, role: "marketer" };
-  const refused = await hireOf(marketer);
-  expect([refused.status, (await refused.json()).error]).toEqual([400, "marketer is a Founder role and this is a Work project. Switch it with `f1rm edition founder` (after `f1rm pm` has registered the project) to hire one."]);
-
-  const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
-  expect((await setEdition("founder")).status).toBe(200);
-  expect(await ids()).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "advisor", ...founder, "lead"]);
-  expect((await hireOf(marketer)).status).toBe(200);
-  expect(spawned.at(-1)!.argv.slice(2, 4)).toEqual(["--agent", "f1rm:marketer"]);
-  expect((await setEdition("work")).status).toBe(200);
-  expect((await hireOf(marketer)).status).toBe(400);
 });
 
 test("a Founder role's connector tools that send, publish, post or schedule are denied; its drafts, Work roles and freelancers are not", async () => {
@@ -2597,27 +2157,6 @@ const hired = (id: string, prompt: string, agent_type = "f1rm:backend-dev", sess
 const skillLoaded = (id: string, skill: string, hook_event_name = "PostToolUse") => hook({ ...common(id, hook_event_name), tool_name: "Skill", tool_input: { skill }, tool_use_id: "toolu_2" });
 const tryTool = async (id: string, tool: string, input: object = {}) => (await held(await hook(preToolUse(id, tool, input))))?.permissionDecision ?? null;
 
-test("a hire whose prompt names skills is refused every tool but the reading ones until each Skill call succeeds", async () => {
-  start();
-  await hired("h", `/tdd${LOAD_FIRST}mattpocock-skills:code-review, impeccable.\n\nbrief`);
-  const out = await held(await hook(preToolUse("h", "Bash", { command: "ls" })));
-  expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toBe("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
-  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBe("deny");
-  for (const tool of ["Read", "Grep", "Glob", "Skill", "ToolSearch", "SendMessage"]) expect([tool, await tryTool("h", tool)]).toEqual([tool, null]);
-  // The first slash command's own sub-agent (a forked /code-review) works at once; only the hire itself is held.
-  const fork = await held(await hook({ ...preToolUse("h", "Bash", { command: "git diff main...x" }), agent_id: "fork-1", agent_type: "general-purpose" }));
-  expect(fork?.permissionDecision ?? null).toBeNull();
-
-  await skillLoaded("h", "code-review"); // another skill that shares the part after the ":" does not count
-  await skillLoaded("h", "impeccable:impeccable"); // nor does a prefixed name for an unprefixed one
-  expect((await held(await hook(preToolUse("h", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: mattpocock-skills:code-review, impeccable. A skill");
-  await skillLoaded("h", "mattpocock-skills:code-review");
-  await skillLoaded("h", "impeccable");
-  expect(await tryTool("h", "Bash", { command: "ls" })).toBeNull();
-  expect(await tryTool("h", "Edit", { file_path: "/a" })).toBeNull();
-});
-
 // A skill the Skill tool refuses (disable-model-invocation, or unknown) fires no hook event at all, not even PostToolUseFailure
 // (measured on Claude Code 2.1.308: a validation error comes before any hook). Its only trace is the session's own transcript.
 const transcripts = realpathSync(mkdtempSync(join(tmpdir(), "f1rm-transcripts-")));
@@ -2632,180 +2171,6 @@ function transcript(id: string, lines: object[], project = `p${++transcriptCount
   return file;
 }
 const tryAt = async (id: string, path: string | undefined, tool = "Bash") => (await held(await hook({ ...preToolUse(id, tool, { command: "ls" }), transcript_path: path })))?.permissionDecision ?? null;
-
-test("a skill the Skill tool refuses counts as tried, read from the session's own transcript; a skill never tried still holds", async () => {
-  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  await hired("t1", `/tdd${LOAD_FIRST}pstack:architect, impeccable.`);
-  const path = transcript("t1", [skillUse("pstack:architect"), refused]);
-  const out = await held(await hook({ ...preToolUse("t1", "Bash", { command: "ls" }), transcript_path: path }));
-  expect(out.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill"); // the refused one is no longer asked for
-  await skillLoaded("t1", "impeccable");
-  expect(await tryAt("t1", path)).toBeNull();
-  // The tries are kept: the next refusal does not need the file again.
-  expect(await tryAt("t1", undefined)).toBeNull();
-});
-
-test("the gate's way-out says that a skill the Skill tool refuses counts as tried", async () => {
-  start();
-  await hired("w", `/tdd${LOAD_FIRST}impeccable.`);
-  const out = await held(await hook(preToolUse("w", "Bash", { command: "ls" })));
-  expect(out.permissionDecisionReason).toContain("A skill the Skill tool refuses counts as tried after one call: if it says disable-model-invocation, go on without it; if it says Unknown skill, go on and send `BLOCKED <task>` with its name to the session in your Report to.");
-});
-
-test("a Skill try only counts from the session's own transcript, read within limits, and fails closed", async () => {
-  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  const hire = async (id: string) => hired(id, `/tdd${LOAD_FIRST}pstack:architect.`);
-  const tried = [skillUse("pstack:architect"), refused];
-  // The control: the same lines in the right place count.
-  await hire("ok");
-  expect(await tryAt("ok", transcript("ok", tried))).toBeNull();
-
-  await hire("name"); // a basename that is not the session's own id
-  expect(await tryAt("name", transcript("someone-else", tried))).toBe("deny");
-  await hire("outside"); // a path outside the directory
-  const elsewhere = join(realpathSync(mkdtempSync(join(tmpdir(), "f1rm-elsewhere-"))), "outside.jsonl");
-  writeFileSync(elsewhere, tried.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  expect(await tryAt("outside", elsewhere)).toBe("deny");
-  await hire("depth"); // not <dir>/<project>/<id>.jsonl
-  mkdirSync(join(transcripts, "a", "b"), { recursive: true });
-  writeFileSync(join(transcripts, "a", "b", "depth.jsonl"), tried.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  expect(await tryAt("depth", join(transcripts, "a", "b", "depth.jsonl"))).toBe("deny");
-  await hire("link"); // a symlink that resolves elsewhere
-  mkdirSync(join(transcripts, "plink"), { recursive: true });
-  symlinkSync(elsewhere, join(transcripts, "plink", "link.jsonl"));
-  expect(await tryAt("link", join(transcripts, "plink", "link.jsonl"))).toBe("deny");
-  await hire("big"); // the try sits past the first 8 MB
-  expect(await tryAt("big", transcript("big", [{ type: "user", pad: "x".repeat(8 * 1024 * 1024) }, ...tried]))).toBe("deny");
-  await hire("bigstart"); // a try inside the first 8 MB of a larger file still counts
-  expect(await tryAt("bigstart", transcript("bigstart", [...tried, { type: "user", pad: "x".repeat(8 * 1024 * 1024) }]))).toBeNull();
-  await hire("side"); // tried only inside a sub-agent
-  expect(await tryAt("side", transcript("side", [skillUse("pstack:architect", { isSidechain: true })]))).toBe("deny");
-  await hire("other"); // other lines and other tools are not a Skill try
-  const bash = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }, { type: "text", text: "pstack:architect" }] } };
-  const asUser = { type: "user", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "pstack:architect" } }] } };
-  const mixed = { type: "assistant", isSidechain: false, message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "impeccable" } }, { type: "tool_use", name: "Bash", input: { skill: "pstack:architect" } }] } };
-  expect(await tryAt("other", transcript("other", [bash, asUser, mixed]))).toBe("deny"); // the Skill block on the line is no cover for the Bash one
-  await hire("dots"); // a path that climbs with ".." is refused even where it lands in the right place
-  const dots = transcript("dots", tried);
-  expect(await tryAt("dots", `${dirname(dirname(dots))}/zz/../${basename(dirname(dots))}/dots.jsonl`)).toBe("deny");
-  expect(await tryAt("dots", dots)).toBeNull();
-  await hire("fifo"); // a named pipe at the path must not hang the office
-  mkdirSync(join(transcripts, "pfifo"), { recursive: true });
-  Bun.spawnSync(["mkfifo", join(transcripts, "pfifo", "fifo.jsonl")]);
-  expect(await tryAt("fifo", join(transcripts, "pfifo", "fifo.jsonl"))).toBe("deny");
-  await hire("odd"); // not JSON
-  const oddPath = transcript("odd", []);
-  writeFileSync(oddPath, "{not json\n\u0000\u0001\n[1,2]\nnull\n");
-  expect(await tryAt("odd", oddPath)).toBe("deny");
-  await hire("gone"); // no file
-  expect(await tryAt("gone", join(transcripts, "pgone", "gone.jsonl"))).toBe("deny");
-  expect(await tryAt("gone", undefined)).toBe("deny"); // no path at all
-  await hire("locked"); // unreadable
-  const locked = transcript("locked", tried);
-  chmodSync(locked, 0);
-  expect(await tryAt("locked", locked)).toBe("deny");
-  chmodSync(locked, 0o600);
-});
-
-test("only a session's first prompt arms the gate: a later prompt that quotes the sentence neither arms nor resets it", async () => {
-  start();
-  const quote = `Re-review. The brief said: ${LOAD_FIRST}not-installed, ghost:skill.${SECURITY} End.`;
-  await hook(sessionStart("seated", "/code/shop")); // an event before the first prompt is no prompt
-  await hired("seated", `/tdd${LOAD_FIRST}impeccable.`);
-  expect(await tryTool("seated", "Bash", { command: "ls" })).toBe("deny");
-  await hired("plain", "/tdd start work"); // a first prompt that names nothing arms nothing
-  await hired("plain", quote);
-  expect(await tryTool("plain", "Bash", { command: "ls" })).toBeNull();
-  expect(await tryTool("plain", "SendMessage", { message: "APPROVED x" })).toBeNull();
-
-  await hired("armed", `/tdd${LOAD_FIRST}impeccable.`);
-  await skillLoaded("armed", "impeccable");
-  await hired("armed", quote); // the loaded set stays, the required list is not replaced
-  expect(await tryTool("armed", "Bash", { command: "ls" })).toBeNull();
-  expect(await tryTool("armed", "SendMessage", { message: "APPROVED x" })).toBeNull();
-
-  await hired("held", `/tdd${LOAD_FIRST}impeccable.`);
-  await hired("held", `/tdd${LOAD_FIRST}other.`); // a second sentence does not swap the names either
-  expect((await held(await hook(preToolUse("held", "Bash", { command: "ls" }))))?.permissionDecisionReason).toContain("Load these first with the Skill tool: impeccable. A skill");
-
-  // `claude --bg --resume` is a new session id whose first prompt is the resume note, which re-lists nothing: it is not armed.
-  await hired("resumed", "Resume the task where you left off.");
-  expect(await tryTool("resumed", "Bash", { command: "ls" })).toBeNull();
-});
-
-test("an office restart remembers which sessions have had their first prompt", async () => {
-  const dbPath = join(mkdtempSync(join(tmpdir(), "f1rm-db-")), "events.db");
-  const open = () => (server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine(), clientDir, dbPath }));
-  open();
-  await hired("old", "/tdd start work");
-  server.stop(true);
-  open();
-  await hired("old", `Re-review. ${LOAD_FIRST}not-installed.`); // a quote, to a session that began before the restart
-  expect(await tryTool("old", "Bash", { command: "ls" })).toBeNull();
-  await hired("fresh", `/tdd${LOAD_FIRST}impeccable.`); // a session first seen after the restart is still armed
-  expect(await tryTool("fresh", "Bash", { command: "ls" })).toBe("deny");
-});
-
-test("a --level high Reviewer's APPROVED message is held until security-review has loaded; its other messages and tools are not", async () => {
-  start();
-  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
-  await skillLoaded("r", "ponytail:ponytail-review");
-  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" }); // the Report to, in the same project
-  const send = async (message: string) => held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message })));
-  const out = await send("APPROVED shop-1");
-  expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toBe("Run security-review with the Skill tool on the merge before you send APPROVED.");
-  expect(await send("CHANGES shop-1: fix x")).toBeNull();
-  expect(await tryTool("r", "Bash", { command: "git log --oneline" })).toBeNull();
-  await skillLoaded("r", "security-review", "PostToolUseFailure");
-  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
-  await skillLoaded("r", "security-review");
-  expect(await send("APPROVED shop-1")).toBeNull();
-});
-
-test("the security hold reads APPROVED as a formal report does: past markdown and a list number, not as the start of a longer word", async () => {
-  start();
-  await hired("r", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
-  await skillLoaded("r", "ponytail:ponytail-review");
-  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
-  const send = async (message: string) => (await held(await hook(preToolUse("r", "SendMessage", { to: "lead-a", message }))))?.permissionDecision ?? null;
-  for (const message of ["**APPROVED** shop-1", "> APPROVED shop-1", "1. APPROVED shop-1", "\n\nAPPROVED shop-1"]) expect([message, await send(message)]).toEqual([message, "deny"]);
-  for (const message of ["APPROVEDLY shop-1", "not APPROVED yet", "CHANGES shop-1: fix x"]) expect([message, await send(message)]).toEqual([message, null]);
-});
-
-test("a woken --level high Reviewer, whose first prompt is the wake note, is held at APPROVED the same way, and its tools are not held", async () => {
-  start();
-  await hired("rw", `resumed; continue your task\nReport to: lead-a${SECURITY}`, "f1rm:reviewer", "a.reviewer-review-x");
-  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
-  const send = async (message: string) => held(await hook(preToolUse("rw", "SendMessage", { to: "lead-a", message })));
-  expect((await send("APPROVED shop-1"))?.permissionDecision).toBe("deny");
-  expect(await tryTool("rw", "Bash", { command: "ls" })).toBeNull(); // no skills named to load first
-  await skillLoaded("rw", "security-review");
-  expect(await send("APPROVED shop-1")).toBeNull();
-});
-
-test("a refused security-review read from the transcript does not release a --level high Reviewer's APPROVED", async () => {
-  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  await hired("rs", `/code-review high${LOAD_FIRST}ponytail:ponytail-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
-  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
-  const path = transcript("rs", [skillUse("ponytail:ponytail-review"), skillUse("security-review"), refused]);
-  const send = async () => held(await hook({ ...preToolUse("rs", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
-  expect(await tryAt("rs", path)).toBeNull(); // the required skill was tried, so the work tools are free
-  expect((await send())?.permissionDecision).toBe("deny"); // the security hold counts only a skill that ran
-  expect((await send())?.permissionDecision).toBe("deny");
-  await skillLoaded("rs", "security-review");
-  expect(await send()).toBeNull();
-});
-
-test("even a first prompt that names security-review does not let a refused try release APPROVED", async () => {
-  start(undefined, undefined, undefined, { transcriptsDir: transcripts });
-  await hired("rn", `/code-review high${LOAD_FIRST}security-review.${SECURITY} Report to: lead-a\n\nbrief`, "f1rm:reviewer", "a.reviewer-review-x");
-  await hook({ ...common("lead", "UserPromptSubmit"), prompt: "go", session_title: "lead-a", agent_type: "f1rm:lead" });
-  const path = transcript("rn", [skillUse("security-review"), refused]);
-  expect(await tryAt("rn", path)).toBe("deny"); // the read happens here and must not count it
-  const out = await held(await hook({ ...preToolUse("rn", "SendMessage", { to: "lead-a", message: "APPROVED shop-1" }), transcript_path: path }));
-  expect(out.permissionDecision).toBe("deny");
-});
 
 test("a session with no such sentence, the PM and a freelancer included, is never held", async () => {
   start();
@@ -2850,24 +2215,6 @@ async function projectsOffice() {
   return async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] ?? "/code/shop" }));
 }
 
-test("a SendMessage from an f1rm role goes to its own project, 'main' and its own sub-agent, and to no one else", async () => {
-  const send = await projectsOffice();
-  for (const to of ["lead-shop", "main", "sub-1"]) expect([to, (await send("b", to))?.permissionDecision ?? null]).toEqual([to, null]);
-  const other = await send("b", "pm-blog");
-  expect(other.permissionDecision).toBe("deny");
-  expect(other.permissionDecisionReason).toContain("Projects are isolated");
-  const unknown = await send("b", "pm-nobody");
-  expect(unknown.permissionDecision).toBe("deny");
-  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
-  // A name two rooms answer to, and a sub-agent of another employee, fail closed too.
-  expect((await send("b", "twin")).permissionDecision).toBe("deny");
-  expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny");
-  expect((await send("b", "*")).permissionDecision).toBe("deny");
-  // The PM too, and a freelancer is never held.
-  expect((await send("pm-s", "pm-blog")).permissionDecision).toBe("deny");
-  expect(await send("free", "pm-shop")).toBeNull();
-});
-
 test("a finished sub-agent can still be resumed by its parent, by agent id and no other way", async () => {
   const send = await projectsOffice();
   await hook({ ...common("b", "SubagentStop"), cwd: "/code/shop/.claude/worktrees/a", agent_id: "sub-1", agent_type: "Explore" });
@@ -2875,30 +2222,6 @@ test("a finished sub-agent can still be resumed by its parent, by agent id and n
   expect((await send("b", "sub-1"))?.permissionDecision ?? null).toBeNull();
   expect((await send("pm-b", "sub-1")).permissionDecision).toBe("deny"); // another employee's sub-agent
   expect((await send("b", "Explore")).permissionDecision).toBe("deny"); // a sub-agent type is not a sub-agent
-});
-
-test("`name [ref]` is read as the bare name, whatever the ref: one project answers, or the name is unknown", async () => {
-  const send = await projectsOffice();
-  const allowed = async (to: string) => (await send("b", to))?.permissionDecision ?? null;
-  expect(await allowed("lead-shop")).toBeNull(); // listed twice, but one project
-  expect(await allowed("lead-shop [36698c]")).toBeNull(); // the 6-hex ref Claude Code gives is not a session-id prefix
-  expect(await allowed("lead-shop [4e323bd1a0f2]")).toBeNull();
-  const other = await send("b", "pm-blog [36698c]");
-  expect(other.permissionDecisionReason).toContain("Projects are isolated");
-  const two = await send("b", "twin [36698c]"); // two projects run a session of this name
-  expect(two.permissionDecision).toBe("deny");
-  expect(two.permissionDecisionReason).toContain("unknown to the office");
-  expect(two.permissionDecisionReason).toContain("`uds:` address");
-});
-
-test("a `uds:<path>` address resolves to the online session that holds the socket, then gets the same project check", async () => {
-  const send = await projectsOffice();
-  expect((await send("b", "uds:/tmp/cc-socks/1.sock"))?.permissionDecision ?? null).toBeNull(); // lead-shop
-  expect((await send("b", "uds:/tmp/cc-socks/2.sock")).permissionDecisionReason).toContain("Projects are isolated"); // pm-blog
-  const unknown = await send("b", "uds:/tmp/cc-socks/99.sock");
-  expect(unknown.permissionDecisionReason).toContain("unknown to the office");
-  expect(unknown.permissionDecisionReason).toContain("`uds:` address");
-  expect((await send("b", "uds:"))?.permissionDecision).toBe("deny");
 });
 
 test("after an office restart the replayed log still knows a parent's sub-agents, so it can resume one", async () => {
@@ -2915,32 +2238,6 @@ test("after an office restart the replayed log still knows a parent's sub-agents
   expect(await send("sub-2")).toBe("deny");
 });
 
-test("an offline session does not answer to its name, so a name that an online session holds in one project resolves", async () => {
-  let now = 1_000_000;
-  server = startServer({ port: 0, secret: SECRET, token: TOKEN, machine: fakeMachine({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }), clientDir, clock: () => now, offlineAfterMs: 400, removeAfterMs: 1e9 });
-  const seat = (id: string, cwd: string, title: string, type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, ...(type && { agent_type: type }) });
-  await seat("twin-b", "/code/blog", "lead-twin", "f1rm:lead");
-  now += 401;
-  await office((s) => s.employees["twin-b"]?.status === "offline");
-  await seat("twin-s", "/code/shop", "lead-twin", "f1rm:lead");
-  await seat("b", "/code/shop", "twin.backend-dev-a", "f1rm:backend-dev");
-  expect((await held(await hook(preToolUse("b", "SendMessage", { to: "lead-twin", message: "x" }))))?.permissionDecision ?? null).toBeNull();
-});
-
-test("a SendMessage refusal is logged with the role, title and rule, and never the message or the target", async () => {
-  const send = await projectsOffice();
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
-  try {
-    await send("b", "pm-blog");
-    await send("b", "SECRET-TARGET");
-  } finally {
-    console.log = log;
-  }
-  expect(lines).toEqual(["refused backend shop.backend-dev-a SendMessage project", "refused backend shop.backend-dev-a SendMessage project-unknown"]);
-});
-
 // Who talks to whom: in one project a PM, two leads, members of two teams (one a Reviewer) and a freelancer; in another a PM.
 const WHO = { pm: "pm-shop", l1: "lead-checkout", l2: "lead-search", c1: "checkout.backend-dev-a", c2: "checkout.frontend-dev-b", rv: "checkout.reviewer-review-a", s1: "search.backend-dev-c", free: "freelancer", pmb: "pm-blog" } as const;
 async function talkOffice() {
@@ -2954,47 +2251,6 @@ async function talkOffice() {
   await office((s) => Object.keys(s.employees).length === 9 && Object.keys(s.interns).length === 5);
   return async (id: string, to: string, message = "the contract is ready", extra: object = {}) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message }), cwd: cwd(id), ...extra }));
 }
-
-test("a SendMessage goes only where the table allows: the PM to leads, a lead to the PM, leads and its team, a member to its lead and its team, interns to their parent", async () => {
-  const send = await talkOffice();
-  const names = [...Object.values(WHO).filter((n) => n !== "freelancer"), "main", "@own", "nobody"];
-  const allowed: Record<string, string[]> = {
-    pm: ["lead-checkout", "lead-search", "main", "@own"],
-    l1: ["pm-shop", "lead-search", "checkout.backend-dev-a", "checkout.frontend-dev-b", "checkout.reviewer-review-a", "main", "@own"],
-    c1: ["lead-checkout", "checkout.frontend-dev-b", "checkout.reviewer-review-a", "main", "@own"],
-    s1: ["lead-search", "main", "@own"],
-    rv: ["lead-checkout", "checkout.backend-dev-a", "checkout.frontend-dev-b", "main", "@own"],
-  };
-  for (const [id, ok] of Object.entries(allowed)) {
-    for (const name of names) {
-      if (name === WHO[id as keyof typeof WHO]) continue;
-      const out = await send(id, name === "@own" ? `i-${id}` : name);
-      expect([id, name, out?.permissionDecision ?? null]).toEqual([id, name, ok.includes(name) ? null : "deny"]);
-      if (out) expect(out.permissionDecisionReason).toMatch(/Who talks to whom|Projects are isolated/);
-    }
-  }
-  // An intern's call carries its agent id: it may message only its parent session and "main".
-  for (const name of [...names, "checkout.backend-dev-a"]) {
-    const out = await send("c1", name === "@own" ? "i-c1" : name, "x", { agent_id: "i-c1", agent_type: "Explore" });
-    expect([name, out?.permissionDecision ?? null]).toEqual([name, ["main", "checkout.backend-dev-a"].includes(name) ? null : "deny"]);
-  }
-  // A freelancer is never held; the user is no session.
-  for (const name of names) expect([name, await send("free", name)]).toEqual([name, null]);
-});
-
-test("a refusal names the rule and the way out", async () => {
-  const send = await talkOffice();
-  const toMember = await send("pm", "checkout.backend-dev-a");
-  expect(toMember.permissionDecisionReason).toContain("Who talks to whom");
-  expect(toMember.permissionDecisionReason).toContain("lead-checkout");
-  const otherTeam = await send("c1", "search.backend-dev-c");
-  expect(otherTeam.permissionDecisionReason).toContain("Who talks to whom");
-  expect(otherTeam.permissionDecisionReason).toContain("ask lead-checkout");
-  expect((await send("c1", "pm-shop")).permissionDecisionReason).toContain("ask lead-checkout");
-  expect((await send("l1", "search.backend-dev-c")).permissionDecisionReason).toContain("lead-search");
-  const intern = await send("c1", "lead-checkout", "x", { agent_id: "i-c1", agent_type: "Explore" });
-  expect(intern.permissionDecisionReason).toContain("parent");
-});
 
 // The flat flow: a PM, a lead, a simple dev (backend-dev-x) and a simple designer (designer-y) with no team, a team's designer and a content Reviewer, and a freelancer, in one registered repo.
 const WT = (task: string) => `/code/shop/.claude/worktrees/${task}`;
@@ -3014,358 +2270,8 @@ async function flatOffice() {
   };
 }
 
-test("a simple dev sends its formal reports (DONE, BLOCKED, NEEDS YOU, ESCALATE) to the PM only; every other session of the project is refused, and the PM may message it", async () => {
-  const { send } = await flatOffice();
-  for (const message of ["DONE x", "BLOCKED x: no key", "NEEDS YOU x: the second review still blocks", "**NEEDS YOU** x", "ESCALATE x", "1. DONE x"]) {
-    expect([message, await send("s", "pm-shop", message)]).toEqual([message, null]);
-    for (const to of ["lead-checkout", "designer-y", "checkout.designer-z", "checkout.reviewer-review-a"]) {
-      const out = await send("s", to, message);
-      expect([to, message, out?.permissionDecision]).toEqual([to, message, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Who talks to whom");
-    }
-  }
-  // Plain words follow the same table: the PM, "main" and its own intern, nobody else.
-  for (const to of ["pm-shop", "main", "i-s"]) expect([to, await send("s", to)]).toEqual([to, null]);
-  for (const to of ["lead-checkout", "designer-y", "checkout.designer-z"]) expect([to, (await send("s", to))?.permissionDecision]).toEqual([to, "deny"]);
-  expect((await send("s", "lead-checkout")).permissionDecisionReason).toContain("pm-shop");
-  // The PM messages its simple devs and its leads, not a team's member; a lead does not reach a simple dev; a freelancer is never held.
-  for (const to of ["backend-dev-x", "designer-y", "lead-checkout"]) expect([to, await send("p", to)]).toEqual([to, null]);
-  expect((await send("p", "checkout.designer-z")).permissionDecision).toBe("deny");
-  expect((await send("l", "backend-dev-x")).permissionDecision).toBe("deny");
-  expect(await send("f", "backend-dev-x", "DONE x")).toBeNull();
-});
-
-test("NEEDS YOU is a formal report for a team member too: to its lead only, never to a peer", async () => {
-  const { send } = await flatOffice();
-  expect(await send("m", "lead-checkout", "NEEDS YOU z: the second review still blocks")).toBeNull();
-  const peer = await send("m", "checkout.reviewer-review-a", "NEEDS YOU z: the second review still blocks");
-  expect(peer.permissionDecisionReason).toContain("a formal report (DONE, APPROVED, CHANGES REQUESTED, BLOCKED, ESCALATE, NEEDS YOU) goes to your lead only");
-  expect(await send("m", "checkout.reviewer-review-a", "NEEDS a look at the x file")).toBeNull();
-});
-
-test("a simple dev whose process ended is reached by the PM with the way back: wake it, then message it; nobody else wakes it", async () => {
-  const { send, bash } = await flatOffice();
-  sessionList = [ended("backend-dev-gone", "/code/shop/.claude/worktrees/gone")];
-  const byPm = await send("p", "backend-dev-gone");
-  expect(byPm.permissionDecisionReason).toContain("no live session; f1rm wake backend-dev-gone resumes it in place");
-  expect(byPm.permissionDecisionReason).toContain("Wake it, then message it.");
-  expect(await bash("p", "f1rm wake backend-dev-gone")).toBeNull();
-  expect(await bash("p", "f1rm wake lead-checkout")).toBeNull();
-  for (const id of ["l", "s", "m", "rv"]) expect([id, (await bash(id, "f1rm wake backend-dev-gone"))?.permissionDecision]).toEqual([id, "deny"]);
-  expect((await bash("p", "f1rm wake checkout.designer-z"))?.permissionDecision).toBe("deny");
-});
-
-test("only the PM hires with --simple, one dev, designer or researcher with no team; a lead, a specialist and the PM's other forms are refused", async () => {
-  const { bash } = await flatOffice();
-  for (const command of ["f1rm hire --simple backend-dev backend-dev-x x 'Task: x'", "f1rm hire --simple --level high frontend-dev frontend-dev-x x b", "f1rm hire --simple --report-to pm-shop designer designer-x x b", "f1rm hire --simple researcher researcher-x x b", "f1rm hire --simple --skills a,b backend-dev backend-dev-x x b", "f1rm hire lead lead-cart cart b"]) {
-    expect([command, await bash("p", command)]).toEqual([command, null]);
-  }
-  for (const command of ["f1rm hire backend-dev backend-dev-x x b", "f1rm hire --simple --team checkout backend-dev checkout.backend-dev-x x b", "f1rm hire --simple lead lead-cart cart b", "f1rm hire --simple reviewer reviewer-review-x review-x b", "f1rm hire --content reviewer reviewer-review-x review-x b"]) {
-    const out = await bash("p", command);
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toMatch(/The PM starts only leads, with `f1rm hire --topic lead|--simple is for one dev/);
-  }
-  // A lead never hires with --simple; its team hires are unchanged. A specialist hires nothing.
-  for (const command of ["f1rm hire --simple backend-dev backend-dev-x x b", "f1rm hire --simple --team checkout designer checkout.designer-x x b"]) {
-    const out = await bash("l", command);
-    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
-  }
-  expect(await bash("l", "f1rm hire --team checkout designer checkout.designer-x x b")).toBeNull();
-  for (const id of ["s", "d", "m", "rv"]) expect([id, (await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b"))?.permissionDecision]).toEqual([id, "deny"]);
-  // Nobody else: not the PM's intern, not a session with no role (the user's terminal or `!` still runs it).
-  for (const [who, id, extra] of [["the PM's intern", "p", { agent_id: "i-p" }], ["a role-less session", "f", {}]] as const) {
-    const out = await bash(id, "f1rm hire --simple backend-dev backend-dev-q q b", extra);
-    expect([who, out?.permissionDecision]).toEqual([who, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Only the PM may pass the legacy --simple, and it starts no new simple task: a lead hires into its own team, with --team, and anyone else asks the PM to start a topic lead.");
-  }
-  expect(await bash("f", "f1rm hire designer designer-q q b")).toBeNull();
-  expect(await bash("p", "git log --grep='f1rm hire --simple backend-dev x'")).toBeNull();
-});
-
 // A hire whose process ended (done, stopped, blocked on a limit) is listed by `claude agents --json --all` with no pid; no employee answers to its name.
 const ended = (name: string, cwd = "/code/shop", state = "done") => ({ id: `e_${name}`, sessionId: `sid_${name}`, name, kind: "background", state, cwd });
-
-test("a message to a hire of this project with no live process is refused with the way back, by name, by `name [ref]` and by session id", async () => {
-  const send = await talkOffice();
-  sessionList = [
-    ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old"),
-    ended("checkout.designer-gone", "/code/shop/.claude/worktrees/gone", "stopped"),
-    ended("lead-old"),
-    ended("search.backend-dev-x", "/code/shop/.claude/worktrees/x", "failed"),
-    ended("blog.backend-dev-b", "/code/blog/.claude/worktrees/b"),
-  ];
-  for (const to of ["checkout.backend-dev-old", "checkout.backend-dev-old [36698c]", "sid_checkout.backend-dev-old", "checkout.designer-gone [4e323bd1a0f2]"]) {
-    const out = await send("l1", to);
-    expect([to, out?.permissionDecision]).toEqual([to, "deny"]);
-    expect(out.permissionDecisionReason).toContain(`no live session; f1rm wake ${to.startsWith("sid_") ? "checkout.backend-dev-old" : to.replace(/ \[.*/, "")}`);
-    expect(out.permissionDecisionReason).not.toContain("unknown to the office");
-  }
-  // The PM reaches an ended lead the same way.
-  expect((await send("pm", "lead-old")).permissionDecisionReason).toContain("no live session; f1rm wake lead-old");
-  // A member can't wake: the refusal sends it to its lead.
-  const byMember = await send("c1", "checkout.backend-dev-old");
-  expect(byMember.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-old");
-  expect(byMember.permissionDecisionReason).toContain("lead-checkout");
-  // The table still comes first: the PM does not message a member, a lead not another team's member.
-  expect((await send("pm", "checkout.backend-dev-old")).permissionDecisionReason).toContain("Who talks to whom");
-  expect((await send("l1", "search.backend-dev-x")).permissionDecisionReason).toContain("Who talks to whom");
-  // Another project's ended hire is as unknown as before.
-  expect((await send("l1", "blog.backend-dev-b")).permissionDecisionReason).toContain("unknown to the office");
-  expect((await send("l1", "checkout.backend-dev-nobody")).permissionDecisionReason).toContain("unknown to the office");
-});
-
-test("a hire that finished its turn and whose process ended leaves the office, and its lead is told it has no live session, not that the name is unknown", async () => {
-  start({ "/code/shop": "/code/shop/.git" });
-  const seat = (id: string, title: string, type: string, cwd = "/code/shop") => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title: title, agent_type: type });
-  await seat("lead", "lead-checkout", "f1rm:lead");
-  await seat("dev", "checkout.backend-dev-a", "f1rm:backend-dev", "/code/shop/.claude/worktrees/a");
-  listing = new Map([["lead", 1], ["dev", 4242]]);
-  deadPids = new Set([4242]);
-  expect((await jumpTo("dev")).status).toBe(410); // the office finds the process gone and drops the employee
-  expect(Object.keys((await office((s) => !("dev" in s.employees))).employees)).toEqual(["lead"]);
-  sessionList = [ended("checkout.backend-dev-a", "/code/shop/.claude/worktrees/a")];
-  const out = await held(await hook({ ...preToolUse("lead", "SendMessage", { to: "checkout.backend-dev-a", message: "one more fix round" }), cwd: "/code/shop" }));
-  expect(out.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-a");
-});
-
-test("a member whose own lead has no live session is told the PM wakes the lead, not to ask the lead it cannot reach", async () => {
-  start({ "/code/shop": "/code/shop/.git" });
-  await hired("m", "go", "f1rm:backend-dev", "team.backend-dev-a");
-  await hired("l2", "go", "f1rm:lead", "lead-other");
-  sessionList = [ended("lead-team"), ended("lead-gone")];
-  const to = async (id: string, name: string) => (await held(await hook({ ...preToolUse(id, "SendMessage", { to: name, message: "a question" }), cwd: "/code/shop" })))?.permissionDecisionReason ?? "";
-  const member = await to("m", "lead-team");
-  expect(member).toContain("no live session; f1rm wake lead-team");
-  expect(member).toContain("The PM wakes a lead");
-  expect(member).toContain("resend after the wake");
-  expect(member).not.toContain("ask lead-team");
-  const lead = await to("l2", "lead-gone");
-  expect(lead).toContain("no live session; f1rm wake lead-gone");
-  expect(lead).toContain("The PM wakes a lead");
-});
-
-test("a message to the sender's own sub-agent never asks `claude agents --json --all`, since the hook gives up long before a slow listing answers", async () => {
-  const send = await talkOffice();
-  const before = sessionsAsked;
-  expect(await send("c1", "i-c1")).toBeNull(); // its own intern
-  expect(await send("l1", "i-l1")).toBeNull();
-  expect(sessionsAsked).toBe(before);
-  sessionList = [ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old")];
-  await send("l1", "checkout.backend-dev-old");
-  expect(sessionsAsked).toBe(before + 1); // a name no employee answers is the one case that asks
-});
-
-test("a hire that has a live session as well as an ended one is not refused: only a name with no live process is", async () => {
-  const send = await talkOffice();
-  sessionList = [ended("checkout.backend-dev-a"), { ...ended("checkout.backend-dev-a"), id: "live", sessionId: "c1", state: "working", pid: 4242 }];
-  expect(await send("l1", "checkout.backend-dev-a")).toBeNull(); // c1 is online
-  expect(await send("l1", "checkout.backend-dev-a [36698c]")).toBeNull();
-});
-
-test("a formal report from a team member goes to its lead only; the same words to a peer are refused, and free text to a peer passes", async () => {
-  const send = await talkOffice();
-  const reports = ["1. **DONE** x", "1) `DONE` x", "1. ✅ DONE x", "2) BLOCKED x", "10. DONE x", "✅ DONE x", "1. DONE x", "| DONE | x", "CHANGES_REQUESTED x", "CHANGES  REQUESTED x", "CHANGES-REQUESTED x", "**DONE** x", "> APPROVED x", "- BLOCKED x", "`ESCALATE` x", "# CHANGES REQUESTED shop-1", "_DONE_ x", "(BLOCKED) x", "\n\n**APPROVED shop-1**", "DONE gate-messaging branch=x commit=y", "APPROVED shop-1", "CHANGES REQUESTED shop-1: fix x", "BLOCKED shop-1 permission", "ESCALATE shop-1", "  DONE: x", "BLOCKED"];
-  for (const message of reports) {
-    for (const id of ["c1", "rv"]) {
-      expect([id, message, await send(id, "lead-checkout", message)]).toEqual([id, message, null]);
-      expect([id, message, await send(id, "main", message)]).toEqual([id, message, null]);
-      const peer = await send(id, id === "c1" ? "checkout.frontend-dev-b" : "checkout.backend-dev-a", message);
-      expect([id, message, peer?.permissionDecision]).toEqual([id, message, "deny"]);
-      expect(peer.permissionDecisionReason).toContain("lead-checkout");
-      expect(peer.permissionDecisionReason).toContain("formal report");
-    }
-  }
-  for (const message of ["the API is DONE on my side", "done", "DONEZO", "Can you review CHANGES in api.ts?", "BLOCKEDx", "CHANGES to the API: add a field", "CHANGES REQUESTEDLY", "- done: x", "CHANGES requested", "Two DONE and one BLOCKED", "2 BLOCKED tests on my side, can you look?", "100% DONE with the API", "1.5 DONE x", "2026-10-22 DONE x"]) expect([message, await send("c1", "checkout.frontend-dev-b", message)]).toEqual([message, null]);
-  // A lead's own words to a member are not a member's report.
-  expect(await send("l1", "checkout.backend-dev-a", "CHANGES REQUESTED shop-1: fix x")).toBeNull();
-  expect(await send("free", "checkout.backend-dev-a", "DONE x")).toBeNull();
-});
-
-test("outside any door a session may message only one working under the same folder", async () => {
-  start({});
-  const cwds: Record<string, string> = { lx: "/code/a", mx: "/code/a/.claude/worktrees/t", dx: "/code/c", lz: "/code/b", mz: "/code/b" };
-  const titles: Record<string, [string, string]> = { lx: ["lead-x", "f1rm:lead"], mx: ["x.backend-dev-a", "f1rm:backend-dev"], dx: ["x.designer-b", "f1rm:designer"], lz: ["lead-z", "f1rm:lead"], mz: ["z.designer-c", "f1rm:designer"] };
-  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
-  await office((s) => Object.keys(s.employees).length === 5 && Object.values(s.employees).every((e) => e.room === "elsewhere"));
-  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "SECRET-TEXT" }), cwd: cwds[id] }));
-  expect(await send("mx", "lead-x")).toBeNull(); // the worktree is under the lead's folder
-  expect(await send("lx", "x.backend-dev-a")).toBeNull();
-  expect(await send("lz", "z.designer-c")).toBeNull(); // the same folder
-  for (const [from, to] of [["lx", "lead-z"], ["lz", "lead-x"], ["dx", "lead-x"], ["lz", "x.designer-b"]]) {
-    const out = await send(from, to);
-    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Elsewhere");
-    expect(out.permissionDecisionReason).toContain("same folder");
-  }
-  expect(await send("lx", "main")).toBeNull();
-});
-
-test("a session whose folder is / or the home folder reaches no Elsewhere session, and none reaches it", async () => {
-  start({});
-  const home = process.env.HOME ?? "/home/me";
-  const cwds: Record<string, string> = { lh: home, mh: `${home}/proj`, lr: "/", lx: "/code/a", mx: "/code/a/w" };
-  const titles: Record<string, [string, string]> = { lh: ["lead-h", "f1rm:lead"], mh: ["h.designer-m", "f1rm:designer"], lr: ["lead-r", "f1rm:lead"], lx: ["lead-x", "f1rm:lead"], mx: ["x.designer-m", "f1rm:designer"] };
-  for (const [id, [session_title, agent_type]] of Object.entries(titles)) await hook({ ...common(id, "UserPromptSubmit"), cwd: cwds[id], prompt: "go", session_title, agent_type });
-  await office((s) => Object.keys(s.employees).length === 5 && Object.values(s.employees).every((e) => e.room === "elsewhere"));
-  const send = async (id: string, to: string) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "x" }), cwd: cwds[id] }));
-  for (const [from, to] of [["lh", "h.designer-m"], ["mh", "lead-h"], ["lh", "lead-x"], ["lx", "lead-h"], ["lr", "lead-x"], ["lx", "lead-r"], ["lr", "lead-h"], ["lr", "x.designer-m"], ["mx", "lead-r"]]) {
-    const out = await send(from, to);
-    expect([from, to, out?.permissionDecision]).toEqual([from, to, "deny"]);
-    expect(out.permissionDecisionReason).toContain("Elsewhere");
-  }
-  // A worktree under a project folder still reports up to the lead whose folder holds it, and the lead down to it.
-  expect(await send("mx", "lead-x")).toBeNull();
-  expect(await send("lx", "x.designer-m")).toBeNull();
-});
-
-test("\"main\" is open to a top-level sender only while no online session is titled main, then the table decides, and always open to a sub-agent", async () => {
-  start({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" });
-  const seat = (id: string, cwd: string, session_title: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), cwd, prompt: "go", session_title, ...(agent_type && { agent_type }) });
-  await seat("m", "/code/shop", "q.backend-dev-a", "f1rm:backend-dev");
-  await seat("l", "/code/shop", "lead-q", "f1rm:lead");
-  await office((s) => Object.keys(s.employees).length === 2);
-  const send = async (id: string, to = "main", extra: object = {}) => held(await hook({ ...preToolUse(id, "SendMessage", { to, message: "x" }), ...extra }));
-  expect(await send("m")).toBeNull();
-  expect(await send("m", "main", { agent_id: "i-m", agent_type: "Explore" })).toBeNull();
-  await seat("fs", "/code/shop", "main"); // a freelancer in the sender's own project
-  await office((s) => Object.keys(s.employees).length === 3);
-  const out = await send("m");
-  expect(out?.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toContain("Who talks to whom");
-  // From a sub-agent "main" is its own parent conversation, whatever a session is titled.
-  expect(await send("m", "main", { agent_id: "i-m", agent_type: "Explore" })).toBeNull();
-  await seat("fb", "/code/blog", "main");
-  await office((s) => Object.keys(s.employees).length === 4);
-  expect(await send("m", "main", { agent_id: "i-m", agent_type: "Explore" })).toBeNull();
-  expect((await send("m"))?.permissionDecision).toBe("deny");
-  expect(await send("l", "lead-q")).toBeNull();
-});
-
-test("an intern whose parent has no title still reaches only its parent, not another untitled session", async () => {
-  start({ "/code/shop": "/code/shop/.git" });
-  await hook({ ...common("u1", "UserPromptSubmit"), prompt: "go", agent_type: "f1rm:backend-dev" });
-  await hook({ ...common("u2", "UserPromptSubmit"), prompt: "go" });
-  await hook({ ...common("u1", "SubagentStart"), agent_id: "i-u1", agent_type: "Explore" });
-  await office((s) => Object.keys(s.employees).length === 2 && Object.keys(s.interns).length === 1);
-  const send = async (to: string) => held(await hook({ ...preToolUse("u1", "SendMessage", { to, message: "x" }), agent_id: "i-u1", agent_type: "Explore" }));
-  expect(await send("u1")).toBeNull(); // the parent, by its session id
-  const other = await send("u2");
-  expect(other?.permissionDecision).toBe("deny");
-  expect(other.permissionDecisionReason).toContain("parent");
-});
-
-test("the messaging refusals are logged by rule with the role and title, and never the message or the target", async () => {
-  const send = await talkOffice();
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
-  try {
-    await send("pm", "checkout.backend-dev-a", "SECRET-TEXT");
-    await send("c1", "checkout.frontend-dev-b", "DONE SECRET-TEXT");
-    await send("c1", "lead-checkout", "SECRET-TEXT", { agent_id: "i-c1", agent_type: "Explore" });
-    await send("l1", "SECRET-TARGET", "SECRET-TEXT");
-  } finally {
-    console.log = log;
-  }
-  expect(lines).toEqual([
-    "refused pm pm-shop SendMessage messaging",
-    "refused backend checkout.backend-dev-a SendMessage formal-report",
-    "refused backend checkout.backend-dev-a SendMessage intern-message",
-    "refused lead lead-checkout SendMessage project-unknown",
-  ]);
-});
-
-test("a message to a name no session answers to is refused as unknown when `claude agents --json --all` is too slow, since the hook gives up after 5 s and would let it through", async () => {
-  expect(GATE_LISTING_MS).toBeLessThan(5000);
-  start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { gateListingMs: 150 });
-  await hired("l1", "go", "f1rm:lead", "lead-checkout");
-  sessionList = [ended("checkout.backend-dev-old", "/code/shop/.claude/worktrees/old")];
-  sessionsGate = new Promise((resolve) => setTimeout(resolve, 2500));
-  const began = Date.now();
-  const out = await held(await hook({ ...preToolUse("l1", "SendMessage", { to: "checkout.backend-dev-old", message: "x" }), cwd: "/code/shop" }));
-  expect(Date.now() - began).toBeLessThan(1500);
-  expect(out.permissionDecision).toBe("deny");
-  expect(out.permissionDecisionReason).toContain("unknown to the office");
-  // A listing that answers in time still finds the ended hire.
-  sessionsGate = undefined;
-  const found = await held(await hook({ ...preToolUse("l1", "SendMessage", { to: "checkout.backend-dev-old", message: "x" }), cwd: "/code/shop" }));
-  expect(found.permissionDecisionReason).toContain("no live session; f1rm wake checkout.backend-dev-old");
-});
-
-test("the recovery tick runs for the registered projects only, reads their boards, and tells the session a hire reports to through that session's inbox", async () => {
-  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
-  const woke: string[] = [];
-  const stored: Record<string, unknown> = {};
-  const wt = "/code/shop/.claude/worktrees";
-  const gone = (name: string, id: string, cwd: string) => ({ id: id.slice(0, 8), kind: "background", name, sessionId: id, cwd, state: "stopped", startedAt: 1 });
-  const row = (owner: string) => `| T1 | ${owner} | doing | worktree-a | x |\n`;
-  const head = "| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n";
-  writeFileSync(join(boards, "-code-shop.team.checkout.md"), head + row("checkout.backend-dev-a") + row("checkout.backend-dev-b"));
-  writeFileSync(join(boards, "-code-blog.team.checkout.md"), head + row("checkout.backend-dev-z"));
-  const transcripts: Record<string, string> = {
-    "sid-a": JSON.stringify({ type: "assistant", isApiErrorMessage: true, message: { content: [{ type: "text", text: "You've hit your session limit" }] } }),
-    "sid-b": JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "compiling" }] } }),
-    "sid-z": "",
-  };
-  start({ "/code/shop": "/code/shop/.git", "/code/blog": "/code/blog/.git" }, undefined, boards, {
-    recovery: {
-      everyMs: 40,
-      deps: {
-        now: Date.now,
-        sessions: async () => [gone("checkout.backend-dev-a", "sid-a", `${wt}/a`), gone("checkout.backend-dev-b", "sid-b", `${wt}/b`), gone("checkout.backend-dev-z", "sid-z", "/code/blog/.claude/worktrees/z"), gone("checkout.backend-dev-q", "sid-q", "/code/quiet/.claude/worktrees/q")],
-        tail: (_cwd, sid) => transcripts[sid] ?? "",
-        mtime: () => null,
-        promptOf: () => null,
-        commitTime: () => null,
-        wake: async (repo, name) => void woke.push(`${repo} ${name}`),
-        store: { load: (repo) => (stored[repo] as any) ?? {}, save: (repo, entries) => void (stored[repo] = structuredClone(entries)) },
-      },
-    },
-  });
-  // Shop and blog are registered and have a lead in the office; /code/quiet is not registered at all.
-  await hook({ ...common("lb", "UserPromptSubmit"), cwd: "/code/blog", prompt: "go", session_title: "lead-checkout", agent_type: "f1rm:lead" }, { "x-f1rm-messaging-socket": "/tmp/cc-socks/blog.sock" });
-  await hook({ ...common("l1", "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", session_title: "lead-checkout", agent_type: "f1rm:lead" }, { "x-f1rm-messaging-socket": "/tmp/cc-socks/lead.sock" });
-  for (let i = 0; i < 100 && !(woke.length > 1 && calls.some((c) => c.startsWith("tell "))); i++) await Bun.sleep(20);
-  expect(woke.sort()).toEqual(["/code/blog checkout.backend-dev-z", "/code/shop checkout.backend-dev-b"]);
-  expect(calls.filter((c) => c.startsWith("tell "))).toEqual(["tell /tmp/cc-socks/lead.sock l1 checkout.backend-dev-a stopped at the session limit; f1rm wake checkout.backend-dev-a"]);
-  expect(Object.keys(stored).sort()).toEqual(["/code/blog", "/code/shop"]);
-});
-
-test("the office tells a hire by its own session id, never another session that shares its title, and tries each live seat of a Report to until one answers", async () => {
-  const boards = mkdtempSync(join(tmpdir(), "f1rm-boards-"));
-  const head = "| id | owner | status | branch | task |\n| :- | :- | :- | :- | :- |\n";
-  writeFileSync(join(boards, "-code-shop.team.checkout.md"), head + "| T1 | checkout.backend-dev-a | doing | worktree-a | x |\n| T2 | checkout.backend-dev-b | doing | worktree-b | x |\n");
-  const gone = { id: "bbbbbbbb", kind: "background", name: "checkout.backend-dev-b", sessionId: "sid-b", cwd: "/code/shop/.claude/worktrees/b", state: "stopped", startedAt: 1 };
-  const idle = { id: "aaaaaaaa", kind: "background", name: "checkout.backend-dev-a", sessionId: "h1", cwd: "/code/shop/.claude/worktrees/a", pid: 4242, state: "working", status: "idle", startedAt: 1 };
-  const text = (t: string) => JSON.stringify({ type: "assistant", uuid: "u1", message: { id: "m1", content: [{ type: "text", text: t }] } });
-  start({ "/code/shop": "/code/shop/.git" }, undefined, boards, {
-    recovery: {
-      everyMs: 40,
-      deps: {
-        now: Date.now,
-        sessions: async () => [idle, gone],
-        tail: (_cwd, sid) => (sid === "h1" ? text("Looked at it.") : JSON.stringify({ type: "assistant", isApiErrorMessage: true, message: { content: [{ type: "text", text: "You've hit your session limit" }] } })),
-        mtime: (_cwd, sid) => (sid === "h1" ? Date.now() - 30 * 60_000 : null),
-        promptOf: () => null,
-        commitTime: () => null,
-        wake: async () => {},
-        store: { load: () => ({}), save: () => {} },
-      },
-    },
-  });
-  const seat = (id: string, title: string, socket: string) => hook({ ...common(id, "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", session_title: title }, { "x-f1rm-messaging-socket": socket });
-  // An interactive session wearing the hire's title is seated first; a stale copy of the lead (dead socket) before the live one.
-  await seat("imp", "checkout.backend-dev-a", "/tmp/cc-socks/imp.sock");
-  await seat("h1", "checkout.backend-dev-a", "/tmp/cc-socks/h1.sock");
-  await seat("l-old", "lead-checkout", "/tmp/cc-socks/dead-lead.sock");
-  await seat("l-live", "lead-checkout", "/tmp/cc-socks/live-lead.sock");
-  for (let i = 0; i < 100 && calls.filter((c) => c.startsWith("tell ")).length < 3; i++) await Bun.sleep(20);
-  const told = calls.filter((c) => c.startsWith("tell "));
-  expect(told).toContain("tell /tmp/cc-socks/h1.sock h1 your turn ended without a report; send your DONE or BLOCKED");
-  expect(told.some((c) => c.includes("imp.sock"))).toBe(false);
-  expect(told).toContain("tell /tmp/cc-socks/live-lead.sock l-live checkout.backend-dev-b stopped at the session limit; f1rm wake checkout.backend-dev-b");
-});
 
 test("the tray lists the registered projects' decision tickets and the browser answers one; a session's call to the route is refused", async () => {
   const resolved: string[] = [];

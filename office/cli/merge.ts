@@ -137,7 +137,7 @@ async function land(task: string, flagCheck: string | undefined, noRed: string |
   if (overlap.length) throw new Refused(`the main working directory has uncommitted changes in files this merge changes: ${overlap.join(", ")}. The merge is retried after they are committed or removed (they are never stashed or discarded here)`);
   const calls: [string, string][] = [];
   const suiteChanged = changed.includes("scripts/check-lock.ts") || suiteOf(git(main, "merge-base", base0, tip)) !== suiteOf(tip);
-  if (!custom && suiteChanged) throw new Refused('the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts) and nobody else reads that diff: read the branch\'s diff of scripts.check, scripts.suite and scripts/check-lock.ts yourself; if it is sound, land with `--check "bun run check"` (or the project\'s command), a call that is logged in calls.md');
+  if (!custom && suiteChanged) throw new Refused('the branch changes how the suite runs (scripts.check, scripts.suite or scripts/check-lock.ts) and nobody else reads that diff: read the branch\'s diff of scripts.check, scripts.suite and scripts/check-lock.ts yourself; if it is sound, land with `--check "bun run check"` (or the project\'s command), a call the close step names in its closing comment');
   if (custom && suiteChanged) calls.push(["merge --check on a suite change", check]);
   const tests = names(main, "diff", "--name-only", "--no-renames", "--diff-filter=ACMR", `${base0}...${tip}`).filter((f) => TEST_FILE.test(f));
   let red: string[] = [];
@@ -193,7 +193,7 @@ export function suiteCommand(main: string, home: string, flag?: string) {
 }
 
 const kept = (home: string, main: string) => join(home, ".f1rm", "kept", basename(main));
-/** After a landing: the `--check` that landed is remembered, and the company's calls are appended to calls.md (a row holds no bar). The branch has landed by now: a write that fails is a warning, never a failed run. ponytail: check-command holds the last one, not a history. */
+/** After a landing: the `--check` that landed is remembered, and each call the merge made on the lander's word is said, for the close step's closing comment. The branch has landed by now: a write that fails is a warning, never a failed run. ponytail: check-command holds the last one, not a history. */
 function keep(deps: { home: string; now: () => number }, main: string, task: string, flagCheck: string | undefined, calls: [string, string][], say: (line: string) => void) {
   const dir = kept(deps.home, main);
   const write = (file: string, text: string, append = false) => {
@@ -205,10 +205,7 @@ function keep(deps: { home: string; now: () => number }, main: string, task: str
     }
   };
   if (flagCheck) write("check-command", flagCheck.trim() + "\n");
-  if (!calls.length) return;
-  const date = new Date(deps.now()).toISOString().slice(0, 10);
-  const header = existsSync(join(dir, "calls.md")) ? "" : "| date | task | call | detail |\n|---|---|---|---|\n";
-  write("calls.md", header + calls.map(([call, detail]) => `| ${date} | ${task} | ${call} | ${detail.trim().replaceAll("|", "/")} |\n`).join(""), true);
+  for (const [call, detail] of calls) say(`call: ${call}: ${detail.trim()}`);
 }
 
 export const hasCheckScript = (main: string) => {

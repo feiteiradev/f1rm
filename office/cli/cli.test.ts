@@ -1016,18 +1016,6 @@ test("status prints all of a large list into a pipe, not the first 64 KB", async
   expect(JSON.parse(out)).toHaveLength(count);
 }, 30_000); // under load the listing and the slow reader take a few seconds
 
-test("status --watch with no name left prints no names and exits 0 at once; a flag among the names is a usage error; the usage names --watch", async () => {
-  const home = tempHome(), repo = realpathSync(repoDir("shop"));
-  Bun.spawnSync(["git", "init", "-q", repo]);
-  const stub = stubClaude(0, []);
-  const none = await f1rmIn(repo, home, stub.bin, "status", "--watch", "");
-  expect([none.code, none.out]).toEqual([0, "no names"]);
-  const flag = await f1rmIn(repo, home, stub.bin, "status", "--watch", "--json");
-  expect(flag.code).toBe(1);
-  expect(flag.err).toContain("usage: f1rm status [--json] | f1rm status --watch <name>[:waiting]...");
-  expect((await f1rmIn(repo, home, stub.bin, "help")).out).toContain("status [--json] | status --watch <name>[:waiting]...");
-});
-
 test("status refuses, in every form, a git repo whose encoded project folder is over 150 characters, and works at 150", async () => {
   const home = tempHome();
   const stub = stubClaude(0, []);
@@ -1035,7 +1023,7 @@ test("status refuses, in every form, a git repo whose encoded project folder is 
   try {
     const long = repos.repo(151), fine = repos.repo(150);
     expect([long.length, fine.length]).toEqual([151, 150]);
-    for (const args of [[], ["--json"], ["--watch", "lead-a"]]) {
+    for (const args of [[], ["--json"]]) {
       const r = await f1rmIn(long, home, stub.bin, "status", ...args);
       expect([args.join(" "), r.code, r.out]).toEqual([args.join(" "), 1, ""]);
       expect(r.err).toContain("this repo's path is too long for f1rm status (Claude Code cuts the project folder name; the limit is 150 characters, so the `--claude-worktrees-` prefix of a worktree's folder stays whole)");
@@ -1045,26 +1033,20 @@ test("status refuses, in every form, a git repo whose encoded project folder is 
     const bogus = await f1rmIn(long, home, stub.bin, "status", "--bogus");
     expect([bogus.code, bogus.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
     expect(bogus.err).not.toContain("too long");
-    const flag = await f1rmIn(long, home, stub.bin, "status", "--watch", "--json");
-    expect([flag.code, flag.err]).toEqual([1, expect.stringContaining("usage: f1rm status")]);
-    for (const names of [[], [":waiting"], [""]]) {
-      const r = await f1rmIn(long, home, stub.bin, "status", "--watch", ...names);
-      expect([names.join(","), r.code, r.out, r.err]).toEqual([names.join(","), 0, "no names", ""]);
-    }
+    const watch = await f1rmIn(long, home, stub.bin, "status", "--watch", "lead-a");
+    expect([watch.code, watch.err]).toEqual([1, expect.stringContaining("--watch is gone")]);
   } finally {
     repos.cleanup();
   }
 });
 
-test("status in a folder that is not a git repo says so and exits 1, except for a watch with no names", async () => {
+test("status in a folder that is not a git repo says so and exits 1", async () => {
   const home = tempHome(), stub = stubClaude(0, []);
   const plain = repoDir("plain");
-  for (const args of [["--json"], [], ["--watch", "lead-a"]]) {
+  for (const args of [["--json"], []]) {
     const r = await f1rmIn(plain, home, stub.bin, "status", ...args);
     expect([args.join(" "), r.code, r.out, r.err]).toEqual([args.join(" "), 1, "", expect.stringContaining("not in a git repo")]);
   }
-  const none = await f1rmIn(plain, home, stub.bin, "status", "--watch");
-  expect([none.code, none.out]).toEqual([0, "no names"]);
 });
 
 test("f1rm pm checks the path length of the repo root, in a git repo only: a long subfolder of a short repo and a long plain folder start a PM, a long repo or a subfolder of one is refused", () => {

@@ -530,7 +530,6 @@ const commands: Record<string, () => void | Promise<void>> = {
   "": open,
   pm,
   hire: async () => process.exit(await hire(process.argv.slice(3))),
-  wake: async () => process.exit(await wake(process.argv.slice(3))),
   pause: pauseOrResume("pause"),
   resume: pauseOrResume("resume"),
   letgo: async () => {
@@ -558,12 +557,6 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (r.err) console.error(r.err);
     process.exitCode = r.code; // not process.exit: on a pipe it cuts the output at 64 KB
   },
-  report: async () => {
-    const r = await reportIn(process.argv.slice(3), process.cwd());
-    process.stdout.write(r.out);
-    if (r.err) console.error(r.err);
-    process.exitCode = r.code;
-  },
   merge: async () => {
     const r = await mergeIn(process.argv.slice(3), process.cwd(), { say: (line) => console.log(line) }); // one line per step, as it happens
     if (r.err) console.error(r.err.trimEnd());
@@ -590,7 +583,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | docker-tag <task> | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | cost | usage-tap";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | docker-tag <task> | status [--json] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | cost | usage-tap";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

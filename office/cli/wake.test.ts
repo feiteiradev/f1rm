@@ -409,38 +409,6 @@ const runIn = (home: string, bin: string, repo: string, ...args: string[]) => {
 };
 const run = (bin: string, repo: string, ...args: string[]) => runIn(tmp("f1rm-wake-home-"), bin, repo, ...args);
 
-test("f1rm wake starts claude from the hire's worktree with the resume argv, and says which session it started", () => {
-  const repo = repoWith("checkout");
-  const bin = stub([
-    running("lead-shop", "lead-sid", repo),
-    stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout", repo)),
-  ]);
-  const r = run(bin, repo, "shop.backend-dev-checkout", "one more fix round", "--model", "haiku");
-  expect([r.code, r.err]).toEqual([0, ""]);
-  expect(r.out).toContain("shop.backend-dev-checkout");
-  expect(r.out).toContain("dev-sid-1");
-  const argv = Bun.file(join(bin, "argv.log")).text();
-  return argv.then(async (text) => {
-    expect(text.split("\0").slice(0, -1)).toEqual(["--bg", "--resume", "dev-sid-1", "--agent", "f1rm:backend-dev", "--name", "shop.backend-dev-checkout", "one more fix round\nReport to: lead-shop", "--settings", FULL, "--model", "haiku", "--effort", "high"]);
-    expect((await Bun.file(join(bin, "cwd.log")).text()).trim()).toBe(wt("checkout", repo));
-  });
-});
-
-test("f1rm wake under a usage hold waits, gives up with code 75 and the ask-nobody line, and starts nothing", async () => {
-  const repo = repoWith("checkout");
-  const bin = stub([
-    running("lead-shop", "lead-sid", repo),
-    stopped("shop.backend-dev-checkout", "dev-sid-1", wt("checkout", repo)),
-  ]);
-  const r = runIn(usageHome(95, Date.now()), bin, repo, "shop.backend-dev-checkout");
-  expect(r.code).toBe(75);
-  expect(r.err).toContain("waiting for a slot: usage hold: 5-hour usage is 95%");
-  expect(r.err).toContain("no slot yet: run the same command again. Ask nobody; it is not a decision for the user.");
-  expect(r.err).not.toContain("--override");
-  expect(await Bun.file(join(bin, "argv.log")).exists()).toBe(false);
-  expect(run(bin, repo).err).toContain("usage: f1rm wake");
-});
-
 /** A fake clock for the wait: each sleep moves it on, and `onSleep` gets the count of sleeps so far (a test frees a slot there). */
 function clock(onSleep: (n: number) => void = () => {}) {
   let t = 0, n = 0;
