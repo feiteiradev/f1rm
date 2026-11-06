@@ -1,11 +1,9 @@
 // `f1rm status [--json]`: what each hire of this repo is really doing, from its transcript and its branch, never from the status text `claude agents` shows.
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { repoKey } from "../server/board.ts";
 import { agents, commitTimeArgs, machine } from "../server/machine.ts";
 import { pausedDirOf, pausedFile, readPaused } from "../server/pause.ts";
-import { sleepGrace } from "../server/sleep.ts";
-import { writePrivate } from "../server/private.ts";
 import { pathTooLong, projectFolder as folder } from "./hire.ts";
 import { hireName, repoOf } from "./letgo.ts";
 import { readReport, reportFile, reportSlug, SHOWN } from "./report.ts";

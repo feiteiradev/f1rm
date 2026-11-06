@@ -2,7 +2,7 @@
 // The f1rm CLI: (bare) | install | uninstall | start | service | demo | edition | pm | hire | wake | pause | resume | letgo | archives | status | report | merge | push | usage-tap
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_TIMEOUT_S } from "../server/approvals.ts";
 import { agents, claudeEnv, machine } from "../server/machine.ts";
@@ -21,10 +21,8 @@ import { letgo } from "./letgo.ts";
 import { dockerTagIn } from "./dockertag.ts";
 import { mainDir, mergeIn } from "./merge.ts";
 import { pushIn } from "./push.ts";
-import { wake } from "./wake.ts";
 import { readUsage, recordUsage, usageFile, usageText } from "../usage.ts";
 import { pauseCall, pausedNote } from "./pause.ts";
-import { reportIn } from "./report.ts";
 import { statusIn } from "./status.ts";
 import { changeEdition, editionFile, isEdition, projectsDir, readEdition, register, writeEdition, type Edition } from "../server/editions.ts";
 import { roomName } from "../server/board.ts";

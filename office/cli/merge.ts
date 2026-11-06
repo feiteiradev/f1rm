@@ -107,7 +107,7 @@ async function land(task: string, flagCheck: string | undefined, noRed: string |
 
   const reportPath = reportFile(deps.home, basename(main), task);
   const report = spec ? null : readReport(reportPath);
-  if (!spec && (report?.kind !== "DONE" || !report.commit)) throw new Refused(`no DONE report with a commit for ${task} in ${reportPath}: the dev sends \`f1rm report DONE ${task} --commit <sha>\` first`);
+  if (!spec && (report?.kind !== "DONE" || !report.commit)) throw new Refused(`no DONE report with a commit for ${task} in ${reportPath}: f1rm merge lands a spec's integration branch, \`f1rm merge spec-<n>\`; a task branch needs a DONE report, which nothing writes since the steps replaced the hires`);
   if (!run(main, ["rev-parse", "-q", "--verify", `refs/heads/${branch}`]).ok) throw new Refused(`no branch ${branch}`);
   const tip = git(main, "rev-parse", `refs/heads/${branch}`);
   if (report && !tip.startsWith(report.commit!.toLowerCase())) throw new Refused(`tip moved: send the work back to the dev (${branch} is at ${tip.slice(0, 9)}, its DONE says ${report.commit!.slice(0, 9)})`);

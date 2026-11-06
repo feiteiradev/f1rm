@@ -1,22 +1,20 @@
 // The f1rm server: hook ingest, office state, WebSocket to the browser.
 import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { applyApproval, commandsFile, deriveCommands, type Cmd } from "./projectcmds.ts";
 import { isSettingsFile, isWideningFlag, SETTINGS_REFUSAL, WIDENING_REFUSAL, writesSettings } from "./settingsgate.ts";
-import { boardFile, clip, MAX_CELL, openQuestion, parseBoard, readBoard, readBoardText, repoDir, repoKey, roomName, teamBoardFile, type BoardRow } from "./board.ts";
+import { boardFile, readBoard, repoDir, repoKey, roomName, teamBoardFile } from "./board.ts";
 import { changeEdition, isEdition, projectFile, readEdition, readFolder, type Edition } from "./editions.ts";
 import { applyListing, ELSEWHERE, emptyOffice, normalize, reduce, sweep, type Employee, type F1rmEvent, type Room } from "./office.ts";
 import { inside, isJunk, junkRoots as defaultJunkRoots, realPath, readForgotten, writeForgotten } from "./doors.ts";
 import { askStream, MAX_QUESTION } from "./ask.ts";
 import { lastSaid } from "./said.ts";
 import { jump } from "./jump.ts";
-import { readUsage, usageFile } from "../usage.ts";
-import { evidenceFile, proofType, topicProgress, type Topic } from "./progress.ts";
-import { HireRefused, parseHireFlags, pmName, SLUG, planHire, readRoles, topicBrief } from "../cli/hire.ts";
+import { evidenceFile, proofType } from "./progress.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
@@ -26,8 +24,8 @@ import { due, liveTasksOf, sweepTick } from "./dockersweep.ts";
 import type { Docker } from "../docker.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
 import { claim, fullStop, realRealpath, type FullStopOptions, type Hire } from "./fullstop.ts";
-import { clearPaused, GRACE_MS, hireRefusal, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
-import { FOUNDER_ONLY, ROLE_IDS, ROLES, roleOfAgentType, teamOf } from "../people.ts";
+import { clearPaused, GRACE_MS, PAUSE_ANSWER, pausedFile, readPaused, writePaused, type Paused } from "./pause.ts";
+import { FOUNDER_ONLY, teamOf } from "../people.ts";
 import type { machine as realMachine } from "./machine.ts";
 import { createLeftovers, usageView } from "./gauges.ts";
 
@@ -118,8 +116,6 @@ const hireArgs = (words: string[], verb = "hire") => {
   const i = words.findIndex((w, i) => ["f1rm", "f1rm.ts"].includes(basename(unquoted(w))) && unquoted(words[i + 1] ?? "") === verb);
   return i < 0 ? null : words.slice(i + 2).map(unquoted);
 };
-/** A word the shell reads as `--override` once its quotes and backslashes go (`--over""ride`, `\--override`); a quoted brief with spaces in it is prose. */
-const isOverrideWord = (w: string) => !/\s/.test(w) && w.replace(/[\\"']/g, "").includes("override");
 /** Where the words after the options start: a flag that takes a value takes the next word with it. */
 const skipOptions = (args: string[], i: number, withValue: Set<string>) => {
   while (args[i]?.startsWith("-")) i += withValue.has(args[i]) ? 2 : 1;
@@ -386,7 +382,6 @@ const claudeStart = ({ prefix, words }: { prefix: string[]; words: string[] }) =
 const PUTS_OUT = new Set(["send", "publish", "post", "schedule"]);
 /** The words of a tool's name, split on separators and camelCase, so `postgres` and `compost` are not `post`. */
 const wordsOf = (tool: string) => tool.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
-const MAX_BRIEF = 8000;
 /** How long the SendMessage gate waits for `claude agents --json --all`. The hook gives up after 5 s and then lets the call through, so a slower listing must read as "can't say" and end in the unknown-name refusal. */
 export const GATE_LISTING_MS = 3000;
 const INTERN =
@@ -481,7 +476,6 @@ const transcriptMtime = (path?: string) => {
   }
 };
 
-const TRANSCRIPT_READ_MAX = 8 * 1024 * 1024;
 
 /** Constant-time credential check. */
 function same(given: string | null | undefined, expected: string) {
@@ -686,7 +680,7 @@ export function startServer({
     }
     const starts = split.flatMap((c) => claudeStart(c) ?? []);
     if (starts.some((s) => !s.home && !(COORDINATORS.has(role) && s.bg && s.wake && !s.print))) {
-      return refuse("session-start", "Sessions start only with `f1rm hire`; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the board. Only the PM and the leads wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
+      return refuse("session-start", "Sessions start only from the office, which starts each step from the issues; a stray `claude --bg` or `claude -p` burns the shared usage limit and escapes the issues. Only the PM and a step wake a session, with `claude --bg --resume <id>`. A second-office proof gives that command its own HOME as a prefix: a literal absolute path or exactly `$(mktemp -d)`, as in `HOME=<tmp> claude …`.");
     }
     if ((tool === "Agent" || tool === "Task") && String(input.subagent_type ?? "").startsWith("f1rm:")) {
       return refuse("intern-role", "A role is hired with `f1rm hire`, never started as an intern.");
@@ -771,8 +765,6 @@ export function startServer({
     for (let q = dirname(p); q !== all.at(-1); q = dirname(q)) all.push(q);
     return all;
   };
-  // The real path of a cwd, as roomOf resolved it.
-  const realCwd = (cwd: string) => cwdPaths.get(cwd)?.chain[1] ?? realPath(resolve(cwd));
   const roomOf = (cwd: string): Room => {
     if (!projectsDir) return ELSEWHERE;
     let info = cwdPaths.get(cwd);
@@ -1278,7 +1270,6 @@ export function startServer({
     }
   }
   // ponytail: polls and rereads each room's board every tick; swap in fs.watch if many rooms make that heavy.
-  let reading = false;
   // Every boardPollMs: a door whose room emptied another way (the sweep, a process that died) goes, and each project's edition is read from its file.
   let polling = false;
   function pollProjects() {

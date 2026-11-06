@@ -1386,7 +1386,7 @@ test("a company employee starts no session with claude --bg or claude -p; the PM
     for (const command of refused) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("f1rm hire");
+      expect(out.permissionDecisionReason).toContain("Sessions start only from the office");
     }
     for (const command of allowed) expect([id, command, await bash(id, command)]).toEqual([id, command, null]);
   }

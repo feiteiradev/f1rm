@@ -66,7 +66,7 @@ The office keeps running after you close Claude Code and starts again at login, 
 
 ## Sleep
 
-After the Mac sleeps (a gap of more than 2 minutes between the office's ticks) nobody is judged stalled, woken or nudged for 5 minutes. f1rm never keeps the Mac awake, and the office never pauses or resumes a project by itself.
+After the Mac sleeps (a gap of more than 2 minutes between the office's ticks) the office judges no step failed for 5 minutes. f1rm never keeps the Mac awake, and the office never pauses or resumes a project by itself.
 
 ## The company
 

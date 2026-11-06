@@ -1,18 +1,16 @@
-// The office's recovery tick: wakes the background hires and leads of a registered project whose process ended while their board row is doing/review, once per stop, and says so when it cannot.
-// It nudges a live idle one whose turn ended without a report. Both go through code that already exists: planWake (the hire checks and the usage hold), machine.tell (the inbox), the boards and transcripts.
+// What a resume does after a pause: each hire the pause halted or stopped is told in its inbox, or woken through planWake (the hire checks and the usage hold). The tick that judged, nudged and woke hires is gone: the scheduler restarts a step that ended.
 import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
-import { firstPrompt, planWake, realWakeDeps, reportToOf, transcriptFile } from "../cli/wake.ts";
-import { HireRefused, UsageHold } from "../cli/hire.ts";
+import { firstPrompt, planWake, realWakeDeps, transcriptFile } from "../cli/wake.ts";
+import { HireRefused } from "../cli/hire.ts";
 import { pacing, readUsage, usageFile } from "../usage.ts";
 import { hireName, repoOf, type HireName } from "../cli/letgo.ts";
 import { parseReport, reportFile, reportSlug } from "../cli/report.ts";
-import { headAsync, lastTurn, limitUntil, recoveryFile, startsTurn, tailAsync } from "../cli/status.ts";
+import { headAsync, recoveryFile, tailAsync } from "../cli/status.ts";
 import { clip, MAX_CELL, type BoardRow } from "./board.ts";
 import { agents, commitTimeArgs, machine, runAsync } from "./machine.ts";
 import { writePrivate } from "./private.ts";
-import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -85,10 +83,6 @@ export function resetAt(text: string, stoppedAt: number): number | null {
   }
 }
 
-const WAKE_AFTER_RESET_MS = MIN; // the reset time is a minute old before the wake, so the limit has surely lifted
-const AGAIN_MS = 10 * MIN; // ended again this soon after a wake, with nothing to show for it: no new wake
-const QUIET_MS = 20 * MIN; // a turn ended this long ago without a report: one nudge
-const REPORT = /^\s*(?:DONE|APPROVED|CHANGES REQUESTED|BLOCKED|ESCALATE|NEEDS YOU)\b/;
 export const NOTE_LIMIT = "resumed after the session limit; continue your task";
 export const NOTE_ENDED = "resumed after your session ended; continue your task";
 // The second sentence is needed: measured with a Haiku hire, the bare note was refused ("the peer message doesn't override that pause"), because the stop reason stays in the conversation.
@@ -138,59 +132,8 @@ export type RecoveryDeps = {
   everyMs?: number;
 };
 
-/** The lines of the hire's last turn, oldest first: its assistant lines and the tool results, back to the last prompt or delivered message (see startsTurn). */
-function lastTurnLines(tailText: string): any[] {
-  const lines: any[] = [];
-  for (const l of tailText.split("\n").reverse()) {
-    let line: any;
-    try {
-      line = JSON.parse(l);
-    } catch {
-      continue; // a cut or odd line
-    }
-    if (!line || line.isSidechain) continue;
-    if (startsTurn(line)) break;
-    if (line.type === "assistant" || line.type === "user") lines.push(line);
-  }
-  return lines.reverse();
-}
 
-/**
- * What the hire's last turn reported. A report is a delivered SendMessage: its message starts with a report word and its tool result is no error (a send cut before its result, or refused by the gate
- * with "no live session", is not delivered). Text never counts: real hires report with SendMessage and close the turn with prose, and a refused send followed by "DONE ..., but the send was refused"
- * has not reported. `any`: the turn delivered a report (the nudge has nothing to ask for). `last`: that report is the turn's last tool call, so the turn ENDED reported (the stop of an ended hire needs no
- * wake); a hire that kept working after its report (a checkpoint) may have more to do, so hires checkpoint first.
- */
-function turnReports(tailText: string): { any: boolean; last: boolean } {
-  const turn = lastTurnLines(tailText);
-  const failed = new Map<string, boolean>();
-  for (const line of turn) if (line.type === "user" && Array.isArray(line.message?.content)) for (const b of line.message.content) if (b?.type === "tool_result") failed.set(String(b.tool_use_id), b.is_error === true);
-  let any = false, last = false;
-  for (const line of turn) {
-    if (line.type !== "assistant") continue;
-    for (const b of Array.isArray(line.message?.content) ? line.message.content : []) {
-      if (b?.type !== "tool_use") continue;
-      last = b.name === "SendMessage" && REPORT.test(String(b.input?.message ?? "")) && failed.get(String(b.id)) === false;
-      any ||= last;
-    }
-  }
-  return { any, last };
-}
 
-/** The progress a woken hire made: a commit on its branch, or more than one assistant message after the wake (the first is its reply; a reply with thinking is several lines of one message id). */
-function madeProgress(tailText: string, since: number, tipBefore: number | null | undefined, tipNow: number | null | undefined): boolean {
-  // An unknown tip (git failed, then or now: undefined) says nothing; a known one with no earlier tip is a first commit.
-  if (tipNow != null && tipBefore !== undefined && (tipBefore === null || tipNow > tipBefore)) return true;
-  const replies = new Set<string>();
-  for (const l of tailText.split("\n")) {
-    if (!l.includes('"type":"assistant"')) continue;
-    try {
-      const line = JSON.parse(l);
-      if (line.type === "assistant" && !line.isSidechain && line.isApiErrorMessage !== true && Date.parse(line.timestamp) > since) replies.add(String(line.message?.id ?? line.uuid ?? l));
-    } catch {} // a cut or odd line is no answer
-  }
-  return replies.size >= 2;
-}
 
 /**
  * A row is live when its status cell starts with doing or review (real boards annotate it: "review (live proof waits for the user)") and it is the hire's: parseBoard clips the owner and the branch cell
