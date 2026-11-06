@@ -273,6 +273,7 @@ test("a Founder project's room is marked founder, and its board counts what wait
   expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tickets done, 2 to publish");
   expect(boardSummary([row("done")])).toBe("1 of 1 ticket done");
   expect(boardSummary([])).toBe("No tickets");
+  expect(boardSummary([{ ...row("doing"), branch: "spec-7" }, row("done")])).toBe("1 of 1 ticket done"); // a spec's own row is no ticket
 });
 
 /** Runs `fn` with a page at /tok/ whose every fetch answers with `res`. */

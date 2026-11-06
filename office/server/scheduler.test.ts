@@ -393,3 +393,11 @@ test("the whiteboard shows each live spec and its tickets from GitHub: the step 
     { id: "#10", owner: "role:designer", status: "doing", branch: "ticket-10", task: "Docs page · 5k cost units" },
   ]);
 });
+
+test("a paused or usage-held project's wall still follows its issues, though no step starts", async () => {
+  for (const over of [{ paused: () => true }, { held: () => true }] satisfies Partial<SchedulerDeps>[]) {
+    const { s, started } = harness([spec(7, { title: "Spec: x" })], over);
+    await s.tick([REPO]);
+    expect([started, s.boards()[REPO]]).toEqual([[], [{ id: "#7", owner: "spec", status: "todo", branch: "spec-7", task: "Spec: x" }]]);
+  }
+});

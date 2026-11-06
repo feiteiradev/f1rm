@@ -6,7 +6,7 @@ import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { repoKey, type BoardRow } from "./board.ts";
-import { costUnits, specCosts, type Size, type SpecCost } from "../cost.ts";
+import { costUnits, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
 import { editionFile, readEdition } from "./editions.ts";
 import { FOUNDER_ONLY, ROLE_IDS, roleOfAgentType } from "../people.ts";
 import { machine } from "./machine.ts";
@@ -100,7 +100,7 @@ export function createScheduler(d: SchedulerDeps) {
   let shown: Decision[] = [];
   let walls: Record<string, BoardRow[]> = {};
   /** The whiteboard of a repo's live specs: a row per spec (the step at work, its total and coordination share) and a row per ticket (state, role, cost, a warning). */
-  async function wall(repo: string, specs: Issue[], live: string[]): Promise<BoardRow[] | null> {
+  async function issueBoard(repo: string, specs: Issue[], live: string[]): Promise<BoardRow[] | null> {
     const lists: [Issue, TicketIssue[]][] = [];
     for (const spec of specs) {
       const tickets = spec.subIssues ? await d.tickets(repo, spec.number) : [];
@@ -113,7 +113,7 @@ export function createScheduler(d: SchedulerDeps) {
     const k = (units: number) => `${Math.round(units / 1000).toLocaleString("en-US")}k`;
     return lists.flatMap(([spec, tickets]) => {
       const n = spec.number;
-      const step = live.find((name) => new RegExp(`^(?:tickets|implement|close)-${n}(?:-\\d+)?$`).test(name));
+      const step = live.find((name) => specOfStep(name) === n);
       const cost = costs[n];
       const building = !!step?.startsWith("implement-");
       return [
@@ -201,12 +201,12 @@ export function createScheduler(d: SchedulerDeps) {
           const started = d.store.load(repo);
           const paused = d.paused(repo);
           await decide(repo, me, started, list, paused);
-          if (held || paused) continue;
           const issues = await d.ready(repo);
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
-          const board = await wall(repo, issues.filter(isSpec), live);
+          const board = await issueBoard(repo, issues.filter(isSpec), live);
           if (board) nextWalls[repo] = board;
+          if (held || paused) continue;
           const owned = async (i: Issue) => i.author === me && (await d.labeledBy(repo, i.number, "ready-for-agent")) === me;
           const startOnce = async (step: Step, spec: Issue, round = 1, tries = 1) => {
             const name = stepName(step, spec.number, round);
@@ -245,8 +245,7 @@ export function createScheduler(d: SchedulerDeps) {
               continue;
             }
             // Only a spec whose tickets the office published is built by it: one ticketed by hand is the user's to drive. One step of a spec runs at a time.
-            const mine = new RegExp(`^(?:tickets|implement|close)-${n}(?:-\\d+)?$`);
-            if (!started[`tickets-${n}`] || live.some((name) => mine.test(name))) continue;
+            if (!started[`tickets-${n}`] || live.some((name) => specOfStep(name) === n)) continue;
             // A failing acceptance criterion becomes a ticket at the first close, which gets one more round; tickets left after the last close are the user's.
             const unfinished = spec.subDone < spec.subIssues;
             const round = started[stepName("close", n)] && (unfinished || started[stepName("implement", n, 2)]) ? 2 : 1;

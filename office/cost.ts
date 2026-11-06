@@ -12,6 +12,12 @@ export type SpecCost = { coordination: Tokens; tickets: Record<number, Tokens>; 
 /** The cost units past which a ticket of each size is flagged; nothing stops for it. shortcut: guessed before any measurement, #94 sets them from the dry run. */
 export const WARN: Record<Size, number> = { s: 300_000, m: 1_000_000, l: 3_000_000 };
 
+/** The spec a step session works on, from its name (`tickets-7`, `implement-7`, `close-7-2`); null for any other name. */
+export const specOfStep = (name: string) => {
+  const m = /^(?:tickets|implement|close)-(\d+)(?:-\d+)?$/.exec(name);
+  return m ? Number(m[1]) : null;
+};
+
 export const costUnits = (t: Tokens) => t.input + 1.25 * t.cacheWrite + 0.1 * t.cacheRead + 5 * t.output;
 const zero = (): Tokens => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });
 const add = (a: Tokens, b: Tokens): Tokens => ({ input: a.input + b.input, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead, output: a.output + b.output });
@@ -35,11 +41,11 @@ const entriesOf = (file: string): any[] => {
   cache.set(file, { stamp, entries });
   return entries;
 };
-/** A transcript's first lines, where Claude Code writes the session's name and agent type. */
+/** A transcript's first lines, where Claude Code writes the session's name and agent type. shortcut: a session whose first lines hold more than 64 KB before them is not seen; read the whole file when its head names no agent if that ever shows up. */
 const headOf = (file: string) => {
   const fd = openSync(file, "r");
   try {
-    const buf = Buffer.alloc(16 * 1024);
+    const buf = Buffer.alloc(64 * 1024);
     return parse(buf.subarray(0, readSync(fd, buf, 0, buf.length, 0)).toString("utf8"));
   } finally {
     closeSync(fd);
@@ -98,9 +104,9 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
     const name = String(head.find((o) => o?.type === "agent-name")?.agentName ?? "");
     if (role !== "f1rm:step" && role !== "f1rm:pm") continue;
     const entries = entriesOf(join(dir, file));
-    const step = role === "f1rm:step" ? /^(?:tickets|implement|close)-(\d+)(?:-\d+)?$/.exec(name) : null;
-    if (step) {
-      const s = of(Number(step[1]));
+    const step = role === "f1rm:step" ? specOfStep(name) : null;
+    if (step !== null) {
+      const s = of(step);
       s.coordination = add(s.coordination, tokensOf(entries));
       for (const e of subagentsOf(dir, file)) {
         const ticket = ticketOf(e);

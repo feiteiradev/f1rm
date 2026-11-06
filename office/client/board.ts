@@ -12,16 +12,20 @@ export const CHIP_COLORS: Record<string, number> = {
   publish: 0xc04fb0,
 };
 
-export const boardCounts = (rows: BoardRow[]) => ({
-  total: rows.length,
-  done: rows.filter((r) => r.status === "done").length,
-  blocked: rows.filter((r) => r.status === "blocked").length,
-  publish: rows.filter((r) => r.status === "publish").length,
-});
+/** The ticket rows: a spec's own row on the wall (its branch `spec-<n>`) is no ticket. */
+export const boardCounts = (all: BoardRow[]) => {
+  const rows = all.filter((r) => !r.branch.startsWith("spec-"));
+  return {
+    total: rows.length,
+    done: rows.filter((r) => r.status === "done").length,
+    blocked: rows.filter((r) => r.status === "blocked").length,
+    publish: rows.filter((r) => r.status === "publish").length,
+  };
+};
 
 /** The whole board in a phrase, for the text version. */
 export function boardSummary(rows: BoardRow[]): string {
-  if (!rows.length) return "No tickets";
   const { total, done, blocked, publish } = boardCounts(rows);
+  if (!total) return "No tickets";
   return `${done} of ${total} ${total === 1 ? "ticket" : "tickets"} done${blocked ? `, ${blocked} blocked` : ""}${publish ? `, ${publish} to publish` : ""}`;
 }
