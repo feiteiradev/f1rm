@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createScheduler, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
+import { BUDGET } from "../cost.ts";
 
 const REPO = "/r/app";
 const ME = "owner";
@@ -30,6 +31,7 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     open: async (repo, title, body) => void opened.push(`${repo} ${title}\n${body}`),
     tickets: async () => [],
     costs: () => ({}),
+    stop: async () => {},
     drop: async () => {},
     approve: async () => {},
     ...over,
@@ -203,7 +205,7 @@ test("a decision ticket by the owner shows with its question, options, recommend
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(s.decisions()).toEqual([
-    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, ready: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
+    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, ready: null, raise: null, ticket: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
   ]);
   expect(told).toEqual(["f1rm: app needs a decision: Keep the old API?"]);
 });
@@ -442,4 +444,45 @@ test("a ticket whose parent is only named in its text (## Parent #5, or Part of 
 test("the tickets step links every ticket as a sub-issue and checks it, and links the spec's unlinked tickets instead of publishing them again", () => {
   const prompt = stepArgv("tickets", 7)[6];
   for (const s of ["sub-issue of #7", "--parent 7", "check that #7 lists them", "already exist", "link them"]) expect(prompt, s).toContain(s);
+});
+
+const spent = (units: number) => ({ input: 0, cacheWrite: 0, cacheRead: units * 10, output: 0 }); // cache reads weigh 0.1
+const overBudget = (ticketUnits: number) => ({
+  live: async () => ["implement-7"],
+  tickets: async () => [{ number: 8, title: "slugify", state: "open" as const, blockedBy: 0, labels: [] }],
+  costs: () => ({ 7: { coordination: spent(0), tickets: { 8: spent(ticketUnits) }, other: spent(0), total: ticketUnits, share: 0, warnings: [] } }),
+});
+
+test("a ticket over its budget while the implement step builds it stops that step and opens one high-risk decision ticket, once", async () => {
+  const stopped: string[] = [];
+  const { s, opened } = harness([spec(7, { subIssues: 1 }), ticket(8, 7)], { ...overBudget(BUDGET.m + 1), stop: async (_repo, name) => void stopped.push(name) }, BUILT);
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect(stopped).toEqual(["implement-7"]);
+  expect(opened).toHaveLength(1);
+  expect(opened[0]).toContain("risk=high step=implement-7 spec=7 recommended=1 restart=1 raise=1 ticket=8 drop=3");
+  expect(opened[0]).toContain("1. Give it 50% more\n2. I'll re-scope it\n3. Drop the spec");
+  const under = harness([spec(7, { subIssues: 1 }), ticket(8, 7)], { ...overBudget(BUDGET.m - 1), stop: async (_repo, name) => void stopped.push(name) }, BUILT);
+  await under.s.tick([REPO]);
+  expect([stopped, under.opened]).toEqual([["implement-7"], []]);
+});
+
+test("Give it 50% more raises that ticket's budget and starts its step again; under the raised budget it is not stopped", async () => {
+  const stopped: string[] = [];
+  const asked = decision(50, { body: "<!-- f1rm:decision risk=high step=implement-7 spec=7 recommended=1 restart=1 raise=1 ticket=8 drop=3 -->\nTicket #8 is over its budget.\n\n1. Give it 50% more\n2. I'll re-scope it\n3. Drop the spec\n" });
+  let live: string[] = [];
+  const { s, started, opened, saved } = harness([spec(7, { subIssues: 1 }), ticket(8, 7)], {
+    ...overBudget(BUDGET.m * 1.4),
+    live: async () => live,
+    decisions: async () => [asked],
+    stop: async (_repo, name) => void stopped.push(name),
+  }, { ...BUILT, "budget-8": { at: OLD, asked: true } });
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#50`, 0)).toEqual({ ok: true });
+  expect(saved[REPO]["budget-8"]).toMatchObject({ factor: 1.5 });
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} implement #7`]);
+  live = ["implement-7"];
+  await s.tick([REPO]);
+  expect([stopped, opened]).toEqual([[], []]);
 });

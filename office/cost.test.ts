@@ -57,8 +57,8 @@ test("the PM that published a spec counts as that spec's coordination", () => {
 test("a ticket over its size's warning flags it and stops nothing; a ticket with no size label is medium", () => {
   const dir = transcripts({
     "s1.jsonl": [...named("implement-7", "f1rm:step")],
-    "s1/subagents/a.jsonl": [bash("a", "git checkout -b ticket-8 spec-7"), usage("a", 0, 0, 0, 15_000_000)],
-    "s1/subagents/b.jsonl": [bash("b", "git checkout -b ticket-9 spec-7"), usage("b", 0, 0, 0, 15_000_000)],
+    "s1/subagents/a.jsonl": [bash("a", "git checkout -b ticket-8 spec-7"), usage("a", 0, 0, 0, 3_000_000)],
+    "s1/subagents/b.jsonl": [bash("b", "git checkout -b ticket-9 spec-7"), usage("b", 0, 0, 0, 3_000_000)],
   });
   const seven = specCosts(dir, REPO, { 8: "l" })[7];
   expect(seven.warnings).toEqual([9]);

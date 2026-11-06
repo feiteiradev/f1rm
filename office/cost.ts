@@ -9,8 +9,13 @@ export type Size = "s" | "m" | "l";
 /** A spec's cost: its PM's and step sessions' own turns (the PM's interns too), each ticket's interns, the interns that start no ticket branch (a review, its fix pass, a merge), the total in cost units, the coordination share of output tokens and the tickets over their size's warning. */
 export type SpecCost = { coordination: Tokens; tickets: Record<number, Tokens>; other: Tokens; total: number; share: number; warnings: number[] };
 
-/** The cost units past which a ticket of each size is flagged; nothing stops for it. shortcut: guessed before any measurement, #94 sets them from the dry run. */
-export const WARN: Record<Size, number> = { s: 300_000, m: 1_000_000, l: 3_000_000 };
+/**
+ * Each ticket size's budget in cost units: past it the wall marks the ticket, and the office stops the step that builds it and asks the user (see scheduler.ts).
+ * Set from the dry run (#14, 2026-11-06): the five medium tickets built so far cost 134,484 (#2), 86,562 (#3), 166,211 (#6), 138,631 (#7) and 109,264 (#8)
+ * cost units, a median of 134,484, and a medium budget is 1.5 times that, rounded. shortcut: no small or large ticket has run yet, so they are half and triple the
+ * medium one; measure them with `f1rm cost` once some have, and set each to 1.5 times its own median.
+ */
+export const BUDGET: Record<Size, number> = { s: 100_000, m: 200_000, l: 600_000 };
 
 /** The spec a step session works on, from its name (`tickets-7`, `implement-7`, `close-7-2`); null for any other name. */
 export const specOfStep = (name: string) => {
@@ -123,7 +128,7 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
     const total = s.coordination.output + s.other.output + Object.values(s.tickets).reduce((n, t) => n + t.output, 0);
     s.share = total ? s.coordination.output / total : 0;
     s.total = costUnits(s.coordination) + costUnits(s.other) + Object.values(s.tickets).reduce((n, t) => n + costUnits(t), 0);
-    s.warnings = Object.entries(s.tickets).filter(([n, t]) => costUnits(t) > WARN[sizes[Number(n)] ?? "m"]).map(([n]) => Number(n));
+    s.warnings = Object.entries(s.tickets).filter(([n, t]) => costUnits(t) > BUDGET[sizes[Number(n)] ?? "m"]).map(([n]) => Number(n));
   }
   return specs;
 }

@@ -6,10 +6,10 @@ import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { repoKey, type BoardRow } from "./board.ts";
-import { costUnits, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
+import { BUDGET, costUnits, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
 import { editionFile, readEdition } from "./editions.ts";
 import { FOUNDER_ONLY, ROLE_IDS, roleOfAgentType } from "../people.ts";
-import { machine } from "./machine.ts";
+import { agents, machine } from "./machine.ts";
 import { writePrivate } from "./private.ts";
 import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
@@ -19,11 +19,11 @@ export type Issue = { number: number; title: string; author: string; parent: num
 export type TicketIssue = { number: number; title: string; state: "open" | "closed"; blockedBy: number; labels: string[] };
 export type Step = "tickets" | "implement" | "close";
 /** The steps started per repo, by session name (`tries` starts, `done` the spec's closed tickets at the last one, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced. */
-export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number }>;
+export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number; factor?: number }>;
 /** An open issue labelled `needs-decision`: `at` is when it opened (ms). */
 export type DecisionIssue = { number: number; author: string; body: string; at: number; url: string };
 /** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec, a `ready` option labels it ready-for-agent (a retro's proposal is a draft spec). */
-export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; ready: number[] | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
+export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; ready: number[] | null; raise: number[] | null; ticket: number | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
 
 export type SchedulerDeps = {
   now: () => number;
@@ -53,6 +53,8 @@ export type SchedulerDeps = {
   approve: (repo: string, spec: number) => Promise<void>;
   /** Closes the spec as not planned. */
   drop: (repo: string, spec: number) => Promise<void>;
+  /** Stops the repo's background session of this name (`claude stop`, which keeps its conversation). */
+  stop: (repo: string, name: string) => Promise<void>;
   /** Opens a decision ticket in the repo. */
   open: (repo: string, title: string, body: string) => Promise<void>;
   /** Closes the decision ticket with the answer as its comment (throws what refused that), then takes its label off and writes the answer on its spec. */
@@ -96,6 +98,8 @@ export function decisionOf(body: string) {
     restart: indices(meta.restart, options.length),
     drop: indices(meta.drop, options.length),
     ready: indices(meta.ready, options.length),
+    raise: indices(meta.raise, options.length),
+    ticket: Number(meta.ticket) || null,
     risk: meta.risk === "low" ? ("low" as const) : ("high" as const),
     step: /^(?:tickets|implement|close)-\d+(?:-\d+)?$/.test(meta.step ?? "") ? meta.step! : null,
     spec: Number(meta.spec) || null,
@@ -111,7 +115,7 @@ export function createScheduler(d: SchedulerDeps) {
   let shown: Decision[] = [];
   let walls: Record<string, BoardRow[]> = {};
   /** The whiteboard of a repo's live specs: a row per spec (the step at work, its total and coordination share) and a row per ticket (state, role, cost, a warning). */
-  async function issueBoard(repo: string, specs: Issue[], live: string[]): Promise<BoardRow[] | null> {
+  async function issueBoard(repo: string, specs: Issue[], live: string[]): Promise<{ rows: BoardRow[]; lists: [Issue, TicketIssue[]][]; costs: Record<number, SpecCost>; sizes: Record<number, Size> } | null> {
     const lists: [Issue, TicketIssue[]][] = [];
     for (const spec of specs) {
       const tickets = spec.subIssues ? await d.tickets(repo, spec.number) : [];
@@ -122,7 +126,7 @@ export function createScheduler(d: SchedulerDeps) {
     for (const [, tickets] of lists) for (const t of tickets) for (const l of t.labels) if (/^size:[sml]$/.test(l)) sizes[t.number] = l.slice(5) as Size;
     const costs = d.costs(repo, sizes);
     const k = (units: number) => `${Math.round(units / 1000).toLocaleString("en-US")}k`;
-    return lists.flatMap(([spec, tickets]) => {
+    const rows = lists.flatMap(([spec, tickets]) => {
       const n = spec.number;
       const step = live.find((name) => specOfStep(name) === n);
       const cost = costs[n];
@@ -141,6 +145,7 @@ export function createScheduler(d: SchedulerDeps) {
         }),
       ];
     });
+    return { rows, lists, costs, sizes };
   }
   // A tick and an answer each load a repo's store, await gh, then save it: they run one after the other, so neither saves over the other's change.
   let busy: Promise<unknown> = Promise.resolve();
@@ -156,6 +161,8 @@ export function createScheduler(d: SchedulerDeps) {
     await d.resolve(one.repo, one.number, one.spec, answer);
     started[`answered-${one.number}`] = { at: d.now() };
     if (one.step && (!one.restart || one.restart.includes(option))) delete started[one.step];
+    // Give it 50% more: the ticket's budget grows half again, and it may be stopped again past that.
+    if (one.ticket && one.raise?.includes(option)) started[`budget-${one.ticket}`] = { at: d.now(), factor: (started[`budget-${one.ticket}`]?.factor ?? 1) * 1.5 };
     if (one.spec && one.drop?.includes(option)) await d.drop(one.repo, one.spec).catch((err) => console.log(`scheduler ${basename(one.repo)}: spec #${one.spec} not dropped: ${(err as Error).message}`));
     d.store.save(one.repo, started);
     console.log(`scheduler ${basename(one.repo)}: decision #${one.number} answered`);
@@ -179,6 +186,33 @@ export function createScheduler(d: SchedulerDeps) {
       d.notify(`f1rm: ${basename(repo)} needs a decision`, one.question.split("\n")[0]);
       started[`decision-${i.number}`] = { at: d.now() };
       d.store.save(repo, started);
+    }
+  }
+  /** A ticket past its size's budget (raised by any "50% more") while the implement step builds it: the office stops that step and asks the user, once per budget. */
+  async function overBudget(repo: string, started: Started, board: { lists: [Issue, TicketIssue[]][]; costs: Record<number, SpecCost>; sizes: Record<number, Size> }, live: string[]) {
+    for (const [spec, tickets] of board.lists) {
+      const step = live.find((name) => specOfStep(name) === spec.number && name.startsWith("implement-"));
+      if (!step) continue;
+      for (const t of tickets) {
+        const rec = started[`budget-${t.number}`];
+        const spent = board.costs[spec.number]?.tickets[t.number];
+        const budget = BUDGET[board.sizes[t.number] ?? "m"] * (rec?.factor ?? 1);
+        if (t.state !== "open" || rec?.asked || !spent || costUnits(spent) <= budget) continue;
+        const k = (u: number) => `${Math.round(u / 1000).toLocaleString("en-US")}k`;
+        const title = `Ticket #${t.number} is over its budget`;
+        const body = `<!-- f1rm:decision risk=high step=${step} spec=${spec.number} recommended=1 restart=1 raise=1 ticket=${t.number} drop=3 -->\n${title}: it has spent ${k(costUnits(spent))} cost units of its ${k(budget)} (size ${board.sizes[t.number] ?? "m"}). The office stopped ${step}. Give it more?\n\n1. Give it 50% more\n2. I'll re-scope it\n3. Drop the spec\n`;
+        try {
+          await d.stop(repo, step);
+          await d.open(repo, title, body);
+        } catch (err) {
+          console.log(`scheduler ${basename(repo)}: ticket #${t.number} over budget, not asked: ${(err as Error).message}`);
+          continue;
+        }
+        started[`budget-${t.number}`] = { at: d.now(), factor: rec?.factor ?? 1, asked: true };
+        d.store.save(repo, started);
+        console.log(`scheduler ${basename(repo)}: ${step} stopped, ticket #${t.number} over budget`);
+        return; // the step is stopped: its other tickets wait for the answer
+      }
     }
   }
   return {
@@ -218,7 +252,8 @@ export function createScheduler(d: SchedulerDeps) {
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
           const board = await issueBoard(repo, issues.filter(isSpec), live);
-          if (board) nextWalls[repo] = board;
+          if (board) nextWalls[repo] = board.rows;
+          if (board && !paused) await overBudget(repo, started, board, live);
           if (held || paused) continue;
           const owned = async (i: Issue) => i.author === me && (await d.labeledBy(repo, i.number, "ready-for-agent")) === me;
           const startOnce = async (step: Step, spec: Issue, round = 1, tries = 1) => {
@@ -415,6 +450,10 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
     },
     approve: async (repo, spec) => {
       if ((await gh(repo, ["issue", "edit", String(spec), "--add-label", "ready-for-agent"])) === null) throw new Error(`gh issue edit #${spec} failed`);
+    },
+    stop: async (repo, name) => {
+      const s = (await agents(false))?.find((a) => a?.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo);
+      if (!s || !(await machine.stop(String(s.sessionId ?? s.id)))) throw new Error(`could not stop ${name}`);
     },
     drop: async (repo, spec) => {
       if ((await gh(repo, ["issue", "close", String(spec), "--reason", "not planned", "--comment", "Dropped in the office."])) === null) throw new Error(`gh issue close #${spec} failed`);

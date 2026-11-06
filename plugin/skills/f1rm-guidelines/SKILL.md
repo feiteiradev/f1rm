@@ -45,7 +45,7 @@ A ticket whose role label is none of these is left open with a comment naming it
 
 - **Cost units** weigh tokens by API price relative to input: input 1, cache write 1.25, cache read 0.1, output 5, each message counted once. Anthropic does not publish how the subscription weighs tokens, so price is the proxy.
 - **Attribution.** A step's own turns and the publishing PM's are its spec's coordination; an intern counts toward the ticket branch it starts; interns that start none (review, merges, the fix pass) are the spec's other work. `f1rm cost` prints it per spec, and the office's wall shows each ticket's cost and each spec's coordination share.
-- **Budgets.** Each ticket size (`size:s`, `size:m`, `size:l`; none counts as medium) has a warning past which the wall marks the ticket. Until the dry run measures real costs, nothing stops for it.
+- **Budgets.** Each ticket size (`size:s`, `size:m`, `size:l`; none counts as medium) has a budget, set from the dry run's measured costs. Past it the wall marks the ticket, and while the implement step builds it the office stops that step and opens a high-risk decision ticket: Give it 50% more (the ticket's budget grows half again and the step starts again), I'll re-scope it, or Drop the spec.
 
 ## What the gates enforce
 

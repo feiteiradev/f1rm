@@ -9,7 +9,7 @@ import { answerDecision } from "./approvals.ts";
 const real = { fetch: globalThis.fetch, location: (globalThis as any).location };
 afterEach(() => Object.assign(globalThis, real));
 
-const D: Decision = { id: "/code/shop#12", repo: "/code/shop", number: 12, url: "https://github.com/o/shop/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, ready: null, risk: "low", step: "implement-7", spec: 7, at: 0 };
+const D: Decision = { id: "/code/shop#12", repo: "/code/shop", number: 12, url: "https://github.com/o/shop/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, ready: null, raise: null, ticket: null, risk: "low", step: "implement-7", spec: 7, at: 0 };
 const state = (decisions: Decision[]) => ({ rooms: {}, employees: {}, approvals: [], decisions }) as unknown as OfficeState;
 const open = (decisions: Decision[]) => renderToStaticMarkup(<Tray state={state(decisions)} open0 />);
 
