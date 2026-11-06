@@ -48,7 +48,7 @@ export function HandCard({ state, approval: a }: { state: OfficeState; approval:
 }
 
 /** A decision ticket a step opened: the question, one button per option (the recommendation marked) and the ticket on GitHub. Only the user's browser answers it. */
-export function DecisionCard({ decision: d }: { decision: Decision }) {
+export function DecisionTicket({ decision: d }: { decision: Decision }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function answer(option: number) {
@@ -73,7 +73,7 @@ export function DecisionCard({ decision: d }: { decision: Decision }) {
           </button>
         ))}
       </div>
-      <p className="risk">{d.risk === "low" && d.recommended !== null ? "Low risk: the recommendation is taken 4 hours after the ticket opened if nobody answers." : "High risk: it waits for you."}</p>
+      <p className="risk">{d.risk === "high" ? "High risk: it waits for you." : d.recommended === null ? "Low risk, but no recommendation: it waits for you." : "Low risk: the recommendation is taken 4 hours after the ticket opened if nobody answers."}</p>
       {error && <p className="problem" role="alert">{error}</p>}
     </article>
   );
@@ -148,7 +148,7 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
             <ul>
               {leftovers && <li><LeftoversCard card={leftovers} onDone={(n) => (setNote(n), panel.current?.focus())} /></li>}
               {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
-              {decisions.map((d) => <li key={d.id}><DecisionCard decision={d} /></li>)}
+              {decisions.map((d) => <li key={d.id}><DecisionTicket decision={d} /></li>)}
               {hands.map((a) => <li key={a.id}><HandCard state={state} approval={a} /></li>)}
             </ul>
           )}

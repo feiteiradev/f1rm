@@ -1,4 +1,4 @@
-// The decision card in the Approvals tray: the question, one button per option with the recommendation marked, the risk, a link to the ticket, the badge, and what an answer posts.
+// A decision ticket in the Approvals tray: the question, one button per option with the recommendation marked, the risk, a link to the ticket, the badge, and what an answer posts.
 import { afterEach, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { OfficeState } from "../server/office.ts";
@@ -23,6 +23,7 @@ test("a decision ticket waits in the tray: its question, one button per option w
   expect(h).toContain("Low risk: the recommendation is taken 4 hours after the ticket opened if nobody answers.");
   expect(h).toContain('href="https://github.com/o/shop/issues/12"');
   expect(open([{ ...D, risk: "high", recommended: null }])).toContain("High risk: it waits for you.");
+  expect(open([{ ...D, recommended: null }])).toContain("Low risk, but no recommendation: it waits for you.");
 });
 
 test("an answer posts the picked option to the decision's route", async () => {

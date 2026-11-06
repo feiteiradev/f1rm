@@ -233,3 +233,37 @@ test("an option the ticket does not have, or a write gh refuses, answers nothing
   expect(await s.answer(`${REPO}#12`, 1)).toEqual({ ok: false, error: "GitHub refused the answer: gh: HTTP 403" });
   expect(s.decisions().map((x) => x.number)).toEqual([12]);
 });
+
+test("an answer given while a tick is reading GitHub is kept: that tick's save does not bring the asking step's record back", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let slow = false;
+  const issues = [spec(7, { subIssues: 1 }), ticket(8, 7)];
+  const { s, started } = harness([], {
+    decisions: async () => [decision(12)],
+    ready: async () => (slow ? (await gate, [...issues, spec(5)]) : issues),
+  }, { "tickets-7": { at: 1 }, "implement-7": { at: 2 } });
+  await s.tick([REPO]);
+  slow = true;
+  const ticking = s.tick([REPO]); // starts tickets-5 and saves after the answer below
+  const answering = s.answer(`${REPO}#12`, 1);
+  release();
+  await ticking;
+  expect(await answering).toEqual({ ok: true });
+  slow = false;
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} tickets #5`, `${REPO} implement #7`]);
+});
+
+test("a decision ticket someone else labelled is not shown or answered, and a repo gh can't read keeps its tickets in the tray", async () => {
+  const { s, labels, told, resolved } = harness([], { now: () => 1_000 + 5 * HOUR, decisions: async () => [decision(12)] });
+  labels.set(12, "stranger");
+  await s.tick([REPO]);
+  expect([s.decisions(), told, resolved]).toEqual([[], [], []]);
+  let fails = false;
+  const kept = harness([], { decisions: async () => (fails ? null : [decision(13, { body: decision(13).body.replace("risk=low", "risk=high") })]) });
+  await kept.s.tick([REPO]);
+  fails = true;
+  await kept.s.tick([REPO]);
+  expect(kept.s.decisions().map((x) => x.number)).toEqual([13]);
+});

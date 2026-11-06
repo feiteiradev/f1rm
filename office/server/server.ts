@@ -1765,12 +1765,12 @@ export function startServer({
   }, 15_000);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
   // The tray shows the decision tickets the tick read: a change is pushed to the page.
-  const stepsOnce = async () => {
+  const tickScheduler = async () => {
     const before = JSON.stringify(scheduling!.decisions());
     await scheduling!.tick(registered()).catch((err) => console.log(`scheduler: ${(err as Error).message}`));
     if (JSON.stringify(scheduling!.decisions()) !== before) push();
   };
-  const schedulerTimer = scheduling && setInterval(stepsOnce, scheduler.everyMs);
+  const schedulerTimer = scheduling && setInterval(tickScheduler, scheduler.everyMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     closing.abort();
