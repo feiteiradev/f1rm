@@ -65,3 +65,14 @@ test("a task's row sums its dev and reviewer tokens once per message, and leads 
   expect(md).not.toContain("| beta |");
   expect(md).toContain("| lead | 1 | 100 | 200 | 300 | 400 |");
 });
+
+test("--specs reports each spec of a repo in cost units: coordination, each ticket, the rest, the total and the coordination share, and the tickets over their warning", () => {
+  const dir = mkdtempSync(join(tmpdir(), "baseline-"));
+  const folder = "/code/shop".replace(/[^a-zA-Z0-9]/g, "-");
+  session(dir, folder, "s1.jsonl", [meta("agent-setting", "agentSetting", "f1rm:step"), meta("agent-name", "agentName", "implement-7"), usage("10:00:00", "a", 0, 1000, 0, 0)]);
+  session(dir, folder, "s1/subagents/x.jsonl", [JSON.stringify({ type: "assistant", message: { id: "b", content: [{ type: "tool_use", id: "t", name: "Bash", input: { command: "git checkout -b ticket-8 spec-7" } }] } }), usage("10:01:00", "b", 0, 3000, 0, 0)]);
+  const out = join(dir, "specs.md");
+  run(["--specs", "/code/shop", "--out", out], { merges: [], projectsDir: dir, mainFolder: folder });
+  const text = readFileSync(out, "utf8");
+  expect(text).toContain("| #7 | 5,000 | #8 15,000 | 0 | 20,000 | 25% | none |");
+});
