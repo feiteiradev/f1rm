@@ -819,13 +819,14 @@ export function startServer({
         return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
       }
     }
-    // The sub-agent's one exception to its parent's landing rule is `git commit` inside its worktree (see confinedTo) and the move forward of its branch onto main.
+    // The sub-agent's exceptions to its parent's landing rule are `git commit` and `git merge` inside its worktree (see confinedTo; an office step's interns merge the integration branch and the tickets, as /implement-spec does) and the move forward of its branch onto main.
     // The line sets no GIT_ variable (`export GIT_DIR=…; git commit` points git at main), and the folder is a linked worktree with a branch other than the base checked out.
     let confined = !!worktree && !/\bGIT_[A-Z_]/.test(String(input.command ?? "")) && confinedTo(split, payload.cwd, worktree);
     const lands = (w: string[]) => {
       const call = gitCall(w);
-      if (confined && (call?.sub === "commit" || (call && movesBranch(call))) && !linkedWorktree(payload.cwd, here!, baseBranches(here!), worktree!)) confined = false;
-      if (confined && call?.sub === "commit" && !changesState(split)) return false; // only as the one state-changing command of the line: the gate sees the state before the line runs
+      const own = call?.sub === "commit" || call?.sub === "merge";
+      if (confined && (own || (call && movesBranch(call))) && !linkedWorktree(payload.cwd, here!, baseBranches(here!), worktree!)) confined = false;
+      if (confined && own && !changesState(split)) return false; // only as the one state-changing command of the line: the gate sees the state before the line runs
       if (subOfCoordinator && call && movesBranch(call)) return !(confined && call.sub === "checkout" && movesForwardOnto(payload.cwd, baseBranches(here!), call.rest));
       return LANDING.has(call?.sub ?? "") || ghLands(w);
     };

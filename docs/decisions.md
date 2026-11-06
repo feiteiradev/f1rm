@@ -407,6 +407,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the owners of the flat workflow run each task with an implementer sub-agent in its own worktree instead of a dev session per task. Its calls carry the parent's session id, so the gate took the owner's role for it and refused every write and commit, and the owner flow could not run. A worktree under the repo's own `.claude/worktrees/` is where `f1rm merge` already expects a task's branch, and the main checkout stays closed to everyone but `f1rm merge`.
 - Rejected: letting a lead write product code itself (the owner would hold the code, the review and the landing, which the split keeps apart); a dev session per task (the cap of 8 and a session's cold start per task, the cost the flat workflow removes); letting the sub-agent write anywhere its parent's folder reaches (a slip in the main checkout would land unreviewed); a rule on the sub-agent's name instead of its worktree (a name proves nothing about where it writes).
 - Where: owner-subagents
+- Superseded in part: since 2026-11-06 (One integration branch per spec) the sub-agent may also `git merge` inside its own worktree, on the same terms as its commit.
 
 ## 2026-10-28 Flat workflow
 
@@ -609,7 +610,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: each spec is built on one integration branch, as `/implement-spec` does unchanged: each ticket's implementer works in its own worktree, a merger subagent merges it into the integration branch, and one `code-review` and one fix pass run at the end. `f1rm merge` lands the integration branch on main once, at close, with its checks at spec level (new tests fail on main, the full suite passes on the merge, `.claude/` settings changes refused).
 - Why: main stays untouched until a spec is done (leads hit 268 refusals trying git in main), and the skill runs as written.
 - Rejected: landing each ticket on main through `f1rm merge`, which needs a modified `/implement-spec`.
-- Where: not built; rebuild grilling 2026-11-06, round 3 Q13
+- Where: rebuild grilling 2026-11-06, round 3 Q13; the implement step and the in-worktree merge in #85 (office/server/scheduler.ts, office/server/server.ts), worktree-ticket-85
 
 ## 2026-11-06 Labels pick the roles
 

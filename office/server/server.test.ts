@@ -2320,10 +2320,19 @@ test("a PM's or lead's sub-agent commits in its own worktree; in the main checko
 });
 
 test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push, no landing shapes, no checkout -B off main, no hire, no f1rm merge, no pause", async () => {
-  const { a, main, behind, diverged, bash } = await ownerOffice();
-  const landing = ["git merge main", "git merge --no-ff worktree-add-b", "git rebase main", "git reset --hard HEAD~1", "git cherry-pick abc1234", "git pull", "git am fix.patch", "git revert abc1234", "gh pr merge 3", "git commit -m x && git merge main",
+  const { repo, a, main, behind, diverged, bash } = await ownerOffice();
+  const landing = ["git rebase main", "git reset --hard HEAD~1", "git cherry-pick abc1234", "git pull", "git am fix.patch", "git revert abc1234", "gh pr merge 3",
     `git checkout -B worktree-add-a ${behind}`, `git checkout -B worktree-add-b ${main}`, `git checkout -B scratch ${diverged}`, `git checkout -B scratch HEAD~1`, "git checkout -B worktree-add-a", "git checkout -B worktree-add-a main extra", `git checkout -q -B worktree-add-b ${main}`, `git checkout -Bworktree-add-a ${main}`, "git switch -C worktree-add-a main", `git checkout -B worktree-add-a ${main}; git merge main`];
   for (const id of ["p", "l"]) {
+    // An office step's interns merge inside their own worktree, as /implement-spec does: the integration branch into a ticket's, a ticket's into the integration branch.
+    for (const command of ["git merge main", "git merge --no-ff worktree-add-b", "git merge spec-81 -m 'take the integration tip'", "git add -A && git merge --no-edit worktree-add-b", "git commit -m x && git merge main"]) {
+      expect([id, command, await bash(id, command, a)]).toEqual([id, command, null]);
+    }
+    // Never from the main checkout or into another folder, and never from the parent session itself.
+    for (const [command, cwd, sub] of [[`cd ${repo} && git merge worktree-add-a`, a, true], [`git -C ${repo} merge worktree-add-a`, a, true], ["git merge worktree-add-a", repo, true], ["git merge main", a, false]] as const) {
+      const out = await bash(id, command, cwd, sub);
+      expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
+    }
     for (const command of landing) {
       const out = await bash(id, command, a);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
