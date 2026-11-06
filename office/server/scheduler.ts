@@ -104,7 +104,7 @@ const PROMPTS: Record<Step, (spec: number) => string> = {
     `You run the implement step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `The integration branch is spec-${spec}, created from main; each ticket's branch is ticket-<number>. ` +
     `Start every implementer and merger with the Agent tool and isolation: "worktree", and run the mergers one at a time. ` +
-    `Tell each of them to spell git as /usr/bin/git, as the first word of its own Bash call, with no cd, no -C and no chaining (a plain git is rewritten by the user's shell hook). ` +
+    `Tell each of them to spell git as /usr/bin/git, as the first word of its own Bash call, with no cd, no -C and no chaining (a plain git is rewritten by the user's shell hook), and to start its branch with /usr/bin/git checkout -b ticket-<number> spec-${spec} (the gate refuses checkout -B and switch -C). ` +
     `Open no pull request: close each ticket with a comment naming its merge commit on spec-${spec}. ` +
     `Leave main alone: the office's close step lands spec-${spec}. ` +
     `End when every ticket is closed, or when none can go on: then say why in a comment on #${spec}.`,

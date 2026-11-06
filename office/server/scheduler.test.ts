@@ -128,5 +128,5 @@ test("the implement step builds the spec on spec-<n> with interns in their own w
   expect(argv.slice(0, 6)).toEqual(["claude", "--bg", "--agent", "f1rm:step", "--name", "implement-7"]);
   const prompt = argv[6];
   expect(prompt).toStartWith("/mattpocock-skills:implement-spec #7");
-  for (const s of ["spec-7", "ticket-<number>", 'isolation: "worktree"', "one at a time", "/usr/bin/git", "no pull request", "main"]) expect(prompt).toContain(s);
+  for (const s of ["spec-7", "checkout -b ticket-<number> spec-7", "ticket-<number>", 'isolation: "worktree"', "one at a time", "/usr/bin/git", "no pull request", "main"]) expect(prompt).toContain(s);
 });
