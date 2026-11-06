@@ -782,7 +782,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
   const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm" && r !== "step").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
-  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
+  expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "advisor", "lead"]);
   const designer = roles.find((r) => r.id === "designer");
   const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(import.meta.dir, "../../plugin/agents/designer.md"), "utf8"))![1]) as any;
   expect(designer).toMatchObject({ title: "Designer", description: fm.description, model: fm.model, skills: fm.skills, working: 2 });
@@ -1464,16 +1464,16 @@ async function held(r: Response) {
   return body ? JSON.parse(body).hookSpecificOutput : null;
 }
 
-test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's is denied, and so is its intern's", async () => {
+test("only the PM, a lead and the user's own sessions run `f1rm hire`; a specialist's (an advisor's too) is denied, and so is its intern's", async () => {
   start();
   const as = (id: string, agent_type?: string) => hook({ ...common(id, "UserPromptSubmit"), prompt: "go", ...(id === "l" && { session_title: "lead-checkout" }), ...(agent_type && { agent_type }) });
-  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
-  await office((s) => Object.keys(s.employees).length === 5);
+  for (const [id, type] of [["p", "f1rm:pm"], ["l", "f1rm:lead"], ["d", "f1rm:designer"], ["a", "f1rm:advisor"], ["v", "f1rm:reviewer"], ["f", undefined]] as const) await as(id, type);
+  await office((s) => Object.keys(s.employees).length === 6);
   const run = (id: string, command: string, extra = {}) => hook({ ...preToolUse(id, "Bash", { command }), ...extra });
   expect(await held(await run("p", "f1rm hire lead lead-checkout checkout 'Task: a'"))).toBeNull();
   for (const id of ["l", "f"]) expect(await held(await run(id, "f1rm hire --team checkout designer checkout.designer-a a 'Task: a'"))).toBeNull();
-  for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
-    const out = await held(await run("d", command));
+  for (const id of ["d", "a"]) for (const command of ["f1rm hire designer designer-a a brief", "cd /code/shop && bun office/cli/f1rm.ts hire reviewer reviewer-a a b"]) {
+    const out = await held(await run(id, command));
     expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
     expect(out.permissionDecisionReason).toContain("Only the PM and team leads hire");
   }
@@ -2468,7 +2468,7 @@ test("a Founder project lists and hires the founder roles; a Work project, or on
 
   const setEdition = (edition: string) => ui("edition", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ room: ROOM, edition }) });
   expect((await setEdition("founder")).status).toBe(200);
-  expect(await ids()).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", ...founder, "lead"]);
+  expect(await ids()).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "advisor", ...founder, "lead"]);
   expect((await hireOf(marketer)).status).toBe(200);
   expect(spawned.at(-1)!.argv.slice(2, 4)).toEqual(["--agent", "f1rm:marketer"]);
   expect((await setEdition("work")).status).toBe(200);

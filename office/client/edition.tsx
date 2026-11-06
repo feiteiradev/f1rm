@@ -33,7 +33,7 @@ export function EditionAsk({ room, name, onClose }: { room: string; name: string
       <h2 id={`${id}-title`}>What kind of project is {name}?</h2>
       <dl id={`${id}-what`}>
         <dt>Work</dt>
-        <dd>The engineering company: designers, developers, a reviewer and a researcher.</dd>
+        <dd>The engineering company: designers, developers, a reviewer, a researcher and an advisor.</dd>
         <dt>Founder</dt>
         <dd>All of that, plus marketing, SEO, social media, sales and strategy, for a product of your own.</dd>
       </dl>

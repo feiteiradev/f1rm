@@ -2,7 +2,7 @@
 // Shared by the server (which assigns names) and the client (which draws them), so it imports nothing.
 
 // A look is a seed that packs three sprite choices; the sprite sheet offers this many of each.
-const SKINS = 3, SHIRTS = 12, HAIRS = 6;
+const SKINS = 3, SHIRTS = 13, HAIRS = 6;
 const look = (skin: number, shirt: number, hair: number) => skin + SKINS * (shirt + SHIRTS * hair);
 export const decodeLook = (seed: number) => ({
   skin: seed % SKINS,
@@ -22,6 +22,7 @@ export const ROLES = {
   backend: { title: "Backend dev", shirt: 3 },
   reviewer: { title: "Reviewer", shirt: 4 },
   researcher: { title: "Researcher", shirt: 5 },
+  advisor: { title: "Advisor", shirt: 12 },
   marketer: { title: "Marketer", shirt: 7 },
   seo: { title: "SEO specialist", shirt: 8 },
   social: { title: "Social media", shirt: 9 },
@@ -41,6 +42,7 @@ const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:backend-dev": "backend",
   "f1rm:reviewer": "reviewer",
   "f1rm:researcher": "researcher",
+  "f1rm:advisor": "advisor",
   "f1rm:marketer": "marketer",
   "f1rm:seo-specialist": "seo",
   "f1rm:social-media": "social",

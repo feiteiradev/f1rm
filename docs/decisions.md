@@ -639,3 +639,17 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a cached install has no `step` agent, so the office's `claude --agent f1rm:step` would fail until the plugin updates.
 - Rejected: none.
 - Where: worktree-ticket-83
+
+## 2026-11-06 The advisor role tests core decisions against the why
+
+- Decision: a thirteenth role, `advisor` (`plugin/agents/advisor.md`, on opus, starting with `mattpocock-skills:domain-modeling` and `mattpocock-skills:research`), keeps the why of the user's products in `~/.f1rm/kept/<repo>/advisor/why.md` and tests decisions against it, each consultation a fresh hire (a `why` task or a `test` task) recorded in `~/.f1rm/kept/<repo>/advisor/ledger.md`. Before a lead sends the user a round that holds a core decision, and before it takes its own recommended option on one in place of asking, it hires an advisor `test` task into its team (the neutral question in the brief's Context, its recommendation in the Inputs); the verdict line goes under the round item word for word, and a STRAINS or BREAKS verdict sets aside an order to take the recommended option, so that item goes to the user. A lead hires it into its team or the user starts it; it is a Work role, not Founder-only; the office blocks its `f1rm hire` like any specialist's; it writes no file of the repo. Its note's direction word is PROCEED, not GO, which the role files and guidelines retired as a message keyword.
+- Why: the user decided it on 2026-11-05 in feit's `docs/decisions.md` ("An advisor role for the office"): one role keeps the why and tests decisions against it, before a lead sends him a round on a core decision and before a lead takes its own recommended option under his standing order to take recommended options, under which a lead's recommendation had been the only check. The research behind the draft keeps it honest by structure rather than tone: a verdict written before the recommendation is read, a quoted clause of the why behind every verdict, a sourced case against with its strength, a kill criterion with a date, and no change of verdict on pushback alone. Work rather than Founder-only: the lead's step it serves runs in every project, and `f1rm hire` refuses a Founder-only role to a Work project's lead.
+- Rejected: a devil's advocate that disagrees on every call (argued dissent works better than role-played disagreement); two roles, a keeper of the why and a tester (a role and a hop more, and a fresh hire per task already keeps the tester from defending a digest it wrote); Founder-only, which the research suggested for "a product of the user's own" while leaving Work projects open.
+- Where: advisor-role
+
+## 2026-11-06 Plugin 0.7.0
+
+- Decision: bump to 0.7.0 for the `f1rm:advisor` role.
+- Why: a cached install has no `advisor` agent, so `f1rm hire`'s `claude --agent f1rm:advisor` would fail until the plugin updates.
+- Rejected: none.
+- Where: advisor-role

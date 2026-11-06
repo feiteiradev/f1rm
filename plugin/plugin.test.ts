@@ -18,6 +18,7 @@ const ROLES: Record<string, string[]> = {
   "backend-dev": ["pstack:poteto-mode", "mattpocock-skills:tdd"],
   reviewer: ["code-review", GUIDELINES, "ponytail:ponytail-review", "mattpocock-skills:code-review"],
   researcher: ["mattpocock-skills:research"],
+  advisor: ["mattpocock-skills:domain-modeling", "mattpocock-skills:research"],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
   "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica", "hook-writer-sms", "carousel-writer-sms"],
@@ -35,7 +36,7 @@ const role = (name: string) => parts(join(PLUGIN, "agents", `${name}.md`));
 const guidelines = readFileSync(join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), "utf8");
 const section = (heading: string) => guidelines.split(/^## /m).find((s) => s.startsWith(heading + "\n")) ?? "";
 
-test("the plugin ships exactly the twelve roles and the office step", () => {
+test("the plugin ships exactly the thirteen roles and the office step", () => {
   expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual([...Object.keys(ROLES), "step"].map((r) => `${r}.md`).sort());
 });
 
@@ -331,7 +332,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire", "resume-all", "stop-all"]);
-  expect(details.out).toMatch(/Agents \(13\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(14\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 
@@ -381,12 +382,24 @@ test("pm.md reads the milestones file at pickup, writes the milestone's section 
   expect(role("researcher").body).toContain("Change no other files except `docs/decisions.md`");
 });
 
+test("a lead has an advisor test a core decision against the why before it asks the user or takes its own option, and a STRAINS or BREAKS verdict goes to the user", () => {
+  const rule = section("Who talks to whom").split("\n").find((l) => l.includes("**An advisor tests each core decision first.**")) ?? "";
+  for (const s of ["Before a lead sends the user a round that holds a core decision", "before it takes its own recommended option on a core decision", "an advisor `test` task", "word for word", "STRAINS or BREAKS", "asks the user that item instead"]) expect(rule, s).toContain(s);
+  expect(rule).not.toMatch(/feit|Pedro/);
+  const lead = role("lead").body;
+  for (const s of ["an advisor `test` task", "STRAINS or BREAKS"]) expect(lead, s).toContain(s);
+  const advisor = role("advisor");
+  expect(String(advisor.fm.tools).split(/,\s*/)).not.toContain("Edit"); // it changes no file of the repo
+  for (const s of ["`why`", "`test`", "~/.f1rm/kept/<repo>/advisor/why.md", "~/.f1rm/kept/<repo>/advisor/ledger.md", "FITS | STRAINS | BREAKS", "Never hire or start a session", "`<team>.advisor-<task>`"]) expect(advisor.body, s).toContain(s);
+  expect(advisor.body).not.toMatch(/feit|Pedro|Hired by the PM/);
+});
+
 test("the lead and the Reviewer carry their part of the decisions log", () => {
   expect(role("lead").body).toContain("docs/decisions.md has the entry");
   expect(role("reviewer").body).toMatch(/every `docs\/decisions\.md` entry the brief asks for.*blocks/);
 });
 
-const SPECIALISTS = ["designer", "frontend-dev", "backend-dev", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"];
+const SPECIALISTS = ["designer", "frontend-dev", "backend-dev", "researcher", "advisor", "marketer", "seo-specialist", "social-media", "sales", "strategist"];
 const pmStep = (n: number) => new RegExp(`^${n}\\. .*$`, "m").exec(role("pm").body)?.[0] ?? "";
 const cliSource = () => readFileSync(join(REPO, "office", "cli", "f1rm.ts"), "utf8");
 const pmPromptText = () => /const pmPrompt[\s\S]*?`;/.exec(cliSource())![0];
@@ -1322,8 +1335,8 @@ test("flat: a simple task whose DONE has no landable commit is checked by the PM
   expect(pluginReadme()).toContain("its simple tasks' devs");
 });
 
-test("flat: the plugin is 0.6.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.6.0");
+test("flat: the plugin is 0.7.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.7.0");
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const flat = entries.find((e) => e.startsWith("2026-10-28 Flat workflow\n")) ?? "";
   for (const s of ["f1rm hire --simple", "f1rm merge", "implementer", "plan once", "baseline-2026-10.md", "11099a6", "f517e70", "flat-prose"]) expect(flat, s).toContain(s);

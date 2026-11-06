@@ -335,7 +335,7 @@ const linkedWorktree = (cwd: string, gitDir: string, bases: string[], worktree: 
   }
 };
 const isLink = (file: string) => { try { return lstatSync(file).isSymbolicLink(); } catch { return false; } };
-const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "marketer", "seo", "social", "sales", "strategist"]);
+const SPECIALISTS = new Set(["designer", "frontend", "backend", "reviewer", "researcher", "advisor", "marketer", "seo", "social", "sales", "strategist"]);
 // A team member's message that opens with one of these words, after anything that is no letter or digit (markdown, an emoji, a table bar) and a list number (`1.`, `2)`), is a formal report: it goes to its lead only.
 const FORMAL_REPORT = /^[^A-Za-z0-9]*(?:\d+[.)][^A-Za-z0-9]*)?(?:DONE|APPROVED|BLOCKED|ESCALATE|CHANGES[\s_-]+REQUESTED|NEEDS[\s_-]+YOU)(?![A-Za-z0-9])/;
 // The user's real home folder, as the system has it, never the HOME the office runs with: a second office is started with a temp one.

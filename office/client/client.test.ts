@@ -57,11 +57,11 @@ test("each role wears its own shirt, while skin and hair vary by session; the le
   expect(new Set(designers.map((l) => l.shirt))).toEqual(new Set([ROLES.designer.shirt]));
   expect(new Set(designers.map((l) => `${l.skin}/${l.hair}`)).size).toBeGreaterThan(5);
   const freelancers = new Set(Array.from({ length: 200 }, (_, i) => decodeLook(seedFor({ sessionId: `f-${i}`, role: null })).shirt));
-  for (const r of ["lead", "marketer", "seo", "social", "sales", "strategist"] as const) expect(freelancers.has(ROLES[r].shirt)).toBe(false);
+  for (const r of ["lead", "advisor", "marketer", "seo", "social", "sales", "strategist"] as const) expect(freelancers.has(ROLES[r].shirt)).toBe(false);
 });
 
 test("an intern never wears a role's shirt, only one of the six plain ones", () => {
-  const roleShirts = new Set<number>(((["lead", "marketer", "seo", "social", "sales", "strategist"]) as const).map((r) => ROLES[r].shirt));
+  const roleShirts = new Set<number>(((["lead", "advisor", "marketer", "seo", "social", "sales", "strategist"]) as const).map((r) => ROLES[r].shirt));
   const shirts = Array.from({ length: 300 }, (_, i) => decodeLook(internSeed(`agent-${i}`)).shirt);
   for (const s of shirts) {
     expect(roleShirts.has(s)).toBe(false);
@@ -74,7 +74,7 @@ test("only f1rm's own agent types are roles", () => {
   const cases: [unknown, RoleId | undefined][] = [
     ["f1rm:designer", "designer"], ["f1rm:frontend-dev", "frontend"], ["f1rm:backend-dev", "backend"], ["f1rm:pm", "pm"], ["f1rm:lead", "lead"],
     ["f1rm:marketer", "marketer"], ["f1rm:seo-specialist", "seo"], ["f1rm:social-media", "social"], ["f1rm:sales", "sales"], ["f1rm:strategist", "strategist"], ["f1rm:seo", undefined],
-    ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"],
+    ["f1rm:reviewer", "reviewer"], ["f1rm:researcher", "researcher"], ["f1rm:advisor", "advisor"],
     ["f1rm:pm-dev", undefined], ["f1rm:designer-dev", undefined], ["f1rm:frontend", undefined], ["f1rm:backend", undefined],
     ["designer", undefined], ["other:designer", undefined], ["f1rm:janitor", undefined], ["f1rm:toString", undefined],
     ["Explore", undefined], ["", undefined], [undefined, undefined], [7, undefined],

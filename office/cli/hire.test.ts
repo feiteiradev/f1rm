@@ -208,6 +208,7 @@ test.each([
   ["frontend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
   ["backend-dev", "/pstack:poteto-mode Before you start, load these with the Skill tool: mattpocock-skills:tdd."],
   ["researcher", "/mattpocock-skills:research"],
+  ["advisor", "/mattpocock-skills:domain-modeling Before you start, load these with the Skill tool: mattpocock-skills:research."],
 ])("a %s brief starts with its slash commands: %s", (role, commands) => {
   const stub = stubClaude([]);
   hire(stub, [...pmArgs, role, `${role}-x`, "x", BRIEF]);

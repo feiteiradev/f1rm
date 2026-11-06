@@ -2,7 +2,7 @@
 
 A pixel-art office for your Claude Code sessions. Every session on your Mac is an employee at a desk, in the office of the project it works on. You see who is working, reading, running a command, waiting for permission or on a coffee break. Someone shows as working only while their process is live and `claude agents` calls them busy or one of their hook events came in the last 90 seconds; otherwise they are idle, or offline once their process is gone. Click someone to jump to their terminal, ask them a question without interrupting them, or tell them something they read at their next step.
 
-f1rm also ships a company: a Claude Code plugin with twelve roles (PM, Team lead, Designer, Frontend dev, Backend dev, Reviewer, Researcher and five Founder roles) and the guidelines they work by. You talk to the PM, which starts a team lead for each piece of work you ask for.
+f1rm also ships a company: a Claude Code plugin with thirteen roles (PM, Team lead, Designer, Frontend dev, Backend dev, Reviewer, Researcher, Advisor and five Founder roles) and the guidelines they work by. You talk to the PM, which starts a team lead for each piece of work you ask for.
 
 ![The f1rm lobby, a Work project with its PM waiting for you at the table, the PM's panel, and a Founder project's launch team](docs/f1rm.gif)
 
