@@ -1695,7 +1695,8 @@ describe("no spawn caps, and the PM starts leads on request", () => {
 
 test("a ticket's role label picks its intern's skills from the role files: the designer, the researcher and the five Founder roles", async () => {
   const { roleSkills } = await import("../office/server/scheduler.ts");
-  expect(roleSkills()).toEqual({
+  expect(roleSkills(false)).toEqual({ designer: ROLES.designer, researcher: ROLES.researcher });
+  expect(roleSkills(true)).toEqual({
     designer: ROLES.designer,
     researcher: ROLES.researcher,
     marketer: ROLES.marketer,

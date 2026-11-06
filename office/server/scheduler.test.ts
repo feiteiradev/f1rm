@@ -358,13 +358,16 @@ test("a restart re-checks that the spec is still the user's: a label someone els
   expect(started).toEqual([]);
 });
 
-test("the implement step gives each intern its ticket's role skills: test-first with no role label, the role's skills for a role label, a comment for an unknown one", () => {
-  const prompt = stepArgv("implement", 7)[6];
-  for (const s of ["role:designer → design-pipeline", "role:researcher → mattpocock-skills:research", "role:marketer → cro, anthropic-skills:content-creator, brandkit", "no role label → mattpocock-skills:tdd", "comment on the ticket naming the label"]) expect(prompt).toContain(s);
-  for (const s of ["role:lead", "role:reviewer", "role:frontend-dev", "role:backend-dev"]) expect(prompt).not.toContain(s);
+test("the implement step gives each intern its ticket's role skills in place of tdd, test-first with no role label, and a comment for an unknown one; the Founder roles only in a Founder project", () => {
+  const founder = stepArgv("implement", 7, 1, true)[6];
+  for (const s of ["in place of tdd", "role:designer → design-pipeline", "role:researcher → mattpocock-skills:research", "role:marketer → cro, anthropic-skills:content-creator, brandkit", "no role label → mattpocock-skills:tdd", "comment on the ticket naming the label"]) expect(founder).toContain(s);
+  for (const s of ["role:lead", "role:reviewer", "role:frontend-dev", "role:backend-dev"]) expect(founder).not.toContain(s);
+  const work = stepArgv("implement", 7)[6];
+  expect(work).toContain("role:designer → design-pipeline");
+  expect(work).not.toContain("role:marketer");
 });
 
-test("the tickets step labels each ticket that is not code with its role", () => {
-  const prompt = stepArgv("tickets", 7)[6];
-  expect(prompt).toContain("role:designer, role:researcher, role:marketer, role:seo-specialist, role:social-media, role:sales, role:strategist");
+test("the tickets step labels each ticket that is not code with its role, the Founder roles only in a Founder project", () => {
+  expect(stepArgv("tickets", 7, 1, true)[6]).toContain("(role:designer, role:researcher, role:marketer, role:seo-specialist, role:social-media, role:sales, role:strategist)");
+  expect(stepArgv("tickets", 7)[6]).toContain("(role:designer, role:researcher)");
 });
