@@ -13,9 +13,6 @@ import { AskBox, History, useHistory } from "./ask.tsx";
 import { BoardList, BoardPanel } from "./board.tsx";
 import { Progress } from "./progress.tsx";
 import { EditionAsk, EditionSelect } from "./edition.tsx";
-import { HireDialog } from "./hire.tsx";
-import { TopicDialog } from "./topic.tsx";
-import { liveLeads } from "./topic.ts";
 import { JumpButton, OnEnded, Palette } from "./jump.tsx";
 import { ENDED, without } from "./jump.ts";
 import { connectLive, OFFICE_DOWN, whyDown } from "./live.ts";
@@ -40,9 +37,6 @@ const IDLE_TEXT = "On a coffee break";
 const statusText = (e: { role: string | null; status: Status }) => (e.role === "pm" && e.status === "idle" ? "Waiting for you" : STATUS_TEXT[e.status]);
 const DEMO = import.meta.env.MODE === "demo";
 const NOBODY: OfficeState = { rooms: {}, employees: {}, interns: {} };
-/** The teams with a lead in the room, which a hire can join. */
-const teamsIn = (state: OfficeState, room: string) =>
-  [...new Set(Object.values(state.employees).filter((e) => e.room === room && e.role === "lead").map(teamOf).filter((t) => t !== null))].sort();
 
 function Counter({ state }: { state: OfficeState }) {
   const counts = statusCounts(state);
@@ -342,8 +336,6 @@ function Office() {
   // The socket handler is set up once, so it calls the latest `go` through a ref.
   const goRef = useRef(go);
   goRef.current = go;
-  const [hiring, setHiring] = useState(false);
-  const [topicing, setTopicing] = useState(false);
   // "Not now" on the edition question lasts until the project is left.
   const [notNow, setNotNow] = useState<string | null>(null);
   const left = useRef<string | null>(null);
@@ -378,6 +370,12 @@ function Office() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
+  // New spec: a PM in a new iTerm tab, which interviews the user and publishes the spec; the office builds it from there.
+  async function newSpec() {
+    const say = (text: string) => (setToast(text), clearTimeout(toastTimer.current), (toastTimer.current = setTimeout(() => setToast(null), 5000)));
+    if (DEMO) return say("Starting a PM needs a live office; this is a recording.");
+    if (inside) say((await post("start-pm", { room: inside })) ?? "Starting a PM in a new iTerm tab: tell it what you want built.");
+  }
 
   // A project the office doesn't have (an old link, or everyone left and the server forgot it) shows the lobby with a note.
   const inside = open !== null && state?.rooms[open] ? open : null;
@@ -401,8 +399,7 @@ function Office() {
           </button>
         )}
         {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
-        {inside && isProject(inside) && <button className="hire-btn" onClick={() => setHiring(true)}>Hire</button>}
-        {inside && isProject(inside) && <button className="hire-btn" onClick={() => setTopicing(true)}>New topic</button>}
+        {inside && isProject(inside) && <button className="hire-btn" onClick={newSpec}>New spec</button>}
         {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state?.plugin && <p className="offline" role="status">The installed f1rm plugin is {state.plugin.installed}, older than this office's {state.plugin.office}: run <code>claude plugin update f1rm@f1rm</code>, then start new sessions.</p>}
@@ -413,17 +410,15 @@ function Office() {
         {view && <Counter state={view} />}
       </header>
       <main>
-        {inside && view ? <Project key={inside} room={inside} state={view} onHire={() => setHiring(true)} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
+        {inside && view ? <Project key={inside} room={inside} state={view} onHire={newSpec} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}
         {!state && <p className="note">Connecting…</p>}
         {empty && <p className="note">The office is empty. Start <code>claude</code> in any terminal and an employee arrives.</p>}
         {state && open !== null && !inside && !empty && <p className="note low">That project isn't in the office right now.</p>}
       </main>
-      {inside && isProject(inside) && state?.editions && !state.editions[inside] && notNow !== inside && !hiring && !DEMO && (
+      {inside && isProject(inside) && state?.editions && !state.editions[inside] && notNow !== inside && !DEMO && (
         <EditionAsk key={inside} room={inside} name={state.rooms[inside].name} onClose={() => setNotNow(inside)} />
       )}
       {toast && <p className="note low pm-note toast" role="status">{toast}</p>}
-      {topicing && inside && isProject(inside) && state && <TopicDialog key={inside} room={inside} name={state.rooms[inside].name} live={liveLeads(state, inside)} onClose={() => setTopicing(false)} />}
-      {hiring && inside && isProject(inside) && state && <HireDialog key={inside} room={inside} name={state.rooms[inside].name} pm={Object.values(state.employees).find((e) => e.room === inside && e.role === "pm") ?? null} teams={teamsIn(state, inside)} onClose={() => setHiring(false)} />}
     </OnEnded.Provider>
   );
 }

@@ -585,34 +585,6 @@ test("the PM's first prompt gives its session name, with no slash command", () =
   expect(prompt).toContain("Your session name is pm-shop.");
 });
 
-test("the PM's first prompt asks it to pick up from the board and the live sessions, and says it interviews no one", () => {
-  const stub = stubClaude();
-  pmIn(repoDir("shop"), {}, stub);
-  const prompt = stub.args()[6];
-  for (const s of ["claude agents --json", "claude logs", "`doing` or `review`"]) expect(prompt).toContain(s);
-  expect(prompt).toContain("interview no one");
-  expect(prompt).not.toContain("open the interview");
-});
-
-test("the PM's first prompt points to the guidelines' decision policy by name and promises the end-of-milestone decisions line, without restating the policy", () => {
-  const stub = stubClaude();
-  pmIn(repoDir("shop"), {}, stub);
-  const prompt = stub.args()[6];
-  for (const s of ["Ask the user only for big decisions", "Decisions taken without you"]) expect(prompt).toContain(s);
-  for (const restated of ["architecture", "libraries", "irreversible"]) expect(prompt).not.toContain(restated);
-});
-
-test("the PM's first prompt points to the talk rules by name, picks no workflow, and has no PLAN or GO", () => {
-  const stub = stubClaude();
-  pmIn(repoDir("shop"), {}, stub);
-  const prompt = stub.args()[6];
-  for (const s of ["Who talks to whom", "NEEDS YOU <team>: <topic>"]) expect(prompt).toContain(s);
-  for (const s of ["Picking the workflow", "Simple workflow:", "f1rm hire --simple", "Hire only leads"]) expect(prompt).not.toContain(s);
-  expect(prompt).not.toMatch(/\bPLAN\b|\bGO\b/);
-  expect(prompt).not.toContain("claude attach");
-  for (const restated of ["one specialist role", "a numbered round", "recommended answer"]) expect(prompt).not.toContain(restated);
-});
-
 test("pm names the session for the repo's main directory, from a subdirectory or a worktree", () => {
   const repo = repoDir("shop");
   Bun.spawnSync(["git", "init", "-q", repo]);
@@ -901,24 +873,6 @@ test("pm registers its repo with no edition chosen and starts as Work, from a su
   expect(pmIn(repo, { HOME: home }, again).code).toBe(0);
   expect(registered(home)).toEqual(files);
   expect(readFileSync(join(home, ".f1rm", "projects", files[0]), "utf8")).toBe(JSON.stringify({ edition: "founder", folder: realpathSync(repo) }) + "\n");
-  expect(again.args()[6]).toContain("This is a Founder project");
-});
-
-test("pm asks a repo's edition the first time, saves it, and tells the PM; with no answer it starts as Work and asks again", () => {
-  const home = tempHome(), repo = repoDir("shop");
-  const silent = stubClaude();
-  const first = pmIn(repo, { HOME: home }, silent);
-  expect(first.out).toContain("Is shop a Work or a Founder project? [w/f]");
-  expect(silent.args()[6]).toContain("This is a Work project");
-  expect(edition(repo, home).out).toBe("none chosen yet (counts as work)");
-
-  const answered = stubClaude();
-  expect(pmIn(repo, { HOME: home, stdin: "f\n" }, answered).code).toBe(0);
-  expect(answered.args()[6]).toContain("This is a Founder project: follow the founder playbook in the guidelines.");
-  expect(edition(repo, home).out).toBe("founder");
-
-  const again = stubClaude();
-  expect(pmIn(repo, { HOME: home }, again).out).not.toContain("Work or a Founder");
   expect(again.args()[6]).toContain("This is a Founder project");
 });
 

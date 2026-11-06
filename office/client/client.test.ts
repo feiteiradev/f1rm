@@ -10,7 +10,6 @@ import { alwaysNote, argsText, cardOf, handsOf, NEEDS_YOU, needsYouTag } from ".
 import type { Approval } from "../server/approvals.ts";
 import { post } from "./post.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
-import { TASK_NAME, taskFrom } from "./hire.ts";
 import { showsLeadTag } from "./lead.ts";
 import { LEAD_TAG } from "./art.ts";
 
@@ -263,15 +262,6 @@ test("the tray shows a Bash command whole and any other tool's arguments as inde
   );
   expect(argsText("Bash", { command: 7 })).toBe('{\n  "command": 7\n}');
   expect(argsText("Bash", undefined)).toBe("");
-});
-
-test("the Hire dialog's task name comes from the brief's first words and always passes the server's check", () => {
-  expect(taskFrom("Design the login page. Reply OK and stop.")).toBe("design-the-login-page");
-  expect(taskFrom("  Fix: `f1rm hire` (v2)!! ")).toBe("fix-f1rm-hire-v2");
-  expect(taskFrom("Add a very-long-hyphenated-compound-wordthatgoesonandonandon here")).toBe("add-a-very-long");
-  expect(taskFrom("x".repeat(60))).toBe("x".repeat(40));
-  expect(taskFrom("日本語 ...")).toBe("");
-  for (const brief of ["Design the login page", "a b c d e f", "A".repeat(50) + "-b"]) expect(taskFrom(brief)).toMatch(TASK_NAME);
 });
 
 test("a Founder project's room is marked founder, and its board counts what waits to be published", async () => {

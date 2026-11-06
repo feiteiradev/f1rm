@@ -485,6 +485,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: one build is about 0.6 h per task; milestones lost days to usage-limit stops and coordination tokens; results went wrong (wrong thing built, buggy, wrong design).
 - Rejected: the one-PM front door.
 - Where: topic-prose (plugin/agents/pm.md, plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+- Superseded: since 2026-11-06 (Labels pick the roles) the PM interviews the user, publishes the spec and stops; it starts no lead (#84).
 
 ## 2026-11-03 Preview before building visible work
 
@@ -555,6 +556,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants to ask the PM for work and hear only when a lead needs him, not go to the New topic button.
 - Rejected: the PM relays the lead's questions and answers; the New topic button as the only way.
 - Where: rules-text
+- Superseded: since 2026-11-06 (Labels pick the roles) the PM interviews the user, publishes the spec and stops; it starts no lead (#84).
 
 ## 2026-11-06 Rebuild the company layer, keep the office
 

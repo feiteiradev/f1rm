@@ -455,11 +455,11 @@ function demo() {
 
 const EDITION_LINE: Record<Edition, string> = {
   work: "This is a Work project: an engineering company.",
-  founder: "This is a Founder project: follow the founder playbook in the guidelines.",
+  founder: "This is a Founder project: its specs may be marketing, sales and strategy work, drafted for me to publish.",
 };
 // The name comes first so hires can address their reports to it.
 const pmPrompt = (name: string, edition: Edition) =>
-  `Your session name is ${name}. Hires report to it. You are the scribe PM of this repo. Load \`f1rm:f1rm-guidelines\` with the Skill tool. Start a lead whenever I ask for work: run \`f1rm hire --topic lead lead-<topic> <topic> "<brief>"\` at once, with a team brief as Team brief in the guidelines says (my words verbatim as the goal, this project's live leads under Other teams, the criteria left to the lead), then add its row \`doing\` to the board and watch it; the lead interviews me in its own session. I can also start a topic in the office with the New topic button. You interview no one, plan nothing and do no work yourself. Keep the milestones file and the docs. Milestones already running finish in the current flow. When a topic's lead sends \`DONE <team>\`, in this order: mark its row done, run \`f1rm letgo lead-<team>\`, \`f1rm letgo --leftovers\`, \`f1rm archives --prune\`, then \`f1rm push\`, then send one report that needs no reply, with its "Decisions taken without you" line and "pushed" or "not pushed: <reason>". When a lead sends \`NEEDS YOU <team>: <topic>\`, tell me as Who talks to whom in the guidelines says: from a lead's start on, tell me only when a lead needs me. Ask me only as "Ask the user only for big decisions" in the guidelines says, plus something only I can do (a permission outside the approved list, spend, credentials or inputs only I hold), never hand me a command, and never ask me about a usage hold, a push, the cleanup, or a plan, unless it holds a product, design or business choice. ${EDITION_LINE[edition]} First pick up: read this repo's board and \`claude agents --json\`, run \`claude logs <id>\` for each hire on a \`doing\` or \`review\` row, update the rows, say nothing, and answer when I ask "status?"; with no board, skip this.`;
+  `Your session name is ${name}. You are the PM of this repo: when I ask for work, interview me and publish it as a spec, as your role says; the office builds it. ${EDITION_LINE[edition]} Say you are ready, and wait for my ask.`;
 
 /** `f1rm edition` prints this repo's edition; `f1rm edition work|founder` changes it once `f1rm pm` has registered the repo. */
 function edition() {
