@@ -554,3 +554,80 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user wants to ask the PM for work and hear only when a lead needs him, not go to the New topic button.
 - Rejected: the PM relays the lead's questions and answers; the New topic button as the only way.
 - Where: rules-text
+
+## 2026-11-06 Rebuild the company layer, keep the office
+
+- Decision: the company layer (the guidelines prose, the twelve role files and the boards, briefs and kept files in `~/.f1rm`) is replaced by the mattpocock-skills spec workflow (`/to-spec`, `/to-tickets`, `/implement-spec`, `/wayfinder`, `/triage`, `/retro`), used as installed and never copied into f1rm; cc-sdd is the fallback if `/implement-spec` fails the dry run. The office, the CLI and the gates stay: `f1rm merge` and its red check, the push, settings and permission-flag gates, the permission card, the usage holds, pause and checkpoint, Docker tags. The rebuild is done when one feature runs on a sample repo from the user's ask to merged on main, with the decisions asked counted and tokens measured per task, and coordination under 20% of output tokens (issue #14, rewritten).
+- Why: over f1rm's life the coordinating sessions (leads, PM, Reviewers) made about 38% of all output tokens, a lead turn re-reads about 308k tokens of context, the guidelines alone are about 22k tokens preloaded into every lead, PM and Reviewer, and 79 decisions in three weeks kept rewriting that prose. The office and gates are what works.
+- Rejected: a full rewrite (it throws away the gates, which took the most rounds to get right); keeping the prose company and trimming it again.
+- Where: not built; rebuild grilling 2026-11-06, round 1 Q1 and Q6, round 2 Q7
+
+## 2026-11-06 GitHub Issues hold the work
+
+- Decision: GitHub Issues is the one tracker for specs, tickets and open decisions; the office reads it, and the `~/.f1rm` boards go. Agent chatter (reports, check records, resume notes) stays in local files and never reaches an issue.
+- Why: work lived in two places (specs in Issues, boards and briefs in `~/.f1rm`), and the chosen spec skills publish to the tracker with blocking edges.
+- Rejected: specs as repo files (OpenSpec, cc-sdd); keeping the private boards. A public repo shows its specs and decisions, so only those go to issues.
+- Where: not built; rebuild grilling 2026-11-06, round 1 Q2
+
+## 2026-11-06 A fresh session per coordination step
+
+- Decision: no coordinator lives for a whole topic. Each step (spec, tickets, implement, review, close) runs as a short session that reads its state from the issues and the repo and ends with its step. Every open decision goes to one inbox with a recommended answer: a low-risk one takes the recommendation when nobody answers in time, a high-risk one waits. Each ticket records its own token cost from the transcripts' usage fields and carries a budget by size; over budget, it stops and asks.
+- Why: a long-lived lead re-reads its whole context every turn, and the waking, watching and resume machinery exists only to keep such sessions alive; the user wants to answer decisions in one place, not inside each lead's session.
+- Rejected: long-lived leads with a smaller rules file; answering in each lead's session.
+- Where: not built; rebuild grilling 2026-11-06, round 1 Q3 to Q5
+
+## 2026-11-06 The office starts every step
+
+- Decision: the office is the scheduler. It reads each registered repo's issues with `gh` about once a minute and starts the session for the next step (a spec approved: tickets; a `ready-for-agent` ticket with no open blocker: implement; a decision answered: the step that asked), and each session ends with its step. Nothing waits in a live session for a human or for another session.
+- Why: with no long-lived coordinator, something outside the sessions has to move the work, and the office already runs from login and already wakes sessions on its own.
+- Rejected: a long-lived PM loop; the user starting each step.
+- Where: not built; rebuild grilling 2026-11-06, round 2 Q8
+
+## 2026-11-06 Decisions are tickets
+
+- Decision: every open decision is a GitHub issue labelled `needs-decision`, holding the question, the options and the recommended answer, with a macOS notification when it opens. An answer counts only when the user gives it in the office's tray, which writes it onto the ticket (Only the user steers the company). A low-risk one takes its recommendation after 4 hours without an answer; a high-risk one (business, product scope, design direction, strategy, spend, publishing to people, deleting data outside the repo, authentication, secrets, user data, money) waits while other tickets go on.
+- Why: one place for every decision, and a default so the user's absence never stalls low-risk work.
+- Rejected: `ready-for-human` (it means a human implements the ticket); answering inside each session.
+- Where: not built; rebuild grilling 2026-11-06, round 2 Q10, round 3 Q16
+
+## 2026-11-06 Budgets in cost units
+
+- Decision: a ticket's cost is counted in cost units, tokens weighted by API price relative to input (input 1, cache write 1.25, cache read 0.1, output 5), from the transcripts' usage fields. Budgets only warn until the dry run; then each size's budget is 1.5 times its measured median, and a ticket over budget stops with a decision ticket.
+- Why: raw counts are dominated by cheap cache reads (a lead turn re-read about 300k tokens), and Anthropic does not publish how the subscription weighs tokens, so price is the closest proxy.
+- Rejected: raw token counts; budgets guessed before any measurement.
+- Where: not built; rebuild grilling 2026-11-06, round 2 Q11
+
+## 2026-11-06 A retro closes every spec
+
+- Decision: when a spec closes, `/retro` reads its tickets, their cost, review rounds, gate refusals and findings, and opens at most 3 proposed changes to a role prompt, a rule or a ticket template as decision tickets; nothing in prompts or rules changes without the user's yes. `findings.md` and `calls.md` go: a finding becomes a `needs-triage` issue, and a call the company made alone is a comment on its ticket.
+- Why: the findings and calls files grew (344 lines in f1rm's findings, 44 left) and nothing read them to tune anything.
+- Rejected: tuning prompts by hand when something hurts; letting the retro change rules on its own.
+- Where: not built; rebuild grilling 2026-11-06, round 2 Q12
+
+## 2026-11-06 One integration branch per spec
+
+- Decision: each spec is built on one integration branch, as `/implement-spec` does unchanged: each ticket's implementer works in its own worktree, a merger subagent merges it into the integration branch, and one `code-review` and one fix pass run at the end. `f1rm merge` lands the integration branch on main once, at close, with its checks at spec level (new tests fail on main, the full suite passes on the merge, `.claude/` settings changes refused).
+- Why: main stays untouched until a spec is done (leads hit 268 refusals trying git in main), and the skill runs as written.
+- Rejected: landing each ticket on main through `f1rm merge`, which needs a modified `/implement-spec`.
+- Where: not built; rebuild grilling 2026-11-06, round 3 Q13
+
+## 2026-11-06 Labels pick the roles
+
+- Decision: nobody hires. The PM is the conversation the user opens with `f1rm pm`: it interviews the user (`/grill-with-docs`), publishes the spec (`/to-spec`) and ends. The office starts the other steps: tickets (`/to-tickets`), implement (`/implement-spec`, each implementer taking its skills from the ticket's `role:` label, `tdd` by default, `design-pipeline`, research or the Founder skills otherwise) and close (`/retro`, `f1rm merge`, `f1rm push`). The lead, frontend-dev, backend-dev and Reviewer role files go, and so does `f1rm hire` for agents; the designer, researcher and five Founder roles stay as the skill sets a label picks. Each step session takes its role's desk in the office, and its subagents are interns.
+- Why: hiring by an agent's judgement was where the rules churned most (the PM hired devs, then only leads, then was a scribe), and a label decides the same thing for free.
+- Rejected: a lead that hires; keeping the dev role files for subagents that never loaded them.
+- Where: not built; rebuild grilling 2026-11-06, round 3 Q14
+
+## 2026-11-06 Sessions talk through issues and git
+
+- Decision: no session messages another. Agent-to-agent messages and what was built to make them reliable go: report files and `f1rm report`, `status --watch`, wakes and nudges by agents, the messaging table and the project gate. A step that ends without moving its issue on is restarted once by the office; a second failure opens a decision ticket (retry, drop, or the user looks).
+- Why: `SendMessage` can return success and never arrive, and every fix for that (reports, watchers, nudges, recovery) cost rules and tokens; a step that only reads and writes the tracker and git has nothing to lose in transit.
+- Rejected: keeping messages with file-backed reports.
+- Where: not built; rebuild grilling 2026-11-06, round 3 Q15
+
+## 2026-11-06 Only the user steers the company
+
+- Decision: only issues, labels and comments by the user's own GitHub account reach an agent or start a step; another account's text never does. A decision answer counts only when given in the office's tray, which sessions cannot reach (as with the permission card); a comment on GitHub is read as context, not as the answer.
+- Why: f1rm's repo is public, so anyone can open an issue or comment, and every agent posts with the user's own `gh` login, so a GitHub comment cannot prove the user wrote it.
+- Rejected: a separate bot account for the agents (answers from the phone would work, but it costs an account and a token, and a session could still use the user's login).
+- Where: not built; rebuild grilling 2026-11-06, round 3 Q16
