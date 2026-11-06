@@ -581,7 +581,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: the office is the scheduler. It reads each registered repo's issues with `gh` about once a minute and starts the session for the next step (a spec approved: tickets; a `ready-for-agent` ticket with no open blocker: implement; a decision answered: the step that asked), and each session ends with its step. Nothing waits in a live session for a human or for another session.
 - Why: with no long-lived coordinator, something outside the sessions has to move the work, and the office already runs from login and already wakes sessions on its own.
 - Rejected: a long-lived PM loop; the user starting each step.
-- Where: not built; rebuild grilling 2026-11-06, round 2 Q8
+- Where: rebuild grilling 2026-11-06, round 2 Q8; the tickets step in #83 (office/server/scheduler.ts, the `f1rm:step` role), worktree-ticket-83
 
 ## 2026-11-06 Decisions are tickets
 
@@ -631,3 +631,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: f1rm's repo is public, so anyone can open an issue or comment, and every agent posts with the user's own `gh` login, so a GitHub comment cannot prove the user wrote it.
 - Rejected: a separate bot account for the agents (answers from the phone would work, but it costs an account and a token, and a session could still use the user's login).
 - Where: not built; rebuild grilling 2026-11-06, round 3 Q16
+
+## 2026-11-06 Plugin 0.6.0
+
+- Decision: bump to 0.6.0 for the `f1rm:step` role the office starts its steps as.
+- Why: a cached install has no `step` agent, so the office's `claude --agent f1rm:step` would fail until the plugin updates.
+- Rejected: none.
+- Where: worktree-ticket-83

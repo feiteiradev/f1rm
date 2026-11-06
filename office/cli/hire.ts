@@ -56,10 +56,10 @@ export function withPonytail(role: string, flags: string[]): string[] {
   }
 }
 
-/** Coordination (the PM and every lead) starts at `--effort medium`, every other role at high; an `--effort` the caller passes wins, so none is added twice. */
+/** Coordination (the PM, every lead and every office step) starts at `--effort medium`, every other role at high; an `--effort` the caller passes wins, so none is added twice. */
 export function withEffort(role: string, flags: string[]): string[] {
   if (flags.some((f) => f === "--effort" || f.startsWith("--effort="))) return flags;
-  return [...flags, "--effort", role === "lead" || role === "pm" ? "medium" : "high"];
+  return [...flags, "--effort", role === "lead" || role === "pm" || role === "step" ? "medium" : "high"];
 }
 
 /** Claude Code's name for a working directory's project folder: every character that is not a letter or digit becomes `-`. */
@@ -88,11 +88,11 @@ export function pmName(cwd: string, m: Pick<typeof machine, "gitCommonDir"> = ma
 
 export type Role = { id: string; description: string; model: string; skills: string[] };
 
-/** The hireable roles, read from the plugin folder on every call: its role files minus the PM. Skills are in the order the brief loads them. */
+/** The hireable roles, read from the plugin folder on every call: its role files minus the PM and the office step (the office starts steps). Skills are in the order the brief loads them. */
 export function readRoles(): Role[] {
   return readdirSync(AGENTS)
     .map((f) => basename(f, ".md"))
-    .filter((id) => id !== "pm")
+    .filter((id) => id !== "pm" && id !== "step")
     .map((id) => {
       const file = readFileSync(join(AGENTS, `${id}.md`), "utf8");
       const fm = Bun.YAML.parse(/^---\n([\s\S]*?)\n---/.exec(file)![1]) as { description?: string; model?: string; skills?: string[] };

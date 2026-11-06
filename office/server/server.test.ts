@@ -780,7 +780,7 @@ test("roles lists the plugin's role files, read from the folder, with the PM lef
   const roles = reply.roles;
   expect(reply.hires).toEqual({ working: 3 }); // no cap: the dialog says only how many work
   const founder = ["marketer", "seo-specialist", "social-media", "sales", "strategist"];
-  const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm").sort();
+  const files = readdirSync(join(import.meta.dir, "../../plugin/agents")).map((f) => f.replace(/\.md$/, "")).filter((r) => r !== "pm" && r !== "step").sort();
   expect([...roles.map((r) => r.id)].sort()).toEqual(files.filter((r) => !founder.includes(r)));
   expect(roles.map((r) => r.id)).toEqual(["designer", "frontend-dev", "backend-dev", "reviewer", "researcher", "lead"]);
   const designer = roles.find((r) => r.id === "designer");

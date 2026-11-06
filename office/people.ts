@@ -46,6 +46,8 @@ const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:social-media": "social",
   "f1rm:sales": "sales",
   "f1rm:strategist": "strategist",
+  // shortcut: an office step wears the lead's desk and coordinator gates until #92 retires the lead; then it gets its own.
+  "f1rm:step": "lead",
 };
 
 /** Exactly the agent types of the plugin's role files are roles; any other agent type (another plugin's, a built-in, a near miss) is not. */

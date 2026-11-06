@@ -20,6 +20,7 @@ import { HireRefused, LOAD_FIRST, parseHireFlags, pmName, SECURITY, SLUG, planHi
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { isSimple, mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
+import { createScheduler, type SchedulerDeps } from "./scheduler.ts";
 import { due, liveTasksOf, sweepTick } from "./dockersweep.ts";
 import type { Docker } from "../docker.ts";
 import { checkpointDirOf, readManifest, whereItStopped } from "./checkpoint.ts";
@@ -477,6 +478,8 @@ type Options = {
   gateListingMs?: number;
   /** The recovery tick (see recovery.ts): how often it runs, and the Claude Code, disk and clock it reads. Without it the office recovers nothing. */
   recovery?: { everyMs: number; deps: Omit<RecoveryDeps, "board" | "tell" | "paused">; /** With it, the daily docker sweep runs on the same tick. */ docker?: Docker };
+  /** The scheduler tick (see scheduler.ts): how often it reads the registered repos' issues to start their specs' steps. Without it the office starts no step. */
+  scheduler?: { everyMs: number; deps: Omit<SchedulerDeps, "paused"> };
 };
 
 // Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
@@ -570,6 +573,7 @@ export function startServer({
   isAlive = processRuns,
   gateListingMs = GATE_LISTING_MS,
   recovery,
+  scheduler,
 }: Options) {
   clientDir = resolve(clientDir);
   const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
@@ -1686,11 +1690,13 @@ export function startServer({
   }
   // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
   const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
+  // A paused project, or one whose stopped hires a resume is still waking, is left alone: no wake, no nudge, no note, no step started.
+  const pausedRepo = (repo: string) => resumes.has(repo) || Object.keys(state.rooms).some((id) => id !== ELSEWHERE.id && folderOf(id) === repo && !!pausedOf(id));
+  const scheduling = scheduler && createScheduler({ ...scheduler.deps, everyMs: scheduler.everyMs, paused: pausedRepo });
   const recovering = recovery && createRecovery({
     ...recovery.deps,
     everyMs: recovery.everyMs,
-    // A paused project, or one whose stopped hires a resume is still waking, is left alone: no wake, no nudge, no note.
-    paused: (repo) => resumes.has(repo) || Object.keys(state.rooms).some((id) => id !== ELSEWHERE.id && folderOf(id) === repo && !!pausedOf(id)),
+    paused: pausedRepo,
     board: async (repo, team) => (boardsDir ? readBoard(team ? teamBoardFile(boardsDir, repo, team) : boardFile(boardsDir, repo)) : []),
     // Every live seat of the name in this project is tried until one takes it (a stale copy keeps a dead socket); a nudge names the hire's own session, since an interactive session may wear its title.
     tell: async (repo, name, message, sessionId) => {
@@ -1744,6 +1750,7 @@ export function startServer({
     if (seen !== lastUsage) (lastUsage = seen, push());
   }, 15_000);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
+  const schedulerTimer = scheduling && setInterval(() => void scheduling.tick(registered()).catch((err) => console.log(`scheduler: ${(err as Error).message}`)), scheduler.everyMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     closing.abort();
@@ -1752,6 +1759,7 @@ export function startServer({
     clearInterval(letGoTimer);
     clearInterval(boardTimer);
     clearInterval(recoveryTimer);
+    clearInterval(schedulerTimer);
     clearInterval(usageTimer);
     approvals.releaseAll();
     await stop(closeActiveConnections);

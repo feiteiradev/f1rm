@@ -35,8 +35,8 @@ const role = (name: string) => parts(join(PLUGIN, "agents", `${name}.md`));
 const guidelines = readFileSync(join(PLUGIN, "skills", "f1rm-guidelines", "SKILL.md"), "utf8");
 const section = (heading: string) => guidelines.split(/^## /m).find((s) => s.startsWith(heading + "\n")) ?? "";
 
-test("the plugin ships exactly the twelve roles", () => {
-  expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual(Object.keys(ROLES).map((r) => `${r}.md`).sort());
+test("the plugin ships exactly the twelve roles and the office step", () => {
+  expect(readdirSync(join(PLUGIN, "agents")).sort()).toEqual([...Object.keys(ROLES), "step"].map((r) => `${r}.md`).sort());
 });
 
 test("the PM runs on sonnet: coordination is cheap, and its effort is medium", () => {
@@ -331,7 +331,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "hire", "resume-all", "stop-all"]);
-  expect(details.out).toMatch(/Agents \(12\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(13\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 
@@ -1322,8 +1322,8 @@ test("flat: a simple task whose DONE has no landable commit is checked by the PM
   expect(pluginReadme()).toContain("its simple tasks' devs");
 });
 
-test("flat: the plugin is 0.5.1 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.5.1");
+test("flat: the plugin is 0.6.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.6.0");
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const flat = entries.find((e) => e.startsWith("2026-10-28 Flat workflow\n")) ?? "";
   for (const s of ["f1rm hire --simple", "f1rm merge", "implementer", "plan once", "baseline-2026-10.md", "11099a6", "f517e70", "flat-prose"]) expect(flat, s).toContain(s);
