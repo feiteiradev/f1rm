@@ -200,7 +200,7 @@ export async function planHire(req: HireRequest, m: Pick<typeof machine, "backgr
   if (simple && (team != null || role === "lead" || role === "reviewer")) throw new Error("--simple is for one dev, designer or researcher the PM hires with no team: not with --team, and not for a lead or a reviewer");
   if (role === "reviewer" && !task.startsWith("review-")) throw new Error(`a Reviewer's task is review-<task>, for the task it reviews, not "${task}"`);
   if (team != null && role === "lead") throw new Error("a lead heads a team and joins none: only the PM hires leads, without --team");
-  if (team != null && dev) throw new Error(`an owner runs implementer subagents, not a session per task; hire a designer, a researcher, or a --content reviewer, not a ${role}`);
+  if (team != null && dev) throw new Error(`an owner runs implementer subagents, not a session per task; hire a designer, a researcher, an advisor, or a --content reviewer, not a ${role}`);
   if (model && !MODELS.includes(model)) throw new Error(`model "${model}" must be one of ${MODELS.join(", ")}`);
   if (level != null && !LEVELS.includes(level)) throw new Error(`level "${level}" must be one of ${LEVELS.join(", ")}`);
   if (level != null && !dev) throw new Error(`--level is for the two devs (frontend-dev, backend-dev): it sets the level of their own review, not ${role}'s`);

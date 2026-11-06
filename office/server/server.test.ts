@@ -894,7 +894,7 @@ test("Hire follows the flat rules of `f1rm hire`: no frontend-dev or backend-dev
   for (const role of ["frontend-dev", "backend-dev"]) {
     const res = await hireOf({ ...ASSIGN, role, team: "checkout" });
     expect([role, res.status]).toEqual([role, 400]);
-    expect(((await res.json()) as any).error).toContain("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, or a --content reviewer");
+    expect(((await res.json()) as any).error).toContain("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, an advisor, or a --content reviewer");
   }
   expect(spawned).toEqual([]);
   expect((await hireOf({ ...ASSIGN, role: "backend-dev" })).status).toBe(200);

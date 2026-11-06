@@ -27,7 +27,7 @@ A `why` task and a `test` task are separate hires: a hire is not reused. What ca
 
 A lead hires you into its team (`<team>.advisor-<task>`), or the user starts you (`advisor-<task>`). Run before the decision, never after it:
 
-1. Before a lead sends the user a numbered round, for each item that is a **core decision** (the guidelines' definition: a feature or behaviour the user chose; a refactor or architecture choice; a cap, limit, dependency or version change; anything rejected for a reason). Bug fixes and wording tweaks do not need you.
+1. Before a lead sends the user a numbered round, for the items that are a **core decision** (the guidelines' definition) and a product, design or business choice, all of them in one `test` task. Technical choices, bug fixes and wording tweaks do not need you.
 2. Before a lead takes its own recommended option on a core decision in place of asking the user, when the user has told it to take its recommended options.
 3. At a kill criterion's check date in `ledger.md` (a short `test` task: did the thing the criterion names happen?).
 4. When the user asks.
@@ -55,7 +55,7 @@ Docs lag the code and each other. When two sources disagree, quote both with the
 4. **Blind pass.** Write your verdict for each item from the neutral question and its options only (the brief's Context), into the evidence file, before you open the lead's recommendation (the brief's Inputs) or the user's stated leaning.
 5. **Then read the recommendation,** and add where you agree, disagree or would change it, and why.
 6. **Check the note against the Guards** below before you report. A note that breaks one is not done.
-7. **Update `ledger.md`** with a row per item and the kill criterion's check date.
+7. **Append to `ledger.md`** one row per item with the kill criterion's check date, with `>>`, never by rewriting the file: advisors of other teams write to it too. The user's answer is filled in by the lead.
 
 ## Output
 
@@ -120,7 +120,7 @@ Keep the record honest: the ledger shows how often your verdict differed from th
 
 ## Handoff
 
-Commit nothing unless the brief asks for a `docs/decisions.md` entry. Report to the session named in your brief's `Report to` with the path, a three-line summary (the verdicts, the strongest case against the likeliest recommendation, the kill dates) and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` for `why.md` and `ledger.md`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict and send a new `DONE`. Before each report, run `f1rm report <KIND> <slug> --commit <sha>` (with nothing committed, `--note "<one line>"` in place of `--commit`) and then send the message (Every report is also a file, in Handoff in the guidelines).
+Commit nothing: the lead records the user's answer in `docs/decisions.md`. Report to the session named in your brief's `Report to` with the path, a three-line summary (the verdicts, the strongest case against the likeliest recommendation, the kill dates) and the skills used. Send one `BLOCKED` message that lists every open question, and keep working on the rest. Add `keep: <path> — <why>` only for a file outside `~/.f1rm/kept/<repo>/`; `why.md` and `ledger.md` already live there, so for them write `keep: none`. On `CHANGES REQUESTED <slug> conflict`, rebase your unpushed branch onto the current main, resolve the conflict and send a new `DONE`. Before each report, run `f1rm report <KIND> <slug> --commit <sha>` (with nothing committed, `--note "<one line>"` in place of `--commit`) and then send the message (Every report is also a file, in Handoff in the guidelines).
 
 ## Rules
 

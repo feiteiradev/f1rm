@@ -384,10 +384,11 @@ test("pm.md reads the milestones file at pickup, writes the milestone's section 
 
 test("a lead has an advisor test a core decision against the why before it asks the user or takes its own option, and a STRAINS or BREAKS verdict goes to the user", () => {
   const rule = section("Who talks to whom").split("\n").find((l) => l.includes("**An advisor tests each core decision first.**")) ?? "";
-  for (const s of ["Before a lead sends the user a round that holds a core decision", "before it takes its own recommended option on a core decision", "an advisor `test` task", "word for word", "STRAINS or BREAKS", "asks the user that item instead"]) expect(rule, s).toContain(s);
+  for (const s of ["Before a lead sends the user a round that holds a core decision", "before it takes its own recommended option on a core decision", "one advisor `test` task into its team for all those items of the round", "a product, design or business choice", "word for word", "STRAINS or BREAKS", "STOP or ASK FIRST", "asks the user that item instead", "Technical choices (the lead's own call)", "never the recommendation itself", "the lead writes the answer in that item's row"]) expect(rule, s).toContain(s);
   expect(rule).not.toMatch(/feit|Pedro/);
   const lead = role("lead").body;
-  for (const s of ["an advisor `test` task", "STRAINS or BREAKS"]) expect(lead, s).toContain(s);
+  for (const s of ["one advisor `test` task", "a product, design or business choice", "STRAINS or BREAKS", "STOP or ASK FIRST", "when the user has told you to take your recommended options"]) expect(lead, s).toContain(s);
+  expect(role("advisor").body).not.toContain("unless the brief asks for a `docs/decisions.md` entry"); // it commits nothing
   const advisor = role("advisor");
   expect(String(advisor.fm.tools).split(/,\s*/)).not.toContain("Edit"); // it changes no file of the repo
   for (const s of ["`why`", "`test`", "~/.f1rm/kept/<repo>/advisor/why.md", "~/.f1rm/kept/<repo>/advisor/ledger.md", "FITS | STRAINS | BREAKS", "Never hire or start a session", "`<team>.advisor-<task>`"]) expect(advisor.body, s).toContain(s);

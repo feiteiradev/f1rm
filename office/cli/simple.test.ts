@@ -32,7 +32,7 @@ test("--simple is refused with --team, for a lead and for a reviewer", async () 
 
 test("a lead's team is refused a frontend-dev or backend-dev; a designer, a researcher, an advisor and a --content reviewer are still hired into it, in a Work project", async () => {
   for (const role of ["frontend-dev", "backend-dev"]) {
-    await expect(plan({ role, team: "checkout" }, [LEAD])).rejects.toThrow("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, or a --content reviewer");
+    await expect(plan({ role, team: "checkout" }, [LEAD])).rejects.toThrow("an owner runs implementer subagents, not a session per task; hire a designer, a researcher, an advisor, or a --content reviewer");
   }
   for (const role of ["designer", "researcher", "advisor"]) expect((await plan({ role, team: "checkout" }, [LEAD]))[5]).toBe(`checkout.${role}-x`);
   expect((await plan({ role: "reviewer", task: "review-x", team: "checkout", content: true }, [LEAD]))[5]).toBe("checkout.reviewer-review-x");

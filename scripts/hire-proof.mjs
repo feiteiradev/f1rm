@@ -76,7 +76,7 @@ try {
   await dialog.locator(".role").first().waitFor();
   assert.equal(await dialog.evaluate((d) => d.open), true, "the dialog is open and modal");
   const names = await dialog.locator(".role .name").allInnerTexts();
-  assert.deepEqual([...names].sort(), ["Backend dev", "Designer", "Frontend dev", "Researcher", "Reviewer", "Team lead"], "six roles by title, and no PM");
+  assert.deepEqual([...names].sort(), ["Advisor", "Backend dev", "Designer", "Frontend dev", "Researcher", "Reviewer", "Team lead"], "seven roles by title, and no PM");
   assert.equal(await dialog.locator(".count").innerText(), "1 hire working.", "the dialog counts the working hires, with no cap");
   await dialog.locator(".count").screenshot({ path: join(OUT, "01b-count.png") });
   const maya = dialog.locator(".role", { hasText: "Designer" });
