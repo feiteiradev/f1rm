@@ -624,7 +624,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: no session messages another. Agent-to-agent messages and what was built to make them reliable go: report files and `f1rm report`, `status --watch`, wakes and nudges by agents, the messaging table and the project gate. A step that ends without moving its issue on is restarted once by the office; a second failure opens a decision ticket (retry, drop, or the user looks).
 - Why: `SendMessage` can return success and never arrive, and every fix for that (reports, watchers, nudges, recovery) cost rules and tokens; a step that only reads and writes the tracker and git has nothing to lose in transit.
 - Rejected: keeping messages with file-backed reports.
-- Where: not built; rebuild grilling 2026-11-06, round 3 Q15
+- Where: rebuild grilling 2026-11-06, round 3 Q15; the restart and the failure ticket in #90 (office/server/scheduler.ts). A step "ended without moving its issue on" when it is no longer running and what started it is still there (a spec with no tickets, an unblocked ticket left, a spec still open with every ticket closed), and it is not waiting on a decision ticket it opened; the failure ticket's Retry restarts it, Leave it to me does not (`restart=1` in the ticket's header).
 
 ## 2026-11-06 Only the user steers the company
 

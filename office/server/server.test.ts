@@ -3375,6 +3375,7 @@ test("the tray lists the registered projects' decision tickets and the browser a
     store: { load: (r: string) => (kept[r] ??= {}), save: (r: string, s: any) => void (kept[r] = s) },
     decisions: async () => [{ number: 12, author: "owner", at: Date.now(), url: "https://github.com/o/shop/issues/12", body: "<!-- f1rm:decision risk=high spec=7 recommended=1 -->\nShip it?\n\n1. Yes\n2. No\n" }],
     notify: () => {},
+    open: async () => {},
     resolve: async (repo: string, n: number, spec: number | null, answer: string) => void resolved.push(`${repo} #${n} ${spec} ${answer}`),
   };
   start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { scheduler: { everyMs: 20, deps } });

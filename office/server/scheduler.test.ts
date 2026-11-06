@@ -10,6 +10,7 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
   const started: string[] = [];
   const told: string[] = [];
   const resolved: string[] = [];
+  const opened: string[] = [];
   const saved: Record<string, Started> = { [REPO]: stored };
   const labels = new Map<number, string | null>();
   const d: SchedulerDeps = {
@@ -26,13 +27,14 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     decisions: async () => [],
     notify: (title, text) => void told.push(`${title}: ${text}`),
     resolve: async (repo, n, spec, answer) => void resolved.push(`${repo} #${n} (spec ${spec}): ${answer}`),
+    open: async (repo, title, body) => void opened.push(`${repo} ${title}\n${body}`),
     ...over,
   };
-  return { s: createScheduler(d), started, labels, told, resolved, saved };
+  return { s: createScheduler(d), started, labels, told, resolved, opened, saved };
 }
 
-test("a spec labelled ready by its owner starts one tickets step, and no second one on the next tick", async () => {
-  const { s, started } = harness([spec(7)]);
+test("a spec labelled ready by its owner starts one tickets step, and no second one while it runs", async () => {
+  const { s, started } = harness([spec(7)], { live: async () => ["tickets-7"] });
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(started).toEqual([`${REPO} tickets #7`]);
@@ -71,7 +73,7 @@ test("nothing starts for a paused project, under a usage hold, just after a slee
 test("a start that fails is not recorded, so the next tick tries again", async () => {
   let fail = true;
   const tries: number[] = [];
-  const { s } = harness([spec(9)], { start: async (_r, _s, n) => (tries.push(n), fail ? Promise.reject(new Error("refused")) : undefined) });
+  const { s } = harness([spec(9)], { live: async () => ["tickets-9"], start: async (_r, _s, n) => (tries.push(n), fail ? Promise.reject(new Error("refused")) : undefined) });
   await s.tick([REPO]);
   fail = false;
   await s.tick([REPO]);
@@ -101,7 +103,8 @@ test("the tickets step starts as a named office step whose first command is to-t
 const TICKETED = { "tickets-7": { at: 1 } };
 
 test("a spec the office ticketed starts one implement step once a ticket is unblocked, and no second one", async () => {
-  const { s, started } = harness([spec(7, { subIssues: 2 }), ticket(8, 7), ticket(9, 7, { blockedBy: 1 })], {}, TICKETED);
+  let ticks = 0;
+  const { s, started } = harness([spec(7, { subIssues: 2 }), ticket(8, 7), ticket(9, 7, { blockedBy: 1 })], { live: async () => (ticks++ ? ["implement-7"] : []) }, TICKETED);
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(started).toEqual([`${REPO} implement #7`]);
@@ -139,7 +142,8 @@ test("the implement step builds the spec on spec-<n> with interns in their own w
 const BUILT = { "tickets-7": { at: 1 }, "implement-7": { at: 2 } };
 
 test("once every ticket of a spec the office built is closed and its implement step ended, one close step starts", async () => {
-  const { s, started } = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, BUILT);
+  let ticks = 0;
+  const { s, started } = harness([spec(7, { subIssues: 2, subDone: 2 })], { live: async () => (ticks++ ? ["close-7"] : []) }, BUILT);
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(started).toEqual([`${REPO} close #7`]);
@@ -193,7 +197,7 @@ test("a decision ticket by the owner shows with its question, options, recommend
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(s.decisions()).toEqual([
-    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
+    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
   ]);
   expect(told).toEqual(["f1rm: app needs a decision: Keep the old API?"]);
 });
@@ -209,7 +213,6 @@ test("after 4 hours a low-risk decision takes its recommendation and its asking 
   now += 2;
   await s.tick([REPO]);
   expect(resolved).toEqual([`${REPO} #12 (spec 7): Drop it, nothing uses it (no answer in 4 hours: the recommendation)`]);
-  await s.tick([REPO]);
   expect(started).toEqual([`${REPO} implement #7`]);
   const paused = harness([], { now: () => 1_000 + 5 * HOUR, paused: () => true, decisions: async () => [decision(12)] });
   await paused.s.tick([REPO]);
@@ -266,4 +269,47 @@ test("a decision ticket someone else labelled is not shown or answered, and a re
   fails = true;
   await kept.s.tick([REPO]);
   expect(kept.s.decisions().map((x) => x.number)).toEqual([13]);
+});
+
+test("a tickets step that ended without publishing tickets starts once more; a second such end opens one decision ticket and starts nothing", async () => {
+  const { s, started, opened } = harness([spec(7)], {}, { "tickets-7": { at: 1 } });
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} tickets #7`]);
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} tickets #7`]);
+  expect(opened).toHaveLength(1);
+  expect(opened[0]).toStartWith(`${REPO} tickets-7 ended twice without moving spec #7 on`);
+  expect(opened[0]).toContain("<!-- f1rm:decision risk=high step=tickets-7 spec=7 recommended=1 restart=1 -->");
+  expect(opened[0]).toContain("1. Retry it");
+  expect(opened[0]).toContain("2. Leave it to me");
+});
+
+test("an implement step that ended with an unblocked ticket left, and a close step that ended with its spec still open, each start once more", async () => {
+  const implement = harness([spec(7, { subIssues: 2, subDone: 1 }), ticket(8, 7)], {}, BUILT);
+  await implement.s.tick([REPO]);
+  const close = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, { ...BUILT, "close-7": { at: 3 } });
+  await close.s.tick([REPO]);
+  expect([...implement.started, ...close.started]).toEqual([`${REPO} implement #7`, `${REPO} close #7`]);
+});
+
+test("a step waiting on a decision ticket it opened has not failed: nothing restarts it until the ticket is answered", async () => {
+  const asking = decision(12, { body: "<!-- f1rm:decision risk=high step=implement-7 spec=7 -->\nWhich database?\n\n1. Postgres\n2. SQLite\n" });
+  const { s, started, opened } = harness([spec(7, { subIssues: 2, subDone: 1 }), ticket(8, 7)], { decisions: async () => [asking] }, { ...BUILT, "implement-7": { at: 2, tries: 2 } });
+  await s.tick([REPO]);
+  expect([started, opened]).toEqual([[], []]);
+});
+
+test("answering the failure ticket with Retry it starts the step again; Leave it to me starts nothing", async () => {
+  const failed = (n: number) => decision(n, { body: "<!-- f1rm:decision risk=high step=tickets-7 spec=7 recommended=1 restart=1 -->\ntickets-7 ended twice without moving spec #7 on.\n\n1. Retry it\n2. Leave it to me\n" });
+  const stuck = { "tickets-7": { at: 1, tries: 2, asked: true } };
+  const retry = harness([spec(7)], { decisions: async () => [failed(20)] }, stuck);
+  await retry.s.tick([REPO]);
+  await retry.s.answer(`${REPO}#20`, 0);
+  await retry.s.tick([REPO]);
+  const leave = harness([spec(7)], { decisions: async () => [failed(21)] }, stuck);
+  await leave.s.tick([REPO]);
+  await leave.s.answer(`${REPO}#21`, 1);
+  await leave.s.tick([REPO]);
+  expect([retry.started, leave.started, leave.opened]).toEqual([[`${REPO} tickets #7`], [], []]);
 });
