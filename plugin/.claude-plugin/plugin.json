@@ -1,7 +1,7 @@
 {
   "name": "f1rm",
-  "description": "The f1rm company: roles, guidelines and hiring for Claude Code sessions.",
-  "version": "0.8.0",
+  "description": "The f1rm company: the PM, the office's steps, the roles a ticket's label picks, and the rules they keep.",
+  "version": "0.9.0",
   "author": { "name": "Pedro Feiteira" },
   "license": "MIT"
 }

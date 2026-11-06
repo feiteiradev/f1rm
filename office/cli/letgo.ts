@@ -23,6 +23,8 @@ async function toreDown(m: { docker?: Docker }, repo: string, task: string): Pro
 
 const SLUG_SRC = SLUG.source.slice(1, -1);
 const NOT_LET_GO = "not let go:";
+/** The roles the rebuild retired (#92): no file starts one any more, but their sessions still sit in a pause's manifest, an archive and the office's log, under these names. */
+const RETIRED_ROLES = ["lead", "frontend-dev", "backend-dev", "reviewer"];
 let nameRe: RegExp | undefined;
 
 export type HireName = { role: string; team: string | null; task: string; reviewer: boolean };
@@ -32,7 +34,7 @@ export type HireName = { role: string; team: string | null; task: string; review
  * is the one it heads, and its task repeats it. A Reviewer is named `reviewer-review-<task>`; its task is the one it reviews, and it has no branch or worktree of its own.
  */
 export function hireName(name: string): HireName | null {
-  nameRe ??= new RegExp(`^(?:(${SLUG_SRC})\\.)?(${readRoles().map((r) => r.id).join("|")})-(${SLUG_SRC})$`);
+  nameRe ??= new RegExp(`^(?:(${SLUG_SRC})\\.)?(${[...readRoles().map((r) => r.id), ...RETIRED_ROLES].join("|")})-(${SLUG_SRC})$`);
   const m = nameRe.exec(name);
   if (!m) return null;
   const [, team, role, rest] = m;

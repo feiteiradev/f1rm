@@ -8,10 +8,17 @@ import { projectFile, readEdition, writeEdition } from "./editions.ts";
 import { startServer } from "./server.ts";
 import type { OfficeState } from "./office.ts";
 
-const guidelines = readFileSync(join(import.meta.dir, "../../plugin/skills/f1rm-guidelines/SKILL.md"), "utf8");
-const example = /## Board format[\s\S]*?```\n(# Board:[\s\S]*?)```/.exec(guidelines)![1];
+// The board format an old-flow board file has; the office still reads one for a pause's resume (see recovery.ts).
+const example = `# Board: <repo name>
 
-test("the board example in the guidelines parses into its rows", () => {
+| id | owner | status | branch | task |
+| :- | :- | :- | :- | :- |
+| T1 | researcher-auth-options | done | worktree-auth-options | Compare session and token auth |
+| T2 | backend-dev-auth-api | doing | worktree-auth-api | Add login endpoint |
+| T3 | - | todo | - | Build the login form |
+`;
+
+test("an old-flow board parses into its rows", () => {
   expect(parseBoard(example)).toEqual([
     { id: "T1", owner: "researcher-auth-options", status: "done", branch: "worktree-auth-options", task: "Compare session and token auth" },
     { id: "T2", owner: "backend-dev-auth-api", status: "doing", branch: "worktree-auth-api", task: "Add login endpoint" },
@@ -19,8 +26,7 @@ test("the board example in the guidelines parses into its rows", () => {
   ]);
 });
 
-test("the board path is the main working directory with every non-alphanumeric as a dash, as the guidelines say", () => {
-  expect(guidelines).toContain("not an ASCII letter or digit");
+test("the board path is the main working directory with every non-alphanumeric as a dash", () => {
   expect(boardFile("/boards", "/Users/me/my repo/.git")).toBe("/boards/-Users-me-my-repo.md");
   expect(boardFile("/boards", "/Users/me/café.app/.git")).toBe("/boards/-Users-me-caf--app.md");
   expect(boardFile("/boards", "/work/notes")).toBe("/boards/-work-notes.md");

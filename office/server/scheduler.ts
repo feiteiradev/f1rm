@@ -282,8 +282,8 @@ export function createScheduler(d: SchedulerDeps) {
   };
 }
 
-/** The role files that are no ticket's role: code is built test-first with no role label, coordination is the steps', and an advisor tests a decision, not a ticket's work. shortcut: #92 deletes these files, then the list goes. */
-const NOT_TICKET_ROLES = ["lead", "reviewer", "frontend-dev", "backend-dev", "advisor"];
+/** The role files that are no ticket's role: the advisor tests a decision for a step, it builds nothing. */
+const NOT_TICKET_ROLES = ["advisor"];
 /** The roles a ticket's `role:<name>` label can name, with their skills, read from the role files, the one place they are kept. A Founder role only in a Founder project. */
 export const roleSkills = (founder: boolean): Record<string, string[]> =>
   Object.fromEntries(

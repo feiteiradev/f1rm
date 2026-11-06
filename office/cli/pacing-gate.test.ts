@@ -66,11 +66,11 @@ test("89% and 94% start; the hold is gone once resets_at has passed; override, a
 test("callers that hand in no usage are never held, whatever the machine's usage file says (planHire, checkSlots)", async () => {
   put(five(99));
   expect(() => checkSlots([WORKER], { role: "backend-dev", name: "backend-dev-x", task: "x", cwd: REPO })).not.toThrow();
-  const argv = await planHire({ role: "backend-dev", task: "x", cwd: REPO, brief: "Task: x", reportTo: "pm-shop" }, { backgroundSessions: async () => [WORKER], gitCommonDir: () => null });
+  const argv = await planHire({ role: "designer", task: "x", cwd: REPO, brief: "Task: x", reportTo: "pm-shop" }, { backgroundSessions: async () => [WORKER], gitCommonDir: () => null });
   expect(argv[0]).toBe("claude");
   // one handed the reading is held
   const usage = { fiveHour: { usedPct: 99, resetsAt: Date.now() / 1000 + H }, readAt: 0 };
-  await expect(planHire({ role: "backend-dev", task: "x", cwd: REPO, brief: "Task: x", reportTo: "pm-shop", usage }, { backgroundSessions: async () => [WORKER], gitCommonDir: () => null })).rejects.toBeInstanceOf(UsageHold);
+  await expect(planHire({ role: "designer", task: "x", cwd: REPO, brief: "Task: x", reportTo: "pm-shop", usage }, { backgroundSessions: async () => [WORKER], gitCommonDir: () => null })).rejects.toBeInstanceOf(UsageHold);
 });
 
 test("a hold refuses a start with sessions live and leaves them as they were; the same start passes under the line", () => {

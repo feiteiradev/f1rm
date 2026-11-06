@@ -58,6 +58,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the PM's chat with the user stays free of hire traffic.
 - Rejected: the PM hiring specialists directly for small work.
 - Where: rules-prose (the gate that enforces it is gate-hire-push)
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-20 Leads filter team traffic
 
@@ -67,6 +68,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Where: rules-prose
 - Superseded: by "Lean review and test runs" (2026-10-23).
 - Superseded: PM pushes at milestone end (2026-11-02).
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-20 Reviewer conflict and tip rules
 
@@ -215,6 +217,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a limit stop used to end the work silently, and every hire in the milestone sat idle for hours.
 - Rejected: waiting for the user to notice; polling in the main conversation; a daemon that restarts sessions by itself.
 - Where: self-driving, ba44481
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-21 Ask the user only for big decisions
 
@@ -231,6 +234,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: pstack's poteto-mode and playbooks give devs a stricter way of working, and mattpocock's skills stay for tdd, diagnosis, grilling and the spec review. Checked on Claude Code 2.1.306 with pstack 0.15.29: every pstack skill but `setup-pstack` carries `disable-model-invocation` (55 of 56, `tdd` included), so the Skill tool refuses it ("reserved for explicit user invocation") and only a first slash command in the prompt expands them, while `/pstack:poteto-mode` as the first command expands and `mattpocock-skills:tdd` then loads through the Skill tool. That is why a lead gets architect or how only from the PM, why the Reviewer gets no `pstack:interrogate` (the user can run it by hand at `--level high`), and why the playbooks' Opening a PR step is skipped.
 - Rejected: dropping the mattpocock skills; letting pstack's PR opening, babysit loops, `/loop` ticks and `afk` run inside f1rm hires; reading a refused pstack skill's file and following it anyway (the refusal forbids it); pstack's own tdd skill.
 - Where: skill-stack, 9fd3578; skill-stack-2, 24608de, 395e72c, 2359dae, 57552a6, a20d5b2, c2b220b, f44f850, 634a319
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-21 Conflict rounds do not count toward ESCALATE
 
@@ -277,6 +281,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Rejected: one workflow for everything; letting the PM hire specialists for small work (the PM hires only leads still holds); a Jump to the lead for a simple workflow's decisions and inputs (a cap or a permission still needs its own session).
 - Where: workflow-talk, 196837a
 - Superseded: Caps wait, never ask (2026-11-02).
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-22 Who talks to whom
 
@@ -346,6 +351,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user saw high token and CPU spend and few deliveries; a Reviewer that reported every finding kept tasks in review for 5 to 30 rounds, and every round reran the whole suite in three sessions.
 - Rejected: every finding goes back (the "Reviewer sends back every finding" decision); the lead rerunning the dev's suite; a numeric cap on non-blocking findings.
 - Where: lean-review, 570ff5b
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-23 Fewer sessions
 
@@ -409,6 +415,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: (1) one counting rule for every kind of team keeps the cap honest, and a name pattern needs no new state in the office. (2) A Reviewer now reads a branch with no code and nothing else; a list of what it may not run kept growing with each hole found, an allowlist cannot be walked round by a command nobody listed. (3) the CLI takes one word per kind, and the recovery tick already read NEEDS YOU as a report.
 - Rejected: counting only working simple tasks (a lead idle after its report holds its slot, and the PM still has the merge and the letgo to do); a `simple` marker stored in the office or on the board (it would have to survive restarts and wakes); keeping the Reviewer's refusal list and adding merge and commit to it; accepting `NEEDS YOU` as two words on the report command.
 - Where: flat-hire
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-29 Owner subagents write in their worktree
 
@@ -424,6 +431,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user found the workflows too slow and costly: up to ten review rounds, two or three sessions per task and a message hop at each step. Research says single owners beat coordination between sessions. A measured baseline is in `~/.f1rm/kept/f1rm/baseline-2026-10.md`, and a later milestone compares 5 tasks on the new flow against it.
 - Rejected: a Reviewer session per task (the cost `f1rm merge` and the dev's own review remove); a dev hired by a lead (an owner's implementer subagent does the work without a session of its own); review by a second session (a fresh-context subagent inside the dev's session is the same independence for a fraction of the cost); a second plan or a re-approval inside a milestone (the plan is approved once). Keeping the Mac awake is unrelated and stays rejected (see "Work hours").
 - Where: F3a 11099a6, F3b f517e70, flat-prose, 60608c5
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-10-29 Archive, then remove
 
@@ -502,6 +510,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a wrong visible build costs a whole task; a preview costs one screen.
 - Rejected: previews for every task; building first and showing after.
 - Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-11-03 First slice shown without waiting
 
@@ -509,6 +518,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: the user sees the real direction early and the team never idles on an answer.
 - Rejected: waiting for a second "go" after the first slice.
 - Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-11-03 Visible tasks land with proof from the running app
 
@@ -516,6 +526,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: tests passed on builds that were the wrong thing or looked wrong.
 - Rejected: proof in the chat; a report per task to the user.
 - Where: topic-prose (plugin/agents/lead.md, plugin/skills/f1rm-guidelines/SKILL.md)
+- Superseded: since 2026-11-06 (A short rules file replaces the guidelines) this rule went with the lead and the guidelines' prose (#92); the office's steps and the rules file hold the flow now.
 
 ## 2026-11-03 Pace on the official usage windows
 
@@ -664,3 +675,10 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Why: a cached install has no `advisor` agent, so `f1rm hire`'s `claude --agent f1rm:advisor` would fail until the plugin updates.
 - Rejected: none.
 - Where: advisor-role
+
+## 2026-11-06 A short rules file replaces the guidelines
+
+- Decision: the f1rm-guidelines skill is a short rules file (about 10 KB, about 2.3k tokens loaded, from 88 KB and about 22k) that says what holds across steps: the spec flow, the steps and their retries, decision tickets, role labels, cost units and budgets, what the gates enforce, editions and drafts, the decisions log, the living spec and Docker. Nothing preloads it: each step's prompt says what that step does. The lead, frontend-dev, backend-dev and Reviewer role files and the hire skill are gone; their names still parse for old sessions in manifests and archives. The advisor stays: before a step opens a high-risk decision ticket on a product, design or business choice, one of its interns runs the advisor's `test` task and the verdict goes into the ticket. The office step wears the old lead's desk, titled Office step. The triage labels gain `needs-decision`, `role:<name>` and `size:s|m|l`. Plugin 0.9.0.
+- Why: the prose company was the costliest context in every coordinating session and kept being rewritten; the steps carry their own instructions now, and the gates hold the rules that must hold.
+- Rejected: trimming the old guidelines again; keeping the lead to hire the advisor; dropping the advisor with the lead (it was the user's newest work; its place in the new flow is the recommended option of the 2026-11-06 question, open to the user's change).
+- Where: #92 (plugin/skills/f1rm-guidelines/SKILL.md, plugin/agents/step.md, office/people.ts, office/cli/letgo.ts, docs/agents/triage-labels.md, both READMEs)

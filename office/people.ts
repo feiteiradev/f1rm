@@ -16,7 +16,8 @@ export const MODELS = ["haiku", "sonnet", "opus"];
 /** In company order, which is also the order staff take desks. Each role wears its own shirt; freelancers wear only the first six. */
 export const ROLES = {
   pm: { title: "PM", shirt: 0 },
-  lead: { title: "Team lead", shirt: 6 },
+  // The office steps (tickets, implement, close) wear the old lead's desk and suit: `lead` is their role id in the gates.
+  lead: { title: "Office step", shirt: 6 },
   designer: { title: "Designer", shirt: 1 },
   frontend: { title: "Frontend dev", shirt: 2 },
   backend: { title: "Backend dev", shirt: 3 },
@@ -48,7 +49,6 @@ const AGENT_TYPES: Record<string, RoleId> = {
   "f1rm:social-media": "social",
   "f1rm:sales": "sales",
   "f1rm:strategist": "strategist",
-  // shortcut: an office step wears the lead's desk and coordinator gates until #92 retires the lead; then it gets its own.
   "f1rm:step": "lead",
 };
 
