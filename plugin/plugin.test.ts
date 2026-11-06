@@ -830,8 +830,8 @@ test("flat: a simple task whose DONE has no landable commit is checked by the PM
   expect(pluginReadme()).toContain("its simple tasks' devs");
 });
 
-test("flat: the plugin is 0.7.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.7.0");
+test("flat: the plugin is 0.8.0 everywhere it is repeated, and docs/decisions.md has the Flat workflow entry", () => {
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.8.0");
   const entries = readFileSync(join(REPO, "docs", "decisions.md"), "utf8").split(/^## /m).slice(1);
   const flat = entries.find((e) => e.startsWith("2026-10-28 Flat workflow\n")) ?? "";
   for (const s of ["f1rm hire --simple", "f1rm merge", "implementer", "plan once", "baseline-2026-10.md", "11099a6", "f517e70", "flat-prose"]) expect(flat, s).toContain(s);
