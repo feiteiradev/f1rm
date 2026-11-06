@@ -127,3 +127,41 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
   }
   return specs;
 }
+
+/** One line per spec of the repo, in cost units (see office/cost.ts). */
+export function specTable(repo: string, projectsDir: string, sizes: Record<number, Size>, command: string) {
+  const units = (t: Tokens) => Math.round(costUnits(t)).toLocaleString("en-US");
+  const rows = Object.entries(specCosts(projectsDir, repo, sizes)).map(([n, s]) => {
+    const list = Object.entries(s.tickets).map(([t, c]) => `#${t} ${units(c)}`).join(", ") || "none";
+    return `| #${n} | ${units(s.coordination)} | ${list} | ${units(s.other)} | ${Math.round(s.total).toLocaleString("en-US")} | ${Math.round(s.share * 100)}% | ${s.warnings.map((t) => `#${t}`).join(", ") || "none"} |`;
+  });
+  return [
+    `# Cost per spec: ${repo}`,
+    "",
+    "Cost units weigh input 1, cache write 1.25, cache read 0.1 and output 5. Coordination is the PM's and the step sessions' own turns; the share is of output tokens.",
+    "",
+    "```",
+    command,
+    "```",
+    "",
+    "| spec | coordination | tickets | other interns | total | coordination share | over warning |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+  ].join("\n");
+}
+
+/** The tickets' size labels (`size:s`, `size:m`, `size:l`) from GitHub; none when gh can't read them. */
+export function sizesOf(repo: string): Record<number, Size> {
+  const p = Bun.spawnSync(["gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number,labels"], { cwd: repo });
+  try {
+    const sizes: Record<number, Size> = {};
+    for (const i of JSON.parse(p.stdout.toString()) as { number: number; labels: { name: string }[] }[]) {
+      const size = i.labels.map((l) => /^size:([sml])$/.exec(l.name)?.[1]).find(Boolean);
+      if (size) sizes[i.number] = size as Size;
+    }
+    return sizes;
+  } catch {
+    return {};
+  }
+}

@@ -605,7 +605,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: when a spec closes, `/retro` reads its tickets, their cost, review rounds, gate refusals and findings, and opens at most 3 proposed changes to a role prompt, a rule or a ticket template as decision tickets; nothing in prompts or rules changes without the user's yes. `findings.md` and `calls.md` go: a finding becomes a `needs-triage` issue, and a call the company made alone is a comment on its ticket.
 - Why: the findings and calls files grew (344 lines in f1rm's findings, 44 left) and nothing read them to tune anything.
 - Rejected: tuning prompts by hand when something hurts; letting the retro change rules on its own.
-- Where: not built; rebuild grilling 2026-11-06, round 2 Q12
+- Where: rebuild grilling 2026-11-06, round 2 Q12; the close step's retro in #91 (office/server/scheduler.ts). A proposal is an unlabelled draft spec and a high-risk decision ticket whose Build it labels the draft `ready-for-agent` (`ready=1`), so the office builds it like any spec, and whose Drop it closes it (`drop=2`); `f1rm cost` is the retro's cost evidence.
 
 ## 2026-11-06 One integration branch per spec
 

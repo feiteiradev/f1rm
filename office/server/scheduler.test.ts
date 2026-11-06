@@ -31,6 +31,7 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     tickets: async () => [],
     costs: () => ({}),
     drop: async () => {},
+    approve: async () => {},
     ...over,
   };
   return { s: createScheduler(d), started, labels, told, resolved, opened, saved };
@@ -202,7 +203,7 @@ test("a decision ticket by the owner shows with its question, options, recommend
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(s.decisions()).toEqual([
-    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
+    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, ready: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
   ]);
   expect(told).toEqual(["f1rm: app needs a decision: Keep the old API?"]);
 });
@@ -399,5 +400,25 @@ test("a paused or usage-held project's wall still follows its issues, though no 
     const { s, started } = harness([spec(7, { title: "Spec: x" })], over);
     await s.tick([REPO]);
     expect([started, s.boards()[REPO]]).toEqual([[], [{ id: "#7", owner: "spec", status: "todo", branch: "spec-7", task: "Spec: x" }]]);
+  }
+});
+
+test("a retro's proposal is a draft spec: Build it labels it ready, so the office builds it; Drop it closes it", async () => {
+  const proposal = (n: number) => decision(n, { body: "<!-- f1rm:decision risk=high spec=40 recommended=1 ready=1 drop=2 -->\nBuild this change? Interns lost 2 turns to refused git; tell them the allowed form.\n\n1. Build it\n2. Drop it\n" });
+  const approved: string[] = [], dropped: string[] = [];
+  const deps = { approve: async (repo: string, n: number) => void approved.push(`${repo} #${n}`), drop: async (repo: string, n: number) => void dropped.push(`${repo} #${n}`) };
+  const build = harness([], { decisions: async () => [proposal(41)], ...deps });
+  await build.s.tick([REPO]);
+  await build.s.answer(`${REPO}#41`, 0);
+  const no = harness([], { decisions: async () => [proposal(42)], ...deps });
+  await no.s.tick([REPO]);
+  await no.s.answer(`${REPO}#42`, 1);
+  expect([approved, dropped]).toEqual([[`${REPO} #40`], [`${REPO} #40`]]);
+});
+
+test("the close step ends with a retro, nobody asked: measured evidence, unfixed findings as needs-triage issues, at most 3 proposals as decision tickets, no file changed", () => {
+  for (const round of [1, 2]) {
+    const prompt = stepArgv("close", 7, round)[6];
+    for (const s of ["retro", "nobody to ask", "f1rm cost", "refused", "needs-triage", "at most 3", "ready=1 drop=2", "1. Build it", "2. Drop it", "Change no file yourself"]) expect(prompt, s).toContain(s);
   }
 });

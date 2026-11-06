@@ -13,12 +13,13 @@ import { realDocker } from "../docker.ts";
 import { writePrivate } from "../server/private.ts";
 import { realRecoveryDeps } from "../server/recovery.ts";
 import { realSchedulerDeps } from "../server/scheduler.ts";
+import { sizesOf, specTable } from "../cost.ts";
 import { startServer } from "../server/server.ts";
 import { hire, pmName, rootTooLong, withEffort } from "./hire.ts";
 import { archivesIn } from "./archive.ts";
 import { letgo } from "./letgo.ts";
 import { dockerTagIn } from "./dockertag.ts";
-import { mergeIn } from "./merge.ts";
+import { mainDir, mergeIn } from "./merge.ts";
 import { pushIn } from "./push.ts";
 import { wake } from "./wake.ts";
 import { readUsage, recordUsage, usageFile, usageText } from "../usage.ts";
@@ -578,13 +579,18 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (text) console.log(text);
     } catch {}
   },
+  // The cost of each spec of this repo, in cost units: what the close step's retro reads.
+  cost: () => {
+    const main = mainDir(process.cwd());
+    console.log(specTable(main, join(process.env.HOME!, ".claude", "projects"), sizesOf(main), "f1rm cost"));
+  },
   push: async () => {
     const r = await pushIn(process.argv.slice(3), process.cwd(), { say: (line) => console.log(line) });
     if (r.err) console.error(r.err.trimEnd());
     process.exitCode = r.code;
   },
 };
-const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | docker-tag <task> | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | usage-tap";
+const USAGE = "usage: f1rm | install | uninstall | start | service [off] | serve | demo | edition [work|founder] | pm [claude flags] | hire <role> <name> <task> <brief> | wake <name|id> [message] | pause [reason...] [--all] | resume [--all] | letgo <name>... | letgo --leftovers | archives [--prune] | docker-tag <task> | status [--json] | status --watch <name>[:waiting]... | report <KIND> <slug> [--commit <sha>] [--note <text>] | merge <task> [--check <command>] [--no-red <reason>] | push [--check <command>] | cost | usage-tap";
 const arg = process.argv[2] ?? "";
 if (["help", "-h", "--help"].includes(arg)) {
   console.log(USAGE);

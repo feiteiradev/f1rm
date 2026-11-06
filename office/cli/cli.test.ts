@@ -1278,3 +1278,14 @@ test("letgo lets a Reviewer or a lead go without touching any branch", async () 
   expect(r.lines).toEqual(["reviewer-review-done: let go", "lead-checkout: let go"]);
   expect(branches(repo)).toEqual(["main", "worktree-done", "worktree-open"]);
 });
+
+test("f1rm cost prints each spec of the repo in cost units, for the retro to read", () => {
+  const home = tempHome(), repo = realpathSync(repoDir("shop"));
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  const dir = join(home, ".claude", "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "s1.jsonl"), [{ type: "agent-setting", agentSetting: "f1rm:step" }, { type: "agent-name", agentName: "implement-7" }, { type: "assistant", message: { id: "a", usage: { input_tokens: 0, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const r = Bun.spawnSync(["bun", CLI, "cost"], { cwd: repo, env: { ...process.env, HOME: home } });
+  expect([r.exitCode, r.stderr.toString()]).toEqual([0, ""]);
+  expect(r.stdout.toString()).toContain("| #7 | 5,000 | none | 0 | 5,000 | 100% | none |");
+});

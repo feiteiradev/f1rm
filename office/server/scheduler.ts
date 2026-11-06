@@ -22,8 +22,8 @@ export type Step = "tickets" | "implement" | "close";
 export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number }>;
 /** An open issue labelled `needs-decision`: `at` is when it opened (ms). */
 export type DecisionIssue = { number: number; author: string; body: string; at: number; url: string };
-/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec. */
-export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
+/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec, a `ready` option labels it ready-for-agent (a retro's proposal is a draft spec). */
+export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; ready: number[] | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
 
 export type SchedulerDeps = {
   now: () => number;
@@ -49,6 +49,8 @@ export type SchedulerDeps = {
   decisions: (repo: string) => Promise<DecisionIssue[] | null>;
   /** Raises a macOS notification. */
   notify: (title: string, text: string) => void;
+  /** Labels a draft spec `ready-for-agent`, so the office builds it. */
+  approve: (repo: string, spec: number) => Promise<void>;
   /** Closes the spec as not planned. */
   drop: (repo: string, spec: number) => Promise<void>;
   /** Opens a decision ticket in the repo. */
@@ -85,6 +87,7 @@ export function decisionOf(body: string) {
     recommended: Number.isInteger(rec) && rec >= 1 && rec <= options.length ? rec - 1 : null,
     restart: indices(meta.restart, options.length),
     drop: indices(meta.drop, options.length),
+    ready: indices(meta.ready, options.length),
     risk: meta.risk === "low" ? ("low" as const) : ("high" as const),
     step: /^(?:tickets|implement|close)-\d+(?:-\d+)?$/.test(meta.step ?? "") ? meta.step! : null,
     spec: Number(meta.spec) || null,
@@ -143,6 +146,7 @@ export function createScheduler(d: SchedulerDeps) {
     await d.resolve(one.repo, one.number, one.spec, answer);
     started[`answered-${one.number}`] = { at: d.now() };
     if (one.step && (!one.restart || one.restart.includes(option))) delete started[one.step];
+    if (one.spec && one.ready?.includes(option)) await d.approve(one.repo, one.spec).catch((err) => console.log(`scheduler ${basename(one.repo)}: spec #${one.spec} not made ready: ${(err as Error).message}`));
     if (one.spec && one.drop?.includes(option)) await d.drop(one.repo, one.spec).catch((err) => console.log(`scheduler ${basename(one.repo)}: spec #${one.spec} not dropped: ${(err as Error).message}`));
     d.store.save(one.repo, started);
     console.log(`scheduler ${basename(one.repo)}: decision #${one.number} answered`);
@@ -317,7 +321,8 @@ const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => s
     `3. Land: run f1rm merge spec-${spec} in the main working directory. If it refuses, comment its message on #${spec} and end.\n` +
     `4. Push: run f1rm push. If it refuses, say why in your closing comment.\n` +
     `5. Clean up: /usr/bin/git branch -d spec-${spec}, then /usr/bin/git branch -d for each ticket-<number> of its tickets and each worktree-agent-* branch that git branch --merged lists (git keeps any a worktree still uses).\n` +
-    `6. Close the spec: gh issue close ${spec} --comment with the merge commit, pushed or not (and why), and any criterion still open. Then end.`,
+    `6. Close the spec: gh issue close ${spec} --comment with the merge commit, pushed or not (and why), and any criterion still open.\n` +
+    `7. Retro, with nobody to ask: follow the retro skill over this spec (it can't be loaded with the Skill tool: read the newest ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/retro/SKILL.md), with measured evidence: f1rm cost for each ticket's cost and the coordination share, grep -E "refused .* (tickets|implement|close)-${spec}" ~/.f1rm/office.log for the gate's refusals, and the comments on #${spec} and its tickets for the review rounds and findings. Open each review finding left unfixed as an issue labelled needs-triage. Then propose at most 3 changes (to a role prompt, a rule, a ticket template or a check), most severe first: for each, a draft spec issue with no label (what to change, why, the evidence), then a decision ticket for it whose header is <!-- f1rm:decision risk=high spec=<the draft's number> recommended=1 ready=1 drop=2 -->, its question "Build this change?" with the evidence in one line, and its options 1. Build it and 2. Drop it. Change no file yourself. Then end.`,
 };
 
 /** The `claude` argv that starts a step: a named background session in the repo itself, coordinating at medium effort. `founder` for a Founder project, whose tickets may take the Founder roles. */
@@ -396,6 +401,9 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       } catch {
         // a notification that can't show is no reason to stop the tick
       }
+    },
+    approve: async (repo, spec) => {
+      if ((await gh(repo, ["issue", "edit", String(spec), "--add-label", "ready-for-agent"])) === null) throw new Error(`gh issue edit #${spec} failed`);
     },
     drop: async (repo, spec) => {
       if ((await gh(repo, ["issue", "close", String(spec), "--reason", "not planned", "--comment", "Dropped in the office."])) === null) throw new Error(`gh issue close #${spec} failed`);

@@ -3377,6 +3377,7 @@ test("the tray lists the registered projects' decision tickets and the browser a
     notify: () => {},
     open: async () => {},
     drop: async () => {},
+    approve: async () => {},
     tickets: async () => [{ number: 8, title: "slugify", state: "open" as const, blockedBy: 0, labels: [] }],
     costs: () => ({}),
     resolve: async (repo: string, n: number, spec: number | null, answer: string) => void resolved.push(`${repo} #${n} ${spec} ${answer}`),

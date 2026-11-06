@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { costUnits, specCosts, type Size, type Tokens as Cost } from "../office/cost.ts";
+import { sizesOf, specTable, type Size } from "../office/cost.ts";
 
 export type Merge = { sha: string; slug: string; startedAt: number; mergedAt: number };
 export type Deps = { merges: Merge[]; projectsDir: string; mainFolder: string; sizes?: Record<number, Size> };
@@ -170,35 +170,12 @@ function render(m: ReturnType<typeof measure>, command: string) {
   ].join("\n");
 }
 
-/** One line per spec of the repo, in cost units (see office/cost.ts). */
-function renderSpecs(repo: string, projectsDir: string, sizes: Record<number, Size>, command: string) {
-  const units = (t: Cost) => Math.round(costUnits(t)).toLocaleString("en-US");
-  const rows = Object.entries(specCosts(projectsDir, repo, sizes)).map(([n, s]) => {
-    const list = Object.entries(s.tickets).map(([t, c]) => `#${t} ${units(c)}`).join(", ") || "none";
-    return `| #${n} | ${units(s.coordination)} | ${list} | ${units(s.other)} | ${Math.round(s.total).toLocaleString("en-US")} | ${Math.round(s.share * 100)}% | ${s.warnings.map((t) => `#${t}`).join(", ") || "none"} |`;
-  });
-  return [
-    `# Cost per spec: ${repo}`,
-    "",
-    "Cost units weigh input 1, cache write 1.25, cache read 0.1 and output 5. Coordination is the PM's and the step sessions' own turns; the share is of output tokens.",
-    "",
-    "```",
-    command,
-    "```",
-    "",
-    "| spec | coordination | tickets | other interns | total | coordination share | over warning |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
-    ...rows,
-    "",
-  ].join("\n");
-}
-
 export function run(argv: string[], d: Deps) {
   const arg = (k: string) => argv[argv.indexOf(k) + 1];
   const out = arg("--out");
   if (argv.includes("--specs") && out) {
     mkdirSync(dirname(out), { recursive: true });
-    return writeFileSync(out, renderSpecs(arg("--specs"), d.projectsDir, d.sizes ?? {}, `bun scripts/baseline.ts ${argv.join(" ")}`));
+    return writeFileSync(out, specTable(arg("--specs"), d.projectsDir, d.sizes ?? {}, `bun scripts/baseline.ts ${argv.join(" ")}`));
   }
   const last = Number(arg("--last"));
   if (!Number.isInteger(last) || last < 1 || !out) throw new Error("usage: bun scripts/baseline.ts --last N --out FILE [--until REF] [--projects DIR], or --specs <repo folder> --out FILE [--projects DIR]");
@@ -223,21 +200,6 @@ function gitMerges(until: string): Merge[] {
     out.push({ sha: sha.slice(0, 7), slug, mergedAt: +ct * 1000, startedAt: (first.length ? Math.min(...first) : +ct) * 1000 });
   }
   return out;
-}
-
-/** The tickets' size labels (`size:s`, `size:m`, `size:l`) from GitHub; none when gh can't read them. */
-function sizesOf(repo: string): Record<number, Size> {
-  const p = Bun.spawnSync(["gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number,labels"], { cwd: repo });
-  try {
-    const sizes: Record<number, Size> = {};
-    for (const i of JSON.parse(p.stdout.toString()) as { number: number; labels: { name: string }[] }[]) {
-      const size = i.labels.map((l) => /^size:([sml])$/.exec(l.name)?.[1]).find(Boolean);
-      if (size) sizes[i.number] = size as Size;
-    }
-    return sizes;
-  } catch {
-    return {};
-  }
 }
 
 if (import.meta.main) {
