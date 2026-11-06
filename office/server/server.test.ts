@@ -1644,7 +1644,7 @@ test("a PM's or lead's Write, Edit and NotebookEdit land only in boards, milesto
       for (const file of refused) {
         const out = await write(id, tool, file);
         expect([id, tool, file, out?.permissionDecision]).toEqual([id, tool, file, "deny"]);
-        expect(out.permissionDecisionReason).toBe("The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
+        expect(out.permissionDecisionReason).toBe("The PM writes only its scratch files and its repo's tracker setup (CLAUDE.md, AGENTS.md, docs/agents/), and the office's steps only scratch files: code is built by the implement step's interns, in their worktrees.");
       }
     }
   }
@@ -2261,7 +2261,7 @@ async function ownerOffice() {
   const bash = async (id: string, command: string, cwd: string, sub = true) => call(id, "Bash", { command }, cwd, sub);
   return { repo, beside, a, b, main: git("rev-parse", "main"), behind: git("rev-parse", "worktree-add-a"), diverged: git("rev-parse", "worktree-add-b"), call, bash };
 }
-const WRITE_REFUSAL = "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.";
+const WRITE_REFUSAL = "The PM writes only its scratch files and its repo's tracker setup (CLAUDE.md, AGENTS.md, docs/agents/), and the office's steps only scratch files: code is built by the implement step's interns, in their worktrees.";
 
 test("a PM's or lead's sub-agent writes inside its own worktree; the same writes from the parent, in the main checkout, another worktree, a folder beside it, through a link or `..` are refused", async () => {
   const { repo, beside, a, b, call } = await ownerOffice();
@@ -3415,5 +3415,15 @@ test("the office warns once the installed f1rm plugin is older than its own, and
     start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
     expect(((await office(() => true)) as any).plugin ?? null).toBeNull();
     server.stop(true);
+  }
+});
+
+test("the PM writes its repo's tracker setup (CLAUDE.md, AGENTS.md, docs/agents/) and nothing else of the repo; a lead and the PM's intern do not", async () => {
+  await mainOffice();
+  const write = async (id: string, file_path: string, extra: object = {}) => held(await hook({ ...preToolUse(id, "Write", { file_path }), cwd: "/code/shop", ...extra }));
+  for (const f of ["/code/shop/CLAUDE.md", "/code/shop/AGENTS.md", "/code/shop/docs/agents/issue-tracker.md"]) expect([f, await write("p", f)]).toEqual([f, null]);
+  for (const [id, f, extra] of [["p", "/code/shop/src/a.ts", {}], ["p", "/code/shop/docs/agents/../../src/a.ts", {}], ["p", "/code/shop/docs/spec.md", {}], ["l", "/code/shop/CLAUDE.md", {}], ["p", "/code/shop/CLAUDE.md", { agent_id: "intern-1" }]] as const) {
+    const out = await write(id, f, extra);
+    expect([id, f, out?.permissionDecision]).toEqual([id, f, "deny"]);
   }
 });

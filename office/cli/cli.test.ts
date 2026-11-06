@@ -787,7 +787,7 @@ test("uninstall keeps the event log and the PM's boards", () => {
   expect(existsSync(join(home, ".f1rm", "ingest-headers"))).toBe(false);
 });
 
-test("pm on a paused project with a checkpoint tells the fresh PM to read the board, the milestones file and the manifest and say in one line where everything stopped", () => {
+test("pm on a paused project with a checkpoint tells the fresh PM that the office starts no step there, and how to resume", () => {
   const home = tempHome(), repo = realpathSync(repoDir("shop"));
   const key = repo.replace(/[^A-Za-z0-9]/g, "-");
   const plain = stubClaude();
@@ -808,8 +808,8 @@ test("pm on a paused project with a checkpoint tells the fresh PM to read the bo
   expect(prompt).toContain("PAUSED");
   expect(prompt).toContain("cp-20261028-153012");
   expect(prompt).toContain(join(dir, "cp-20261028-153012.json"));
-  expect(prompt).toContain("the board, the milestones file and the manifest");
-  expect(prompt).toContain("one line where everything stopped");
+  expect(prompt).toContain("The office starts no step in it.");
+  expect(prompt).not.toContain("the board");
   expect(prompt).toContain("`f1rm resume`");
   expect(prompt).toContain("going home");
 });

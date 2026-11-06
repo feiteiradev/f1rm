@@ -1131,7 +1131,8 @@ test("the PM interviews the user, publishes the spec and stops: no rules preload
   const { fm, body } = role("pm");
   expect(fm.model).toBe("sonnet");
   expect(fm.skills).toBeUndefined();
-  expect(String(fm.tools).split(/,\s*/)).toEqual(["Read", "Grep", "Glob", "Bash", "Write", "Skill"]);
+  expect(String(fm.tools).split(/,\s*/)).toEqual(["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill"]);
+  for (const s of ["`CLAUDE.md`, `AGENTS.md`, `docs/agents/`", "--body-file"]) expect(body, s).toContain(s);
   for (const s of ["setup-matt-pocock-skills", "`mattpocock-skills:grilling`", "`mattpocock-skills:domain-modeling`", "`to-spec`", "`ready-for-agent`", "A small ask", "gets no rounds", "and stop."]) expect(body, s).toContain(s);
   for (const s of ["f1rm hire", "board", "f1rm push", "letgo", "milestone", "lead"]) expect(body, s).not.toContain(s);
   expect(pmPromptText()).toContain("publish it as a spec");

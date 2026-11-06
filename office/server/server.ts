@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { alwaysRules, createBroker, DEFAULT_TIMEOUT_S, DENY_MESSAGE } from "./approvals.ts";
 import { applyApproval, commandsFile, deriveCommands, type Cmd } from "./projectcmds.ts";
 import { isSettingsFile, isWideningFlag, SETTINGS_REFUSAL, WIDENING_REFUSAL, writesSettings } from "./settingsgate.ts";
@@ -839,8 +839,11 @@ export function startServer({
       const dirs = [boardsDir, home && join(home, ".f1rm", "milestones"), home && join(home, ".f1rm", "kept"), home && join(home, ".claude", "agent-memory"), home && join(home, ".f1rm", "evidence")];
       const scratch = ["/private/tmp/claude-", "/tmp/claude-"];
       const inItsWorktree = !!worktree && inside(worktree, homeKey(file)) && !isLink(file) && !file.split("/").some((part) => part.toLowerCase() === ".git"); // the .git file says which repo the worktree is of (APFS ignores case)
-      if (!inItsWorktree && !dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
-        return refuse("write", "The PM and leads write only boards, milestones, kept files, memory, evidence and scratch files. Put this work on the board and hire for it.");
+      // The PM sets up its repo's issue tracker for the spec skills when it is missing: CLAUDE.md, AGENTS.md and docs/agents/, nothing else of the repo.
+      const rel = role === "pm" && !payload.agent_id && here && here !== ELSEWHERE.id ? relative(folderOf(here), file) : "";
+      const trackerSetup = rel === "CLAUDE.md" || rel === "AGENTS.md" || (rel.startsWith("docs/agents/") && !rel.split(sep).includes("..") && !isLink(file));
+      if (!inItsWorktree && !trackerSetup && !dirs.some((d) => d && file.startsWith(resolve(d) + sep)) && !scratch.some((p) => file.startsWith(p))) {
+        return refuse("write", "The PM writes only its scratch files and its repo's tracker setup (CLAUDE.md, AGENTS.md, docs/agents/), and the office's steps only scratch files: code is built by the implement step's interns, in their worktrees.");
       }
     }
     // The sub-agent's exceptions to its parent's landing rule are `git commit` and `git merge` inside its worktree (see confinedTo; an office step's interns merge the integration branch and the tickets, as /implement-spec does) and the move forward of its branch onto main.

@@ -370,11 +370,15 @@ function Office() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
-  // New spec: a PM in a new iTerm tab, which interviews the user and publishes the spec; the office builds it from there.
+  // New spec: a PM in a new iTerm tab, which interviews the user and publishes the spec; the office builds it from there. Clicks while one is on its way open no second tab.
+  const startingPm = useRef(false);
   async function newSpec() {
     const say = (text: string) => (setToast(text), clearTimeout(toastTimer.current), (toastTimer.current = setTimeout(() => setToast(null), 5000)));
     if (DEMO) return say("Starting a PM needs a live office; this is a recording.");
-    if (inside) say((await post("start-pm", { room: inside })) ?? "Starting a PM in a new iTerm tab: tell it what you want built.");
+    if (!inside || startingPm.current) return;
+    startingPm.current = true;
+    say((await post("start-pm", { room: inside })) ?? "Starting a PM in a new iTerm tab: tell it what you want built.");
+    setTimeout(() => (startingPm.current = false), 5000);
   }
 
   // A project the office doesn't have (an old link, or everyone left and the server forgot it) shows the lobby with a note.

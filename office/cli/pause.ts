@@ -72,5 +72,5 @@ export function pausedNote(root: string, home: string): string {
   const dir = checkpointDirOf(checkpointsDirOf(home), root);
   const manifest = (paused.checkpoint ? readManifest(dir, paused.checkpoint) : null) ?? latestManifest(dir);
   const since = `${paused.by}${paused.why ? `: ${paused.why}` : ""}, at ${new Date(paused.at).toISOString()}`;
-  return ` This project is PAUSED (${since}) and everything in it is stopped${manifest ? `: checkpoint ${manifest.id}, manifest ${join(dir, `${manifest.id}.json`)}` : ""}. Instead of the first pick up above, read the board, the milestones file${manifest ? " and the manifest" : ""} and tell me in one line where everything stopped; wake nothing yourself. When I say "resume", run \`f1rm resume\`${manifest ? ": it wakes every session from the manifest, each with a note of where it stopped" : ""}.`;
+  return ` This project is PAUSED (${since}) and everything in it is stopped${manifest ? `: checkpoint ${manifest.id}, manifest ${join(dir, `${manifest.id}.json`)}` : ""}. The office starts no step in it. Tell me so in one line; when I say "resume", run \`f1rm resume\`${manifest ? ": it wakes every session of the manifest, each with a note of where it stopped" : ""}.`;
 }
