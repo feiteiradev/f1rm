@@ -9,8 +9,8 @@ The office runs the company. A session needs none of this to do its step: its pr
 
 ## The flow
 
-1. **The ask.** The user asks the PM for work (`f1rm pm`, or New spec in the office). The PM checks the repo's issue tracker is set up for the spec skills, interviews the user on what their words leave open (a small ask gets a one-line understanding instead of rounds), publishes the spec on GitHub Issues labelled `ready-for-agent`, and stops.
-2. **Tickets.** The office starts `tickets-<n>`, whose first command is `/mattpocock-skills:to-tickets`. It publishes the spec's tickets as sub-issues with native blocking edges, labels each ticket that is not code with its role, comments the breakdown on the spec, and ends. The breakdown is the company's call.
+1. **The ask.** The user asks the PM for work (`f1rm pm`, or New spec in the office). The PM checks the repo's issue tracker is set up for the spec skills, interviews the user on what their words leave open, publishes the spec on GitHub Issues labelled `ready-for-agent`, and stops. A small ask (one ticket, about 3 files, no product, design or business choice) gets a one-line understanding and its check instead of rounds, and goes on at the user's "go".
+2. **Tickets.** The office starts `tickets-<n>`, whose first command is `/mattpocock-skills:to-tickets`. It publishes the spec's tickets as sub-issues with native blocking edges, each with a `Boundary:` line (the files it owns, so parallel interns never collide) and a `Depends:` line (the tickets it waits for), labels each ticket that is not code with its role, comments the breakdown on the spec, and ends. The breakdown is the company's call.
 3. **Implement.** Once a ticket is unblocked, the office starts `implement-<n>`, whose first command is `/mattpocock-skills:implement-spec`. Interns build each ticket test-first in their own worktree on `ticket-<number>`, mergers bring them one at a time onto the integration branch `spec-<n>`, one code review and one fix pass run at the end, and each ticket is closed with a comment naming its merge commit. Main is not touched.
 4. **Close.** Once every ticket is closed, the office starts `close-<n>`. It checks each acceptance criterion of the spec once on `spec-<n>`; at the first close a failing one becomes one more ticket, and the spec gets one more implement and close round (`-2`), the last. It lands `spec-<n>` with one `f1rm merge spec-<n>`, runs `f1rm push`, deletes the spec's branches, closes the spec, then runs the retro.
 5. **Retro.** The close step follows the retro skill with nobody to ask, on measured evidence (`f1rm cost`, the gate's refusals of its steps, the review comments). Each review finding left unfixed becomes a `needs-triage` issue. It proposes at most three changes (a role prompt, a rule, a ticket template or a check), each a draft spec with no label and a high-risk decision ticket: Build it has the office label the draft `ready-for-agent`, Drop it closes it. It changes no file itself.
@@ -58,7 +58,7 @@ The office's hooks hold these for every company session; the user's own sessions
 - An intern writes, commits and merges only inside its own worktree; the PM writes only scratch files and its repo's tracker setup (`CLAUDE.md`, `AGENTS.md`, `docs/agents/`); a step writes only scratch files.
 - Claude Code's settings and hooks are closed to every session; a project's command list is approved once by the user, in the office.
 - A permission request and a decision ticket are answered only in the office.
-- `--all` on pause and resume is the user's alone; a session starts no `claude --bg` or `claude -p` of its own.
+- The PM pauses and resumes its own project and prunes the archives; a step lets go of the sessions and worktrees it started (`f1rm letgo`); `--all` on pause and resume is the user's alone; a session starts no `claude --bg` or `claude -p` of its own.
 
 ## Editions and drafts
 

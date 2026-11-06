@@ -8,8 +8,7 @@ import { claudeEnv, machine } from "../server/machine.ts";
 import { pacing, readUsage, usageFile, when, withUsageTap, type Usage } from "../usage.ts";
 
 export const USAGE =
-  "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <pm session>] [--team <team>] [--simple] [--topic (a lead only)] [--skills a,b] [--level low|medium|high] [--content] <role> <name> <task> <brief> [claude flags...]\n" +
-  "       f1rm hire lead lead-<team> <team> <brief>";
+  "usage: f1rm hire [--override] (the user's own terminal only) [--report-to <session>] [--skills a,b] <role> <name> <task> <brief> [claude flags]: a designer, researcher, advisor or Founder role, from your own terminal; no session hires";
 
 const AGENTS = join(import.meta.dir, "..", "..", "plugin", "agents");
 export const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

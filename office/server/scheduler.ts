@@ -300,6 +300,7 @@ const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => s
     `/mattpocock-skills:to-tickets #${spec}\n\n` +
     `You run the tickets step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `Publish your breakdown without asking: the breakdown is the company's call. ` +
+    `Give each ticket a Boundary: line (the files it owns, so parallel interns never collide) and a Depends: line (the tickets it waits for). ` +
     `Label each ticket that is not code with its role (${Object.keys(roleSkills(founder)).map((r) => `role:${r}`).join(", ")}); a code ticket gets no role label. ` +
     `Then comment the breakdown on #${spec} (each ticket's number, title and blockers), and end.`,
   implement: (spec, _round, founder) =>

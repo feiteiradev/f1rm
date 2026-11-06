@@ -1454,8 +1454,8 @@ test("a background shell watcher (Bash with run_in_background) is not held for t
 });
 
 // The refusals of landing and of a raw push name the company's own paths: `f1rm merge` for the PM and the leads, `f1rm push` for the PM.
-const LANDING_REFUSAL = "Land with `f1rm merge <task>`, which the PM and the leads run in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the PM's at the end of a milestone.";
-const PUSH_REFUSAL = "The company pushes only with `f1rm push`, which the PM runs at the end of a milestone";
+const LANDING_REFUSAL = "Land with `f1rm merge spec-<n>`, which the close step runs in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the close step's once a spec landed.";
+const PUSH_REFUSAL = "The company pushes only with `f1rm push`, which a close step runs once a spec landed";
 
 // A PM, the checkout lead, a designer, a Reviewer and a freelancer, for the hire and push rules.
 async function gateOffice() {
@@ -1644,7 +1644,7 @@ test("only the PM, a lead and the user's own session run `f1rm merge`: a dev, a 
     for (const command of forms) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Only the PM and the leads run `f1rm merge");
+      expect(out.permissionDecisionReason).toContain("Only the PM and the office's steps run `f1rm merge`");
     }
   }
   for (const id of ["p", "l"]) expect([id, (await bash(id, "f1rm merge add-a", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
@@ -1660,7 +1660,7 @@ test("only the PM runs `f1rm push`: a lead, a dev, a designer, a researcher, a R
     for (const command of forms) {
       const out = await bash(id, command);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
-      expect(out.permissionDecisionReason).toContain("Only the PM pushes, with `f1rm push` at the end of a milestone");
+      expect(out.permissionDecisionReason).toContain("Only the PM and a close step push, with `f1rm push`");
     }
   }
   for (const id of ["p", "l", "c"]) expect([id, (await bash(id, "f1rm push", { agent_id: "intern-1" }))?.permissionDecision]).toEqual([id, "deny"]); // an intern is not its parent
@@ -1930,7 +1930,7 @@ test("a PM's or lead's sub-agent keeps the rest of its parent's limits: no push,
     }
     const hire = await bash(id, `f1rm hire --team checkout designer checkout.designer-a a 'Task: a'`, a);
     expect([id, "hire", hire?.permissionDecision]).toEqual([id, "hire", "deny"]);
-    for (const [command, reason] of [["f1rm merge add-a", "Only the PM and the leads run `f1rm merge"], ["f1rm pause", "Only the PM pauses and resumes"], ["f1rm resume", "Only the PM pauses and resumes"]] as const) {
+    for (const [command, reason] of [["f1rm merge add-a", "Only the PM and the office's steps run `f1rm merge`"], ["f1rm pause", "Only the PM pauses and resumes"], ["f1rm resume", "Only the PM pauses and resumes"]] as const) {
       const out = await bash(id, command, a);
       expect([id, command, out?.permissionDecision]).toEqual([id, command, "deny"]);
       expect(out.permissionDecisionReason).toContain(reason);

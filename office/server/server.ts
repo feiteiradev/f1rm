@@ -618,13 +618,13 @@ export function startServer({
     if (pausing && (role !== "pm" || payload.agent_id)) return refuse("pause", "Only the PM pauses and resumes its project. Send what you need to the session named in your brief's Report to.");
     // `f1rm merge` lands a reviewed branch on main: the PM runs it for a simple task and a lead for its milestone; an intern, any specialist and a Reviewer do not.
     if ((!COORDINATORS.has(role) || payload.agent_id) && commands.some((c) => hireArgs(c, "merge"))) {
-      return refuse("merge", "Only the PM and the leads run `f1rm merge <task>`. Send `DONE` to the session in your brief's Report to; it lands the branch.");
+      return refuse("merge", "Only the PM and the office's steps run `f1rm merge`: the close step lands a spec with `f1rm merge spec-<n>`. An intern leaves landing to the step that started it.");
     }
     // `f1rm push` pushes the base branch to origin, fast-forward only, once the suite is green: the PM's, at the end of a milestone. A lead, a specialist, a Reviewer and any intern are refused.
-    // shortcut: an office close step (`close-<n>`, a lead by role until #92 gives steps their own) pushes its landed spec too.
+    // An office close step (`close-<n>`, whose role id is lead: the steps wear the old lead's desk) pushes its landed spec too.
     const closeStep = role === "lead" && /^close-\d+(?:-\d+)?$/.test(state.employees[sessionId]?.title ?? "");
     if ((!(role === "pm" || closeStep) || payload.agent_id) && commands.some((c) => hireArgs(c, "push"))) {
-      return refuse("push-cmd", "Only the PM pushes, with `f1rm push` at the end of a milestone, once everything landed and the suite is green. Tell the session in your Report to that the work is ready.");
+      return refuse("push-cmd", "Only the PM and a close step push, with `f1rm push` once a spec landed and the suite is green. Say in your last turn that the work is ready.");
     }
     // The `--check` value of `f1rm push` and `f1rm merge` runs under `sh -c`, so it is read as a command line of its own: the suite, never a push or a merge.
     // ponytail: like the rest of the gate, `bash -c` and quote tricks inside the value are not seen.
@@ -660,9 +660,9 @@ export function startServer({
     const line = String(input.command ?? "");
     const unreadCommit = subOfCoordinator && /\bcommit\b/.test(line) && /\$\(|`/.test(line) && !commands.some((w) => gitCall(w)?.sub === "commit");
     if (COORDINATORS.has(role) && (unreadCommit || commands.some(lands))) {
-      return refuse("landing", "Land with `f1rm merge <task>`, which the PM and the leads run in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the PM's at the end of a milestone.");
+      return refuse("landing", "Land with `f1rm merge spec-<n>`, which the close step runs in the main working directory; `git push` and merging pull requests stay refused for everyone, and `f1rm push` is the close step's once a spec landed.");
     }
-    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "`git push` and merging pull requests are refused for everyone. The company pushes only with `f1rm push`, which the PM runs at the end of a milestone; tell the session in your Report to that the work is ready.");
+    if (commands.some((w) => gitCall(w)?.sub === "push" || ghLands(w))) return refuse("push", "`git push` and merging pull requests are refused for everyone. The company pushes only with `f1rm push`, which a close step runs once a spec landed.");
     // Nothing lands on the base branch but `f1rm merge`, for every role.
     const me = state.employees[sessionId];
     if (me && me.room !== ELSEWHERE.id && landsOnMain(split, String(payload.cwd ?? me.cwd), folderOf(me.room), baseBranches(me.room))) {

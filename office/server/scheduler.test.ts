@@ -373,6 +373,7 @@ test("the implement step gives each intern its ticket's role skills in place of 
 test("the tickets step labels each ticket that is not code with its role, the Founder roles only in a Founder project", () => {
   expect(stepArgv("tickets", 7, 1, true)[6]).toContain("(role:designer, role:researcher, role:marketer, role:seo-specialist, role:social-media, role:sales, role:strategist)");
   expect(stepArgv("tickets", 7)[6]).toContain("(role:designer, role:researcher)");
+  expect(stepArgv("tickets", 7)[6]).toContain("a Boundary: line (the files it owns, so parallel interns never collide) and a Depends: line");
 });
 
 test("the whiteboard shows each live spec and its tickets from GitHub: the step at work, each ticket's state, role and cost, the spec's total and coordination share, and a ticket over its warning", async () => {
