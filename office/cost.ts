@@ -6,8 +6,8 @@ import { projectFolder } from "./cli/hire.ts";
 
 export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number };
 export type Size = "s" | "m" | "l";
-/** A spec's cost: its PM's and step sessions' own turns, each ticket's interns, the interns that name no ticket (a review, its fix pass), the coordination share of output tokens and the tickets over their size's warning. */
-export type SpecCost = { coordination: Tokens; tickets: Record<number, Tokens>; other: Tokens; share: number; warnings: number[] };
+/** A spec's cost: its PM's and step sessions' own turns (the PM's interns too), each ticket's interns, the interns that start no ticket branch (a review, its fix pass, a merge), the total in cost units, the coordination share of output tokens and the tickets over their size's warning. */
+export type SpecCost = { coordination: Tokens; tickets: Record<number, Tokens>; other: Tokens; total: number; share: number; warnings: number[] };
 
 /** The cost units past which a ticket of each size is flagged; nothing stops for it. shortcut: guessed before any measurement, #94 sets them from the dry run. */
 export const WARN: Record<Size, number> = { s: 300_000, m: 1_000_000, l: 3_000_000 };
@@ -39,13 +39,17 @@ function tokensOf(entries: any[]): Tokens {
 
 const toolUses = (entries: any[]) =>
   entries.flatMap((o) => (o?.type === "assistant" && Array.isArray(o.message?.content) ? o.message.content.filter((c: any) => c?.type === "tool_use").map((c: any) => ({ id: String(c.id), text: JSON.stringify(c.input ?? {}) })) : []));
-/** The ticket an intern built: the first `ticket-<n>` its own commands name, which is the branch it starts. */
+/** The ticket an intern built: the `ticket-<n>` branch it starts (`checkout -b`, `switch -c`, `worktree add -b`). Naming a ticket in a diff or a merge is no start. */
 const ticketOf = (entries: any[]) => {
   for (const c of toolUses(entries)) {
-    const m = /\bticket-(\d+)\b/.exec(c.text);
+    const m = /(?:checkout|switch|worktree add)\b[^"]*?\s-[bcB]\s+ticket-(\d+)\b/.exec(c.text);
     if (m) return Number(m[1]);
   }
   return null;
+};
+const subagentsOf = (dir: string, file: string) => {
+  const subs = join(dir, file.slice(0, -".jsonl".length), "subagents");
+  return existsSync(subs) ? readdirSync(subs).filter((f) => f.endsWith(".jsonl")).map((f) => entriesOf(join(subs, f))) : [];
 };
 /** The specs a PM published: the issue each `gh issue create` printed. */
 function published(entries: any[]): number[] {
@@ -65,7 +69,7 @@ function published(entries: any[]): number[] {
 export function specCosts(projectsDir: string, repo: string, sizes: Record<number, Size> = {}): Record<number, SpecCost> {
   const dir = join(projectsDir, projectFolder(repo));
   const specs: Record<number, SpecCost> = {};
-  const of = (n: number) => (specs[n] ??= { coordination: zero(), tickets: {}, other: zero(), share: 0, warnings: [] });
+  const of = (n: number) => (specs[n] ??= { coordination: zero(), tickets: {}, other: zero(), total: 0, share: 0, warnings: [] });
   for (const file of existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : []) {
     const entries = entriesOf(join(dir, file));
     const role = entries.find((o) => o?.type === "agent-setting")?.agentSetting;
@@ -74,9 +78,7 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
     if (step) {
       const s = of(Number(step[1]));
       s.coordination = add(s.coordination, tokensOf(entries));
-      const subs = join(dir, file.slice(0, -".jsonl".length), "subagents");
-      for (const sub of existsSync(subs) ? readdirSync(subs).filter((f) => f.endsWith(".jsonl")) : []) {
-        const e = entriesOf(join(subs, sub));
+      for (const e of subagentsOf(dir, file)) {
         const ticket = ticketOf(e);
         if (ticket === null) s.other = add(s.other, tokensOf(e));
         else s.tickets[ticket] = add(s.tickets[ticket] ?? zero(), tokensOf(e));
@@ -84,12 +86,13 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
     } else if (role === "f1rm:pm") {
       // shortcut: a PM session that published several specs counts whole toward the first; split it by turn if PM sessions span specs.
       const first = published(entries)[0];
-      if (first !== undefined) of(first).coordination = add(of(first).coordination, tokensOf(entries));
+      if (first !== undefined) of(first).coordination = [entries, ...subagentsOf(dir, file)].reduce((t, e) => add(t, tokensOf(e)), of(first).coordination);
     }
   }
   for (const s of Object.values(specs)) {
     const total = s.coordination.output + s.other.output + Object.values(s.tickets).reduce((n, t) => n + t.output, 0);
     s.share = total ? s.coordination.output / total : 0;
+    s.total = costUnits(s.coordination) + costUnits(s.other) + Object.values(s.tickets).reduce((n, t) => n + costUnits(t), 0);
     s.warnings = Object.entries(s.tickets).filter(([n, t]) => costUnits(t) > WARN[sizes[Number(n)] ?? "m"]).map(([n]) => Number(n));
   }
   return specs;

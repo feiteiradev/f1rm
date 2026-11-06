@@ -31,7 +31,7 @@ test("a spec's cost: the step sessions' own turns are coordination, each intern 
     "s1.jsonl": [...named("implement-7", "f1rm:step"), usage("a", 10, 100, 0, 1000), usage("a", 10, 120, 0, 1000), usage("b", 0, 30, 0, 0)],
     "s1/subagents/agent-x.jsonl": [bash("c", "/usr/bin/git checkout -b ticket-8 spec-7"), usage("c", 0, 400, 0, 0), bash("d", "/usr/bin/git checkout -b ticket-9 spec-7")],
     "s1/subagents/agent-y.jsonl": [bash("e", "/usr/bin/git checkout -b ticket-9 spec-7"), usage("e", 0, 200, 0, 0)],
-    "s1/subagents/agent-z.jsonl": [usage("f", 0, 100, 0, 0)],
+    "s1/subagents/agent-z.jsonl": [bash("f", "/usr/bin/git diff main...ticket-8"), bash("f2", "/usr/bin/git merge ticket-9"), usage("f", 0, 100, 0, 0)],
     "s2.jsonl": [...named("close-7", "f1rm:step"), usage("g", 0, 50, 0, 0)],
     "s3.jsonl": [...named("tickets-9", "f1rm:step"), usage("h", 0, 999, 0, 0)],
     "s4.jsonl": [...named("someone", "f1rm:designer"), usage("i", 0, 999, 0, 0)],
@@ -41,15 +41,17 @@ test("a spec's cost: the step sessions' own turns are coordination, each intern 
   expect(seven.tickets).toEqual({ 8: { input: 0, cacheWrite: 0, cacheRead: 0, output: 400 }, 9: { input: 0, cacheWrite: 0, cacheRead: 0, output: 200 } });
   expect(seven.other).toEqual({ input: 0, cacheWrite: 0, cacheRead: 0, output: 100 });
   expect(seven.share).toBeCloseTo(200 / 900);
+  expect(seven.total).toBe(5 * 900 + 10 + 0.1 * 1000);
   expect(Object.keys(specCosts(dir, REPO)).sort()).toEqual(["7", "9"]);
 });
 
 test("the PM that published a spec counts as that spec's coordination", () => {
   const dir = transcripts({
     "pm.jsonl": [...named("pm-shop", "f1rm:pm"), bash("a", "gh issue create --title 'Spec: x' --label ready-for-agent --body-file /tmp/s.md"), result("a", "https://github.com/o/shop/issues/12\n"), usage("a", 0, 300, 0, 0)],
+    "pm/subagents/explore.jsonl": [usage("c", 0, 50, 0, 0)],
     "s1.jsonl": [...named("tickets-12", "f1rm:step"), usage("b", 0, 100, 0, 0)],
   });
-  expect(specCosts(dir, REPO)[12].coordination.output).toBe(400);
+  expect(specCosts(dir, REPO)[12].coordination.output).toBe(450);
 });
 
 test("a ticket over its size's warning flags it and stops nothing; a ticket with no size label is medium", () => {

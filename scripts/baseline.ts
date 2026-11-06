@@ -5,10 +5,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { costUnits, specCosts, type Tokens as Cost } from "../office/cost.ts";
+import { costUnits, specCosts, type Size, type Tokens as Cost } from "../office/cost.ts";
 
 export type Merge = { sha: string; slug: string; startedAt: number; mergedAt: number };
-export type Deps = { merges: Merge[]; projectsDir: string; mainFolder: string };
+export type Deps = { merges: Merge[]; projectsDir: string; mainFolder: string; sizes?: Record<number, Size> };
 
 type Tokens = [input: number, output: number, cacheCreate: number, cacheRead: number];
 type Session = { role: string; name: string; times: number[]; usage: { ts: number; t: Tokens }[] };
@@ -171,13 +171,11 @@ function render(m: ReturnType<typeof measure>, command: string) {
 }
 
 /** One line per spec of the repo, in cost units (see office/cost.ts). */
-function renderSpecs(repo: string, projectsDir: string, command: string) {
+function renderSpecs(repo: string, projectsDir: string, sizes: Record<number, Size>, command: string) {
   const units = (t: Cost) => Math.round(costUnits(t)).toLocaleString("en-US");
-  const rows = Object.entries(specCosts(projectsDir, repo)).map(([n, s]) => {
-    const tickets = Object.entries(s.tickets);
-    const total = costUnits(s.coordination) + costUnits(s.other) + tickets.reduce((x, [, t]) => x + costUnits(t), 0);
-    const list = tickets.map(([t, c]) => `#${t} ${units(c)}`).join(", ") || "none";
-    return `| #${n} | ${units(s.coordination)} | ${list} | ${units(s.other)} | ${Math.round(total).toLocaleString("en-US")} | ${Math.round(s.share * 100)}% | ${s.warnings.map((t) => `#${t}`).join(", ") || "none"} |`;
+  const rows = Object.entries(specCosts(projectsDir, repo, sizes)).map(([n, s]) => {
+    const list = Object.entries(s.tickets).map(([t, c]) => `#${t} ${units(c)}`).join(", ") || "none";
+    return `| #${n} | ${units(s.coordination)} | ${list} | ${units(s.other)} | ${Math.round(s.total).toLocaleString("en-US")} | ${Math.round(s.share * 100)}% | ${s.warnings.map((t) => `#${t}`).join(", ") || "none"} |`;
   });
   return [
     `# Cost per spec: ${repo}`,
@@ -200,7 +198,7 @@ export function run(argv: string[], d: Deps) {
   const out = arg("--out");
   if (argv.includes("--specs") && out) {
     mkdirSync(dirname(out), { recursive: true });
-    return writeFileSync(out, renderSpecs(arg("--specs"), d.projectsDir, `bun scripts/baseline.ts ${argv.join(" ")}`));
+    return writeFileSync(out, renderSpecs(arg("--specs"), d.projectsDir, d.sizes ?? {}, `bun scripts/baseline.ts ${argv.join(" ")}`));
   }
   const last = Number(arg("--last"));
   if (!Number.isInteger(last) || last < 1 || !out) throw new Error("usage: bun scripts/baseline.ts --last N --out FILE [--until REF] [--projects DIR], or --specs <repo folder> --out FILE [--projects DIR]");
@@ -227,12 +225,28 @@ function gitMerges(until: string): Merge[] {
   return out;
 }
 
+/** The tickets' size labels (`size:s`, `size:m`, `size:l`) from GitHub; none when gh can't read them. */
+function sizesOf(repo: string): Record<number, Size> {
+  const p = Bun.spawnSync(["gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number,labels"], { cwd: repo });
+  try {
+    const sizes: Record<number, Size> = {};
+    for (const i of JSON.parse(p.stdout.toString()) as { number: number; labels: { name: string }[] }[]) {
+      const size = i.labels.map((l) => /^size:([sml])$/.exec(l.name)?.[1]).find(Boolean);
+      if (size) sizes[i.number] = size as Size;
+    }
+    return sizes;
+  } catch {
+    return {};
+  }
+}
+
 if (import.meta.main) {
   const argv = process.argv.slice(2);
   const at = (k: string, dflt: string) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : dflt);
   const common = git("rev-parse", "--path-format=absolute", "--git-common-dir");
   run(argv, {
-    merges: gitMerges(at("--until", "main")),
+    merges: argv.includes("--specs") ? [] : gitMerges(at("--until", "main")),
+    sizes: argv.includes("--specs") ? sizesOf(at("--specs", ".")) : {},
     projectsDir: at("--projects", join(homedir(), ".claude", "projects")),
     mainFolder: dirname(common).replace(/[^a-zA-Z0-9]/g, "-"),
   });

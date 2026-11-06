@@ -75,4 +75,7 @@ test("--specs reports each spec of a repo in cost units: coordination, each tick
   run(["--specs", "/code/shop", "--out", out], { merges: [], projectsDir: dir, mainFolder: folder });
   const text = readFileSync(out, "utf8");
   expect(text).toContain("| #7 | 5,000 | #8 15,000 | 0 | 20,000 | 25% | none |");
+  session(dir, folder, "s1/subagents/y.jsonl", [JSON.stringify({ type: "assistant", message: { id: "c", content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "git checkout -b ticket-9 spec-7" } }] } }), usage("10:02:00", "c", 0, 0, 0, 4_000_000)]);
+  run(["--specs", "/code/shop", "--out", out], { merges: [], projectsDir: dir, mainFolder: folder, sizes: { 9: "s" } });
+  expect(readFileSync(out, "utf8")).toContain("| #7 | 5,000 | #8 15,000, #9 400,000 | 0 | 420,000 | 25% | #9 |");
 });
