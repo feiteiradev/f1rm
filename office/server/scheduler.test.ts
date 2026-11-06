@@ -378,7 +378,7 @@ test("the tickets step labels each ticket that is not code with its role, the Fo
   expect(stepArgv("tickets", 7)[6]).toContain("a Boundary: line (the files it owns, so parallel interns never collide) and a Depends: line");
 });
 
-test("the whiteboard shows each live spec and its tickets from GitHub: the step at work, each ticket's state, role and cost, the spec's total and coordination share, and a ticket over its warning", async () => {
+test("the whiteboard shows each live spec and its tickets from GitHub: the step at work, each ticket's state, role and cost, the spec's total and coordination share, and a ticket over its budget", async () => {
   const zero = { input: 0, cacheWrite: 0, cacheRead: 0 };
   const { s } = harness([spec(7, { title: "Spec: slugify titles", subIssues: 3, subDone: 1 }), ticket(9, 7, { title: "The slug command", blockedBy: 1 }), ticket(10, 7, { title: "Docs page" })], {
     live: async () => ["implement-7"],
@@ -387,12 +387,12 @@ test("the whiteboard shows each live spec and its tickets from GitHub: the step 
       { number: 9, title: "The slug command", state: "open", blockedBy: 1, labels: ["size:s"] },
       { number: 10, title: "Docs page", state: "open", blockedBy: 0, labels: ["role:designer"] },
     ],
-    costs: (_repo, sizes) => ({ 7: { coordination: { ...zero, output: 1_000 }, tickets: { 8: { ...zero, output: 20_000 }, 10: { ...zero, output: 1_000 } }, other: { ...zero, output: 0 }, total: 110_000, share: 0.05, warnings: sizes[8] ? [] : [8] } }),
+    costs: () => ({ 7: { coordination: { ...zero, output: 1_000 }, tickets: { 8: { ...zero, output: 50_000 }, 10: { ...zero, output: 1_000 } }, other: { ...zero, output: 0 }, total: 110_000, share: 0.05 } }),
   }, BUILT);
   await s.tick([REPO]);
   expect(s.boards()[REPO]).toEqual([
     { id: "#7", owner: "implement-7", status: "doing", branch: "spec-7", task: "Spec: slugify titles · 110k cost units, 5% coordination" },
-    { id: "#8", owner: "intern", status: "done", branch: "ticket-8", task: "slugify · 100k cost units · over its warning" },
+    { id: "#8", owner: "intern", status: "done", branch: "ticket-8", task: "slugify · 250k cost units · over its budget" },
     { id: "#9", owner: "intern", status: "blocked", branch: "ticket-9", task: "The slug command" },
     { id: "#10", owner: "role:designer", status: "doing", branch: "ticket-10", task: "Docs page · 5k cost units" },
   ]);
@@ -450,7 +450,7 @@ const spent = (units: number) => ({ input: 0, cacheWrite: 0, cacheRead: units * 
 const overBudget = (ticketUnits: number) => ({
   live: async () => ["implement-7"],
   tickets: async () => [{ number: 8, title: "slugify", state: "open" as const, blockedBy: 0, labels: [] }],
-  costs: () => ({ 7: { coordination: spent(0), tickets: { 8: spent(ticketUnits) }, other: spent(0), total: ticketUnits, share: 0, warnings: [] } }),
+  costs: () => ({ 7: { coordination: spent(0), tickets: { 8: spent(ticketUnits) }, other: spent(0), total: ticketUnits, share: 0 } }),
 });
 
 test("a ticket over its budget while the implement step builds it stops that step and opens one high-risk decision ticket, once", async () => {
@@ -485,4 +485,40 @@ test("Give it 50% more raises that ticket's budget and starts its step again; un
   live = ["implement-7"];
   await s.tick([REPO]);
   expect([stopped, opened]).toEqual([[], []]);
+});
+
+test("I'll re-scope it leaves the stopped step to the user: the office does not start it again, even once its decision ticket is gone", async () => {
+  let live = ["implement-7"];
+  let open: DecisionIssue[] = [];
+  const { s, started, opened } = harness([spec(7, { subIssues: 1 }), ticket(8, 7)], {
+    ...overBudget(BUDGET.m + 1),
+    live: async () => live,
+    decisions: async () => open,
+    open: async (_repo, _title, body) => void (open = [decision(50, { body })]),
+  }, BUILT);
+  await s.tick([REPO]);
+  live = [];
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#50`, 1)).toEqual({ ok: true });
+  open = [];
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect([started, open.length]).toEqual([[], 0]);
+  expect(opened).toEqual([]);
+});
+
+test("a raised budget is the wall's budget too, and a small or large ticket's guessed budget marks the ticket on the wall but never stops its step", async () => {
+  const stopped: string[] = [];
+  const { s } = harness([spec(7, { subIssues: 2 }), ticket(8, 7), ticket(9, 7)], {
+    live: async () => ["implement-7"],
+    tickets: async () => [
+      { number: 8, title: "slugify", state: "open", blockedBy: 0, labels: [] },
+      { number: 9, title: "CLI", state: "open", blockedBy: 0, labels: ["size:l"] },
+    ],
+    costs: () => ({ 7: { coordination: spent(0), tickets: { 8: spent(BUDGET.m * 1.4), 9: spent(BUDGET.l + 1) }, other: spent(0), total: 0, share: 0 } }),
+    stop: async (_repo, name) => void stopped.push(name),
+  }, { ...BUILT, "budget-8": { at: OLD, factor: 1.5 } });
+  await s.tick([REPO]);
+  expect(stopped).toEqual([]);
+  expect(s.boards()[REPO].slice(1).map((r) => r.task)).toEqual([`slugify · ${Math.round(BUDGET.m * 1.4 / 1000)}k cost units`, `CLI · ${Math.round((BUDGET.l + 1) / 1000)}k cost units · over its budget`]);
 });

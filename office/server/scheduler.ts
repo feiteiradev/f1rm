@@ -6,7 +6,7 @@ import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { repoKey, type BoardRow } from "./board.ts";
-import { BUDGET, costUnits, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
+import { MEASURED, budgetOf, costUnits, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
 import { editionFile, readEdition } from "./editions.ts";
 import { FOUNDER_ONLY, ROLE_IDS, roleOfAgentType } from "../people.ts";
 import { agents, machine } from "./machine.ts";
@@ -18,11 +18,11 @@ export type Issue = { number: number; title: string; author: string; parent: num
 /** A spec's ticket, open or closed, as the whiteboard shows it. */
 export type TicketIssue = { number: number; title: string; state: "open" | "closed"; blockedBy: number; labels: string[] };
 export type Step = "tickets" | "implement" | "close";
-/** The steps started per repo, by session name (`tries` starts, `done` the spec's closed tickets at the last one, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced. */
+/** The steps started per repo, by session name (`tries` starts, `done` the spec's closed tickets at the last one, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced, and `budget-<n>` is ticket n's budget (`factor` its raises, `asked` once it went to the user). */
 export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number; factor?: number }>;
 /** An open issue labelled `needs-decision`: `at` is when it opened (ms). */
 export type DecisionIssue = { number: number; author: string; body: string; at: number; url: string };
-/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec, a `ready` option labels it ready-for-agent (a retro's proposal is a draft spec). */
+/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec, a `ready` option labels it ready-for-agent (a retro's proposal is a draft spec), a `raise` option grows the `ticket`'s budget. */
 export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; ready: number[] | null; raise: number[] | null; ticket: number | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
 
 export type SchedulerDeps = {
@@ -44,7 +44,7 @@ export type SchedulerDeps = {
   /** A spec's tickets, open and closed; null if gh can't read them. */
   tickets: (repo: string, spec: number) => Promise<TicketIssue[] | null>;
   /** Each spec's cost in the repo (see office/cost.ts), with the tickets' sizes. */
-  costs: (repo: string, sizes: Record<number, Size>) => Record<number, SpecCost>;
+  costs: (repo: string) => Record<number, SpecCost>;
   /** The repo's open issues labelled `needs-decision`; null if gh can't read them. */
   decisions: (repo: string) => Promise<DecisionIssue[] | null>;
   /** Raises a macOS notification. */
@@ -107,6 +107,12 @@ export function decisionOf(body: string) {
 }
 
 /** A step's session name: `implement-7`, and `implement-7-2` for its second round. */
+/** "Give it 50% more" multiplies a ticket's budget by this. */
+const RAISE = 1.5;
+const inK = (units: number) => `${Math.round(units / 1000).toLocaleString("en-US")}k`;
+/** A repo's specs with their tickets, the cost of each, and the tickets' sizes, as the whiteboard and the budget check read them. */
+type Board = { rows: BoardRow[]; lists: [Issue, TicketIssue[]][]; costs: Record<number, SpecCost>; sizes: Record<number, Size> };
+
 export const stepName = (step: Step, spec: number, round = 1) => `${step}-${spec}${round > 1 ? `-${round}` : ""}`;
 
 export function createScheduler(d: SchedulerDeps) {
@@ -114,8 +120,9 @@ export function createScheduler(d: SchedulerDeps) {
   let ticking = false;
   let shown: Decision[] = [];
   let walls: Record<string, BoardRow[]> = {};
-  /** The whiteboard of a repo's live specs: a row per spec (the step at work, its total and coordination share) and a row per ticket (state, role, cost, a warning). */
-  async function issueBoard(repo: string, specs: Issue[], live: string[]): Promise<{ rows: BoardRow[]; lists: [Issue, TicketIssue[]][]; costs: Record<number, SpecCost>; sizes: Record<number, Size> } | null> {
+  const budget = (started: Started, sizes: Record<number, Size>, n: number) => budgetOf(sizes[n], started[`budget-${n}`]?.factor);
+  /** The whiteboard of a repo's live specs: a row per spec (the step at work, its total and coordination share) and a row per ticket (state, role, cost, over its budget). */
+  async function issueBoard(repo: string, specs: Issue[], live: string[], started: Started): Promise<Board | null> {
     const lists: [Issue, TicketIssue[]][] = [];
     for (const spec of specs) {
       const tickets = spec.subIssues ? await d.tickets(repo, spec.number) : [];
@@ -124,15 +131,14 @@ export function createScheduler(d: SchedulerDeps) {
     }
     const sizes: Record<number, Size> = {};
     for (const [, tickets] of lists) for (const t of tickets) for (const l of t.labels) if (/^size:[sml]$/.test(l)) sizes[t.number] = l.slice(5) as Size;
-    const costs = d.costs(repo, sizes);
-    const k = (units: number) => `${Math.round(units / 1000).toLocaleString("en-US")}k`;
+    const costs = d.costs(repo);
     const rows = lists.flatMap(([spec, tickets]) => {
       const n = spec.number;
       const step = live.find((name) => specOfStep(name) === n);
       const cost = costs[n];
       const building = !!step?.startsWith("implement-");
       return [
-        { id: `#${n}`, owner: step ?? "spec", status: step ? "doing" : "todo", branch: `spec-${n}`, task: cost ? `${spec.title} · ${k(cost.total)} cost units, ${Math.round(cost.share * 100)}% coordination` : spec.title },
+        { id: `#${n}`, owner: step ?? "spec", status: step ? "doing" : "todo", branch: `spec-${n}`, task: cost ? `${spec.title} · ${inK(cost.total)} cost units, ${Math.round(cost.share * 100)}% coordination` : spec.title },
         ...tickets.map((t) => {
           const spent = cost?.tickets[t.number];
           return {
@@ -140,7 +146,7 @@ export function createScheduler(d: SchedulerDeps) {
             owner: t.labels.find((l) => l.startsWith("role:")) ?? "intern",
             status: t.state === "closed" ? "done" : t.blockedBy > 0 ? "blocked" : building ? "doing" : "todo",
             branch: `ticket-${t.number}`,
-            task: `${t.title}${spent ? ` · ${k(costUnits(spent))} cost units` : ""}${cost?.warnings.includes(t.number) ? " · over its warning" : ""}`,
+            task: `${t.title}${spent ? ` · ${inK(costUnits(spent))} cost units` : ""}${spent && costUnits(spent) > budget(started, sizes, t.number) ? " · over its budget" : ""}`,
           };
         }),
       ];
@@ -162,7 +168,7 @@ export function createScheduler(d: SchedulerDeps) {
     started[`answered-${one.number}`] = { at: d.now() };
     if (one.step && (!one.restart || one.restart.includes(option))) delete started[one.step];
     // Give it 50% more: the ticket's budget grows half again, and it may be stopped again past that.
-    if (one.ticket && one.raise?.includes(option)) started[`budget-${one.ticket}`] = { at: d.now(), factor: (started[`budget-${one.ticket}`]?.factor ?? 1) * 1.5 };
+    if (one.ticket && one.raise?.includes(option)) started[`budget-${one.ticket}`] = { at: d.now(), factor: (started[`budget-${one.ticket}`]?.factor ?? 1) * RAISE };
     if (one.spec && one.drop?.includes(option)) await d.drop(one.repo, one.spec).catch((err) => console.log(`scheduler ${basename(one.repo)}: spec #${one.spec} not dropped: ${(err as Error).message}`));
     d.store.save(one.repo, started);
     console.log(`scheduler ${basename(one.repo)}: decision #${one.number} answered`);
@@ -188,29 +194,33 @@ export function createScheduler(d: SchedulerDeps) {
       d.store.save(repo, started);
     }
   }
-  /** A ticket past its size's budget (raised by any "50% more") while the implement step builds it: the office stops that step and asks the user, once per budget. */
-  async function overBudget(repo: string, started: Started, board: { lists: [Issue, TicketIssue[]][]; costs: Record<number, SpecCost>; sizes: Record<number, Size> }, live: string[]) {
+  /** A ticket past its measured budget while the implement step builds it: the office asks the user, once per budget, and stops that step; only the answer starts it again. */
+  async function overBudget(repo: string, started: Started, board: Board, live: string[]) {
     for (const [spec, tickets] of board.lists) {
       const step = live.find((name) => specOfStep(name) === spec.number && name.startsWith("implement-"));
       if (!step) continue;
       for (const t of tickets) {
-        const rec = started[`budget-${t.number}`];
+        const size = board.sizes[t.number] ?? "m";
+        const prior = started[`budget-${t.number}`];
         const spent = board.costs[spec.number]?.tickets[t.number];
-        const budget = BUDGET[board.sizes[t.number] ?? "m"] * (rec?.factor ?? 1);
-        if (t.state !== "open" || rec?.asked || !spent || costUnits(spent) <= budget) continue;
-        const k = (u: number) => `${Math.round(u / 1000).toLocaleString("en-US")}k`;
+        const limit = budget(started, board.sizes, t.number);
+        if (t.state !== "open" || !MEASURED.includes(size) || prior?.asked || !spent || costUnits(spent) <= limit) continue;
         const title = `Ticket #${t.number} is over its budget`;
-        const body = `<!-- f1rm:decision risk=high step=${step} spec=${spec.number} recommended=1 restart=1 raise=1 ticket=${t.number} drop=3 -->\n${title}: it has spent ${k(costUnits(spent))} cost units of its ${k(budget)} (size ${board.sizes[t.number] ?? "m"}). The office stopped ${step}. Give it more?\n\n1. Give it 50% more\n2. I'll re-scope it\n3. Drop the spec\n`;
+        const body = `<!-- f1rm:decision risk=high step=${step} spec=${spec.number} recommended=1 restart=1 raise=1 ticket=${t.number} drop=3 -->\n${title}: it has spent ${inK(costUnits(spent))} cost units of its ${inK(limit)} (size ${size}). The office stopped ${step}. Give it more?\n\n1. Give it ${Math.round((RAISE - 1) * 100)}% more\n2. I'll re-scope it\n3. Drop the spec\n`;
         try {
-          await d.stop(repo, step);
           await d.open(repo, title, body);
         } catch (err) {
           console.log(`scheduler ${basename(repo)}: ticket #${t.number} over budget, not asked: ${(err as Error).message}`);
           continue;
         }
-        started[`budget-${t.number}`] = { at: d.now(), factor: rec?.factor ?? 1, asked: true };
+        // Asked, the step never starts again by itself: Give it 50% more clears it, re-scoping leaves it to the user.
+        started[`budget-${t.number}`] = { at: d.now(), factor: prior?.factor ?? 1, asked: true };
+        started[step] = { ...started[step], at: started[step]?.at ?? d.now(), asked: true };
         d.store.save(repo, started);
-        console.log(`scheduler ${basename(repo)}: ${step} stopped, ticket #${t.number} over budget`);
+        await d.stop(repo, step).then(
+          () => console.log(`scheduler ${basename(repo)}: ${step} stopped, ticket #${t.number} over budget`),
+          (err) => console.log(`scheduler ${basename(repo)}: ticket #${t.number} over budget, ${step} not stopped: ${(err as Error).message}`),
+        );
         return; // the step is stopped: its other tickets wait for the answer
       }
     }
@@ -251,7 +261,7 @@ export function createScheduler(d: SchedulerDeps) {
           const issues = await d.ready(repo);
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
-          const board = await issueBoard(repo, issues.filter(isSpec), live);
+          const board = await issueBoard(repo, issues.filter(isSpec), live, started);
           if (board) nextWalls[repo] = board.rows;
           if (board && !paused) await overBudget(repo, started, board, live);
           if (held || paused) continue;
@@ -429,7 +439,7 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
         return null;
       }
     },
-    costs: (repo, sizes) => specCosts(join(home, ".claude", "projects"), repo, sizes),
+    costs: (repo) => specCosts(join(home, ".claude", "projects"), repo),
     decisions: async (repo) => {
       // shortcut: one page of 100 open decision tickets, as for the ready issues.
       const out = await gh(repo, ["api", "repos/{owner}/{repo}/issues?labels=needs-decision&state=open&per_page=100"]);
@@ -452,7 +462,8 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       if ((await gh(repo, ["issue", "edit", String(spec), "--add-label", "ready-for-agent"])) === null) throw new Error(`gh issue edit #${spec} failed`);
     },
     stop: async (repo, name) => {
-      const s = (await agents(false))?.find((a) => a?.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo);
+      // The newest session of that name in the repo: an older one keeps its name after it ends.
+      const s = ((await agents(false)) ?? []).filter((a) => a?.name === name && typeof a.cwd === "string" && repoOf(a.cwd) === repo).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
       if (!s || !(await machine.stop(String(s.sessionId ?? s.id)))) throw new Error(`could not stop ${name}`);
     },
     drop: async (repo, spec) => {

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { costUnits, specCosts } from "./cost.ts";
+import { costUnits, specCosts, specTable } from "./cost.ts";
 import { projectFolder } from "./cli/hire.ts";
 
 const REPO = "/code/shop";
@@ -54,14 +54,14 @@ test("the PM that published a spec counts as that spec's coordination", () => {
   expect(specCosts(dir, REPO)[12].coordination.output).toBe(450);
 });
 
-test("a ticket over its size's warning flags it and stops nothing; a ticket with no size label is medium", () => {
+test("f1rm cost lists the tickets over their size's budget; a ticket with no size label is medium", () => {
   const dir = transcripts({
     "s1.jsonl": [...named("implement-7", "f1rm:step")],
     "s1/subagents/a.jsonl": [bash("a", "git checkout -b ticket-8 spec-7"), usage("a", 0, 0, 0, 3_000_000)],
     "s1/subagents/b.jsonl": [bash("b", "git checkout -b ticket-9 spec-7"), usage("b", 0, 0, 0, 3_000_000)],
   });
-  const seven = specCosts(dir, REPO, { 8: "l" })[7];
-  expect(seven.warnings).toEqual([9]);
+  const row = specTable(REPO, dir, { 8: "l" }, "f1rm cost").split("\n").find((l) => l.startsWith("| #7 |"));
+  expect(row).toEndWith("| #9 |");
 });
 
 test("a repo with no transcripts costs nothing", () => {
