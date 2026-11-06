@@ -461,6 +461,8 @@ type Options = {
   approvalTimeoutMs?: number;
   /** The usage file (`~/.f1rm/usage.json`) the top-bar gauges read; without it the snapshot has no usage. */
   usageFile?: string;
+  /** The installed plugins file (`~/.claude/plugins/installed_plugins.json`) and this office's own plugin.json: with them, the office warns while the installed f1rm is older. */
+  pluginFiles?: { installed: string; own: string };
   /** Docker and the answer file (`~/.f1rm/leftovers.json`) of the one-time leftovers card; without both there is no card. */
   docker?: Docker;
   leftoversFile?: string;
@@ -481,6 +483,24 @@ type Options = {
   /** The scheduler tick (see scheduler.ts): how often it reads the registered repos' issues to start their specs' steps. Without it the office starts no step. */
   scheduler?: { everyMs: number; deps: Omit<SchedulerDeps, "paused"> };
 };
+
+/** The installed f1rm plugin's version and this office's, while the installed one is older; null when they match, nothing is installed or a file can't be read. */
+export function installedLag({ installed, own }: { installed: string; own: string }): { installed: string; own: string } | null {
+  try {
+    const mine = String(JSON.parse(readFileSync(own, "utf8")).version);
+    const entries = Object.entries(JSON.parse(readFileSync(installed, "utf8")).plugins ?? {}).filter(([k]) => k.startsWith("f1rm@")).flatMap(([, v]) => (Array.isArray(v) ? v : [v]));
+    const parts = (v: string) => v.split(".").map(Number);
+    const older = (a: string, b: string) => {
+      const [x, y] = [parts(a), parts(b)];
+      for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+      return false;
+    };
+    const newest = entries.map((e: any) => String(e?.version ?? "")).filter(Boolean).sort((a, b) => (older(a, b) ? 1 : -1))[0];
+    return newest && older(newest, mine) ? { installed: newest, own: mine } : null;
+  } catch {
+    return null;
+  }
+}
 
 // Dead only on ESRCH (no such process). EPERM means it belongs to someone else, so it is alive; so does any error that does not say it is gone.
 // ponytail: a pid the system has handed to another program since reads as alive, so that ghost waits for the quiet path; compare process start times if that is felt.
@@ -574,9 +594,13 @@ export function startServer({
   gateListingMs = GATE_LISTING_MS,
   recovery,
   scheduler,
+  pluginFiles,
 }: Options) {
   clientDir = resolve(clientDir);
   const junk = junkRoots.map(realPath); // resolved once; the injected roots may be raw paths
+  // The installed f1rm plugin never updates by itself: sessions keep the old rules while the office enforces the new ones. Read again on the usage tick, so an update clears the warning.
+  let pluginLag = pluginFiles ? installedLag(pluginFiles) : null;
+  if (pluginLag) console.log(`f1rm office: the installed f1rm plugin is ${pluginLag.installed}, older than this office's ${pluginLag.own}: run \`claude plugin update f1rm@f1rm\``);
 
   const db = new Database(dbPath, { create: true });
   // Another process reading the log (a backup, `sqlite3`) holds a lock; an insert waits for it instead of failing and losing the event.
@@ -1089,7 +1113,7 @@ export function startServer({
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
   const leftoversCard = createLeftovers({ docker, file: leftoversFile, clock, onChange: () => push() });
-  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }) });
+  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }), ...(pluginLag && { plugin: pluginLag }) });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1760,6 +1784,8 @@ export function startServer({
   let lastUsage = JSON.stringify(usageView(gaugesFile, clock()));
   const usageTimer = setInterval(() => {
     leftoversCard.current();
+    const lag = pluginFiles ? installedLag(pluginFiles) : null;
+    if (JSON.stringify(lag) !== JSON.stringify(pluginLag)) (pluginLag = lag, push());
     const seen = JSON.stringify(usageView(gaugesFile, clock()));
     if (seen !== lastUsage) (lastUsage = seen, push());
   }, 15_000);

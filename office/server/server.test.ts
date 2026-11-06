@@ -3396,3 +3396,20 @@ test("the tray lists the registered projects' decision tickets and the browser a
     expect(out.permissionDecisionReason).toContain("Only the user answers a decision ticket");
   }
 });
+
+test("the office warns once the installed f1rm plugin is older than its own, and says nothing when they match or no f1rm is installed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "f1rm-plugins-"));
+  const installed = join(dir, "installed_plugins.json"), own = join(dir, "plugin.json");
+  writeFileSync(own, JSON.stringify({ name: "f1rm", version: "0.6.0" }));
+  const plugins = (version: string) => writeFileSync(installed, JSON.stringify({ version: 2, plugins: { "f1rm@f1rm": [{ scope: "user", version }], "other@x": [{ version: "9.0.0" }] } }));
+  plugins("0.3.0");
+  start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
+  expect(((await office((s: any) => s.plugin !== undefined)) as any).plugin).toEqual({ installed: "0.3.0", own: "0.6.0" });
+  server.stop(true);
+  for (const write of [() => plugins("0.6.0"), () => plugins("0.10.0"), () => writeFileSync(installed, JSON.stringify({ version: 2, plugins: {} }))]) {
+    write();
+    start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { pluginFiles: { installed, own } });
+    expect(((await office(() => true)) as any).plugin ?? null).toBeNull();
+    server.stop(true);
+  }
+});

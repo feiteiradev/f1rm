@@ -405,6 +405,7 @@ function Office() {
         {inside && isProject(inside) && <button className="hire-btn" onClick={() => setTopicing(true)}>New topic</button>}
         {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
+        {state?.plugin && <p className="offline" role="status">The installed f1rm plugin is {state.plugin.installed}, older than this office's {state.plugin.own}: run <code>claude plugin update f1rm@f1rm</code>, then start new sessions.</p>}
         {state && <StopAll paused={state.paused ?? []} />}
         {state && <Gauges usage={state.usage} />}
         {state && <Palette state={state} onOpen={go} />}

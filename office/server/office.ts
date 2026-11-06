@@ -72,6 +72,8 @@ export type OfficeState = {
   approvals?: Approval[];
   /** The registered projects' open decision tickets (see scheduler.ts). Added by the server like `approvals`, and absent when the office reads no tickets. */
   decisions?: Decision[];
+  /** The installed f1rm plugin's version and this office's, while the installed one is older (see installedLag in server.ts). Added by the server only then. */
+  plugin?: { installed: string; own: string };
 };
 
 export type F1rmEvent = {
