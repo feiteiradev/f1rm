@@ -28,6 +28,7 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     notify: (title, text) => void told.push(`${title}: ${text}`),
     resolve: async (repo, n, spec, answer) => void resolved.push(`${repo} #${n} (spec ${spec}): ${answer}`),
     open: async (repo, title, body) => void opened.push(`${repo} ${title}\n${body}`),
+    drop: async () => {},
     ...over,
   };
   return { s: createScheduler(d), started, labels, told, resolved, opened, saved };
@@ -139,7 +140,9 @@ test("the implement step builds the spec on spec-<n> with interns in their own w
   for (const s of ["spec-7", "checkout -b ticket-<number> spec-7", "fix every finding", "ticket-<number>", 'isolation: "worktree"', "one at a time", "/usr/bin/git", "no pull request", "main"]) expect(prompt).toContain(s);
 });
 
-const BUILT = { "tickets-7": { at: 1 }, "implement-7": { at: 2 } };
+/** Ten minutes before the tests' clock: past the grace a just-started step gets. */
+const OLD = -10 * 60_000;
+const BUILT = { "tickets-7": { at: OLD }, "implement-7": { at: OLD } };
 
 test("once every ticket of a spec the office built is closed and its implement step ended, one close step starts", async () => {
   let ticks = 0;
@@ -197,7 +200,7 @@ test("a decision ticket by the owner shows with its question, options, recommend
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(s.decisions()).toEqual([
-    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
+    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, restart: null, drop: null, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
   ]);
   expect(told).toEqual(["f1rm: app needs a decision: Keep the old API?"]);
 });
@@ -272,23 +275,25 @@ test("a decision ticket someone else labelled is not shown or answered, and a re
 });
 
 test("a tickets step that ended without publishing tickets starts once more; a second such end opens one decision ticket and starts nothing", async () => {
-  const { s, started, opened } = harness([spec(7)], {}, { "tickets-7": { at: 1 } });
+  let now = 0;
+  const { s, started, opened } = harness([spec(7)], { now: () => now }, { "tickets-7": { at: OLD } });
   await s.tick([REPO]);
   expect(started).toEqual([`${REPO} tickets #7`]);
+  await s.tick([REPO]); // inside the grace of the restart: not judged yet
+  expect(opened).toEqual([]);
+  now += 10 * 60_000;
   await s.tick([REPO]);
   await s.tick([REPO]);
   expect(started).toEqual([`${REPO} tickets #7`]);
   expect(opened).toHaveLength(1);
   expect(opened[0]).toStartWith(`${REPO} tickets-7 ended twice without moving spec #7 on`);
-  expect(opened[0]).toContain("<!-- f1rm:decision risk=high step=tickets-7 spec=7 recommended=1 restart=1 -->");
-  expect(opened[0]).toContain("1. Retry it");
-  expect(opened[0]).toContain("2. Leave it to me");
+  expect(opened[0]).toContain("<!-- f1rm:decision risk=high step=tickets-7 spec=7 recommended=1 restart=1 drop=2 -->");
 });
 
 test("an implement step that ended with an unblocked ticket left, and a close step that ended with its spec still open, each start once more", async () => {
   const implement = harness([spec(7, { subIssues: 2, subDone: 1 }), ticket(8, 7)], {}, BUILT);
   await implement.s.tick([REPO]);
-  const close = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, { ...BUILT, "close-7": { at: 3 } });
+  const close = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, { ...BUILT, "close-7": { at: OLD } });
   await close.s.tick([REPO]);
   expect([...implement.started, ...close.started]).toEqual([`${REPO} implement #7`, `${REPO} close #7`]);
 });
@@ -312,4 +317,43 @@ test("answering the failure ticket with Retry it starts the step again; Leave it
   await leave.s.answer(`${REPO}#21`, 1);
   await leave.s.tick([REPO]);
   expect([retry.started, leave.started, leave.opened]).toEqual([[`${REPO} tickets #7`], [], []]);
+});
+
+test("a step started less than 3 minutes ago is not judged: claude may not list it yet", async () => {
+  const { s, started } = harness([spec(7)], { now: () => 1_000 + 3 * 60_000 - 1 }, { "tickets-7": { at: 1_000 } });
+  await s.tick([REPO]);
+  expect(started).toEqual([]);
+});
+
+test("an implement step that closed a ticket since it started is started again without counting a failure, and one that left only blocked tickets has failed", async () => {
+  const progress = harness([spec(7, { subIssues: 3, subDone: 2 }), ticket(9, 7)], {}, { ...BUILT, "implement-7": { at: OLD, tries: 2, done: 1 } });
+  await progress.s.tick([REPO]);
+  expect([progress.started, progress.opened]).toEqual([[`${REPO} implement #7`], []]);
+  const blocked = harness([spec(7, { subIssues: 2, subDone: 1 }), ticket(9, 7, { blockedBy: 1 })], {}, { ...BUILT, "implement-7": { at: OLD, tries: 2, done: 1 } });
+  await blocked.s.tick([REPO]);
+  expect(blocked.opened).toHaveLength(1);
+});
+
+test("a close step that fails twice asks once, offering to retry it, drop the spec or leave it; Drop closes the spec and starts nothing", async () => {
+  const twice = harness([spec(7, { subIssues: 2, subDone: 2 })], {}, { ...BUILT, "close-7": { at: OLD, tries: 2 } });
+  await twice.s.tick([REPO]);
+  await twice.s.tick([REPO]);
+  expect(twice.started).toEqual([]);
+  expect(twice.opened).toHaveLength(1);
+  expect(twice.opened[0]).toContain("restart=1 drop=2");
+  expect(twice.opened[0]).toContain("1. Retry it\n2. Drop the spec\n3. Leave it to me");
+  const dropped: string[] = [];
+  const failure = decision(30, { body: twice.opened[0].slice(twice.opened[0].indexOf("\n") + 1) });
+  const drop = harness([spec(7, { subIssues: 2, subDone: 2 })], { decisions: async () => [failure], drop: async (repo, n) => void dropped.push(`${repo} #${n}`) }, { ...BUILT, "close-7": { at: 3, tries: 2, asked: true } });
+  await drop.s.tick([REPO]);
+  expect(await drop.s.answer(`${REPO}#30`, 1)).toEqual({ ok: true });
+  await drop.s.tick([REPO]);
+  expect([dropped, drop.started]).toEqual([[`${REPO} #7`], []]);
+});
+
+test("a restart re-checks that the spec is still the user's: a label someone else added starts nothing", async () => {
+  const { s, started, labels } = harness([spec(7)], {}, { "tickets-7": { at: OLD } });
+  labels.set(7, "stranger");
+  await s.tick([REPO]);
+  expect(started).toEqual([]);
 });

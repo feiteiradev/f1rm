@@ -13,12 +13,12 @@ import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 /** An open issue labelled `ready-for-agent`, as the scheduler needs it: `parent` is the spec of a ticket, `subDone` a spec's closed tickets, `blockedBy` a ticket's open blockers. */
 export type Issue = { number: number; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean };
 export type Step = "tickets" | "implement" | "close";
-/** The steps started per repo, by session name (`tries` starts, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced. */
-export type Started = Record<string, { at: number; tries?: number; asked?: boolean }>;
+/** The steps started per repo, by session name (`tries` starts, `done` the spec's closed tickets at the last one, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced. */
+export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number }>;
 /** An open issue labelled `needs-decision`: `at` is when it opened (ms). */
 export type DecisionIssue = { number: number; author: string; body: string; at: number; url: string };
-/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some). */
-export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
+/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered (only for the `restart` options, when the ticket names some); a `drop` option closes the spec. */
+export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; restart: number[] | null; drop: number[] | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
 
 export type SchedulerDeps = {
   now: () => number;
@@ -40,6 +40,8 @@ export type SchedulerDeps = {
   decisions: (repo: string) => Promise<DecisionIssue[] | null>;
   /** Raises a macOS notification. */
   notify: (title: string, text: string) => void;
+  /** Closes the spec as not planned. */
+  drop: (repo: string, spec: number) => Promise<void>;
   /** Opens a decision ticket in the repo. */
   open: (repo: string, title: string, body: string) => Promise<void>;
   /** Closes the decision ticket with the answer as its comment (throws what refused that), then takes its label off and writes the answer on its spec. */
@@ -55,6 +57,12 @@ const isSpec = (i: Issue) => !i.pr && i.parent === null;
 export const DEFAULT_AFTER_MS = 4 * 3_600_000;
 const META = /<!--\s*f1rm:decision\b([^>]*?)-->/;
 const OPTION = /^\s*\d+\.\s+(?=\S)/;
+/** `restart=1,3` as indices into the options; null when the header has no such field. */
+const indices = (field: string | undefined, count: number) => (field ? field.split(",").map((x) => Number(x) - 1).filter((i) => i >= 0 && i < count) : null);
+/** A failed step is judged only this long after it started: `claude agents` may not list a session that has just been started. */
+const GRACE_MS = 3 * 60_000;
+/** A step that ended twice without moving its spec on is not started a third time: the user is asked. */
+const MAX_TRIES = 2;
 /** Reads a decision ticket's body: an HTML comment `<!-- f1rm:decision risk=low step=implement-7 spec=7 recommended=2 -->`, the question, then the options as a numbered list. A risk that is not `low` is high. */
 export function decisionOf(body: string) {
   const meta = Object.fromEntries([...(META.exec(body)?.[1] ?? "").matchAll(/(\w+)=(\S+)/g)].map((m) => [m[1], m[2]]));
@@ -66,7 +74,8 @@ export function decisionOf(body: string) {
     question: (first < 0 ? lines : lines.slice(0, first)).join("\n").trim(),
     options,
     recommended: Number.isInteger(rec) && rec >= 1 && rec <= options.length ? rec - 1 : null,
-    restart: meta.restart ? meta.restart.split(",").map((x) => Number(x) - 1).filter((i) => i >= 0 && i < options.length) : null,
+    restart: indices(meta.restart, options.length),
+    drop: indices(meta.drop, options.length),
     risk: meta.risk === "low" ? ("low" as const) : ("high" as const),
     step: /^(?:tickets|implement|close)-\d+(?:-\d+)?$/.test(meta.step ?? "") ? meta.step! : null,
     spec: Number(meta.spec) || null,
@@ -92,6 +101,7 @@ export function createScheduler(d: SchedulerDeps) {
     await d.resolve(one.repo, one.number, one.spec, answer);
     started[`answered-${one.number}`] = { at: d.now() };
     if (one.step && (!one.restart || one.restart.includes(option))) delete started[one.step];
+    if (one.spec && one.drop?.includes(option)) await d.drop(one.repo, one.spec).catch((err) => console.log(`scheduler ${basename(one.repo)}: spec #${one.spec} not dropped: ${(err as Error).message}`));
     d.store.save(one.repo, started);
     console.log(`scheduler ${basename(one.repo)}: decision #${one.number} answered`);
   }
@@ -150,26 +160,26 @@ export function createScheduler(d: SchedulerDeps) {
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
           const owned = async (i: Issue) => i.author === me && (await d.labeledBy(repo, i.number, "ready-for-agent")) === me;
-          // shortcut: a step that ended without moving its spec on is never started again; #90 adds one retry, then a decision ticket.
-          const startOnce = async (step: Step, spec: number, round = 1, tries = 1) => {
-            const name = stepName(step, spec, round);
+          const startOnce = async (step: Step, spec: Issue, round = 1, tries = 1) => {
+            const name = stepName(step, spec.number, round);
             try {
-              await d.start(repo, step, spec, round);
+              await d.start(repo, step, spec.number, round);
             } catch (err) {
               return console.log(`scheduler ${basename(repo)}: ${name} not started: ${(err as Error).message}`);
             }
-            started[name] = { at: d.now(), tries };
+            started[name] = { at: d.now(), tries, done: spec.subDone };
             d.store.save(repo, started);
             console.log(`scheduler ${basename(repo)}: started ${name}${tries > 1 ? " again" : ""}`);
           };
-          // A step that ended while what it was for is still there failed: it starts once more, then the user is asked. One waiting on a decision ticket has not failed.
-          const again = async (step: Step, spec: number, round = 1) => {
-            const name = stepName(step, spec, round);
+          // A step that ended while what it was for is still there failed: it starts once more (a closed ticket since its start counts as progress, not a failure), then the user is asked. One waiting on a decision ticket it opened has not failed.
+          const retryOrAsk = async (step: Step, spec: Issue, round = 1) => {
+            const name = stepName(step, spec.number, round);
             const rec = started[name];
-            if (rec.asked || list.some((x) => x.repo === repo && x.step === name)) return;
-            if ((rec.tries ?? 1) < 2) return startOnce(step, spec, round, (rec.tries ?? 1) + 1);
-            const title = `${name} ended twice without moving spec #${spec} on`;
-            const body = `<!-- f1rm:decision risk=high step=${name} spec=${spec} recommended=1 restart=1 -->\n${title}. Its last words are in \`claude logs\` for ${name}, and the office's log says when it started.\n\n1. Retry it\n2. Leave it to me\n`;
+            if (d.now() - rec.at < GRACE_MS || rec.asked || list.some((x) => x.repo === repo && x.step === name) || !(await owned(spec))) return;
+            const tries = rec.done !== undefined && spec.subDone > rec.done ? 0 : (rec.tries ?? 1);
+            if (tries < MAX_TRIES) return startOnce(step, spec, round, tries + 1);
+            const title = `${name} ended twice without moving spec #${spec.number} on`;
+            const body = `<!-- f1rm:decision risk=high step=${name} spec=${spec.number} recommended=1 restart=1 drop=2 -->\n${title}. Its last words are in \`claude logs\` for ${name}, and the office's log says when it started.\n\n1. Retry it\n2. Drop the spec\n3. Leave it to me\n`;
             try {
               await d.open(repo, title, body);
             } catch (err) {
@@ -182,29 +192,33 @@ export function createScheduler(d: SchedulerDeps) {
             const n = spec.number;
             if (!spec.subIssues) {
               if (!started[`tickets-${n}`]) {
-                if (await owned(spec)) await startOnce("tickets", n);
-              } else if (!live.includes(`tickets-${n}`)) await again("tickets", n);
+                if (await owned(spec)) await startOnce("tickets", spec);
+              } else if (!live.includes(`tickets-${n}`)) await retryOrAsk("tickets", spec);
               continue;
             }
             // Only a spec whose tickets the office published is built by it: one ticketed by hand is the user's to drive. One step of a spec runs at a time.
             const mine = new RegExp(`^(?:tickets|implement|close)-${n}(?:-\\d+)?$`);
             if (!started[`tickets-${n}`] || live.some((name) => mine.test(name))) continue;
             // A failing acceptance criterion becomes a ticket at the first close, which gets one more round; tickets left after the last close are the user's.
-            const open = spec.subDone < spec.subIssues;
-            const round = started[stepName("close", n)] && (open || started[stepName("implement", n, 2)]) ? 2 : 1;
+            const unfinished = spec.subDone < spec.subIssues;
+            const round = started[stepName("close", n)] && (unfinished || started[stepName("implement", n, 2)]) ? 2 : 1;
             const implement = stepName("implement", n, round), close = stepName("close", n, round);
-            if (!open) {
+            if (!unfinished) {
               if (!started[implement]) continue;
               if (!started[close]) {
-                if (await owned(spec)) await startOnce("close", n, round);
-              } else await again("close", n, round);
+                if (await owned(spec)) await startOnce("close", spec, round);
+              } else await retryOrAsk("close", spec, round);
               continue;
             }
             if (round === 2 && started[close]) continue;
+            if (started[implement]) {
+              await retryOrAsk("implement", spec, round);
+              continue;
+            }
             const unblocked = issues.filter((t) => t.parent === n && !t.pr && t.blockedBy === 0 && t.author === me);
             if (!unblocked.length || !(await owned(spec))) continue;
             for (const t of unblocked) if ((await d.labeledBy(repo, t.number, "ready-for-agent")) === me) {
-              await (started[implement] ? again("implement", n, round) : startOnce("implement", n, round));
+              await startOnce("implement", spec, round);
               break;
             }
           }
@@ -308,6 +322,9 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       } catch {
         // a notification that can't show is no reason to stop the tick
       }
+    },
+    drop: async (repo, spec) => {
+      if ((await gh(repo, ["issue", "close", String(spec), "--reason", "not planned", "--comment", "Dropped in the office."])) === null) throw new Error(`gh issue close #${spec} failed`);
     },
     open: async (repo, title, body) => {
       if ((await gh(repo, ["label", "create", "needs-decision", "--force", "--description", "A question only the user answers, in the office's tray"])) === null) throw new Error("gh label create needs-decision failed");
