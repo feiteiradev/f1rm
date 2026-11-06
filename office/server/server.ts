@@ -1111,7 +1111,7 @@ export function startServer({
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
   const leftoversCard = createLeftovers({ docker, file: leftoversFile, clock, onChange: () => push() });
-  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }), ...(pluginLag && { plugin: pluginLag }) });
+  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards: scheduling ? issueBoards() : boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }), ...(pluginLag && { plugin: pluginLag }) });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1726,6 +1726,8 @@ export function startServer({
   }
   // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
   const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
+  /** The whiteboards from the issues (see scheduler.ts), by room. */
+  const issueBoards = () => Object.fromEntries(projectRooms().flatMap((id) => (scheduling?.boards()[folderOf(id)]?.length ? [[id, scheduling.boards()[folderOf(id)]]] : [])));
   // A paused project, or one whose stopped hires a resume is still waking, is left alone: no wake, no nudge, no note, no step started.
   const pausedRepo = (repo: string) => resumes.has(repo) || Object.keys(state.rooms).some((id) => id !== ELSEWHERE.id && folderOf(id) === repo && !!pausedOf(id));
   const scheduling = scheduler && createScheduler({ ...scheduler.deps, everyMs: scheduler.everyMs, paused: pausedRepo });
@@ -1791,11 +1793,12 @@ export function startServer({
     if (seen !== lastUsage) (lastUsage = seen, push());
   }, 15_000);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
-  // The tray shows the decision tickets the tick read: a change is pushed to the page.
+  // The tray shows the decision tickets the tick read, and the whiteboards its issues: a change is pushed to the page.
   const tickScheduler = async () => {
-    const before = JSON.stringify(scheduling!.decisions());
+    const seen = () => JSON.stringify([scheduling!.decisions(), scheduling!.boards()]);
+    const before = seen();
     await scheduling!.tick(registered()).catch((err) => console.log(`scheduler: ${(err as Error).message}`));
-    if (JSON.stringify(scheduling!.decisions()) !== before) push();
+    if (seen() !== before) push();
   };
   const schedulerTimer = scheduling && setInterval(tickScheduler, scheduler.everyMs);
   const stop = server.stop.bind(server);

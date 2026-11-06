@@ -1,6 +1,6 @@
 // What a spec's work cost, in cost units: tokens weighted by API price relative to input, read from the Claude Code transcripts of the repo's step sessions,
 // their interns and the PM (decision "Budgets in cost units"). Anthropic does not publish how the subscription weighs tokens, so price is the proxy.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { projectFolder } from "./cli/hire.ts";
 
@@ -15,14 +15,36 @@ export const WARN: Record<Size, number> = { s: 300_000, m: 1_000_000, l: 3_000_0
 export const costUnits = (t: Tokens) => t.input + 1.25 * t.cacheWrite + 0.1 * t.cacheRead + 5 * t.output;
 const zero = (): Tokens => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });
 const add = (a: Tokens, b: Tokens): Tokens => ({ input: a.input + b.input, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead, output: a.output + b.output });
-const entriesOf = (file: string): any[] =>
-  readFileSync(file, "utf8").split("\n").flatMap((l) => {
+const parse = (text: string): any[] =>
+  text.split("\n").flatMap((l) => {
     try {
       return [JSON.parse(l)];
     } catch {
       return [];
     }
   });
+// The office reads costs every minute and a repo's transcripts can weigh hundreds of MB: a file is read again only when it changed.
+// shortcut: the cache only grows within a process; clear it by age if an office runs for weeks over many repos.
+const cache = new Map<string, { stamp: string; entries: any[] }>();
+const entriesOf = (file: string): any[] => {
+  const st = statSync(file);
+  const stamp = `${st.mtimeMs}:${st.size}`;
+  const hit = cache.get(file);
+  if (hit?.stamp === stamp) return hit.entries;
+  const entries = parse(readFileSync(file, "utf8"));
+  cache.set(file, { stamp, entries });
+  return entries;
+};
+/** A transcript's first lines, where Claude Code writes the session's name and agent type. */
+const headOf = (file: string) => {
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(16 * 1024);
+    return parse(buf.subarray(0, readSync(fd, buf, 0, buf.length, 0)).toString("utf8"));
+  } finally {
+    closeSync(fd);
+  }
+};
 
 /** A transcript's tokens. A message is written once per content block and early copies carry partial counts, so each message counts once with the largest of each field. */
 function tokensOf(entries: any[]): Tokens {
@@ -71,9 +93,11 @@ export function specCosts(projectsDir: string, repo: string, sizes: Record<numbe
   const specs: Record<number, SpecCost> = {};
   const of = (n: number) => (specs[n] ??= { coordination: zero(), tickets: {}, other: zero(), total: 0, share: 0, warnings: [] });
   for (const file of existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : []) {
+    const head = headOf(join(dir, file));
+    const role = head.find((o) => o?.type === "agent-setting")?.agentSetting;
+    const name = String(head.find((o) => o?.type === "agent-name")?.agentName ?? "");
+    if (role !== "f1rm:step" && role !== "f1rm:pm") continue;
     const entries = entriesOf(join(dir, file));
-    const role = entries.find((o) => o?.type === "agent-setting")?.agentSetting;
-    const name = String(entries.find((o) => o?.type === "agent-name")?.agentName ?? "");
     const step = role === "f1rm:step" ? /^(?:tickets|implement|close)-(\d+)(?:-\d+)?$/.exec(name) : null;
     if (step) {
       const s = of(Number(step[1]));

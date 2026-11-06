@@ -3371,17 +3371,24 @@ test("the tray lists the registered projects' decision tickets and the browser a
   const resolved: string[] = [];
   const kept: Record<string, any> = {};
   const deps = {
-    now: Date.now, owner: async () => "owner", ready: async () => [], live: async () => [], labeledBy: async () => "owner", start: async () => {}, held: () => false, resting: () => false,
+    now: Date.now, owner: async () => "owner", ready: async () => [{ number: 7, title: "Spec: slugify", author: "owner", parent: null, subIssues: 1, subDone: 0, blockedBy: 0, pr: false }], live: async () => [], labeledBy: async () => "owner", start: async () => {}, held: () => false, resting: () => false,
     store: { load: (r: string) => (kept[r] ??= {}), save: (r: string, s: any) => void (kept[r] = s) },
     decisions: async () => [{ number: 12, author: "owner", at: Date.now(), url: "https://github.com/o/shop/issues/12", body: "<!-- f1rm:decision risk=high spec=7 recommended=1 -->\nShip it?\n\n1. Yes\n2. No\n" }],
     notify: () => {},
     open: async () => {},
     drop: async () => {},
+    tickets: async () => [{ number: 8, title: "slugify", state: "open" as const, blockedBy: 0, labels: [] }],
+    costs: () => ({}),
     resolve: async (repo: string, n: number, spec: number | null, answer: string) => void resolved.push(`${repo} #${n} ${spec} ${answer}`),
   };
   start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { scheduler: { everyMs: 20, deps } });
   await hook({ ...common("l", "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", agent_type: "f1rm:lead", session_title: "lead-checkout" });
-  const seen = (await office((s: any) => s.decisions?.length === 1)) as any;
+  const seen = (await office((s: any) => s.decisions?.length === 1 && !!s.boards?.["/code/shop/.git"])) as any;
+  // The whiteboard reads the issues, not a board file.
+  expect(seen.boards["/code/shop/.git"]).toEqual([
+    { id: "#7", owner: "spec", status: "todo", branch: "spec-7", task: "Spec: slugify" },
+    { id: "#8", owner: "intern", status: "todo", branch: "ticket-8", task: "slugify" },
+  ]);
   const d = seen.decisions[0];
   expect(d).toMatchObject({ number: 12, question: "Ship it?", options: ["Yes", "No"], recommended: 0, risk: "high", spec: 7 });
   expect((await ui(`decide/${encodeURIComponent(d.id)}`)).status).toBe(405);

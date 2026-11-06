@@ -598,7 +598,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: a ticket's cost is counted in cost units, tokens weighted by API price relative to input (input 1, cache write 1.25, cache read 0.1, output 5), from the transcripts' usage fields. Budgets only warn until the dry run; then each size's budget is 1.5 times its measured median, and a ticket over budget stops with a decision ticket.
 - Why: raw counts are dominated by cheap cache reads (a lead turn re-read about 300k tokens), and Anthropic does not publish how the subscription weighs tokens, so price is the closest proxy.
 - Rejected: raw token counts; budgets guessed before any measurement.
-- Where: not built; rebuild grilling 2026-11-06, round 2 Q11
+- Where: rebuild grilling 2026-11-06, round 2 Q11; the cost report in #82 (office/cost.ts, `scripts/baseline.ts --specs`), the whiteboard's cost per spec and ticket in #89
 
 ## 2026-11-06 A retro closes every spec
 

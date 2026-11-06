@@ -21,7 +21,7 @@ export const boardCounts = (rows: BoardRow[]) => ({
 
 /** The whole board in a phrase, for the text version. */
 export function boardSummary(rows: BoardRow[]): string {
-  if (!rows.length) return "No tasks";
+  if (!rows.length) return "No tickets";
   const { total, done, blocked, publish } = boardCounts(rows);
-  return `${done} of ${total} ${total === 1 ? "task" : "tasks"} done${blocked ? `, ${blocked} blocked` : ""}${publish ? `, ${publish} to publish` : ""}`;
+  return `${done} of ${total} ${total === 1 ? "ticket" : "tickets"} done${blocked ? `, ${blocked} blocked` : ""}${publish ? `, ${publish} to publish` : ""}`;
 }

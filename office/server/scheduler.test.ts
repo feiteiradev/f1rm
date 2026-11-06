@@ -3,7 +3,7 @@ import { createScheduler, stepArgv, type DecisionIssue, type Issue, type Schedul
 
 const REPO = "/r/app";
 const ME = "owner";
-const spec = (number: number, over: Partial<Issue> = {}): Issue => ({ number, author: ME, parent: null, subIssues: 0, subDone: 0, blockedBy: 0, pr: false, ...over });
+const spec = (number: number, over: Partial<Issue> = {}): Issue => ({ number, title: `Issue ${number}`, author: ME, parent: null, subIssues: 0, subDone: 0, blockedBy: 0, pr: false, ...over });
 const ticket = (number: number, of: number, over: Partial<Issue> = {}): Issue => spec(number, { parent: of, ...over });
 
 function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Started = {}) {
@@ -28,6 +28,8 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     notify: (title, text) => void told.push(`${title}: ${text}`),
     resolve: async (repo, n, spec, answer) => void resolved.push(`${repo} #${n} (spec ${spec}): ${answer}`),
     open: async (repo, title, body) => void opened.push(`${repo} ${title}\n${body}`),
+    tickets: async () => [],
+    costs: () => ({}),
     drop: async () => {},
     ...over,
   };
@@ -370,4 +372,24 @@ test("the implement step gives each intern its ticket's role skills in place of 
 test("the tickets step labels each ticket that is not code with its role, the Founder roles only in a Founder project", () => {
   expect(stepArgv("tickets", 7, 1, true)[6]).toContain("(role:designer, role:researcher, role:marketer, role:seo-specialist, role:social-media, role:sales, role:strategist)");
   expect(stepArgv("tickets", 7)[6]).toContain("(role:designer, role:researcher)");
+});
+
+test("the whiteboard shows each live spec and its tickets from GitHub: the step at work, each ticket's state, role and cost, the spec's total and coordination share, and a ticket over its warning", async () => {
+  const zero = { input: 0, cacheWrite: 0, cacheRead: 0 };
+  const { s } = harness([spec(7, { title: "Spec: slugify titles", subIssues: 3, subDone: 1 }), ticket(9, 7, { title: "The slug command", blockedBy: 1 }), ticket(10, 7, { title: "Docs page" })], {
+    live: async () => ["implement-7"],
+    tickets: async () => [
+      { number: 8, title: "slugify", state: "closed", blockedBy: 0, labels: [] },
+      { number: 9, title: "The slug command", state: "open", blockedBy: 1, labels: ["size:s"] },
+      { number: 10, title: "Docs page", state: "open", blockedBy: 0, labels: ["role:designer"] },
+    ],
+    costs: (_repo, sizes) => ({ 7: { coordination: { ...zero, output: 1_000 }, tickets: { 8: { ...zero, output: 20_000 }, 10: { ...zero, output: 1_000 } }, other: { ...zero, output: 0 }, total: 110_000, share: 0.05, warnings: sizes[8] ? [] : [8] } }),
+  }, BUILT);
+  await s.tick([REPO]);
+  expect(s.boards()[REPO]).toEqual([
+    { id: "#7", owner: "implement-7", status: "doing", branch: "spec-7", task: "Spec: slugify titles · 110k cost units, 5% coordination" },
+    { id: "#8", owner: "intern", status: "done", branch: "ticket-8", task: "slugify · 100k cost units · over its warning" },
+    { id: "#9", owner: "intern", status: "blocked", branch: "ticket-9", task: "The slug command" },
+    { id: "#10", owner: "role:designer", status: "doing", branch: "ticket-10", task: "Docs page · 5k cost units" },
+  ]);
 });

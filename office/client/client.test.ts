@@ -270,8 +270,9 @@ test("a Founder project's room is marked founder, and its board counts what wait
   const { rooms } = layoutOffice(state, 400);
   expect(rooms.map((r) => [r.room.id, r.founder])).toEqual([["a", true], ["b", false]]);
   const row = (status: string) => ({ id: "T1", owner: "-", status, branch: "-", task: "x" });
-  expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tasks done, 2 to publish");
-  expect(boardSummary([row("done")])).toBe("1 of 1 task done");
+  expect(boardSummary([row("done"), row("publish"), row("publish"), row("todo")])).toBe("1 of 4 tickets done, 2 to publish");
+  expect(boardSummary([row("done")])).toBe("1 of 1 ticket done");
+  expect(boardSummary([])).toBe("No tickets");
 });
 
 /** Runs `fn` with a page at /tok/ whose every fetch answers with `res`. */

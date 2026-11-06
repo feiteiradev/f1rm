@@ -5,7 +5,8 @@ import { basename, dirname, join } from "node:path";
 import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
-import { repoKey } from "./board.ts";
+import { repoKey, type BoardRow } from "./board.ts";
+import { costUnits, specCosts, type Size, type SpecCost } from "../cost.ts";
 import { editionFile, readEdition } from "./editions.ts";
 import { FOUNDER_ONLY, ROLE_IDS, roleOfAgentType } from "../people.ts";
 import { machine } from "./machine.ts";
@@ -13,7 +14,9 @@ import { writePrivate } from "./private.ts";
 import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
 /** An open issue labelled `ready-for-agent`, as the scheduler needs it: `parent` is the spec of a ticket, `subDone` a spec's closed tickets, `blockedBy` a ticket's open blockers. */
-export type Issue = { number: number; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean };
+export type Issue = { number: number; title: string; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean };
+/** A spec's ticket, open or closed, as the whiteboard shows it. */
+export type TicketIssue = { number: number; title: string; state: "open" | "closed"; blockedBy: number; labels: string[] };
 export type Step = "tickets" | "implement" | "close";
 /** The steps started per repo, by session name (`tries` starts, `done` the spec's closed tickets at the last one, `asked` once a failure went to the user), so none starts twice; `decision-<n>` marks a decision ticket already announced. */
 export type Started = Record<string, { at: number; tries?: number; asked?: boolean; done?: number }>;
@@ -38,6 +41,10 @@ export type SchedulerDeps = {
   /** The names of the repo's background sessions still running; null if Claude Code can't say. */
   live: (repo: string) => Promise<string[] | null>;
   store: { load: (repo: string) => Started; save: (repo: string, started: Started) => void };
+  /** A spec's tickets, open and closed; null if gh can't read them. */
+  tickets: (repo: string, spec: number) => Promise<TicketIssue[] | null>;
+  /** Each spec's cost in the repo (see office/cost.ts), with the tickets' sizes. */
+  costs: (repo: string, sizes: Record<number, Size>) => Record<number, SpecCost>;
   /** The repo's open issues labelled `needs-decision`; null if gh can't read them. */
   decisions: (repo: string) => Promise<DecisionIssue[] | null>;
   /** Raises a macOS notification. */
@@ -91,6 +98,39 @@ export function createScheduler(d: SchedulerDeps) {
   const resting = d.resting ?? sleepGrace(Math.max(SLEEP_GAP_MS, 2 * (d.everyMs ?? 0)));
   let ticking = false;
   let shown: Decision[] = [];
+  let walls: Record<string, BoardRow[]> = {};
+  /** The whiteboard of a repo's live specs: a row per spec (the step at work, its total and coordination share) and a row per ticket (state, role, cost, a warning). */
+  async function wall(repo: string, specs: Issue[], live: string[]): Promise<BoardRow[] | null> {
+    const lists: [Issue, TicketIssue[]][] = [];
+    for (const spec of specs) {
+      const tickets = spec.subIssues ? await d.tickets(repo, spec.number) : [];
+      if (!tickets) return null;
+      lists.push([spec, tickets]);
+    }
+    const sizes: Record<number, Size> = {};
+    for (const [, tickets] of lists) for (const t of tickets) for (const l of t.labels) if (/^size:[sml]$/.test(l)) sizes[t.number] = l.slice(5) as Size;
+    const costs = d.costs(repo, sizes);
+    const k = (units: number) => `${Math.round(units / 1000).toLocaleString("en-US")}k`;
+    return lists.flatMap(([spec, tickets]) => {
+      const n = spec.number;
+      const step = live.find((name) => new RegExp(`^(?:tickets|implement|close)-${n}(?:-\\d+)?$`).test(name));
+      const cost = costs[n];
+      const building = !!step?.startsWith("implement-");
+      return [
+        { id: `#${n}`, owner: step ?? "spec", status: step ? "doing" : "todo", branch: `spec-${n}`, task: cost ? `${spec.title} · ${k(cost.total)} cost units, ${Math.round(cost.share * 100)}% coordination` : spec.title },
+        ...tickets.map((t) => {
+          const spent = cost?.tickets[t.number];
+          return {
+            id: `#${t.number}`,
+            owner: t.labels.find((l) => l.startsWith("role:")) ?? "intern",
+            status: t.state === "closed" ? "done" : t.blockedBy > 0 ? "blocked" : building ? "doing" : "todo",
+            branch: `ticket-${t.number}`,
+            task: `${t.title}${spent ? ` · ${k(costUnits(spent))} cost units` : ""}${cost?.warnings.includes(t.number) ? " · over its warning" : ""}`,
+          };
+        }),
+      ];
+    });
+  }
   // A tick and an answer each load a repo's store, await gh, then save it: they run one after the other, so neither saves over the other's change.
   let busy: Promise<unknown> = Promise.resolve();
   const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -131,6 +171,8 @@ export function createScheduler(d: SchedulerDeps) {
   return {
     /** The open decision tickets of the repos the last tick read. */
     decisions: () => shown,
+    /** Each repo's whiteboard, from its issues, as the last tick read them. */
+    boards: () => walls,
     /** The user's answer from the office: the option they picked, written onto the ticket. */
     answer: (id: string, option: number): Promise<{ ok: true } | { ok: false; error: string }> => exclusive(async () => {
       const one = shown.find((x) => x.id === id);
@@ -153,6 +195,8 @@ export function createScheduler(d: SchedulerDeps) {
         if (!me) return;
         const held = d.held();
         const list: Decision[] = [];
+        // A repo the tick does not read this time keeps the whiteboard it had.
+        const nextWalls: Record<string, BoardRow[]> = Object.fromEntries(repos.filter((r) => walls[r]).map((r) => [r, walls[r]]));
         for (const repo of repos) {
           const started = d.store.load(repo);
           const paused = d.paused(repo);
@@ -161,6 +205,8 @@ export function createScheduler(d: SchedulerDeps) {
           const issues = await d.ready(repo);
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
+          const board = await wall(repo, issues.filter(isSpec), live);
+          if (board) nextWalls[repo] = board;
           const owned = async (i: Issue) => i.author === me && (await d.labeledBy(repo, i.number, "ready-for-agent")) === me;
           const startOnce = async (step: Step, spec: Issue, round = 1, tries = 1) => {
             const name = stepName(step, spec.number, round);
@@ -226,6 +272,7 @@ export function createScheduler(d: SchedulerDeps) {
           }
         }
         shown = list;
+        walls = nextWalls;
       }).finally(() => (ticking = false));
     },
   };
@@ -306,6 +353,7 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       try {
         return (JSON.parse(out) as any[]).map((i) => ({
           number: i.number,
+          title: String(i.title ?? ""),
           author: String(i.user?.login ?? ""),
           parent: Number(/\/issues\/(\d+)$/.exec(String(i.parent_issue_url ?? ""))?.[1]) || null,
           subIssues: Number(i.sub_issues_summary?.total ?? 0),
@@ -322,6 +370,16 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       const out = await gh(repo, ["api", "--paginate", `repos/{owner}/{repo}/issues/${n}/timeline?per_page=100`, "--jq", jq]);
       return out?.split("\n").filter(Boolean).at(-1) ?? null;
     },
+    tickets: async (repo, spec) => {
+      const out = await gh(repo, ["api", `repos/{owner}/{repo}/issues/${spec}/sub_issues?per_page=100`]);
+      if (out === null) return null;
+      try {
+        return (JSON.parse(out) as any[]).map((i) => ({ number: i.number, title: String(i.title ?? ""), state: i.state === "closed" ? ("closed" as const) : ("open" as const), blockedBy: Number(i.issue_dependencies_summary?.blocked_by ?? 0), labels: (i.labels ?? []).map((l: any) => String(l.name)) }));
+      } catch {
+        return null;
+      }
+    },
+    costs: (repo, sizes) => specCosts(join(home, ".claude", "projects"), repo, sizes),
     decisions: async (repo) => {
       // shortcut: one page of 100 open decision tickets, as for the ready issues.
       const out = await gh(repo, ["api", "repos/{owner}/{repo}/issues?labels=needs-decision&state=open&per_page=100"]);
