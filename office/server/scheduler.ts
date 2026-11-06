@@ -2,7 +2,7 @@
 // Only the user's own GitHub account steers it: an issue, or a label, by another account starts nothing (decision "Only the user steers the company").
 import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { withEffort, withPonytail } from "../cli/hire.ts";
+import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { repoKey } from "./board.ts";
@@ -229,17 +229,26 @@ export function createScheduler(d: SchedulerDeps) {
   };
 }
 
+/** The roles a ticket's `role:<name>` label can name: work that is not code. A ticket with none is code, built test-first. */
+const TICKET_ROLES = ["designer", "researcher", "marketer", "seo-specialist", "social-media", "sales", "strategist"];
+/** Each ticket role's skills, read from its role file, the one place they are kept. */
+export const roleSkills = () => Object.fromEntries(TICKET_ROLES.map((id) => [id, readRoles().find((r) => r.id === id)?.skills ?? []]));
+const roleMap = () =>
+  [...Object.entries(roleSkills()).map(([id, skills]) => `role:${id} → ${skills.join(", ")}`), "no role label → mattpocock-skills:tdd"].join("; ");
+
 const PROMPTS: Record<Step, (spec: number, round: number) => string> = {
   tickets: (spec) =>
     `/mattpocock-skills:to-tickets #${spec}\n\n` +
     `You run the tickets step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `Publish your breakdown without asking: the breakdown is the company's call. ` +
+    `Label each ticket that is not code with its role (${TICKET_ROLES.map((r) => `role:${r}`).join(", ")}); a code ticket gets no role label. ` +
     `Then comment the breakdown on #${spec} (each ticket's number, title and blockers), and end.`,
   implement: (spec) =>
     `/mattpocock-skills:implement-spec #${spec}\n\n` +
     `You run the implement step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `The integration branch is spec-${spec} (create it from main if it does not exist yet); each ticket's branch is ticket-<number>. ` +
     `Start every implementer and merger with the Agent tool and isolation: "worktree", and run the mergers one at a time. ` +
+    `Tell each implementer to load, with the Skill tool and before it builds, the skills its ticket's role label names: ${roleMap()}. A ticket whose role label is none of these is not built: comment on the ticket naming the label, and leave it open. ` +
     `Tell each of them to spell git as /usr/bin/git, as the first word of its own Bash call, with no cd, no -C and no chaining (a plain git is rewritten by the user's shell hook), and to start its branch with /usr/bin/git checkout -b ticket-<number> spec-${spec} (the gate refuses checkout -B and switch -C). ` +
     `After the code review of spec-${spec}, fix every finding it raised in one implementer, as the skill says, before you end. ` +
     `Open no pull request: close each ticket with a comment naming its merge commit on spec-${spec}. ` +

@@ -1692,3 +1692,16 @@ describe("no spawn caps, and the PM starts leads on request", () => {
     for (const s of ["- Decision:", "f1rm hire --topic", "The PM starts only leads", "still watches and wakes its leads", "its other unprompted items stay", "- Why:", "- Rejected:", "relays the lead's questions and answers", "New topic button as the only way", "- Where: rules-text"]) expect(pm, s).toContain(s);
   });
 });
+
+test("a ticket's role label picks its intern's skills from the role files: the designer, the researcher and the five Founder roles", async () => {
+  const { roleSkills } = await import("../office/server/scheduler.ts");
+  expect(roleSkills()).toEqual({
+    designer: ROLES.designer,
+    researcher: ROLES.researcher,
+    marketer: ROLES.marketer,
+    "seo-specialist": ROLES["seo-specialist"],
+    "social-media": ROLES["social-media"],
+    sales: ROLES.sales,
+    strategist: ROLES.strategist,
+  });
+});

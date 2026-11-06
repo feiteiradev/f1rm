@@ -617,7 +617,7 @@ Core decisions, oldest first. The rules are in the f1rm guidelines, "Milestones 
 - Decision: nobody hires. The PM is the conversation the user opens with `f1rm pm`: it interviews the user (`/grill-with-docs`), publishes the spec (`/to-spec`) and ends. The office starts the other steps: tickets (`/to-tickets`), implement (`/implement-spec`, each implementer taking its skills from the ticket's `role:` label, `tdd` by default, `design-pipeline`, research or the Founder skills otherwise) and close (`/retro`, `f1rm merge`, `f1rm push`). The lead, frontend-dev, backend-dev and Reviewer role files go, and so does `f1rm hire` for agents; the designer, researcher and five Founder roles stay as the skill sets a label picks. Each step session takes its role's desk in the office, and its subagents are interns.
 - Why: hiring by an agent's judgement was where the rules churned most (the PM hired devs, then only leads, then was a scribe), and a label decides the same thing for free.
 - Rejected: a lead that hires; keeping the dev role files for subagents that never loaded them.
-- Where: not built; rebuild grilling 2026-11-06, round 3 Q14
+- Where: rebuild grilling 2026-11-06, round 3 Q14; the role labels in #88 (office/server/scheduler.ts builds the role map into the implement step's prompt from the role files' `skills:`; the tickets step labels each ticket that is not code)
 
 ## 2026-11-06 Sessions talk through issues and git
 
