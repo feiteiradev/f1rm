@@ -2,6 +2,7 @@
 import { basename } from "node:path";
 import { nameFor, roleOfAgentType, type RoleId } from "../people.ts";
 import type { Approval } from "./approvals.ts";
+import type { Decision } from "./scheduler.ts";
 import type { Cmd } from "./projectcmds.ts";
 import type { BoardRow } from "./board.ts";
 import type { Topic } from "./progress.ts";
@@ -69,6 +70,8 @@ export type OfficeState = {
   leftovers?: LeftoversView | null;
   /** The raised hands, oldest first. The server adds this to what it pushes; the reducer never sees it. */
   approvals?: Approval[];
+  /** The registered projects' open decision tickets (see scheduler.ts). Added by the server like `approvals`, and absent when the office reads no tickets. */
+  decisions?: Decision[];
 };
 
 export type F1rmEvent = {

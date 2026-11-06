@@ -2,7 +2,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
-import { cardOf, handsOf, type Anchor } from "./approvals.ts";
+import type { Decision } from "../server/scheduler.ts";
+import { answerDecision, cardOf, handsOf, type Anchor } from "./approvals.ts";
 import { post } from "./post.ts";
 import { CommandsCard } from "./commands.tsx";
 import { LeftoversCard } from "./leftovers.tsx";
@@ -41,6 +42,38 @@ export function HandCard({ state, approval: a }: { state: OfficeState; approval:
           <p id={grant} className="grant">{card.always.note}</p>
         </div>
       )}
+      {error && <p className="problem" role="alert">{error}</p>}
+    </article>
+  );
+}
+
+/** A decision ticket a step opened: the question, one button per option (the recommendation marked) and the ticket on GitHub. Only the user's browser answers it. */
+export function DecisionCard({ decision: d }: { decision: Decision }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function answer(option: number) {
+    setBusy(true);
+    setError(await answerDecision(d.id, option));
+    setBusy(false);
+  }
+  const project = d.repo.split("/").pop() ?? d.repo;
+  return (
+    <article className="decision" aria-label={`${project} needs a decision`}>
+      <p className="who">
+        <strong>{project}</strong>
+        <a className="where" href={d.url} target="_blank" rel="noreferrer">#{d.number}</a>
+      </p>
+      {/* Text, never HTML: a step wrote it. */}
+      <p className="question">{d.question}</p>
+      <div className="answer">
+        {d.options.map((o, i) => (
+          <button key={i} disabled={busy} onClick={() => answer(i)}>
+            {o}
+            {i === d.recommended && <> <span className="recommended">recommended</span></>}
+          </button>
+        ))}
+      </div>
+      <p className="risk">{d.risk === "low" && d.recommended !== null ? "Low risk: the recommendation is taken 4 hours after the ticket opened if nobody answers." : "High risk: it waits for you."}</p>
       {error && <p className="problem" role="alert">{error}</p>}
     </article>
   );
@@ -85,7 +118,8 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
   // The projects whose command list waits for the user's tick: one card each, ahead of the single requests.
   const lists = Object.entries(state.commands ?? {});
   const leftovers = state.leftovers ?? null;
-  const waiting = (hands?.length ?? 0) + lists.length + (leftovers ? 1 : 0);
+  const decisions = state.decisions ?? [];
+  const waiting = (hands?.length ?? 0) + lists.length + (leftovers ? 1 : 0) + decisions.length;
   // What the leftovers answer said, in the card's slot until the tray closes.
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
@@ -114,6 +148,7 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
             <ul>
               {leftovers && <li><LeftoversCard card={leftovers} onDone={(n) => (setNote(n), panel.current?.focus())} /></li>}
               {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
+              {decisions.map((d) => <li key={d.id}><DecisionCard decision={d} /></li>)}
               {hands.map((a) => <li key={a.id}><HandCard state={state} approval={a} /></li>)}
             </ul>
           )}

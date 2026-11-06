@@ -13,8 +13,12 @@ import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 /** An open issue labelled `ready-for-agent`, as the scheduler needs it: `parent` is the spec of a ticket, `subDone` a spec's closed tickets, `blockedBy` a ticket's open blockers. */
 export type Issue = { number: number; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean };
 export type Step = "tickets" | "implement" | "close";
-/** The steps started per repo, by session name, so none starts twice. */
+/** The steps started per repo, by session name, so none starts twice; `decision-<n>` marks a decision ticket already announced. */
 export type Started = Record<string, { at: number }>;
+/** An open issue labelled `needs-decision`: `at` is when it opened (ms). */
+export type DecisionIssue = { number: number; author: string; body: string; at: number; url: string };
+/** A decision ticket as the office's tray shows it: `recommended` is an index into `options`, `step` the step that asked and starts again once it is answered. */
+export type Decision = { id: string; repo: string; number: number; url: string; question: string; options: string[]; recommended: number | null; risk: "low" | "high"; step: string | null; spec: number | null; at: number };
 
 export type SchedulerDeps = {
   now: () => number;
@@ -32,6 +36,12 @@ export type SchedulerDeps = {
   /** The names of the repo's background sessions still running; null if Claude Code can't say. */
   live: (repo: string) => Promise<string[] | null>;
   store: { load: (repo: string) => Started; save: (repo: string, started: Started) => void };
+  /** The repo's open issues labelled `needs-decision`; null if gh can't read them. */
+  decisions: (repo: string) => Promise<DecisionIssue[] | null>;
+  /** Raises a macOS notification. */
+  notify: (title: string, text: string) => void;
+  /** Writes the answer onto the decision ticket and its spec, and closes the ticket; throws what refused it. */
+  resolve: (repo: string, number: number, spec: number | null, answer: string) => Promise<void>;
   /** True while the machine is just back from a sleep; defaults to the office's sleep rule. */
   resting?: (now: number) => boolean;
   everyMs?: number;
@@ -39,26 +49,93 @@ export type SchedulerDeps = {
 
 /** A spec is a ready issue that is no ticket (no parent); it has tickets once the tickets step published them. */
 const isSpec = (i: Issue) => !i.pr && i.parent === null;
+/** A low-risk decision nobody answers takes its recommendation after this long. */
+export const DEFAULT_AFTER_MS = 4 * 3_600_000;
+const META = /<!--\s*f1rm:decision\b([^>]*?)-->/;
+const OPTION = /^\s*\d+\.\s+(?=\S)/;
+/** Reads a decision ticket's body: an HTML comment `<!-- f1rm:decision risk=low step=implement-7 spec=7 recommended=2 -->`, the question, then the options as a numbered list. A risk that is not `low` is high. */
+export function decisionOf(body: string) {
+  const meta = Object.fromEntries([...(META.exec(body)?.[1] ?? "").matchAll(/(\w+)=(\S+)/g)].map((m) => [m[1], m[2]]));
+  const lines = body.replace(META, "").trim().split("\n");
+  const first = lines.findIndex((l) => OPTION.test(l));
+  const options = lines.filter((l) => OPTION.test(l)).map((l) => l.replace(OPTION, "").trim());
+  const rec = Number(meta.recommended);
+  return {
+    question: (first < 0 ? lines : lines.slice(0, first)).join("\n").trim(),
+    options,
+    recommended: Number.isInteger(rec) && rec >= 1 && rec <= options.length ? rec - 1 : null,
+    risk: meta.risk === "low" ? ("low" as const) : ("high" as const),
+    step: /^(?:tickets|implement|close)-\d+(?:-\d+)?$/.test(meta.step ?? "") ? meta.step! : null,
+    spec: Number(meta.spec) || null,
+  };
+}
+
 /** A step's session name: `implement-7`, and `implement-7-2` for its second round. */
 export const stepName = (step: Step, spec: number, round = 1) => `${step}-${spec}${round > 1 ? `-${round}` : ""}`;
 
 export function createScheduler(d: SchedulerDeps) {
   const resting = d.resting ?? sleepGrace(Math.max(SLEEP_GAP_MS, 2 * (d.everyMs ?? 0)));
   let ticking = false;
+  let shown: Decision[] = [];
+  /** Writes the answer, and clears the asking step's record so the next tick starts it again by the usual rules. */
+  async function settle(one: Decision, started: Started, answer: string) {
+    await d.resolve(one.repo, one.number, one.spec, answer);
+    started[`answered-${one.number}`] = { at: d.now() };
+    if (one.step) delete started[one.step];
+    d.store.save(one.repo, started);
+    console.log(`scheduler ${basename(one.repo)}: decision #${one.number} answered`);
+  }
+  /** Lists the repo's decision tickets by the owner, announces each new one once, and answers a low-risk one nobody answered in 4 hours with its recommendation (not while the project is paused). */
+  async function decide(repo: string, me: string, started: Started, list: Decision[], paused: boolean) {
+    const open = await d.decisions(repo);
+    if (!open) return;
+    for (const i of open) {
+      if (i.author !== me || started[`answered-${i.number}`]) continue;
+      const one: Decision = { id: `${repo}#${i.number}`, repo, number: i.number, url: i.url, ...decisionOf(i.body), at: i.at };
+      if (!paused && one.risk === "low" && one.recommended !== null && d.now() - one.at >= DEFAULT_AFTER_MS) {
+        await settle(one, started, `${one.options[one.recommended]} (no answer in 4 hours: the recommendation)`).catch((err) => console.log(`scheduler ${basename(repo)}: decision #${i.number} not answered: ${(err as Error).message}`));
+        continue;
+      }
+      list.push(one);
+      if (started[`decision-${i.number}`]) continue;
+      d.notify(`f1rm: ${basename(repo)} needs a decision`, one.question.split("\n")[0]);
+      started[`decision-${i.number}`] = { at: d.now() };
+      d.store.save(repo, started);
+    }
+  }
   return {
+    /** The open decision tickets of the repos the last tick read. */
+    decisions: () => shown,
+    /** The user's answer from the office: the option they picked, written onto the ticket. */
+    async answer(id: string, option: number): Promise<{ ok: true } | { ok: false; error: string }> {
+      const one = shown.find((x) => x.id === id);
+      if (!one) return { ok: false, error: "That decision is no longer open." };
+      if (!Number.isInteger(option) || !one.options[option]) return { ok: false, error: "That decision has no such option." };
+      try {
+        await settle(one, d.store.load(one.repo), one.options[option]);
+      } catch (err) {
+        return { ok: false, error: `GitHub refused the answer: ${(err as Error).message}` };
+      }
+      shown = shown.filter((x) => x !== one);
+      return { ok: true };
+    },
     async tick(repos: string[]) {
       const asleep = resting(d.now());
-      if (ticking || asleep || !repos.length || d.held()) return;
+      if (ticking || asleep || !repos.length) return;
       ticking = true;
       try {
         const me = await d.owner();
         if (!me) return;
+        const held = d.held();
+        const list: Decision[] = [];
         for (const repo of repos) {
-          if (d.paused(repo)) continue;
+          const started = d.store.load(repo);
+          const paused = d.paused(repo);
+          await decide(repo, me, started, list, paused);
+          if (held || paused) continue;
           const issues = await d.ready(repo);
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
-          const started = d.store.load(repo);
           const owned = async (i: Issue) => i.author === me && (await d.labeledBy(repo, i.number)) === me;
           // shortcut: a step that ended without moving its spec on is never started again; #90 adds one retry, then a decision ticket.
           const startOnce = async (step: Step, spec: number, round = 1) => {
@@ -97,6 +174,7 @@ export function createScheduler(d: SchedulerDeps) {
             }
           }
         }
+        shown = list;
       } finally {
         ticking = false;
       }
@@ -134,7 +212,7 @@ const PROMPTS: Record<Step, (spec: number, round: number) => string> = {
 
 /** The `claude` argv that starts a step: a named background session in the repo itself, coordinating at medium effort. */
 export const stepArgv = (step: Step, spec: number, round = 1) => [
-  "claude", "--bg", "--agent", "f1rm:step", "--name", stepName(step, spec, round), PROMPTS[step](spec, round),
+  "claude", "--bg", "--agent", "f1rm:step", "--name", stepName(step, spec, round), `${PROMPTS[step](spec, round)}\n\nThis step is ${stepName(step, spec, round)}.`,
   ...withUsageTap(withEffort("step", withPonytail("step", []))),
 ];
 
@@ -178,6 +256,31 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
       const jq = '[.[] | select(.event == "labeled" and .label.name == "ready-for-agent")] | last | .actor.login // empty';
       const out = await gh(repo, ["api", "--paginate", `repos/{owner}/{repo}/issues/${n}/timeline?per_page=100`, "--jq", jq]);
       return out?.split("\n").filter(Boolean).at(-1) ?? null;
+    },
+    decisions: async (repo) => {
+      const out = await gh(repo, ["api", "repos/{owner}/{repo}/issues?labels=needs-decision&state=open&per_page=100"]);
+      if (out === null) return null;
+      try {
+        return (JSON.parse(out) as any[]).filter((i) => !i.pull_request).map((i) => ({ number: i.number, author: String(i.user?.login ?? ""), body: String(i.body ?? ""), at: Date.parse(i.created_at), url: String(i.html_url ?? "") }));
+      } catch {
+        return null;
+      }
+    },
+    notify: (title, text) => {
+      const q = (s: string) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
+      try {
+        Bun.spawn(["osascript", "-e", `display notification ${q(text)} with title ${q(title)}`], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+      } catch {
+        // a notification that can't show is no reason to stop the tick
+      }
+    },
+    resolve: async (repo, n, spec, answer) => {
+      for (const args of [
+        ["issue", "comment", String(n), "--body", `Answered in the office: ${answer}`],
+        ["issue", "edit", String(n), "--remove-label", "needs-decision"],
+        ["issue", "close", String(n)],
+        ...(spec ? [["issue", "comment", String(spec), "--body", `Decision #${n}: ${answer}`]] : []),
+      ]) if ((await gh(repo, args)) === null) throw new Error(`gh ${args.slice(0, 2).join(" ")} #${args[2]} failed`);
     },
     start: async (repo, step, spec, round) => void (await machine.spawnBackground(stepArgv(step, spec, round), repo)),
     // shortcut: a session is live until Claude Code calls it done or failed; read its process too if a crashed one lingers as working.

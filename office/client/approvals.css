@@ -92,3 +92,14 @@
 /* The result line's region stays in the page so a screen reader hears it arrive; empty, it takes no room. */
 .tray-panel [role="status"]:empty { padding: 0; height: 0; overflow: hidden; }
 .tray-panel:focus { outline: none; }
+.decision { padding: 12px 16px; border-bottom: 1px solid var(--line); border-left: 4px solid var(--amber); }
+.decision:last-child { border-bottom: 0; }
+.decision p { margin: 0; }
+.decision .who { display: flex; gap: 12px; align-items: baseline; }
+.decision .where { color: var(--muted); }
+.decision .question { margin-top: 4px; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.decision .answer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.decision button { flex: 1 1 auto; font: inherit; padding: 4px 10px; cursor: pointer; color: var(--text); background: var(--bg); border: 1px solid var(--line); }
+.decision button:disabled { opacity: 0.5; cursor: default; }
+.decision .recommended { color: var(--green); font-weight: 700; }
+.decision .risk { margin-top: 8px; color: var(--muted); }

@@ -723,6 +723,9 @@ export function startServer({
       if (/(?:approve|deny|always|commands|leftovers)\/[^\s'"]/.test(line) && namesOffice(line)) {
         return refuse("answer", "Only the user answers a permission request, in the office: tell the session in your Report to what you are waiting for, and wait.");
       }
+      if (/decide\/[^\s'"]/.test(line) && namesOffice(line)) {
+        return refuse("answer", "Only the user answers a decision ticket, in the office's tray: end your step, and the office starts it again once it is answered.");
+      }
     }
     // Only the user changes Claude Code's permissions (see settingsgate.ts): no company session, a sub-agent included, writes a settings or hooks file. The user's own sessions have no role and never get here.
     if (WRITE_TOOLS.has(tool)) {
@@ -1086,7 +1089,7 @@ export function startServer({
   // The names of the registered projects whose pause flag is set (a schedule pause too): the page's Stop all / Resume all. The page uses only whether it is empty.
   const pausedNames = () => [...registeredKeys()].filter(pausedOf).map(registeredName).sort();
   const leftoversCard = createLeftovers({ docker, file: leftoversFile, clock, onChange: () => push() });
-  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list() });
+  const snapshot = () => JSON.stringify({ ...state, usage: usageView(gaugesFile, clock()), leftovers: leftoversCard.current(), employees: employeesNow(), boards, teamBoards, topics, ...(projectsDir && { editions, commands: pendingCommands() }), paused: pausedNames(), approvals: approvals.list(), ...(scheduling && { decisions: scheduling.decisions() }) });
   const push = () => server.publish("office", snapshot());
 
   const server = Bun.serve({
@@ -1168,7 +1171,7 @@ export function startServer({
       if (!same(given, token)) return new Response("<!doctype html><title>f1rm</title><p>Open the office with <code>f1rm</code>.", { status: 401, headers: { "content-type": "text/html; charset=utf-8" } });
       if (rest.length === 0) return new Response(null, { status: 307, headers: { location: `/${given}/` } });
       const path = rest.join("/");
-      if (rest.length === 2 && ["jump", "approve", "deny", "always", "ask", "tell", "letgo", "intern", "remove", "leftovers"].includes(rest[0]) && req.method !== "POST") {
+      if (rest.length === 2 && ["jump", "approve", "deny", "always", "ask", "tell", "letgo", "intern", "remove", "leftovers", "decide"].includes(rest[0]) && req.method !== "POST") {
         return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       }
       // The one-time leftovers card's answers. Remove takes no ids: the office deletes what a fresh docker list holds.
@@ -1187,6 +1190,14 @@ export function startServer({
         }
         const result = await jump(machine, employee);
         return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
+      // A decision ticket's answer: the option the user picked, which the office writes onto the ticket (see scheduler.ts).
+      if (rest[0] === "decide" && rest.length === 2) {
+        if (!scheduling) return Response.json({ ok: false, error: "This office reads no decision tickets." }, { status: 404 });
+        const option = ((await req.json().catch(() => null)) as { option?: unknown } | null)?.option;
+        const r = await scheduling.answer(decodeURIComponent(rest[1]), typeof option === "number" ? option : -1);
+        if (r.ok) push();
+        return Response.json(r, { status: r.ok ? 200 : 409 });
       }
       if (rest[0] === "always" && rest.length === 2) {
         if (approvals.always(rest[1])) return Response.json({ ok: true });
@@ -1753,7 +1764,13 @@ export function startServer({
     if (seen !== lastUsage) (lastUsage = seen, push());
   }, 15_000);
   const recoveryTimer = recovery && setInterval(recoverOnce, recovery.everyMs);
-  const schedulerTimer = scheduling && setInterval(() => void scheduling.tick(registered()).catch((err) => console.log(`scheduler: ${(err as Error).message}`)), scheduler.everyMs);
+  // The tray shows the decision tickets the tick read: a change is pushed to the page.
+  const stepsOnce = async () => {
+    const before = JSON.stringify(scheduling!.decisions());
+    await scheduling!.tick(registered()).catch((err) => console.log(`scheduler: ${(err as Error).message}`));
+    if (JSON.stringify(scheduling!.decisions()) !== before) push();
+  };
+  const schedulerTimer = scheduling && setInterval(stepsOnce, scheduler.everyMs);
   const stop = server.stop.bind(server);
   server.stop = async (closeActiveConnections) => {
     closing.abort();

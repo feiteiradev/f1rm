@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createScheduler, stepArgv, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
+import { createScheduler, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
 
 const REPO = "/r/app";
 const ME = "owner";
@@ -8,6 +8,8 @@ const ticket = (number: number, of: number, over: Partial<Issue> = {}): Issue =>
 
 function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Started = {}) {
   const started: string[] = [];
+  const told: string[] = [];
+  const resolved: string[] = [];
   const saved: Record<string, Started> = { [REPO]: stored };
   const labels = new Map<number, string | null>();
   const d: SchedulerDeps = {
@@ -21,9 +23,12 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     live: async () => [],
     store: { load: (repo) => structuredClone(saved[repo] ?? {}), save: (repo, s) => void (saved[repo] = s) },
     resting: () => false,
+    decisions: async () => [],
+    notify: (title, text) => void told.push(`${title}: ${text}`),
+    resolve: async (repo, n, spec, answer) => void resolved.push(`${repo} #${n} (spec ${spec}): ${answer}`),
     ...over,
   };
-  return { s: createScheduler(d), started, labels };
+  return { s: createScheduler(d), started, labels, told, resolved, saved };
 }
 
 test("a spec labelled ready by its owner starts one tickets step, and no second one on the next tick", async () => {
@@ -168,6 +173,63 @@ test("the close step checks the criteria on spec-<n>, lands it with f1rm merge, 
   const last = stepArgv("close", 7, 2);
   expect(last[5]).toBe("close-7-2");
   expect(last[6]).toContain("last round");
+  expect(last[6]).toEndWith("This step is close-7-2.");
   expect(last[6]).not.toContain("--parent 7");
   expect(stepArgv("implement", 7, 2)[5]).toBe("implement-7-2");
+});
+
+const HOUR = 3_600_000;
+const decision = (number: number, over: Partial<DecisionIssue> = {}): DecisionIssue => ({
+  number,
+  author: ME,
+  at: 1_000,
+  url: `https://github.com/o/app/issues/${number}`,
+  body: "<!-- f1rm:decision risk=low step=implement-7 spec=7 recommended=2 -->\nKeep the old API?\n\n1. Keep it\n2. Drop it, nothing uses it\n",
+  ...over,
+});
+
+test("a decision ticket by the owner shows with its question, options, recommendation and risk, and raises one notification", async () => {
+  const { s, told } = harness([], { decisions: async () => [decision(12), decision(13, { author: "stranger" })] });
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect(s.decisions()).toEqual([
+    { id: `${REPO}#12`, repo: REPO, number: 12, url: "https://github.com/o/app/issues/12", question: "Keep the old API?", options: ["Keep it", "Drop it, nothing uses it"], recommended: 1, risk: "low", step: "implement-7", spec: 7, at: 1_000 },
+  ]);
+  expect(told).toEqual(["f1rm: app needs a decision: Keep the old API?"]);
+});
+
+test("after 4 hours a low-risk decision takes its recommendation and its asking step starts again; a high-risk one waits, and nothing is answered while paused", async () => {
+  let now = 1_000 + 4 * HOUR - 1;
+  const high = decision(14, { body: "<!-- f1rm:decision risk=high step=close-9 spec=9 recommended=1 -->\nPublish the launch post?\n\n1. Yes\n2. No\n" });
+  const issues = [spec(7, { subIssues: 1 }), ticket(8, 7)];
+  const built = { "tickets-7": { at: 1 }, "implement-7": { at: 2 } };
+  const { s, resolved, started } = harness(issues, { now: () => now, decisions: async () => [decision(12), high] }, built);
+  await s.tick([REPO]);
+  expect(resolved).toEqual([]);
+  now += 2;
+  await s.tick([REPO]);
+  expect(resolved).toEqual([`${REPO} #12 (spec 7): Drop it, nothing uses it (no answer in 4 hours: the recommendation)`]);
+  await s.tick([REPO]);
+  expect(started).toEqual([`${REPO} implement #7`]);
+  const paused = harness([], { now: () => 1_000 + 5 * HOUR, paused: () => true, decisions: async () => [decision(12)] });
+  await paused.s.tick([REPO]);
+  expect(paused.resolved).toEqual([]);
+});
+
+test("the user's answer is written as the option they picked, and only for a decision the tray shows", async () => {
+  const { s, resolved } = harness([], { decisions: async () => [decision(12)] }, { "implement-7": { at: 2 } });
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#12`, 0)).toEqual({ ok: true });
+  expect(resolved).toEqual([`${REPO} #12 (spec 7): Keep it`]);
+  expect(s.decisions()).toEqual([]);
+  expect(await s.answer(`${REPO}#12`, 0)).toEqual({ ok: false, error: "That decision is no longer open." });
+  expect(await s.answer(`${REPO}#99`, 0)).toEqual({ ok: false, error: "That decision is no longer open." });
+});
+
+test("an option the ticket does not have, or a write gh refuses, answers nothing", async () => {
+  const { s } = harness([], { decisions: async () => [decision(12)], resolve: async () => Promise.reject(new Error("gh: HTTP 403")) });
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#12`, 5)).toEqual({ ok: false, error: "That decision has no such option." });
+  expect(await s.answer(`${REPO}#12`, 1)).toEqual({ ok: false, error: "GitHub refused the answer: gh: HTTP 403" });
+  expect(s.decisions().map((x) => x.number)).toEqual([12]);
 });

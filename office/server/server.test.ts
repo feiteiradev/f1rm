@@ -3366,3 +3366,31 @@ test("the office tells a hire by its own session id, never another session that 
   expect(told.some((c) => c.includes("imp.sock"))).toBe(false);
   expect(told).toContain("tell /tmp/cc-socks/live-lead.sock l-live checkout.backend-dev-b stopped at the session limit; f1rm wake checkout.backend-dev-b");
 });
+
+test("the tray lists the registered projects' decision tickets and the browser answers one; a session's call to the route is refused", async () => {
+  const resolved: string[] = [];
+  const kept: Record<string, any> = {};
+  const deps = {
+    now: Date.now, owner: async () => "owner", ready: async () => [], live: async () => [], labeledBy: async () => "owner", start: async () => {}, held: () => false, resting: () => false,
+    store: { load: (r: string) => (kept[r] ??= {}), save: (r: string, s: any) => void (kept[r] = s) },
+    decisions: async () => [{ number: 12, author: "owner", at: Date.now(), url: "https://github.com/o/shop/issues/12", body: "<!-- f1rm:decision risk=high spec=7 recommended=1 -->\nShip it?\n\n1. Yes\n2. No\n" }],
+    notify: () => {},
+    resolve: async (repo: string, n: number, spec: number | null, answer: string) => void resolved.push(`${repo} #${n} ${spec} ${answer}`),
+  };
+  start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { scheduler: { everyMs: 20, deps } });
+  await hook({ ...common("l", "UserPromptSubmit"), cwd: "/code/shop", prompt: "go", agent_type: "f1rm:lead", session_title: "lead-checkout" });
+  const seen = (await office((s: any) => s.decisions?.length === 1)) as any;
+  const d = seen.decisions[0];
+  expect(d).toMatchObject({ number: 12, question: "Ship it?", options: ["Yes", "No"], recommended: 0, risk: "high", spec: 7 });
+  expect((await ui(`decide/${encodeURIComponent(d.id)}`)).status).toBe(405);
+  const res = await ui(`decide/${encodeURIComponent(d.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ option: 1 }) });
+  expect(await res.json()).toEqual({ ok: true });
+  expect(resolved).toEqual(["/code/shop #12 7 No"]);
+  await office((s: any) => s.decisions?.length === 0);
+  const at = `http://127.0.0.1:${server.port}`;
+  for (const command of [`curl -s -X POST ${at}/${TOKEN}/decide/x -d '{"option":0}'`, `curl -X POST "$(cat ~/.f1rm/office-url)decide/x"`]) {
+    const out = await held(await hook({ ...preToolUse("l", "Bash", { command }), cwd: "/code/shop" }));
+    expect([command, out?.permissionDecision]).toEqual([command, "deny"]);
+    expect(out.permissionDecisionReason).toContain("Only the user answers a decision ticket");
+  }
+});
