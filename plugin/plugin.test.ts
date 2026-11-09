@@ -15,6 +15,7 @@ const ROLES: Record<string, string[]> = {
   designer: ["design-pipeline"],
   researcher: ["mattpocock-skills:research"],
   advisor: ["mattpocock-skills:domain-modeling", "mattpocock-skills:research"],
+  "fresh-eyes": [],
   marketer: ["cro", "anthropic-skills:content-creator", "brandkit"],
   "seo-specialist": ["seo-audit", "ai-seo"],
   "social-media": ["social", "content-calendar-sms", "anthropic-skills:fabrica", "hook-writer-sms", "carousel-writer-sms"],
@@ -90,7 +91,7 @@ test.skipIf(!hasClaude)("the plugin installs from the repo's marketplace into a 
   const details = claude("plugin", "details", "f1rm@f1rm");
   expect(details.code).toBe(0);
   expect(/Skills \(\d+\)\s+(.*)/.exec(details.out)?.[1].split(", ").sort()).toEqual(["f1rm-guidelines", "resume-all", "stop-all"]);
-  expect(details.out).toMatch(/Agents \(10\)\s+\S/);
+  expect(details.out).toMatch(/Agents \(11\)\s+\S/);
   for (const name of Object.keys(ROLES)) expect(details.out).toContain(name);
 });
 
@@ -321,7 +322,7 @@ test("the PM interviews the user, publishes the spec and stops: no rules preload
   expect(fm.skills).toBeUndefined();
   expect(String(fm.tools).split(/,\s*/)).toEqual(["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill"]);
   for (const s of ["`CLAUDE.md`, `AGENTS.md`, `docs/agents/`", "--body-file"]) expect(body, s).toContain(s);
-  for (const s of ["setup-matt-pocock-skills", "`mattpocock-skills:grilling`", "`mattpocock-skills:domain-modeling`", "`to-spec`", "`ready-for-agent`", "A small ask", "gets no rounds", "and stop."]) expect(body, s).toContain(s);
+  for (const s of ["setup-matt-pocock-skills", "`mattpocock-skills:grilling`", "`mattpocock-skills:domain-modeling`", "`to-spec`", "`ready-for-agent`", "A small ask", "gets none of 2 to 4", "and stop."]) expect(body, s).toContain(s);
   for (const s of ["f1rm hire", "board", "f1rm push", "letgo", "milestone", "lead"]) expect(body, s).not.toContain(s);
   expect(pmPromptText()).toContain("publish it as a spec");
   expect(pmPromptText()).not.toMatch(/board|f1rm hire|\blead|guidelines/);
@@ -334,9 +335,9 @@ test("the rules file is short and says the flow, the steps, decision tickets, ro
   expect(guidelines).not.toMatch(/\blead\b|\bboards?\b|SendMessage/i);
 });
 
-test("the four retired role files are gone, the plugin is 0.9.0, and the label vocabulary lists the decision, role and size labels", () => {
+test("the four retired role files are gone, the plugin is 0.10.0, and the label vocabulary lists the decision, role and size labels", () => {
   for (const r of ["lead", "frontend-dev", "backend-dev", "reviewer"]) expect(existsSync(join(PLUGIN, "agents", `${r}.md`)), r).toBe(false);
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.9.0");
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.10.0");
   const labels = readFileSync(join(REPO, "docs", "agents", "triage-labels.md"), "utf8");
   for (const s of ["`needs-decision`", "`role:<name>`", "`size:s`"]) expect(labels, s).toContain(s);
 });
@@ -347,4 +348,17 @@ test("both READMEs describe the new flow: no lead, board, topic or message betwe
     expect(text, name).toContain("spec");
   }
   expect(pluginReadme()).toContain("Nobody hires and no session messages another");
+});
+
+test("the PM ends on examples the user confirms and a prototype they accept, and publishes the ask verbatim", () => {
+  const pm = role("pm").body;
+  for (const s of ["3 to 5 numbered examples", "Wait for the user to confirm", "`prototype` skill", "`design-pipeline`", "never a rebuilt copy", "\"accept\"", "## Ask", "verbatim", "## Examples", "in place of the skill's `## User Stories`", "--attach", "Done = you see Y."]) expect(pm, s).toContain(s);
+});
+
+test("fresh-eyes reads only the ask, the examples, the tickets and their files on main, and ends on its count of surprises", () => {
+  const { fm, body } = role("fresh-eyes");
+  expect(String(fm.tools).split(/,\s*/)).not.toContain("Edit");
+  expect(String(fm.tools).split(/,\s*/)).not.toContain("Write");
+  for (const s of ["## Ask", "## Examples", "Boundary:", "Read nothing else", "Mermaid", "path:line", "none, unasked", "contradicts example N", "SURPRISES: <n>"]) expect(body, s).toContain(s);
+  expect(role("step").body).toContain("the user's comments on the spec since this step last started");
 });

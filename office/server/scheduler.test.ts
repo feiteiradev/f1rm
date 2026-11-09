@@ -522,3 +522,37 @@ test("a raised budget is the wall's budget too, and a small or large ticket's gu
   expect(stopped).toEqual([]);
   expect(s.boards()[REPO].slice(1).map((r) => r.task)).toEqual([`slugify · ${Math.round(BUDGET.m * 1.4 / 1000)}k cost units`, `CLI · ${Math.round((BUDGET.l + 1) / 1000)}k cost units · over its budget`]);
 });
+
+const PREVIEW_ASKED = "<!-- f1rm:decision risk=high step=tickets-7 spec=7 recommended=1 restart=1 drop=3 -->\nThe preview of #7 has changes no example asks for. Go on?\n\n1. Go as planned\n2. I'll re-scope it\n3. Drop the spec\n";
+
+test("a tickets step that asked about its preview starts again once the user says go, though its tickets exist, and once only", async () => {
+  let open = [decision(12, { body: PREVIEW_ASKED })];
+  let ticks = 0;
+  const { s, started } = harness([spec(7, { subIssues: 2 }), ticket(8, 7), ticket(9, 7)], { decisions: async () => open, labeledBy: async (_r, n) => (n === 12 || n === 7 ? ME : null), live: async () => (ticks++ > 1 ? ["tickets-7"] : []) }, TICKETED);
+  await s.tick([REPO]);
+  expect(started).toEqual([]); // waits: no ticket is labelled by the step yet in the real flow, and nothing restarts it before the answer
+  expect(await s.answer(`${REPO}#12`, 0)).toEqual({ ok: true });
+  open = [];
+  await s.tick([REPO]);
+  await s.tick([REPO]);
+  expect(started.filter((x) => x.includes("tickets"))).toEqual([`${REPO} tickets #7`]);
+});
+
+test("I'll re-scope it starts nothing again", async () => {
+  let open = [decision(12, { body: PREVIEW_ASKED })];
+  const { s, started } = harness([spec(7, { subIssues: 1 }), ticket(8, 7)], { decisions: async () => open, labeledBy: async (_r, n) => (n === 12 || n === 7 ? ME : null) }, TICKETED);
+  await s.tick([REPO]);
+  expect(await s.answer(`${REPO}#12`, 1)).toEqual({ ok: true });
+  open = [];
+  await s.tick([REPO]);
+  expect(started).toEqual([]);
+});
+
+test("the steps carry the user's examples: Serves lines, a thin first slice, the fresh-eyes preview as the gate, and a visual close", () => {
+  const tickets = stepArgv("tickets", 7)[6];
+  for (const s of ["Serves:", "Out of scope", "thinnest end-to-end slice of example 1", "without the ready-for-agent label", "agents/fresh-eyes.md", "Add nothing to that prompt", "word for word", "SURPRISES: 0", "restart=1 drop=3", "Go as planned"]) expect(tickets, s).toContain(s);
+  const implement = stepArgv("implement", 7)[6];
+  for (const s of ["slice of example 1", "--attach", "waiting for nobody"]) expect(implement, s).toContain(s);
+  const close = stepArgv("close", 7)[6];
+  for (const s of ["## Examples", "Mermaid flowchart", "never from memory", "✅ or ❌", "--attach", "Intent:", "drop the fresh-eyes review"]) expect(close, s).toContain(s);
+});
