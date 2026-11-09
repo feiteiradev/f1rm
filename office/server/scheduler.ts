@@ -16,7 +16,8 @@ import { writePrivate } from "./private.ts";
 import { SLEEP_GAP_MS, sleepGrace } from "./sleep.ts";
 
 /** An open issue labelled `ready-for-agent`, as the scheduler needs it: `parent` is the spec of a ticket, `subDone` a spec's closed tickets, `blockedBy` a ticket's open blockers. */
-export type Issue = { number: number; title: string; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean };
+/** `later`: a ticket parked on purpose (labelled `later`), which no step builds until the user takes the label off. */
+export type Issue = { number: number; title: string; author: string; parent: number | null; subIssues: number; subDone: number; blockedBy: number; pr: boolean; later?: boolean };
 /** A spec's ticket, open or closed, as the whiteboard shows it. */
 export type TicketIssue = { number: number; title: string; state: "open" | "closed"; blockedBy: number; labels: string[] };
 export type Step = "tickets" | "implement" | "close";
@@ -346,11 +347,13 @@ export function createScheduler(d: SchedulerDeps) {
               continue;
             }
             if (round === 2 && started[close]) continue;
+            // A ticket parked as later is the user's to move: a step that leaves only those has not failed, and none starts for them.
+            const open = issues.filter((t) => t.parent === n && !t.pr && !t.later && t.author === me);
             if (started[implement]) {
-              await retryOrAsk("implement", spec, round);
+              if (open.length) await retryOrAsk("implement", spec, round);
               continue;
             }
-            const unblocked = issues.filter((t) => t.parent === n && !t.pr && t.blockedBy === 0 && t.author === me);
+            const unblocked = open.filter((t) => t.blockedBy === 0);
             if (!unblocked.length || !(await owned(spec))) continue;
             for (const t of unblocked) if ((await d.labeledBy(repo, t.number, "ready-for-agent")) === me) {
               await startOnce("implement", spec, round);
@@ -465,6 +468,7 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
           subDone: Number(i.sub_issues_summary?.completed ?? 0),
           blockedBy: Number(i.issue_dependencies_summary?.blocked_by ?? 0),
           pr: !!i.pull_request,
+          later: (i.labels ?? []).some((l: any) => l?.name === "later"),
         }));
       } catch {
         return null;

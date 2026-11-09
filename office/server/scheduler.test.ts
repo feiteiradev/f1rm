@@ -615,3 +615,13 @@ test("a step Claude Code still calls working whose transcript ended its turn lon
   ];
   expect(endedSteps(sessions, REPO, (cwd) => cwd, (a) => a.sessionId === "w1")).toEqual(["w1"]);
 });
+
+test("a ticket parked as later is not work: no implement step starts for it, and one that ends with only later tickets left has not failed", async () => {
+  const parked = harness([spec(7, { subIssues: 1 }), ticket(8, 7, { later: true })], {}, TICKETED);
+  await parked.s.tick([REPO]);
+  expect(parked.started).toEqual([]);
+  const left = harness([spec(7, { subIssues: 2, subDone: 1 }), ticket(9, 7, { later: true })], {}, { ...TICKETED, "implement-7": { at: OLD, done: 1 } });
+  await left.s.tick([REPO]);
+  await left.s.tick([REPO]);
+  expect([left.started, left.opened]).toEqual([[], []]);
+});
