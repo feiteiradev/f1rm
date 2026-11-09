@@ -100,12 +100,14 @@ export function decisionOf(body: string) {
   const first = lines.findIndex((l) => OPTION.test(l));
   const options = lines.filter((l) => OPTION.test(l)).map((l) => l.replace(OPTION, "").trim());
   const rec = Number(meta.recommended);
+  const worded = options.flatMap((o, i) => (/^drop the spec\b/i.test(o) ? [i] : []));
   return {
     question: (first < 0 ? lines : lines.slice(0, first)).join("\n").trim(),
     options,
     recommended: Number.isInteger(rec) && rec >= 1 && rec <= options.length ? rec - 1 : null,
     restart: indices(meta.restart, options.length),
-    drop: indices(meta.drop, options.length),
+    // A step that wrote "Drop the spec" but no drop= still means it: the user's answer must do what its words say.
+    drop: indices(meta.drop, options.length) ?? (worded.length ? worded : null),
     ready: indices(meta.ready, options.length),
     raise: indices(meta.raise, options.length),
     ticket: Number(meta.ticket) || null,

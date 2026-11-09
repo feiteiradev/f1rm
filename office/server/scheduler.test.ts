@@ -596,3 +596,14 @@ test("the retro files a change to f1rm itself on f1rm's own repo, never as a dra
   const close = stepArgv("close", 7)[6];
   for (const s of ["A change to f1rm itself", "is never built here", "gh issue create --repo feiteiradev/f1rm --label needs-triage", "gh api user -q .login prints feiteiradev", "For f1rm", "A change to this repo's own files", "Build this change?"]) expect(close, s).toContain(s);
 });
+
+test("a decision whose header names no drop option still drops its spec on an option worded Drop the spec, and only on that one", async () => {
+  const body = "<!-- f1rm:decision risk=low step=implement-7 spec=7 recommended=1 -->\nWhere does #8 land?\n\n1. Build it elsewhere\n2. Drop the spec\n";
+  for (const [option, want] of [[1, [`${REPO} #7`]], [0, []]] as [number, string[]][]) {
+    const dropped: string[] = [];
+    const { s } = harness([], { decisions: async () => [decision(12, { body })], drop: async (repo, n) => void dropped.push(`${repo} #${n}`) });
+    await s.tick([REPO]);
+    expect(await s.answer(`${REPO}#12`, option)).toEqual({ ok: true });
+    expect(dropped).toEqual(want);
+  }
+});
