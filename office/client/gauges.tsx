@@ -14,7 +14,7 @@ function GaugeCell({ g }: { g: Gauge }) {
         {g.pace !== null && <i className="pace" style={{ left: `${g.pace.toFixed(1)}%` }} />}
       </span>
       <b className="pct">{g.pct !== null && `${g.pct}%`}</b>
-      <span className="line2">
+      <span className="meta">
         {g.state === "none" ? (
           <span>no reading yet</span>
         ) : g.state === "paused" ? (
@@ -25,8 +25,8 @@ function GaugeCell({ g }: { g: Gauge }) {
             <span className="reset">resets <time dateTime={g.resetIso!}>{g.reset}</time></span>
           </>
         )}
+        {g.ahead && <span className="pace-note">Ahead of pace</span>}
       </span>
-      {g.ahead && <span className="pace-note">Ahead of pace</span>}
     </div>
   );
 }

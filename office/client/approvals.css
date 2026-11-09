@@ -19,8 +19,10 @@
   background: var(--line);
   font-weight: 700;
 }
-.tray-button[data-waiting] { color: var(--text); border-color: var(--amber); }
-.tray-button[data-waiting] .badge { color: var(--bg); background: var(--amber); }
+/* Something waits: the one filled control in the bar. */
+.tray-button[data-waiting] { color: var(--bg); background: var(--amber); border-color: var(--amber); font-weight: 700; }
+.tray-button[data-waiting] .badge { color: var(--amber); background: var(--bg); }
+.tray-button[data-waiting]:hover { filter: brightness(1.08); }
 
 .tray-panel {
   position: absolute;

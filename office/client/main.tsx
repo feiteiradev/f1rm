@@ -43,10 +43,10 @@ function Counter({ state }: { state: OfficeState }) {
   return (
     <ul className="counter" aria-label="Employees by status">
       {COUNTERS.map(([status, label]) => (
-        <li key={status} data-status={status}>
+        <li key={status} data-status={status} title={label}>
           <span className="swatch" aria-hidden />
           <span className="count">{counts[status]}</span>
-          {label}
+          <span className="label">{label}</span>
         </li>
       ))}
     </ul>
@@ -395,23 +395,28 @@ function Office() {
   const empty = state && Object.keys(state.rooms).length === 0;
   return (
     <OnEnded.Provider value={onEnded}>
+      {/* Three zones: where you are, how much usage is left, and what you can do (Approvals the loudest when something waits; Stop all last and quiet). */}
       <header className="bar">
-        <h1>f1rm</h1>
-        {open !== null && (
-          <button className="back" onClick={() => go(null)}>
-            <span aria-hidden>← </span>Lobby
-          </button>
-        )}
-        {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
-        {inside && isProject(inside) && <button className="hire-btn" onClick={newSpec}>New spec</button>}
-        {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
+        <div className="zone where">
+          <h1>f1rm</h1>
+          {open !== null && (
+            <button className="back" onClick={() => go(null)}>
+              <span aria-hidden>← </span>Lobby
+            </button>
+          )}
+          {inside && state && <p className="crumb">{state.rooms[inside].name}</p>}
+          {inside && isProject(inside) && <button className="hire-btn" onClick={newSpec}>New spec</button>}
+          {inside && isProject(inside) && state?.editions && <EditionSelect key={inside} room={inside} edition={state.editions[inside] ?? null} />}
+        </div>
+        {state && <Gauges usage={state.usage} />}
+        <div className="zone act">
+          {view && <Counter state={view} />}
+          {state && <Palette state={state} onOpen={go} />}
+          {state && <Tray state={state} />}
+          {state && <StopAll paused={state.paused ?? []} />}
+        </div>
         {down && <p className="offline" role="alert">{down.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>}
         {state?.plugin && <p className="offline" role="status">The installed f1rm plugin is {state.plugin.installed}, older than this office's {state.plugin.office}: run <code>claude plugin update f1rm@f1rm</code>, then start new sessions.</p>}
-        {state && <StopAll paused={state.paused ?? []} />}
-        {state && <Gauges usage={state.usage} />}
-        {state && <Palette state={state} onOpen={go} />}
-        {state && <Tray state={state} />}
-        {view && <Counter state={view} />}
       </header>
       <main>
         {inside && view ? <Project key={inside} room={inside} state={view} onHire={newSpec} /> : <Lobby state={state ?? NOBODY} onOpen={go} />}

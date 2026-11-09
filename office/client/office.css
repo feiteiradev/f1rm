@@ -16,25 +16,33 @@ html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--mono); }
 #root { display: flex; flex-direction: column; }
 
+/* The top bar: three zones on one line (where, usage, act); a notice takes a row of its own below them. */
 .bar {
   flex: none;
-  min-height: 52px;
-  padding: 6px 16px;
+  min-height: 48px;
+  padding: 8px 16px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
+  gap: 8px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
+.bar .zone { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.bar .act { margin-left: auto; }
 .bar h1 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+.bar .crumb { margin: 0; color: var(--text); }
+.bar .crumb::before { content: "/"; margin-right: 8px; color: var(--muted); }
+.bar .back { font: inherit; color: var(--muted); background: transparent; border: 0; padding: 2px 0; cursor: pointer; }
+.bar .back:hover { color: var(--text); }
+.bar .offline { flex-basis: 100%; }
 .offline { margin: 0; color: var(--amber); }
 
-.counter { margin: 0 0 0 auto; padding: 0; display: flex; gap: 20px; list-style: none; }
-.counter li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.counter .count { color: var(--text); font-size: 18px; font-weight: 700; min-width: 1ch; }
+.counter { margin: 0; padding: 0 12px 0 0; display: flex; gap: 14px; list-style: none; border-right: 1px solid var(--line); }
+.counter li { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.counter .count { color: var(--text); font-weight: 700; min-width: 1ch; font-variant-numeric: tabular-nums; }
 
-.swatch { width: 10px; height: 10px; background: var(--muted); }
+.swatch { width: 8px; height: 8px; background: var(--muted); }
 [data-status="working"] .swatch { background: var(--green); }
 [data-status="waiting"] .swatch { background: var(--amber); }
 [data-status="idle"] .swatch { background: var(--idle); }
@@ -121,10 +129,23 @@ code { font: inherit; color: var(--text); }
   cursor: pointer;
 }
 
-@media (max-width: 640px) {
-  .panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; }
-  .counter { gap: 12px; }
+/* Below 1600px the counts keep their square and number; the word moves to the tooltip, so the bar stays one line. */
+@media (max-width: 1599px) {
+  .counter .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .counter { gap: 10px; }
 }
+@media (max-width: 640px) {
+  .gauge { flex-wrap: wrap; white-space: normal; }
+  .panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; }
+  .counter { gap: 10px; border-right: 0; padding-right: 0; }
+  .bar .act { margin-left: 0; }
+  .usage { padding-left: 0; border-left: 0; }
+}
+/* A text control that stays out of the way: Stop all. While a project is paused it reads Resume all, in amber. */
+.quiet { font: inherit; color: var(--muted); background: transparent; border: 0; padding: 2px 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
+.quiet:hover { color: var(--text); text-decoration-color: currentColor; }
+.quiet[data-paused] { color: var(--amber); text-decoration-color: currentColor; }
+.bar :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
 
 .pm-note { padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); color: var(--text); }
 /* The ended-session toast stacks above the PM note, which keeps the bottom spot. */

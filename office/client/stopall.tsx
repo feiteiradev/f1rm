@@ -38,7 +38,7 @@ export function StopAllView({ paused, view, controls }: { paused: string[]; view
         </span>
       ) : (
         // One button for every state but the question, so the focus stays on it while it works. aria-disabled, not disabled: a disabled button drops the focus.
-        <button type="button" ref={main} className="hire-btn" aria-disabled={busy || undefined} onClick={() => !busy && (paused.length ? controls.resume() : controls.ask())}>
+        <button type="button" ref={main} className="quiet" data-paused={paused.length > 0 || undefined} aria-disabled={busy || undefined} onClick={() => !busy && (paused.length ? controls.resume() : controls.ask())}>
           {view.phase === "stopping" ? "Stopping…" : view.phase === "resuming" ? "Resuming…" : paused.length ? "Resume all" : "Stop all"}
         </button>
       )}
