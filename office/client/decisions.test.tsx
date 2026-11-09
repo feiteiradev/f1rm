@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { OfficeState } from "../server/office.ts";
 import type { Decision } from "../server/scheduler.ts";
 import { Tray } from "./approvals.tsx";
-import { answerDecision } from "./approvals.ts";
+import { answerDecision, takeRecommended } from "./approvals.ts";
 
 const real = { fetch: globalThis.fetch, location: (globalThis as any).location };
 afterEach(() => Object.assign(globalThis, real));
@@ -34,4 +34,21 @@ test("an answer posts the picked option to the decision's route", async () => {
   });
   expect(await answerDecision(D.id, 1)).toBeNull();
   expect(posts).toEqual([{ path: "/tok/decide/%2Fcode%2Fshop%2312", body: JSON.stringify({ option: 1 }) }]);
+});
+
+test("with two or more recommendations waiting, one button takes them all: each posts its own recommended option, and one without a recommendation is left", async () => {
+  const two = [D, { ...D, id: "/code/shop#13", number: 13, risk: "high" as const, recommended: 0 }];
+  expect(open(two)).toContain(">Take all 2 recommendations</button>");
+  expect(open([D])).not.toContain("Take all");
+  expect(open([D, { ...D, id: "/code/shop#14", recommended: null }])).not.toContain("Take all");
+  const posts: { path: string; body: unknown }[] = [];
+  Object.assign(globalThis, {
+    location: { href: "http://127.0.0.1:4170/tok/" },
+    fetch: async (url: URL, init: RequestInit) => (posts.push({ path: url.pathname, body: init.body }), Response.json({ ok: true })),
+  });
+  expect(await takeRecommended([...two, { ...D, id: "/code/shop#14", recommended: null }])).toEqual([]);
+  expect(posts).toEqual([
+    { path: "/tok/decide/%2Fcode%2Fshop%2312", body: JSON.stringify({ option: 1 }) },
+    { path: "/tok/decide/%2Fcode%2Fshop%2313", body: JSON.stringify({ option: 0 }) },
+  ]);
 });

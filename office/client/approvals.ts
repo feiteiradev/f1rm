@@ -1,6 +1,7 @@
 // The permission card's pure part: what a raised hand shows, as text, and who needs the user.
 import type { Employee, OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
+import type { Decision } from "../server/scheduler.ts";
 import { post } from "./post.ts";
 
 /** The full arguments of a tool request as plain text: a Bash command as is, anything else as indented JSON. Never shortened, because approving acts on exactly this. */
@@ -39,3 +40,12 @@ export const needsYouTag = (e: Pick<Employee, "role" | "name" | "needsYou">) => 
 
 /** Answers a decision ticket with the option the user picked; null when the office wrote it, otherwise why not. */
 export const answerDecision = (id: string, option: number) => post(`decide/${encodeURIComponent(id)}`, { option });
+/** Answers each decision that has a recommendation with it, one after another; the errors, empty when all went through. */
+export async function takeRecommended(decisions: Decision[]): Promise<string[]> {
+  const errors: string[] = [];
+  for (const d of decisions) if (d.recommended !== null) {
+    const error = await answerDecision(d.id, d.recommended);
+    if (error) errors.push(`#${d.number}: ${error}`);
+  }
+  return errors;
+}

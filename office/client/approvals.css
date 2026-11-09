@@ -92,6 +92,7 @@
 /* The result line's region stays in the page so a screen reader hears it arrive; empty, it takes no room. */
 .tray-panel [role="status"]:empty { padding: 0; height: 0; overflow: hidden; }
 .tray-panel:focus { outline: none; }
+.take-all { display: block; width: calc(100% - 32px); margin: 12px 16px; }
 .decision { padding: 12px 16px; border-bottom: 1px solid var(--line); border-left: 4px solid var(--amber); }
 .decision:last-child { border-bottom: 0; }
 .decision p { margin: 0; }

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import type { OfficeState } from "../server/office.ts";
 import type { Approval } from "../server/approvals.ts";
 import type { Decision } from "../server/scheduler.ts";
-import { answerDecision, cardOf, handsOf, type Anchor } from "./approvals.ts";
+import { answerDecision, cardOf, handsOf, takeRecommended, type Anchor } from "./approvals.ts";
 import { post } from "./post.ts";
 import { CommandsCard } from "./commands.tsx";
 import { LeftoversCard } from "./leftovers.tsx";
@@ -122,6 +122,15 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
   const waiting = (hands?.length ?? 0) + lists.length + (leftovers ? 1 : 0) + decisions.length;
   // What the leftovers answer said, in the card's slot until the tray closes.
   const [note, setNote] = useState<string | null>(null);
+  const [taking, setTaking] = useState(false);
+  const recommended = decisions.filter((d) => d.recommended !== null);
+  async function takeAll() {
+    setTaking(true);
+    const errors = await takeRecommended(recommended);
+    setTaking(false);
+    setNote(errors.length ? `Not answered: ${errors.join("; ")}` : `Took ${recommended.length} recommendations.`);
+    panel.current?.focus();
+  }
   useEffect(() => {
     if (!open) return setNote(null);
     const away = (e: MouseEvent) => root.current && !root.current.contains(e.target as Node) && setOpen(false);
@@ -146,6 +155,7 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
             !note && <p className="none">No one is waiting for permission.</p>
           ) : (
             <ul>
+              {recommended.length > 1 && <li><button className="take-all" disabled={taking} onClick={takeAll}>Take all {recommended.length} recommendations</button></li>}
               {leftovers && <li><LeftoversCard card={leftovers} onDone={(n) => (setNote(n), panel.current?.focus())} /></li>}
               {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
               {decisions.map((d) => <li key={d.id}><DecisionTicket decision={d} /></li>)}

@@ -13,8 +13,15 @@ export type SpecCost = { coordination: Tokens; tickets: Record<number, Tokens>; 
 export const BUDGET: Record<Size, number> = { s: 100_000, m: 200_000, l: 600_000 };
 /** The sizes whose budget was measured: only these stop a step, so a guessed number never stops real work. */
 export const MEASURED: Size[] = ["m"];
-/** A ticket's budget: its size's (none counts as medium), times any raises it was given. */
-export const budgetOf = (size: Size | undefined, factor = 1) => BUDGET[size ?? "m"] * factor;
+/** A ticket's budget: its size's (none counts as medium) in `base`, times any raises it was given. */
+export const budgetOf = (size: Size | undefined, factor = 1, base = BUDGET) => base[size ?? "m"] * factor;
+/** A repo's budgets from its own finished tickets' costs: medium is 1.5 times their median once there are 5 (the defaults came from a toy repo), small and large scale from it. */
+export function repoBudgets(finished: number[]): Record<Size, number> {
+  if (finished.length < 5) return BUDGET;
+  const sorted = [...finished].sort((a, b) => a - b);
+  const m = 1.5 * sorted[Math.floor(sorted.length / 2)];
+  return { s: m / 2, m, l: 3 * m };
+}
 
 /** The spec a step session works on, from its name (`tickets-7`, `implement-7`, `close-7-2`); null for any other name. */
 export const specOfStep = (name: string) => {

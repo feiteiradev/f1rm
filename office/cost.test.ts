@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { costUnits, specCosts, specTable } from "./cost.ts";
+import { costUnits, specCosts, specTable, BUDGET, repoBudgets } from "./cost.ts";
 import { projectFolder } from "./cli/hire.ts";
 
 const REPO = "/code/shop";
@@ -66,4 +66,9 @@ test("f1rm cost lists the tickets over their size's budget; a ticket with no siz
 
 test("a repo with no transcripts costs nothing", () => {
   expect(specCosts(mkdtempSync(join(tmpdir(), "f1rm-cost-")), REPO)).toEqual({});
+});
+
+test("a repo's budgets are 1.5 times the median of its finished tickets once it has 5, small and large scaled from it; fewer keep the defaults", () => {
+  expect(repoBudgets([400_000, 500_000, 600_000, 700_000])).toEqual(BUDGET);
+  expect(repoBudgets([700_000, 400_000, 600_000, 500_000, 1_000_000])).toEqual({ s: 450_000, m: 900_000, l: 2_700_000 });
 });
