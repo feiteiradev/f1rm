@@ -90,6 +90,22 @@ type Listed = { sessionId?: string; name: string; state: string; cwd: string };
 /** `stale`: one Claude Code still calls working or blocked whose transcript ended its turn long ago. */
 export const endedSteps = (sessions: Listed[], repo: string, repoOf: (cwd: string) => string, stale: (a: Listed) => boolean = () => false) =>
   sessions.filter((a) => (a.state === "done" || a.state === "failed" || stale(a)) && STEP_NAME.test(a.name) && repoOf(a.cwd) === repo && a.sessionId).map((a) => a.sessionId!);
+/**
+ * One folder per GitHub repo: two registered folders with one `origin` would each run every step of its specs (f1rm#101). The one registered
+ * last (`at`) runs; `remote` is null for a folder git names no GitHub origin for, which runs as itself.
+ */
+export function oneFolderPerRemote(folders: { folder: string; remote: string | null; at: number }[]) {
+  const last = new Map<string, { folder: string; at: number }>();
+  for (const f of folders) {
+    const seen = f.remote ? last.get(f.remote) : undefined;
+    if (f.remote && (!seen || f.at > seen.at)) last.set(f.remote, f);
+  }
+  const run = folders.filter((f) => !f.remote || last.get(f.remote)!.folder === f.folder).map((f) => f.folder);
+  return { run, skipped: folders.map((f) => f.folder).filter((f) => !run.includes(f)) };
+}
+/** The `owner/name` of a folder's GitHub origin; null when git names none. */
+export const githubRemote = (folder: string) =>
+  /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(Bun.spawnSync(["git", "-C", folder, "remote", "get-url", "origin"]).stdout.toString().trim())?.[1] ?? null;
 /** A step whose transcript has shown a finished turn for this long has ended, whatever Claude Code's list says. */
 const STALE_MS = 10 * 60_000;
 const META = /<!--\s*f1rm:decision\b([^>]*?)-->/;
@@ -382,10 +398,7 @@ const roleMapText = (founder: boolean) =>
   [...Object.entries(roleSkills(founder)).map(([id, skills]) => `role:${id} → ${skills.join(", ")}`), "no role label → mattpocock-skills:tdd"].join("; ");
 
 /** f1rm's own GitHub repo (`owner/name`) from the checkout the office runs from, where a retro files changes to f1rm itself; null when git can't say. */
-const F1RM_REPO = (() => {
-  const url = Bun.spawnSync(["git", "-C", join(import.meta.dir, "..", ".."), "remote", "get-url", "origin"]).stdout.toString().trim();
-  return /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(url)?.[1] ?? null;
-})();
+const F1RM_REPO = githubRemote(join(import.meta.dir, "..", ".."));
 
 const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => string> = {
   tickets: (spec, _round, founder) =>

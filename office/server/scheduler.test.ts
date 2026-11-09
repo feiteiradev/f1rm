@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createScheduler, endedSteps, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
+import { createScheduler, endedSteps, oneFolderPerRemote, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
 import { BUDGET } from "../cost.ts";
 
 const REPO = "/r/app";
@@ -624,4 +624,14 @@ test("a ticket parked as later is not work: no implement step starts for it, and
   await left.s.tick([REPO]);
   await left.s.tick([REPO]);
   expect([left.started, left.opened]).toEqual([[], []]);
+});
+
+test("two registered folders of one GitHub repo: steps run only in the one registered last, and a folder with no remote runs as itself", () => {
+  const folders = [
+    { folder: "/proof/repo", remote: "feiteiradev/f1rm-sample", at: 1 },
+    { folder: "/dev/f1rm-sample", remote: "feiteiradev/f1rm-sample", at: 5 },
+    { folder: "/dev/feit", remote: "feiteiradev/feit", at: 2 },
+    { folder: "/dev/local", remote: null, at: 3 },
+  ];
+  expect(oneFolderPerRemote(folders)).toEqual({ run: ["/dev/f1rm-sample", "/dev/feit", "/dev/local"], skipped: ["/proof/repo"] });
 });

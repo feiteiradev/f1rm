@@ -18,7 +18,7 @@ import { evidenceFile, proofType } from "./progress.ts";
 import { hireName, hireTask, letGoHire, repoOf } from "../cli/letgo.ts";
 import { mayWake } from "../cli/wake.ts";
 import { createRecovery, type RecoveryDeps } from "./recovery.ts";
-import { createScheduler, type SchedulerDeps } from "./scheduler.ts";
+import { createScheduler, githubRemote, oneFolderPerRemote, type SchedulerDeps } from "./scheduler.ts";
 import type { PluginLag } from "./office.ts";
 import { due, liveTasksOf, sweepTick } from "./dockersweep.ts";
 import type { Docker } from "../docker.ts";
@@ -1375,7 +1375,20 @@ export function startServer({
     return { name, lost, waking };
   }
   // Recovery (recovery.ts): the registered projects' hires that stopped are woken or reported, and idle ones that ended a turn without a report are nudged. Their inbox is the one the panel's Tell uses.
-  const registered = () => (projectsDir ? projectRooms().map(folderOf) : []);
+  // One folder per GitHub repo (f1rm#101): a second registered folder with the same origin is skipped and named once in the log.
+  const remotes = new Map<string, string | null>();
+  const skippedOnce = new Set<string>();
+  const registered = () => {
+    if (!projectsDir) return [];
+    const folders = projectRooms().map((id) => {
+      const folder = folderOf(id);
+      if (!remotes.has(folder)) remotes.set(folder, githubRemote(folder));
+      return { folder, remote: remotes.get(folder)!, at: statSync(projectFile(projectsDir, id), { throwIfNoEntry: false })?.mtimeMs ?? 0 };
+    });
+    const { run, skipped } = oneFolderPerRemote(folders);
+    for (const f of skipped) if (!skippedOnce.has(f)) (skippedOnce.add(f), console.log(`scheduler: ${f} shares its GitHub repo with a folder registered later: no step runs in it`));
+    return run;
+  };
   /** The whiteboards from the issues (see scheduler.ts), by room. */
   const issueBoards = () => Object.fromEntries(projectRooms().flatMap((id) => (scheduling?.boards()[folderOf(id)]?.length ? [[id, scheduling.boards()[folderOf(id)]]] : [])));
   // A paused project, or one whose stopped hires a resume is still waking, is left alone: no wake, no nudge, no note, no step started.
