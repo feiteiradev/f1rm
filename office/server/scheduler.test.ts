@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createScheduler, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
+import { createScheduler, endedSteps, parentOf, stepArgv, type DecisionIssue, type Issue, type SchedulerDeps, type Started } from "./scheduler.ts";
 import { BUDGET } from "../cost.ts";
 
 const REPO = "/r/app";
@@ -34,6 +34,8 @@ function harness(issues: Issue[], over: Partial<SchedulerDeps> = {}, stored: Sta
     stop: async () => {},
     drop: async () => {},
     approve: async () => {},
+    ended: async () => [],
+    release: async () => {},
     ...over,
   };
   return { s: createScheduler(d), started, labels, told, resolved, opened, saved };
@@ -555,4 +557,25 @@ test("the steps carry the user's examples: Serves lines, a thin first slice, the
   for (const s of ["slice of example 1", "--attach", "waiting for nobody"]) expect(implement, s).toContain(s);
   const close = stepArgv("close", 7)[6];
   for (const s of ["## Examples", "Mermaid flowchart", "never from memory", "✅ or ❌", "--attach", "Intent:", "drop the fresh-eyes review"]) expect(close, s).toContain(s);
+});
+
+test("a step whose last turn ended is stopped, so its process does not live on; one Claude Code can't list is left alone", async () => {
+  const released: string[] = [];
+  const { s } = harness([], { ended: async () => ["a1b2c3d4"], release: async (id) => void released.push(id) });
+  await s.tick([REPO]);
+  expect(released).toEqual(["a1b2c3d4"]);
+  const quiet = harness([], { ended: async () => null, release: async (id) => void released.push(id) });
+  await quiet.s.tick([REPO]);
+  expect(released).toEqual(["a1b2c3d4"]);
+});
+
+test("only the office's own steps that ended are released: no live step, no hire, no other folder", () => {
+  const sessions = [
+    { sessionId: "a1", name: "tickets-7", state: "done", cwd: REPO },
+    { sessionId: "a2", name: "implement-7-2", state: "failed", cwd: `${REPO}/.claude/worktrees/x` },
+    { sessionId: "a3", name: "close-7", state: "working", cwd: REPO },
+    { sessionId: "a4", name: "designer-logo", state: "done", cwd: REPO },
+    { sessionId: "a5", name: "tickets-9", state: "done", cwd: "/r/other" },
+  ];
+  expect(endedSteps(sessions, REPO, (cwd) => (cwd.startsWith(REPO) ? REPO : cwd))).toEqual(["a1", "a2"]);
 });

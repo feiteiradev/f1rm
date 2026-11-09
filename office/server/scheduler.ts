@@ -55,6 +55,10 @@ export type SchedulerDeps = {
   drop: (repo: string, spec: number) => Promise<void>;
   /** Stops the repo's background session of this name (`claude stop`, which keeps its conversation). */
   stop: (repo: string, name: string) => Promise<void>;
+  /** The session ids of the repo's office steps that Claude Code calls done or failed; null if it can't say. */
+  ended: (repo: string) => Promise<string[] | null>;
+  /** Stops a background session by its session id (`claude stop`, which keeps its conversation). */
+  release: (id: string) => Promise<void>;
   /** Opens a decision ticket in the repo. */
   open: (repo: string, title: string, body: string) => Promise<void>;
   /** Closes the decision ticket with the answer as its comment (throws what refused that), then takes its label off and writes the answer on its spec. */
@@ -76,6 +80,11 @@ export function parentOf(i: { parent_issue_url?: string | null; body?: string | 
 const isSpec = (i: Issue) => !i.pr && i.parent === null;
 /** A low-risk decision nobody answers takes its recommendation after this long. */
 export const DEFAULT_AFTER_MS = 4 * 3_600_000;
+/** A step's session name: `tickets-7`, `implement-7-2`. */
+const STEP_NAME = /^(?:tickets|implement|close)-\d+(?:-\d+)?$/;
+/** The office's steps in `repo` whose last turn ended: Claude Code keeps a done session's process alive to be attached to, until it is stopped. */
+export const endedSteps = (sessions: { sessionId?: string; name: string; state: string; cwd: string }[], repo: string, repoOf: (cwd: string) => string) =>
+  sessions.filter((a) => (a.state === "done" || a.state === "failed") && STEP_NAME.test(a.name) && repoOf(a.cwd) === repo && a.sessionId).map((a) => a.sessionId!);
 const META = /<!--\s*f1rm:decision\b([^>]*?)-->/;
 const OPTION = /^\s*\d+\.\s+(?=\S)/;
 /** `restart=1,3` as indices into the options; null when the header has no such field. */
@@ -101,7 +110,7 @@ export function decisionOf(body: string) {
     raise: indices(meta.raise, options.length),
     ticket: Number(meta.ticket) || null,
     risk: meta.risk === "low" ? ("low" as const) : ("high" as const),
-    step: /^(?:tickets|implement|close)-\d+(?:-\d+)?$/.test(meta.step ?? "") ? meta.step! : null,
+    step: STEP_NAME.test(meta.step ?? "") ? meta.step! : null,
     spec: Number(meta.spec) || null,
   };
 }
@@ -262,6 +271,7 @@ export function createScheduler(d: SchedulerDeps) {
           const started = d.store.load(repo);
           const paused = d.paused(repo);
           await decide(repo, me, started, list, paused);
+          for (const id of (await d.ended(repo)) ?? []) await d.release(id).catch((err) => console.log(`scheduler ${basename(repo)}: ${id} not stopped: ${(err as Error).message}`));
           const issues = await d.ready(repo);
           const live = issues && (await d.live(repo));
           if (!issues || !live) continue;
@@ -501,6 +511,13 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
     start: async (repo, step, spec, round) => void (await machine.spawnBackground(stepArgv(step, spec, round, readEdition(editionFile(repo)) === "founder"), repo)),
     // shortcut: a session is live until Claude Code calls it done or failed; read its process too if a crashed one lingers as working.
     live: async (repo) => (await machine.backgroundSessions())?.filter((a) => repoOf(a.cwd) === repo && a.state !== "done" && a.state !== "failed").map((a) => a.name) ?? null,
+    ended: async (repo) => {
+      const list = await machine.backgroundSessions();
+      return list && endedSteps(list, repo, repoOf);
+    },
+    release: async (id) => {
+      if (!(await machine.stop(id))) throw new Error("claude stop refused");
+    },
     held: () => pacing(readUsage(usageFile(home), Date.now() / 1000), Date.now() / 1000).hold !== null,
     store: {
       load(repo) {

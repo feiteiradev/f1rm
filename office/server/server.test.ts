@@ -2287,6 +2287,8 @@ test("the tray lists the registered projects' decision tickets and the browser a
     stop: async () => {},
     tickets: async () => [{ number: 8, title: "slugify", state: "open" as const, blockedBy: 0, labels: [] }],
     costs: () => ({}),
+    ended: async () => [],
+    release: async () => {},
     resolve: async (repo: string, n: number, spec: number | null, answer: string) => void resolved.push(`${repo} #${n} ${spec} ${answer}`),
   };
   start({ "/code/shop": "/code/shop/.git" }, undefined, undefined, { scheduler: { everyMs: 20, deps } });
