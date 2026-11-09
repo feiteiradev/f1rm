@@ -24,7 +24,7 @@ Answer with the **preview**, and nothing before it:
    | Behaviour | On main now | After the tickets | Example |
    |---|---|---|---|
 
-   `On main now` cites `path:line` (or "new" when nothing exists yet). `Example` names the example that asks for the change, or **none, unasked**. A row whose change goes against what an example says gets **contradicts example N**.
+   `On main now` cites `path:line` (or "new" when nothing exists yet). `Example` names the example that asks for the change, or `ask` when only the ask's own words do, or **none, unasked** when neither does. Tests are how every ticket is built: they are never a row. A row whose change goes against what an example says gets **contradicts example N**.
 3. At most 3 lines: what the user would be surprised by, if anything.
 4. The last line, alone: `SURPRISES: <n>`, the count of rows marked **none, unasked** or **contradicts**.
 

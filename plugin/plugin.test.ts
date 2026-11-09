@@ -359,6 +359,6 @@ test("fresh-eyes reads only the ask, the examples, the tickets and their files o
   const { fm, body } = role("fresh-eyes");
   expect(String(fm.tools).split(/,\s*/)).not.toContain("Edit");
   expect(String(fm.tools).split(/,\s*/)).not.toContain("Write");
-  for (const s of ["## Ask", "## Examples", "Boundary:", "Read nothing else", "Mermaid", "path:line", "none, unasked", "contradicts example N", "SURPRISES: <n>"]) expect(body, s).toContain(s);
+  for (const s of ["## Ask", "## Examples", "Boundary:", "Read nothing else", "Mermaid", "path:line", "none, unasked", "when only the ask's own words do", "never a row", "contradicts example N", "SURPRISES: <n>"]) expect(body, s).toContain(s);
   expect(role("step").body).toContain("the user's comments on the spec since this step last started");
 });
