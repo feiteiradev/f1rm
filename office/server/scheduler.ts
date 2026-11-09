@@ -86,7 +86,7 @@ export const DEFAULT_AFTER_MS = 4 * 3_600_000;
 const STEP_NAME = /^(?:tickets|implement|close)-\d+(?:-\d+)?$/;
 /** The office's steps in `repo` whose last turn ended: Claude Code keeps a done session's process alive to be attached to, until it is stopped. */
 type Listed = { sessionId?: string; name: string; state: string; cwd: string };
-/** `stale`: one Claude Code still calls working whose transcript ended its turn long ago. */
+/** `stale`: one Claude Code still calls working or blocked whose transcript ended its turn long ago. */
 export const endedSteps = (sessions: Listed[], repo: string, repoOf: (cwd: string) => string, stale: (a: Listed) => boolean = () => false) =>
   sessions.filter((a) => (a.state === "done" || a.state === "failed" || stale(a)) && STEP_NAME.test(a.name) && repoOf(a.cwd) === repo && a.sessionId).map((a) => a.sessionId!);
 /** A step whose transcript has shown a finished turn for this long has ended, whatever Claude Code's list says. */
@@ -444,8 +444,9 @@ const schedulerFile = (home: string, repo: string) => join(home, ".f1rm", "sched
 
 /** The real gh, Claude Code, usage file and disk; the server adds the pause. */
 export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
-  // Read only for a step Claude Code calls working: its transcript tells whether its last turn ended long ago.
-  const stale = (a: Listed) => a.state === "working" && STEP_NAME.test(a.name) && !!a.sessionId && endedBefore(tail(transcriptFile(home, a.cwd, a.sessionId)), Date.now() - STALE_MS);
+  // Read only for a step Claude Code calls working or blocked (a turn that ended on a report or a question): its transcript tells whether that turn ended long ago.
+  // A step waiting on a permission prompt is blocked too, but its transcript ends on the tool call, so it is never stale.
+  const stale = (a: Listed) => (a.state === "working" || a.state === "blocked") && STEP_NAME.test(a.name) && !!a.sessionId && endedBefore(tail(transcriptFile(home, a.cwd, a.sessionId)), Date.now() - STALE_MS);
   let owner: string | null = null;
   return {
     now: Date.now,
