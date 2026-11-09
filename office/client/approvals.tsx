@@ -124,7 +124,8 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
   const [note, setNote] = useState<string | null>(null);
   // While the button answers them, how many are done of how many: the cards also leave one by one as the office pushes each answer.
   const [taking, setTaking] = useState<{ done: number; of: number } | null>(null);
-  const recommended = decisions.filter((d) => d.recommended !== null);
+  // A retro's proposal (a `ready` option) changes how the company works: it gets its own click.
+  const recommended = decisions.filter((d) => d.recommended !== null && !d.ready);
   async function takeAll() {
     const all = recommended;
     setTaking({ done: 0, of: all.length });

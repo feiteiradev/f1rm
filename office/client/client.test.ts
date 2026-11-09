@@ -10,7 +10,7 @@ import { alwaysNote, argsText, cardOf, handsOf, NEEDS_YOU, needsYouTag } from ".
 import type { Approval } from "../server/approvals.ts";
 import { post } from "./post.ts";
 import { poseOf, statusCounts, type Pose } from "./pose.ts";
-import { showsLeadTag } from "./lead.ts";
+import { stepTag } from "./lead.ts";
 import { LEAD_TAG } from "./art.ts";
 
 const employee = (sessionId: string, room: string, over: Partial<Employee> = {}): Employee => ({
@@ -511,14 +511,17 @@ test("a Remove refusal clears itself after a few seconds, and not if it was repl
   expect(cleared).toEqual(["a"]);
 });
 
-test("only a team lead gets the LEAD tag, not a specialist or a freelancer", () => {
-  expect(showsLeadTag(employee("l", "r", { role: "lead" }))).toBe(true);
-  expect(showsLeadTag(employee("b", "r", { role: "backend" }))).toBe(false);
-  expect(showsLeadTag(employee("p", "r", { role: "pm" }))).toBe(false);
-  expect(showsLeadTag(employee("f", "r"))).toBe(false);
+test("an office step's tag names its kind of step; a specialist, the PM or a freelancer gets none", () => {
+  expect(stepTag(employee("t", "r", { role: "lead", title: "tickets-22" }))).toBe("TICKETS");
+  expect(stepTag(employee("i", "r", { role: "lead", title: "implement-7-2" }))).toBe("BUILD");
+  expect(stepTag(employee("c", "r", { role: "lead", title: "close-17" }))).toBe("CLOSE");
+  expect(stepTag(employee("o", "r", { role: "lead", title: "lead-checkout" }))).toBe("STEP");
+  expect(stepTag(employee("b", "r", { role: "backend" }))).toBeNull();
+  expect(stepTag(employee("p", "r", { role: "pm" }))).toBeNull();
+  expect(stepTag(employee("f", "r"))).toBeNull();
 });
 
-test("the LEAD tag sits over the head: the sprite's centre, one art pixel above its top", () => {
+test("the step tag sits over the head: the sprite's centre, one art pixel above its top", () => {
   expect(LEAD_TAG).toEqual({ x: 23, y: 10 });
 });
 

@@ -5,7 +5,7 @@ import { internSeed, seedFor } from "../people.ts";
 import { bob, buildDesk, buildIntern, buildRoom, COLORS, drawDesk, LEAD_TAG, loadArt, newApp, TABLE, TICK_MS, type DeskArt } from "./art.ts";
 import { CELL, layoutOffice, ROOM, scaleFor } from "./layout.ts";
 import { needsYouTag, type Anchor } from "./approvals.ts";
-import { showsLeadTag } from "./lead.ts";
+import { stepTag } from "./lead.ts";
 import { poseOf } from "./pose.ts";
 import { buildTeamSign, buildWhiteboard, teamSignLabel, whiteboardCount } from "./whiteboard.ts";
 
@@ -24,7 +24,7 @@ const SEAT = { x: 17, y: 14 };
 const STANDS = [{ x: 22, y: 41 }, { x: 4, y: 41 }, { x: 13, y: 45 }];
 const WALK_MS = 700;
 const NEED_FILL = 0xf2a93b;
-/** The "needs you" tag: dark text on the office's amber, so it reads at a glance beside the gold LEAD tag. */
+/** The "needs you" tag: dark text on the office's amber, so it reads at a glance beside the gold step tag. */
 function buildNeedsYou(text: string) {
   const label = new Text({ text, style: { ...LABEL, fontSize: 10, fill: COLORS.night } });
   label.anchor.set(0.5, 1);
@@ -141,8 +141,10 @@ export async function createScene(host: HTMLElement, onSelect: (id: string | nul
         p.name.anchor.set(0.5, 0);
         p.name.position.set((d.x + CELL.w / 2) * scale, (d.y + (d.table ? TABLE.h : 57)) * scale);
         names.addChild(p.name);
-        if (showsLeadTag(e)) {
-          p.tag ??= new Text({ text: "LEAD", style: TAG });
+        const tag = stepTag(e);
+        if (tag) {
+          p.tag ??= new Text({ text: tag, style: TAG });
+          p.tag.text = tag;
           p.tag.anchor.set(0.5, 1);
           p.tag.position.set((d.x + LEAD_TAG.x) * scale, (d.y + LEAD_TAG.y) * scale);
           names.addChild(p.tag);

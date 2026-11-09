@@ -54,3 +54,9 @@ test("with two or more recommendations waiting, one button takes them all: each 
     { path: "/tok/decide/%2Fcode%2Fshop%2313", body: JSON.stringify({ option: 0 }) },
   ]);
 });
+
+test("a retro's proposal is never among the recommendations taken all at once", () => {
+  const proposal = { ...D, id: "/code/shop#15", number: 15, risk: "high" as const, recommended: 0, ready: [0], drop: [1] };
+  expect(open([D, { ...D, id: "/code/shop#13", number: 13 }, proposal])).toContain(">Take all 2 recommendations</button>");
+  expect(open([D, proposal])).not.toContain("Take all");
+});

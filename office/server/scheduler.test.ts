@@ -591,3 +591,8 @@ test("a repo with 5 finished tickets is held to its own budget: a ticket over th
   await s.tick([REPO]);
   expect([stopped, opened]).toEqual([[], []]);
 });
+
+test("the retro files a change to f1rm itself on f1rm's own repo, never as a draft spec in the product repo", () => {
+  const close = stepArgv("close", 7)[6];
+  for (const s of ["A change to f1rm itself", "is never built here", "gh issue create --repo feiteiradev/f1rm --label needs-triage", "gh api user -q .login prints feiteiradev", "For f1rm", "A change to this repo's own files", "Build this change?"]) expect(close, s).toContain(s);
+});
