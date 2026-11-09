@@ -4,6 +4,8 @@ import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readRoles, withEffort, withPonytail } from "../cli/hire.ts";
 import { repoOf } from "../cli/letgo.ts";
+import { endedBefore, tail } from "../cli/status.ts";
+import { transcriptFile } from "../cli/wake.ts";
 import { pacing, readUsage, usageFile, withUsageTap } from "../usage.ts";
 import { repoKey, type BoardRow } from "./board.ts";
 import { MEASURED, budgetOf, costUnits, repoBudgets, specCosts, specOfStep, type Size, type SpecCost } from "../cost.ts";
@@ -83,8 +85,12 @@ export const DEFAULT_AFTER_MS = 4 * 3_600_000;
 /** A step's session name: `tickets-7`, `implement-7-2`. */
 const STEP_NAME = /^(?:tickets|implement|close)-\d+(?:-\d+)?$/;
 /** The office's steps in `repo` whose last turn ended: Claude Code keeps a done session's process alive to be attached to, until it is stopped. */
-export const endedSteps = (sessions: { sessionId?: string; name: string; state: string; cwd: string }[], repo: string, repoOf: (cwd: string) => string) =>
-  sessions.filter((a) => (a.state === "done" || a.state === "failed") && STEP_NAME.test(a.name) && repoOf(a.cwd) === repo && a.sessionId).map((a) => a.sessionId!);
+type Listed = { sessionId?: string; name: string; state: string; cwd: string };
+/** `stale`: one Claude Code still calls working whose transcript ended its turn long ago. */
+export const endedSteps = (sessions: Listed[], repo: string, repoOf: (cwd: string) => string, stale: (a: Listed) => boolean = () => false) =>
+  sessions.filter((a) => (a.state === "done" || a.state === "failed" || stale(a)) && STEP_NAME.test(a.name) && repoOf(a.cwd) === repo && a.sessionId).map((a) => a.sessionId!);
+/** A step whose transcript has shown a finished turn for this long has ended, whatever Claude Code's list says. */
+const STALE_MS = 10 * 60_000;
 const META = /<!--\s*f1rm:decision\b([^>]*?)-->/;
 const OPTION = /^\s*\d+\.\s+(?=\S)/;
 /** `restart=1,3` as indices into the options; null when the header has no such field. */
@@ -438,6 +444,8 @@ const schedulerFile = (home: string, repo: string) => join(home, ".f1rm", "sched
 
 /** The real gh, Claude Code, usage file and disk; the server adds the pause. */
 export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
+  // Read only for a step Claude Code calls working: its transcript tells whether its last turn ended long ago.
+  const stale = (a: Listed) => a.state === "working" && STEP_NAME.test(a.name) && !!a.sessionId && endedBefore(tail(transcriptFile(home, a.cwd, a.sessionId)), Date.now() - STALE_MS);
   let owner: string | null = null;
   return {
     now: Date.now,
@@ -519,10 +527,10 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
     },
     start: async (repo, step, spec, round) => void (await machine.spawnBackground(stepArgv(step, spec, round, readEdition(editionFile(repo)) === "founder"), repo)),
     // shortcut: a session is live until Claude Code calls it done or failed; read its process too if a crashed one lingers as working.
-    live: async (repo) => (await machine.backgroundSessions())?.filter((a) => repoOf(a.cwd) === repo && a.state !== "done" && a.state !== "failed").map((a) => a.name) ?? null,
+    live: async (repo) => (await machine.backgroundSessions())?.filter((a) => repoOf(a.cwd) === repo && a.state !== "done" && a.state !== "failed" && !stale(a)).map((a) => a.name) ?? null,
     ended: async (repo) => {
       const list = await machine.backgroundSessions();
-      return list && endedSteps(list, repo, repoOf);
+      return list && endedSteps(list, repo, repoOf, stale);
     },
     release: async (id) => {
       if (!(await machine.stop(id))) throw new Error("claude stop refused");

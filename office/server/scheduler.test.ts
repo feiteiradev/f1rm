@@ -607,3 +607,11 @@ test("a decision whose header names no drop option still drops its spec on an op
     expect(dropped).toEqual(want);
   }
 });
+
+test("a step Claude Code still calls working whose transcript ended its turn long ago counts as ended", () => {
+  const sessions = [
+    { sessionId: "w1", name: "tickets-401", state: "working", cwd: REPO },
+    { sessionId: "w2", name: "tickets-402", state: "working", cwd: REPO },
+  ];
+  expect(endedSteps(sessions, REPO, (cwd) => cwd, (a) => a.sessionId === "w1")).toEqual(["w1"]);
+});

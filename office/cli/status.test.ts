@@ -8,7 +8,7 @@ import { hireName } from "./letgo.ts";
 import { longRepos } from "./long-repo.test-helper.ts";
 import { reportFile } from "./report.ts";
 import { pausedDirOf, pausedFile, writePaused } from "../server/pause.ts";
-import { head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, type Hire } from "./status.ts";
+import { endedBefore, head, headAsync, hires, limitUntil, ls, parseArgs, status, statusFor, tail, tailAsync, type Hire } from "./status.ts";
 
 const REPO = "/code/shop";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -471,4 +471,24 @@ test("status says the project is paused on a line of its own above the table, an
   pause(h);
   expect((await status({ json: false }, { ...deps, loadAgents: async () => [] })).out).toBe(`PAUSED (manual) since ${SINCE}; \`f1rm resume\` wakes it\nno hires\n`);
   expect((await status({ json: true }, deps)).out).toBe(json); // the json stays one array of hires
+});
+
+test("a transcript ends on a finished turn when its last entries are the bookkeeping after a reply, written before the cut-off", () => {
+  const at = (t: string) => `"timestamp":"2026-11-09T${t}:00.000Z"`;
+  const done = [`{"type":"assistant","message":{"content":[{"type":"text","text":"Published."}]},${at("09:29")}}`, `{"type":"system","subtype":"stop_hook_summary",${at("09:29")}}`, `{"type":"system","subtype":"turn_duration",${at("09:30")}}`].join("\n");
+  expect(endedBefore(done, Date.parse("2026-11-09T10:00:00Z"))).toBe(true);
+  expect(endedBefore(done, Date.parse("2026-11-09T09:20:00Z"))).toBe(false); // ended too recently to judge
+  expect(endedBefore(`${done}\n{"type":"user","message":{"content":"go on"},${at("09:40")}}`, Date.parse("2026-11-09T10:00:00Z"))).toBe(false); // a new turn began
+  expect(endedBefore(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]},${at("09:29")}}`, Date.parse("2026-11-09T10:00:00Z"))).toBe(false); // mid-tool
+  expect(endedBefore("", Date.parse("2026-11-09T10:00:00Z"))).toBe(false);
+});
+
+test("a turn that ended while a background command or intern it started is still out has not ended", () => {
+  const at = (t: string) => `"timestamp":"2026-11-09T${t}:00.000Z"`;
+  const started = `{"type":"user","message":{"content":[{"type":"tool_result","content":"Command running in background with ID: byhzzfu6p. Output is being written to /tmp/x"}]},${at("16:31")}}`;
+  const ended = `{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting for the smoke run."}]},${at("16:32")}}\n{"type":"system","subtype":"turn_duration",${at("16:32")}}`;
+  const later = Date.parse("2026-11-09T18:00:00Z");
+  expect(endedBefore(`${started}\n${ended}`, later)).toBe(false);
+  const back = `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\\n<task-id>byhzzfu6p</task-id>\\n<status>completed</status>",${at("16:40")}}`;
+  expect(endedBefore(`${started}\n${back}\n${ended.replaceAll("16:32", "16:41")}`, later)).toBe(true);
 });

@@ -168,6 +168,28 @@ export function lastTurn(end: string): any {
 }
 
 /**
+ * Whether a piece of transcript ends on a finished turn written before `before` (ms): its last entry is Claude Code's bookkeeping after a reply,
+ * with nothing since, and no background command or intern it started is still out (each reports back as a task-notification naming its id).
+ * Claude Code can go on calling such a background session working for hours.
+ * shortcut: only the tail is read, so a task started before it is not seen; read the whole transcript if one ever is.
+ */
+export function endedBefore(end: string, before: number): boolean {
+  const back = new Set([...end.matchAll(/<task-id>([\w-]+)<\/task-id>/g)].map((m) => m[1]));
+  if ([...end.matchAll(/(?:running in background with ID|agentId): ([\w-]+)/g)].some((m) => !back.has(m[1]))) return false;
+  for (const l of end.split("\n").reverse()) {
+    if (!l.trim()) continue;
+    try {
+      const line = JSON.parse(l);
+      if (!line?.type) continue;
+      return line.type === "system" && (line.subtype === "turn_duration" || line.subtype === "stop_hook_summary") && Date.parse(line.timestamp) < before;
+    } catch {
+      return false; // a cut line: judge nothing
+    }
+  }
+  return false;
+}
+
+/**
  * When a limit stop lifts, as its text gives it: what follows "resets" ("8:40pm (Europe/Lisbon)", "Monday 9:00 (Europe/Lisbon)"). "unknown" if the text
  * names none; null unless the last line of the conversation is an API error about a limit, so a delivered `resume` or a reply clears it.
  */
