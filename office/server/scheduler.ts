@@ -37,7 +37,8 @@ export type SchedulerDeps = {
   /** Who added the issue's current `label`; null if nobody did or gh can't say. */
   labeledBy: (repo: string, issue: number, label: string) => Promise<string | null>;
   /** Starts the step's background session in the repo (round 2: the one more round a failing acceptance criterion gets); throws what refused it. */
-  start: (repo: string, step: Step, spec: number, round: number) => Promise<void>;
+  /** `small`: a spec of one or two tickets, which one implementer builds with no mergers (decision 2 on #96). */
+  start: (repo: string, step: Step, spec: number, round: number, small?: boolean) => Promise<void>;
   /** True while a usage hold stops every new start. */
   held: () => boolean;
   paused: (repo: string) => boolean;
@@ -308,7 +309,7 @@ export function createScheduler(d: SchedulerDeps) {
           const startOnce = async (step: Step, spec: Issue, round = 1, tries = 1) => {
             const name = stepName(step, spec.number, round);
             try {
-              await d.start(repo, step, spec.number, round);
+              await d.start(repo, step, spec.number, round, spec.subIssues > 0 && spec.subIssues <= 2);
             } catch (err) {
               return console.log(`scheduler ${basename(repo)}: ${name} not started: ${(err as Error).message}`);
             }
@@ -400,7 +401,7 @@ const roleMapText = (founder: boolean) =>
 /** f1rm's own GitHub repo (`owner/name`) from the checkout the office runs from, where a retro files changes to f1rm itself; null when git can't say. */
 const F1RM_REPO = githubRemote(join(import.meta.dir, "..", ".."));
 
-const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => string> = {
+const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean, small: boolean) => string> = {
   tickets: (spec, _round, founder) =>
     `/mattpocock-skills:to-tickets #${spec}\n\n` +
     `You run the tickets step of spec #${spec}, started by the office, and nobody is in this session. ` +
@@ -414,11 +415,13 @@ const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => s
     `If #${spec} has more than one ticket, publish them without the ready-for-agent label, then start one intern with the Agent tool whose whole prompt is: "Read agents/fresh-eyes.md in the f1rm plugin (the newest ~/.claude/plugins/cache/f1rm/f1rm/*/agents/fresh-eyes.md) and do what it says for spec #${spec}." Add nothing to that prompt. Post its preview on #${spec} as one comment, word for word. ` +
     `If its last line is SURPRISES: 0, label every ticket ready-for-agent and end. Otherwise open a high-risk decision ticket whose header is <!-- f1rm:decision risk=high step=tickets-${spec} spec=${spec} recommended=1 restart=1 drop=3 -->, its question "The preview of #${spec} has changes no example asks for. Go on?" with the surprising rows, and its options 1. Go as planned, 2. I'll re-scope it, 3. Drop the spec; and end without the label. ` +
     `When you start again with a decision on #${spec} answered "Go as planned", the tickets exist: label every ticket ready-for-agent and end.`,
-  implement: (spec, _round, founder) =>
+  implement: (spec, _round, founder, small) =>
     `/mattpocock-skills:implement-spec #${spec}\n\n` +
     `You run the implement step of spec #${spec}, started by the office, and nobody is in this session. ` +
     `The integration branch is spec-${spec} (create it from main if it does not exist yet); each ticket's branch is ticket-<number>. ` +
-    `Start every implementer and merger with the Agent tool and isolation: "worktree", and run the mergers one at a time. ` +
+    (small
+      ? `This spec has one or two tickets: start one implementer with the Agent tool and isolation: "worktree" that builds them one after another, in dependency order: for each, it starts the ticket's branch as below, builds it, commits, then runs /usr/bin/git checkout spec-${spec} and /usr/bin/git merge --ff-only ticket-<number>. Start no merger. `
+      : `Start every implementer and merger with the Agent tool and isolation: "worktree", and run the mergers one at a time. `) +
     `Tell each implementer to load, with the Skill tool and before it builds, the skills its ticket's role label names, in place of tdd for a ticket with a role label: ${roleMapText(founder)}. A ticket whose role label is none of these is not built: comment on the ticket naming the label, and leave it open. ` +
     `Tell each of them to spell git as /usr/bin/git, as the first word of its own Bash call, with no cd, no -C and no chaining (a plain git is rewritten by the user's shell hook), and to start its branch with /usr/bin/git checkout -b ticket-<number> spec-${spec} (the gate refuses checkout -B and switch -C). ` +
     `After the code review of spec-${spec}, fix every finding it raised in one implementer, as the skill says, before you end. ` +
@@ -436,12 +439,12 @@ const PROMPTS: Record<Step, (spec: number, round: number, founder: boolean) => s
     `4. Push: run f1rm push. If it refuses, say why in your closing comment.\n` +
     `5. Clean up: /usr/bin/git branch -d spec-${spec}, then /usr/bin/git branch -d for each ticket-<number> of its tickets and each worktree-agent-* branch that git branch --merged lists (git keeps any a worktree still uses).\n` +
     `6. Close the spec: gh issue close ${spec} --comment with, first, a Mermaid flowchart of what changed built from /usr/bin/git diff <the commit you noted> main (its --stat and the diff itself), never from memory; then one table, a row per example: ✅ or ❌, the example, and its evidence (the command and its output); then the merge commit, pushed or not (and why), and any example still failing, in at most 3 lines; last, the line "Intent: <passed>/<examples> examples passed at the first close · <n> comments by the user · preview correction: yes|no" (yes when the user answered a preview's decision ticket other than "Go as planned"). For an example you can see, attach a screenshot of main before and after (gh issue comment ${spec} --attach <file>).\n` +
-    `7. Retro, with nobody to ask: follow the retro skill over this spec (it can't be loaded with the Skill tool: read the newest ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/retro/SKILL.md), with measured evidence: f1rm cost for each ticket's cost and the coordination share, grep -E "refused [a-z]+ (tickets|implement|close)-${spec}(-[0-9]+)? " ~/.f1rm/office.log for the gate's refusals, and the comments on #${spec} and its tickets for the review rounds and findings. Read the Intent: line of this spec's closing comment and of the last 5 closed specs' (gh issue list --state closed --search "Intent: in:comments"): if 5 have one and none says "preview correction: yes", one of your changes is to drop the fresh-eyes review. Open each review finding left unfixed as an issue labelled needs-triage (gh label create needs-triage --force first). Then propose at most 3 changes, most severe first, each where its files live. A change to f1rm itself (a role or step prompt, a rule, a check, a budget, the office) is never built here: ${F1RM_REPO ? `when gh api user -q .login prints ${F1RM_REPO.split("/")[0]}, open it on ${F1RM_REPO} (gh issue create --repo ${F1RM_REPO} --label needs-triage) with what to change, why and the evidence; otherwise ` : ""}list it under "For f1rm" in your closing comment. A change to this repo's own files (its CLAUDE.md, docs/agents/, its ticket template, its tests) is a draft spec issue here with no label (what to change, why, the evidence), then a decision ticket for it whose header is <!-- f1rm:decision risk=high spec=<the draft's number> recommended=1 ready=1 drop=2 -->, its question "Build this change?" with the evidence in one line, and its options 1. Build it and 2. Drop it. Change no file yourself. Then end.`,
+    `7. Retro, only when something went wrong: an example failed at a close, the grep below finds a gate refusal, a ticket of #${spec} went over its budget (a decision ticket on #${spec} about it), or a review finding left unfixed. If none did, comment "No retro: nothing went wrong." on #${spec} and end. Otherwise, with nobody to ask: follow the retro skill over this spec (it can't be loaded with the Skill tool: read the newest ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/retro/SKILL.md), with measured evidence: f1rm cost for each ticket's cost and the coordination share, grep -E "refused [a-z]+ (tickets|implement|close)-${spec}(-[0-9]+)? " ~/.f1rm/office.log for the gate's refusals, and the comments on #${spec} and its tickets for the review rounds and findings. Read the Intent: line of this spec's closing comment and of the last 5 closed specs' (gh issue list --state closed --search "Intent: in:comments"): if 5 have one and none says "preview correction: yes", one of your changes is to drop the fresh-eyes review. Open each review finding left unfixed as an issue labelled needs-triage (gh label create needs-triage --force first). Then propose at most 3 changes, most severe first, each where its files live. A change to f1rm itself (a role or step prompt, a rule, a check, a budget, the office) is never built here: ${F1RM_REPO ? `when gh api user -q .login prints ${F1RM_REPO.split("/")[0]}, open it on ${F1RM_REPO} (gh issue create --repo ${F1RM_REPO} --label needs-triage) with what to change, why and the evidence; otherwise ` : ""}list it under "For f1rm" in your closing comment. A change to this repo's own files (its CLAUDE.md, docs/agents/, its ticket template, its tests) is a draft spec issue here with no label (what to change, why, the evidence), then a decision ticket for it whose header is <!-- f1rm:decision risk=high spec=<the draft's number> recommended=1 ready=1 drop=2 -->, its question "Build this change?" with the evidence in one line, and its options 1. Build it and 2. Drop it. Change no file yourself. Then end.`,
 };
 
 /** The `claude` argv that starts a step: a named background session in the repo itself, coordinating at medium effort. `founder` for a Founder project, whose tickets may take the Founder roles. */
-export const stepArgv = (step: Step, spec: number, round = 1, founder = false) => [
-  "claude", "--bg", "--agent", "f1rm:step", "--name", stepName(step, spec, round), `${PROMPTS[step](spec, round, founder)}\n\nThis step is ${stepName(step, spec, round)}.`,
+export const stepArgv = (step: Step, spec: number, round = 1, founder = false, small = false) => [
+  "claude", "--bg", "--agent", "f1rm:step", "--name", stepName(step, spec, round), `${PROMPTS[step](spec, round, founder, small)}\n\nThis step is ${stepName(step, spec, round)}.`,
   ...withUsageTap(withEffort("step", withPonytail("step", []))),
 ];
 
@@ -543,7 +546,7 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
         if ((await gh(repo, args)) === null) console.log(`scheduler ${basename(repo)}: gh ${args.slice(0, 2).join(" ")} #${args[2]} failed after decision #${n} was answered`);
       }));
     },
-    start: async (repo, step, spec, round) => void (await machine.spawnBackground(stepArgv(step, spec, round, readEdition(editionFile(repo)) === "founder"), repo)),
+    start: async (repo, step, spec, round, small) => void (await machine.spawnBackground(stepArgv(step, spec, round, readEdition(editionFile(repo)) === "founder", small), repo)),
     // shortcut: a session is live until Claude Code calls it done or failed; read its process too if a crashed one lingers as working.
     live: async (repo) => (await machine.backgroundSessions())?.filter((a) => repoOf(a.cwd) === repo && a.state !== "done" && a.state !== "failed" && !stale(a)).map((a) => a.name) ?? null,
     ended: async (repo) => {

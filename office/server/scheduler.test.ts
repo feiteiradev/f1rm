@@ -635,3 +635,21 @@ test("two registered folders of one GitHub repo: steps run only in the one regis
   ];
   expect(oneFolderPerRemote(folders)).toEqual({ run: ["/dev/f1rm-sample", "/dev/feit", "/dev/local"], skipped: ["/proof/repo"] });
 });
+
+test("a spec of one or two tickets is built by one implementer, ticket after ticket, with no mergers; a bigger one keeps its interns", async () => {
+  const small = stepArgv("implement", 7, 1, false, true)[6];
+  for (const s of ["one implementer", "one after another", "/usr/bin/git merge --ff-only ticket-<number>", "Start no merger"]) expect(small, s).toContain(s);
+  expect(small).not.toContain("run the mergers one at a time");
+  expect(stepArgv("implement", 7)[6]).toContain("run the mergers one at a time");
+  const sizes: boolean[] = [];
+  for (const n of [2, 3]) {
+    const { s } = harness([spec(7, { subIssues: n }), ticket(8, 7)], { start: async (_r, _step, _n, _round, small) => void sizes.push(!!small) }, TICKETED);
+    await s.tick([REPO]);
+  }
+  expect(sizes).toEqual([true, false]);
+});
+
+test("the close step runs the retro only when something went wrong, and says so in one line otherwise", () => {
+  const close = stepArgv("close", 7)[6];
+  for (const s of ["only when something went wrong", "an example failed", "a gate refusal", "over its budget", "a review finding left unfixed", "No retro: nothing went wrong."]) expect(close, s).toContain(s);
+});
