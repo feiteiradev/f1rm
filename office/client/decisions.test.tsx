@@ -46,7 +46,9 @@ test("with two or more recommendations waiting, one button takes them all: each 
     location: { href: "http://127.0.0.1:4170/tok/" },
     fetch: async (url: URL, init: RequestInit) => (posts.push({ path: url.pathname, body: init.body }), Response.json({ ok: true })),
   });
-  expect(await takeRecommended([...two, { ...D, id: "/code/shop#14", recommended: null }])).toEqual([]);
+  const seen: number[] = [];
+  expect(await takeRecommended([...two, { ...D, id: "/code/shop#14", recommended: null }], (done) => seen.push(done))).toEqual([]);
+  expect(seen).toEqual([1, 2]);
   expect(posts).toEqual([
     { path: "/tok/decide/%2Fcode%2Fshop%2312", body: JSON.stringify({ option: 1 }) },
     { path: "/tok/decide/%2Fcode%2Fshop%2313", body: JSON.stringify({ option: 0 }) },

@@ -504,9 +504,10 @@ export function realSchedulerDeps(home: string): Omit<SchedulerDeps, "paused"> {
     // The close carries the answer, so a retry after a failure never writes it twice; the label and the spec's note are best effort after it.
     resolve: async (repo, n, spec, answer) => {
       if ((await gh(repo, ["issue", "close", String(n), "--comment", `Answered in the office: ${answer}`])) === null) throw new Error(`gh issue close #${n} failed`);
-      for (const args of [["issue", "edit", String(n), "--remove-label", "needs-decision"], ...(spec ? [["issue", "comment", String(spec), "--body", `Decision #${n}: ${answer}`]] : [])]) {
+      // Both at once: neither depends on the other, and a bulk answer waits on each.
+      await Promise.all([["issue", "edit", String(n), "--remove-label", "needs-decision"], ...(spec ? [["issue", "comment", String(spec), "--body", `Decision #${n}: ${answer}`]] : [])].map(async (args) => {
         if ((await gh(repo, args)) === null) console.log(`scheduler ${basename(repo)}: gh ${args.slice(0, 2).join(" ")} #${args[2]} failed after decision #${n} was answered`);
-      }
+      }));
     },
     start: async (repo, step, spec, round) => void (await machine.spawnBackground(stepArgv(step, spec, round, readEdition(editionFile(repo)) === "founder"), repo)),
     // shortcut: a session is live until Claude Code calls it done or failed; read its process too if a crashed one lingers as working.

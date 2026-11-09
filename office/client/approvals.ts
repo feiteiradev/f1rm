@@ -40,12 +40,14 @@ export const needsYouTag = (e: Pick<Employee, "role" | "name" | "needsYou">) => 
 
 /** Answers a decision ticket with the option the user picked; null when the office wrote it, otherwise why not. */
 export const answerDecision = (id: string, option: number) => post(`decide/${encodeURIComponent(id)}`, { option });
-/** Answers each decision that has a recommendation with it, one after another; the errors, empty when all went through. */
-export async function takeRecommended(decisions: Decision[]): Promise<string[]> {
+/** Answers each decision that has a recommendation with it, one after another, calling `onEach` with how many are done; the errors, empty when all went through. */
+export async function takeRecommended(decisions: Decision[], onEach: (done: number) => void = () => {}): Promise<string[]> {
   const errors: string[] = [];
+  let done = 0;
   for (const d of decisions) if (d.recommended !== null) {
     const error = await answerDecision(d.id, d.recommended);
     if (error) errors.push(`#${d.number}: ${error}`);
+    onEach(++done);
   }
   return errors;
 }

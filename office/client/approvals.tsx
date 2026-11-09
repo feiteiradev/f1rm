@@ -122,13 +122,15 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
   const waiting = (hands?.length ?? 0) + lists.length + (leftovers ? 1 : 0) + decisions.length;
   // What the leftovers answer said, in the card's slot until the tray closes.
   const [note, setNote] = useState<string | null>(null);
-  const [taking, setTaking] = useState(false);
+  // While the button answers them, how many are done of how many: the cards also leave one by one as the office pushes each answer.
+  const [taking, setTaking] = useState<{ done: number; of: number } | null>(null);
   const recommended = decisions.filter((d) => d.recommended !== null);
   async function takeAll() {
-    setTaking(true);
-    const errors = await takeRecommended(recommended);
-    setTaking(false);
-    setNote(errors.length ? `Not answered: ${errors.join("; ")}` : `Took ${recommended.length} recommendations.`);
+    const all = recommended;
+    setTaking({ done: 0, of: all.length });
+    const errors = await takeRecommended(all, (done) => setTaking({ done, of: all.length }));
+    setTaking(null);
+    setNote(errors.length ? `Not answered: ${errors.join("; ")}` : `Took ${all.length} recommendations.`);
     panel.current?.focus();
   }
   useEffect(() => {
@@ -155,7 +157,14 @@ export function Tray({ state, open0 = false }: { state: OfficeState; open0?: boo
             !note && <p className="none">No one is waiting for permission.</p>
           ) : (
             <ul>
-              {recommended.length > 1 && <li><button className="take-all" disabled={taking} onClick={takeAll}>Take all {recommended.length} recommendations</button></li>}
+              {(taking || recommended.length > 1) && (
+                <li>
+                  <button className="take-all" disabled={!!taking} aria-busy={!!taking} onClick={takeAll}>
+                    {taking ? `Taking ${Math.min(taking.done + 1, taking.of)} of ${taking.of}…` : `Take all ${recommended.length} recommendations`}
+                  </button>
+                  {taking && <progress className="take-all-progress" max={taking.of} value={taking.done} aria-label="Recommendations taken" />}
+                </li>
+              )}
               {leftovers && <li><LeftoversCard card={leftovers} onDone={(n) => (setNote(n), panel.current?.focus())} /></li>}
               {lists.map(([room, list]) => <li key={room}><CommandsCard room={room} name={state.rooms[room]?.name ?? room} list={list} /></li>)}
               {decisions.map((d) => <li key={d.id}><DecisionTicket decision={d} /></li>)}
