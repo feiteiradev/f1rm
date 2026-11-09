@@ -335,9 +335,9 @@ test("the rules file is short and says the flow, the steps, decision tickets, ro
   expect(guidelines).not.toMatch(/\blead\b|\bboards?\b|SendMessage/i);
 });
 
-test("the four retired role files are gone, the plugin is 0.10.0, and the label vocabulary lists the decision, role and size labels", () => {
+test("the four retired role files are gone, the plugin is 0.10.1, and the label vocabulary lists the decision, role and size labels", () => {
   for (const r of ["lead", "frontend-dev", "backend-dev", "reviewer"]) expect(existsSync(join(PLUGIN, "agents", `${r}.md`)), r).toBe(false);
-  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.10.0");
+  expect(JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version).toBe("0.10.1");
   const labels = readFileSync(join(REPO, "docs", "agents", "triage-labels.md"), "utf8");
   for (const s of ["`needs-decision`", "`role:<name>`", "`size:s`"]) expect(labels, s).toContain(s);
 });
@@ -352,7 +352,7 @@ test("both READMEs describe the new flow: no lead, board, topic or message betwe
 
 test("the PM ends on examples the user confirms and a prototype they accept, and publishes the ask verbatim", () => {
   const pm = role("pm").body;
-  for (const s of ["3 to 5 numbered examples", "Wait for the user to confirm", "`prototype` skill", "`design-pipeline`", "never a rebuilt copy", "\"accept\"", "## Ask", "verbatim", "## Examples", "in place of the skill's `## User Stories`", "--attach", "Done = you see Y."]) expect(pm, s).toContain(s);
+  for (const s of ["3 to 5 numbered examples", "Wait for the user to confirm", "`prototype` skill", "`design-pipeline`", "never a rebuilt copy", "\"accept\"", "## Ask", "verbatim", "## Examples", "in place of the skill's `## User Stories`", "--attach", "Done = you see Y.", "a new page, screen, view or visual change is never small"]) expect(pm, s).toContain(s);
 });
 
 test("fresh-eyes reads only the ask, the examples, the tickets and their files on main, and ends on its count of surprises", () => {

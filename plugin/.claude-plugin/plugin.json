@@ -1,7 +1,7 @@
 {
   "name": "f1rm",
   "description": "The f1rm company: the PM, the office's steps, the roles a ticket's label picks, and the rules they keep.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "author": { "name": "Pedro Feiteira" },
   "license": "MIT"
 }
